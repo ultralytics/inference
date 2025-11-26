@@ -1,0 +1,111 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# Overview:
+# This pyproject.toml file manages the build, packaging, and distribution of the Ultralytics Template library.
+# It defines essential project metadata, dependencies, and settings used to develop and deploy the library.
+
+# Key Sections:
+# - [build-system]: Specifies the build requirements and backend (e.g., setuptools, wheel).
+# - [project]: Includes details like name, version, description, authors, dependencies and more.
+# - [project.optional-dependencies]: Provides additional, optional packages for extended features.
+# - [tool.*]: Configures settings for various tools (pytest, yapf, etc.) used in the project.
+
+# Installation:
+# The Template library can be installed using the command: 'pip install git+https://TOKEN:x-oauth-basic@github.com/ultralytics/template.git@main'
+# For development purposes, you can install the package in editable mode with: 'pip install -e .'
+# This approach allows for real-time code modifications without the need for re-installation.
+
+# Documentation:
+# For comprehensive documentation and usage instructions, visit: https://docs.ultralytics.com
+
+[build-system]
+requires = ["setuptools>=70.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Project settings -----------------------------------------------------------------------------------------------------
+[project]
+name = "template"  # Required
+dynamic = ["version"]
+description = "Ultralytics Template Python Package"  # Optional
+readme = "README.md"  # Optional
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+keywords = ["Ultralytics", "Template"]  # Optional
+authors = [
+    { name = "Glenn Jocher", email = "glenn.jocher@ultralytics.com" } # Optional
+]
+maintainers = [
+    { name = "Glenn Jocher", email = "glenn.jocher@ultralytics.com" } # Optional
+]
+classifiers = [# Optional, for a list of valid classifiers, see https://pypi.org/classifiers/
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
+
+# Required dependencies ------------------------------------------------------------------------------------------------
+dependencies = [
+    "numpy",
+]
+
+# Optional dependencies ------------------------------------------------------------------------------------------------
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",  # coverage with pytest
+    "coverage",  # coverage with unittest
+    "mkdocs",
+]
+
+[project.urls]  # Optional
+"Homepage" = "https://ultralytics.com"
+"Source" = "https://github.com/ultralytics/template"
+"Documentation" = "https://docs.ultralytics.com"
+"Bug Reports" = "https://github.com/ultralytics/template/issues"
+"Changelog" = "https://github.com/ultralytics/template/releases"
+
+[project.scripts]  # Optional
+example-cli-command = "template.module1:main"  # executes `template.module1.main` when "example-cli-command" is run from CLI
+
+# Tools settings -------------------------------------------------------------------------------------------------------
+[tool.setuptools]  # configuration specific to the `setuptools` build backend.
+packages = { find = { where = ["."], include = ["template", "template.*"] } }
+package-data = { "sample" = ["*.yaml"] }
+
+[tool.setuptools.dynamic]
+version = { attr = "template.__version__" }
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules --durations=30 --color=yes"
+norecursedirs = [".git", "dist", "build"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["UP"]  # enables Python-upgrade rules
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.codespell]
+ignore-words-list = "crate,nd,strack,dota,ane,segway,fo,gool,winn,commend"
+skip = '*.csv,*venv*,docs/??/,docs/mkdocs_??.yml'
