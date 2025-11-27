@@ -2,23 +2,56 @@
 
 # Documentation Directory (`docs/`)
 
-This directory contains the documentation for the [Ultralytics](https://github.com/ultralytics/ultralytics) project, built and managed using [MkDocs](https://www.mkdocs.org/).
+This directory contains the documentation for the Ultralytics Inference Rust library and CLI.
 
 ## 📖 Overview
 
-- **MkDocs Configuration:** The primary configuration file for MkDocs is `mkdocs.yml`. This file defines the structure, navigation, and settings of our project documentation. You can learn more about [MkDocs configuration options](https://www.mkdocs.org/user-guide/configuration/).
-- **Documentation Files:** All documentation content is written in [Markdown](https://www.markdownguide.org/basic-syntax/), a lightweight markup language. These files reside within this `docs/` directory and are organized according to the structure defined in `mkdocs.yml`.
+The Ultralytics Inference project provides high-performance YOLO model inference through a Rust library and CLI application. This documentation directory will contain:
 
-## 🚀 Getting Started
+- **API Documentation:** Comprehensive API reference for the Rust library (generated via `cargo doc`)
+- **Usage Guides:** Step-by-step tutorials for using the library and CLI
+- **Architecture:** Technical details about the inference engine implementation
+- **Examples:** Code samples demonstrating various use cases
 
-To work with the documentation locally:
+## 🚀 Building Documentation
 
-1.  **Install MkDocs:** Ensure MkDocs and its necessary extensions are installed in your Python environment. Follow the [MkDocs installation guide](https://www.mkdocs.org/user-guide/installation/) if you haven't already.
-2.  **Preview Documentation:** Navigate to the root directory of this repository in your terminal and run the command `mkdocs serve`. This starts a local development server, allowing you to preview the documentation site in your web browser, typically at `http://127.0.0.1:8000/`. The site will automatically reload when you save changes to the documentation files or the configuration.
-3.  **Build Documentation:** To generate the static HTML site (usually for deployment), use the `mkdocs build` command. This creates a `site/` directory containing the built documentation. For more details on commands, see the [MkDocs CLI documentation](https://www.mkdocs.org/user-guide/cli/).
+To generate and view the API documentation locally:
 
-The documentation should be continuously updated alongside the project's development to maintain clarity, accuracy, and usefulness for both internal developers and external users exploring the [Ultralytics Docs](https://docs.ultralytics.com/).
+1. **Generate Rust Documentation:**
+
+   ```bash
+   cargo doc --no-deps --open
+   ```
+
+   This generates HTML documentation from the code comments and opens it in your browser.
+
+2. **Documentation with Private Items:**
+
+   ```bash
+   cargo doc --no-deps --document-private-items --open
+   ```
+
+   This includes documentation for private modules and functions.
+
+3. **Test Documentation Examples:**
+
+   ```bash
+   cargo test --doc
+   ```
+
+   This runs all code examples in the documentation to ensure they compile correctly.
+
+## 📚 Documentation Structure
+
+Future documentation will include:
+
+- **Getting Started:** Installation, setup, and basic usage
+- **Library API:** Detailed API reference for all public types and functions
+- **CLI Reference:** Command-line interface documentation
+- **Python Bindings:** Guide for using the library from Python (when available)
+- **Performance:** Benchmarks and optimization tips
+- **Examples:** Real-world usage examples and best practices
 
 ## 🙌 Contributing
 
-Contributions to improve the documentation are welcome! Whether it's fixing typos, clarifying explanations, adding examples, or translating content, your help is valuable. Please see our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) for more details on how to get started. You can also find helpful [tips for contributing to Ultralytics open-source projects](https://www.ultralytics.com/blog/tips-to-start-contributing-to-ultralytics-open-source-projects) on our blog or ask questions on the [Ultralytics Community Forums](https://community.ultralytics.com/).
+Contributions to improve the documentation are welcome! Whether it's fixing typos, clarifying explanations, adding examples, or improving API docs, your help is valuable. Please see our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) for more details.

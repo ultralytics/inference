@@ -1,12 +1,18 @@
 <a href="https://www.ultralytics.com/"><img src="https://raw.githubusercontent.com/ultralytics/assets/main/logo/Ultralytics_Logotype_Original.svg" width="320" alt="Ultralytics logo"></a>
 
-# 🛠 Ultralytics Python Project Template
+# 🛠 Ultralytics Inference
 
-Welcome to the Ultralytics Python Project Template! This repository provides a standardized foundation for initiating Python projects at [Ultralytics](https://www.ultralytics.com/). It incorporates best practices in project structure, configuration, and essential tooling to streamline development. By using this template, Ultralytics developers can ensure consistency, maintain high quality standards, and accelerate the setup process for new Python-based software. Explore our [Ultralytics Solutions](https://www.ultralytics.com/solutions) to see how we apply these standards in real-world applications.
+Welcome to Ultralytics Inference! This repository provides a high-performance Rust library and CLI application for running YOLO models. Built with Rust for maximum performance and safety, it can be used as both a standalone application and a reusable library for Rust and Python projects. 
 
-[![Template CI](https://github.com/ultralytics/template/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/template/actions/workflows/ci.yml)
-[![Ultralytics Actions](https://github.com/ultralytics/template/actions/workflows/format.yml/badge.svg)](https://github.com/ultralytics/template/actions/workflows/format.yml)
-[![codecov](https://codecov.io/gh/ultralytics/template/graph/badge.svg?token=K9IunpFzjS)](https://codecov.io/gh/ultralytics/template)
+**Key Features:**
+- 🚀 **Modular Architecture:** Choose only the acceleration backends you need (CUDA, TensorRT, OpenVINO, CoreML, etc.)
+- ⚡ **High Performance:** Built in Rust for zero-cost abstractions and memory safety
+- 🎯 **Multiple Deployment Options:** Use as a library or standalone CLI
+- 🔧 **Flexible:** Support for CPU, GPU, and specialized hardware accelerators
+
+📖 **[Feature Flags Guide](FEATURES.md)** - Learn how to enable specific hardware acceleration features.
+
+Explore our [Ultralytics Solutions](https://www.ultralytics.com/solutions) to see how we apply AI in real-world applications.
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
@@ -14,88 +20,208 @@ Welcome to the Ultralytics Python Project Template! This repository provides a s
 
 ## 🗂️ Repository Structure
 
-This template is meticulously organized for intuitive navigation and a clear understanding of project components. Familiarize yourself with the [Python project structure best practices](https://realpython.com/python-application-layouts/) to make the most of this layout.
+This project is organized following Rust best practices with a clear separation between library and application code:
 
-- `src/` or `your_package_name/`: Contains the core source code of your Python package, organized into modules. Using a `src` layout is a common practice detailed in [Python packaging guides](https://packaging.python.org/en/latest/tutorials/packaging-projects/#configuring-metadata).
-- `tests/`: Dedicated directory for unit tests and integration tests, crucial for implementing [continuous testing](https://docs.ultralytics.com/help/CI/) practices. Consider using frameworks like [pytest](https://docs.pytest.org/en/stable/) for writing tests.
-- `docs/`: (Optional) Houses project documentation. Tools like [MkDocs](https://www.mkdocs.org/) can be used to generate comprehensive documentation from this directory.
-- `pyproject.toml`: The standard configuration file for Python projects, detailing dependencies, build system requirements, formatting rules, and packaging information as specified by [PEP 518](https://peps.python.org/pep-0518/) and subsequent PEPs.
-- `.gitignore`: Configured to exclude unnecessary files (like `*.pyc` or virtual environment directories) from [Git](https://git-scm.com/) tracking.
-- `LICENSE`: Specifies the open-source license (defaulting to AGPL-3.0) under which the project is released.
-- `.github/workflows/`: Contains [GitHub Actions](https://docs.github.com/en/actions) workflows for automating Continuous Integration and Continuous Deployment (CI/CD) processes. Learn more about [CI/CD concepts](https://www.redhat.com/en/topics/devops/what-is-ci-cd).
-- `.pre-commit-config.yaml`: (Optional) Configuration for [pre-commit hooks](https://pre-commit.com/) to automatically check and enforce code quality standards before commits.
-- `Dockerfile`: (Optional) Defines instructions for building a [Docker](https://www.docker.com/) container image, enabling [containerization](https://www.ultralytics.com/glossary/containerization) of the project environment for consistent deployment.
-- `environment.yml`: (Optional, for Conda users) Manages dependencies for [Conda environments](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html).
+- `src/lib.rs`: Core library code that can be reused in other Rust projects or exposed to Python via PyO3
+- `src/main.rs`: CLI application entry point for running YOLO inference from the command line
+- `tests/`: Integration tests for the library
+- `docs/`: Project documentation
+- `Cargo.toml`: Rust project configuration, dependencies, and metadata
+- `.gitignore`: Configured to exclude Rust build artifacts (`target/`), editor files, etc.
+- `LICENSE`: Open-source license (AGPL-3.0)
 
 ```plaintext
-your-project/
+inference/
 │
-├── your_package_name/          # Or src/ for src-layout
-│   ├── __init__.py
-│   ├── module1.py
-│   ├── module2.py
-│   └── ...
+├── src/
+│   ├── lib.rs              # Library entry point
+│   ├── main.rs             # CLI application
+│   ├── model/              # YOLO model implementations
+│   ├── inference/          # Inference engine
+│   └── utils/              # Utility functions
 │
-├── tests/                      # Test suite
-│   ├── __init__.py
-│   ├── test_module1.py
-│   └── ...
+├── tests/                  # Integration tests
+│   └── integration_test.rs
 │
-├── docs/                       # Documentation files (optional)
-│   └── ...
+├── docs/                   # Documentation
+│   └── README.md
 │
-├── .github/                    # GitHub Actions workflows
-│   └── workflows/
-│       ├── ci.yml
-|       └── format.yml
-│
-├── .gitignore                  # Git ignore rules
-├── .pre-commit-config.yaml     # Pre-commit hook config (optional)
-├── Dockerfile                  # Docker configuration (optional)
-├── environment.yml             # Conda environment config (optional)
-├── LICENSE                     # Project license file
-├── pyproject.toml              # Project configuration and dependencies
-└── README.md                   # This file
+├── Cargo.toml              # Rust project configuration
+├── .gitignore              # Git ignore rules
+├── LICENSE                 # Project license
+└── README.md               # This file
 ```
 
-### 📦 Source Code Directory (`src/` or `your_package_name/`)
+### 📦 Source Code Directory (`src/`)
 
-The `src/` or `your_package_name/` directory is the heart of your project, containing the Python code that constitutes your package. Adopting a structured layout promotes clean imports and simplifies testing and packaging.
+The `src/` directory contains the core Rust code for the YOLO inference engine. It's organized into:
+- **`lib.rs`**: The library entry point, exposing public APIs for use in other Rust projects or Python bindings
+- **`main.rs`**: The CLI application for running inference from the command line
+- Additional modules for model loading, inference execution, and utilities
 
 ### 🧪 Testing Directory (`tests/`)
 
-The `tests/` directory is crucial for ensuring code reliability and robustness. It should contain comprehensive unit and integration tests covering various aspects of your package. Effective testing is a cornerstone of quality software development.
+Integration tests ensure the reliability of the inference engine across different models and inputs. Unit tests are typically co-located with source files in Rust.
 
 ### 📚 Documentation Directory (`docs/`)
 
-For projects requiring detailed documentation beyond the README, the `docs/` directory is the designated space. Utilizing tools like [Sphinx](https://www.sphinx-doc.org/en/master/) allows for the generation of professional, high-quality documentation from reStructuredText or Markdown files. Check out the [Ultralytics Docs](https://docs.ultralytics.com/) for an example.
+Comprehensive documentation for using the library and CLI, including examples and API references.
 
-## ✨ Starting a New Project
+## ✨ Getting Started
 
-Kickstart your new Python project using this template with these steps:
+### Prerequisites
 
-1.  **Create Your Repository**: Use this template on GitHub by clicking the "Use this template" button to generate a new repository for your project. Learn more about [creating a repository from a template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
-2.  **Customize**: Tailor the template files (`pyproject.toml`, `README.md`, `.github/workflows/*.yml`, etc.) to match your specific project's name, goals, and requirements.
-3.  **Develop**: Begin adding your source code into the `your_package_name/` (or `src/`) directory and write corresponding tests in the `tests/` directory.
-4.  **Document**: Update this `README.md` thoroughly and, if needed, populate the `docs/` directory with more extensive documentation.
-5.  **Integrate**: Leverage the pre-configured GitHub Actions for automated testing, linting, and other [CI/CD](https://www.ultralytics.com/glossary/continuous-integration-ci) processes to maintain code quality.
+- Rust 1.70 or later (install via [rustup](https://rustup.rs/))
 
-## 🔧 Utilizing the Template
+### Installation
 
-For Ultralytics team members and external contributors:
+#### As a Library
 
-- Clone the newly created repository based on this template to start working on the project locally.
-- Ensure the `README.md` is updated to accurately reflect the project's purpose, usage, and specifics.
-- Remove or modify optional components (like `Dockerfile`, `environment.yml`) based on the project's deployment and dependency management strategy.
+Add to your `Cargo.toml` with the features you need:
 
-With this template, Ultralytics aims to foster a culture of excellence and uniformity in Python software development, ensuring every project starts on a solid foundation aligned with industry standards and organizational best practices. For insights into managing ML projects, explore our [MLOps guide](https://www.ultralytics.com/glossary/machine-learning-operations-mlops).
+```toml
+[dependencies]
+# Basic installation (CPU only)
+inference = { git = "https://github.com/ultralytics/inference.git" }
+
+# With NVIDIA GPU support
+inference = { git = "https://github.com/ultralytics/inference.git", features = ["cuda"] }
+
+# With multiple accelerators
+inference = { git = "https://github.com/ultralytics/inference.git", features = ["cuda", "tensorrt"] }
+
+# Convenience feature groups
+inference = { git = "https://github.com/ultralytics/inference.git", features = ["nvidia"] }  # CUDA + TensorRT
+inference = { git = "https://github.com/ultralytics/inference.git", features = ["intel"] }   # OpenVINO + oneDNN
+inference = { git = "https://github.com/ultralytics/inference.git", features = ["mobile"] }  # NNAPI + CoreML + QNN
+
+# All features (not recommended for most users)
+inference = { git = "https://github.com/ultralytics/inference.git", features = ["all"] }
+```
+
+#### Available Features
+
+**GPU Acceleration:**
+- `cuda` - NVIDIA CUDA support
+- `tensorrt` - NVIDIA TensorRT optimization
+- `rocm` - AMD ROCm support
+- `nvidia` - Convenience feature (CUDA + TensorRT)
+- `amd` - Convenience feature (ROCm + MIGraphX)
+
+**CPU Acceleration:**
+- `openvino` - Intel OpenVINO
+- `onednn` - Intel oneDNN
+- `xnnpack` - XNNPACK (cross-platform)
+- `intel` - Convenience feature (OpenVINO + oneDNN)
+
+**Mobile/Embedded:**
+- `nnapi` - Android Neural Networks API
+- `coreml` - Apple CoreML (iOS/macOS)
+- `qnn` - Qualcomm AI Engine
+- `mobile` - Convenience feature (NNAPI + CoreML + QNN)
+
+**Platform-Specific:**
+- `directml` - DirectML (Windows)
+- `webgpu` - WebGPU support
+- `azure` - Azure acceleration
+
+**Advanced:**
+- `acl` - ARM Compute Library
+- `armnn` - ARM NN
+- `tvm` - Apache TVM
+- `migraphx` - AMD MIGraphX
+- `rknpu` - Rockchip NPU
+- `vitis` - Xilinx Vitis AI
+- `cann` - Huawei CANN
+
+#### As a CLI Tool
+
+```bash
+# Basic installation (CPU only)
+cargo install --git https://github.com/ultralytics/inference.git
+
+# With specific features
+cargo install --git https://github.com/ultralytics/inference.git --features cuda
+cargo install --git https://github.com/ultralytics/inference.git --features nvidia
+```
+
+### Development Setup
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/ultralytics/inference.git
+   cd inference
+   ```
+
+2. Build the project:
+   ```bash
+   cargo build --release
+   ```
+
+3. Run tests:
+   ```bash
+   cargo test
+   ```
+
+4. Run the CLI:
+   ```bash
+   cargo run -- --help
+   ```
+
+## 🚀 Usage
+
+### As a Rust Library
+
+```rust
+use inference::YoloModel;
+
+fn main() {
+    let model = YoloModel::load("path/to/model.onnx").unwrap();
+    let results = model.predict("path/to/image.jpg").unwrap();
+    println!("Detections: {:?}", results);
+}
+```
+
+### As a CLI
+
+```bash
+# Run inference on an image
+inference predict --model yolov8n.onnx --source image.jpg
+
+# Run inference on a video
+inference predict --model yolov8n.onnx --source video.mp4
+
+# Run inference on a webcam
+inference predict --model yolov8n.onnx --source 0
+```
+
+### Python Bindings (Future)
+
+Python bindings using PyO3 will allow you to use this high-performance Rust library in Python projects:
+
+```python
+from inference import YoloModel
+
+model = YoloModel.load("path/to/model.onnx")
+results = model.predict("path/to/image.jpg")
+```
+
+## 🔧 Building for Production
+
+For optimized release builds:
+
+```bash
+cargo build --release
+```
+
+The compiled binary will be available in `target/release/inference`.
 
 ## 💡 Contribute
 
 Ultralytics thrives on community collaboration, and we deeply value your contributions! Whether it's reporting bugs, suggesting features, or submitting code changes, your involvement is crucial.
 
-- **Reporting Issues**: Encounter a bug? Please report it on [GitHub Issues](https://github.com/ultralytics/template/issues).
-- **Feature Requests**: Have an idea for improvement? Share it via [GitHub Issues](https://github.com/ultralytics/template/issues).
+- **Reporting Issues**: Encounter a bug? Please report it on [GitHub Issues](https://github.com/ultralytics/inference/issues).
+- **Feature Requests**: Have an idea for improvement? Share it via [GitHub Issues](https://github.com/ultralytics/inference/issues).
 - **Pull Requests**: Want to contribute code? Please read our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) first, then submit a Pull Request.
 - **Feedback**: Share your thoughts and experiences by participating in our official [Survey](https://www.ultralytics.com/survey?utm_source=github&utm_medium=social&utm_campaign=Survey).
 
@@ -112,7 +238,7 @@ Ultralytics offers two licensing options to accommodate diverse needs:
 
 ## 📮 Contact
 
-For bug reports or feature suggestions related to this template or other Ultralytics projects, please use [GitHub Issues](https://github.com/ultralytics/template/issues). For general questions, discussions, and community support, join our [Discord](https://discord.com/invite/ultralytics) server!
+For bug reports or feature suggestions related to this project, please use [GitHub Issues](https://github.com/ultralytics/inference/issues). For general questions, discussions, and community support, join our [Discord](https://discord.com/invite/ultralytics) server!
 
 <br>
 <div align="center">

@@ -1,0 +1,73 @@
+[package]
+name = "inference"
+version = "0.1.0"
+edition = "2021"
+authors = ["Glenn Jocher <glenn.jocher@ultralytics.com>","Onuralp Sezer <onuralp@ultralytics.com>"]
+description = "Ultralytics YOLO inference library and CLI for Rust"
+license = "AGPL-3.0"
+repository = "https://github.com/ultralytics/inference"
+readme = "README.md"
+keywords = ["yolo", "ultralytics", "inference", "computer-vision", "ml"]
+categories = ["computer-vision", "science", "command-line-utilities"]
+
+[lib]
+name = "inference"
+path = "src/lib.rs"
+
+[[bin]]
+name = "inference"
+path = "src/main.rs"
+
+[dependencies]
+image = "0.25.9"
+ndarray = { version = "0.17.1", features = ["rayon"] }
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["download-binaries", "copy-dylibs", "half"] }
+
+[features]
+default = []
+
+# NVIDIA GPU acceleration
+cuda = ["ort/cuda"]
+tensorrt = ["ort/tensorrt"]
+
+# AMD GPU acceleration  
+rocm = ["ort/rocm"]
+
+# Intel acceleration
+openvino = ["ort/openvino"]
+onednn = ["ort/onednn"]
+
+# DirectML (Windows)
+directml = ["ort/directml"]
+
+# Mobile/Embedded
+nnapi = ["ort/nnapi"]        # Android
+coreml = ["ort/coreml"]      # iOS/macOS
+qnn = ["ort/qnn"]            # Qualcomm
+
+# Additional accelerators
+xnnpack = ["ort/xnnpack"]
+acl = ["ort/acl"]            # ARM Compute Library
+armnn = ["ort/armnn"]        # ARM NN
+tvm = ["ort/tvm"]            # Apache TVM
+migraphx = ["ort/migraphx"]  # AMD MIGraphX
+rknpu = ["ort/rknpu"]        # Rockchip NPU
+vitis = ["ort/vitis"]        # Xilinx Vitis AI
+cann = ["ort/cann"]          # Huawei CANN
+webgpu = ["ort/webgpu"]      # WebGPU
+azure = ["ort/azure"]        # Azure
+
+# Convenience feature groups
+nvidia = ["cuda", "tensorrt"]
+amd = ["rocm", "migraphx"]
+intel = ["openvino", "onednn"]
+mobile = ["nnapi", "coreml", "qnn"]
+all = ["cuda", "tensorrt", "rocm", "openvino", "onednn", "directml", "nnapi", "coreml", "xnnpack", "acl", "armnn", "tvm", "migraphx", "rknpu", "vitis", "cann", "qnn", "webgpu", "azure"]
+
+[dev-dependencies]
+# Testing dependencies
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
