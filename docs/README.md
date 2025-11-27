@@ -19,27 +19,27 @@ To generate and view the API documentation locally:
 
 1. **Generate Rust Documentation:**
 
-   ```bash
-   cargo doc --no-deps --open
-   ```
+    ```bash
+    cargo doc --no-deps --open
+    ```
 
-   This generates HTML documentation from the code comments and opens it in your browser.
+    This generates HTML documentation from the code comments and opens it in your browser.
 
 2. **Documentation with Private Items:**
 
-   ```bash
-   cargo doc --no-deps --document-private-items --open
-   ```
+    ```bash
+    cargo doc --no-deps --document-private-items --open
+    ```
 
-   This includes documentation for private modules and functions.
+    This includes documentation for private modules and functions.
 
 3. **Test Documentation Examples:**
 
-   ```bash
-   cargo test --doc
-   ```
+    ```bash
+    cargo test --doc
+    ```
 
-   This runs all code examples in the documentation to ensure they compile correctly.
+    This runs all code examples in the documentation to ensure they compile correctly.
 
 ## 📚 Documentation Structure
 

@@ -2,9 +2,10 @@
 
 # 🛠 Ultralytics Inference
 
-Welcome to Ultralytics Inference! This repository provides a high-performance Rust library and CLI application for running YOLO models. Built with Rust for maximum performance and safety, it can be used as both a standalone application and a reusable library for Rust and Python projects. 
+Welcome to Ultralytics Inference! This repository provides a high-performance Rust library and CLI application for running YOLO models. Built with Rust for maximum performance and safety, it can be used as both a standalone application and a reusable library for Rust and Python projects.
 
 **Key Features:**
+
 - 🚀 **Modular Architecture:** Choose only the acceleration backends you need (CUDA, TensorRT, OpenVINO, CoreML, etc.)
 - ⚡ **High Performance:** Built in Rust for zero-cost abstractions and memory safety
 - 🎯 **Multiple Deployment Options:** Use as a library or standalone CLI
@@ -55,6 +56,7 @@ inference/
 ### 📦 Source Code Directory (`src/`)
 
 The `src/` directory contains the core Rust code for the YOLO inference engine. It's organized into:
+
 - **`lib.rs`**: The library entry point, exposing public APIs for use in other Rust projects or Python bindings
 - **`main.rs`**: The CLI application for running inference from the command line
 - Additional modules for model loading, inference execution, and utilities
@@ -102,6 +104,7 @@ inference = { git = "https://github.com/ultralytics/inference.git", features = [
 #### Available Features
 
 **GPU Acceleration:**
+
 - `cuda` - NVIDIA CUDA support
 - `tensorrt` - NVIDIA TensorRT optimization
 - `rocm` - AMD ROCm support
@@ -109,30 +112,34 @@ inference = { git = "https://github.com/ultralytics/inference.git", features = [
 - `amd` - Convenience feature (ROCm + MIGraphX)
 
 **CPU Acceleration:**
+
 - `openvino` - Intel OpenVINO
 - `onednn` - Intel oneDNN
 - `xnnpack` - XNNPACK (cross-platform)
 - `intel` - Convenience feature (OpenVINO + oneDNN)
 
 **Mobile/Embedded:**
+
 - `nnapi` - Android Neural Networks API
 - `coreml` - Apple CoreML (iOS/macOS)
 - `qnn` - Qualcomm AI Engine
 - `mobile` - Convenience feature (NNAPI + CoreML + QNN)
 
 **Platform-Specific:**
+
 - `directml` - DirectML (Windows)
 - `webgpu` - WebGPU support
 - `azure` - Azure acceleration
 
 **Advanced:**
+
 - `acl` - ARM Compute Library
 - `armnn` - ARM NN
 - `tvm` - Apache TVM
 - `migraphx` - AMD MIGraphX
 - `rknpu` - Rockchip NPU
 - `vitis` - Xilinx Vitis AI
-- `cann` - Huawei CANN
+- `can` - Huawei CAN
 
 #### As a CLI Tool
 
@@ -148,17 +155,20 @@ cargo install --git https://github.com/ultralytics/inference.git --features nvid
 ### Development Setup
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/ultralytics/inference.git
    cd inference
    ```
 
 2. Build the project:
+
    ```bash
    cargo build --release
    ```
 
 3. Run tests:
+
    ```bash
    cargo test
    ```
