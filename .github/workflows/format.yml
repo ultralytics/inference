@@ -26,7 +26,7 @@ jobs:
         with:
           token: ${{ secrets._GITHUB_TOKEN || github.token }} # Auto-generated fallback
           labels: true # Auto-label issues/PRs using AI
-          python: true # Format Python with Ruff
+          python: false # Format Python with Ruff
           prettier: true # Format YAML, JSON, Markdown, CSS
           swift: false # Format Swift (requires macos-latest)
           spelling: true # Check spelling with codespell
