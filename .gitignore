@@ -167,7 +167,6 @@ cython_debug/
 # datasets and projects
 datasets/
 runs/
-tests/
 .DS_Store
 
 # Neural Network weights
