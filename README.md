@@ -174,6 +174,7 @@ cargo install --git https://github.com/ultralytics/inference.git --features nvid
    ```
 
 4. Run the CLI:
+
    ```bash
    cargo run -- --help
    ```
@@ -203,17 +204,6 @@ inference predict --model yolov8n.onnx --source video.mp4
 
 # Run inference on a webcam
 inference predict --model yolov8n.onnx --source 0
-```
-
-### Python Bindings (Future)
-
-Python bindings using PyO3 will allow you to use this high-performance Rust library in Python projects:
-
-```python
-from inference import YoloModel
-
-model = YoloModel.load("path/to/model.onnx")
-results = model.predict("path/to/image.jpg")
 ```
 
 ## 🔧 Building for Production
