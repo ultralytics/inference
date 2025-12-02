@@ -11,8 +11,6 @@ Welcome to Ultralytics Inference! This repository provides a high-performance Ru
 - 🎯 **Multiple Deployment Options:** Use as a library or standalone CLI
 - 🔧 **Flexible:** Support for CPU, GPU, and specialized hardware accelerators
 
-📖 **[Feature Flags Guide](FEATURES.md)** - Learn how to enable specific hardware acceleration features.
-
 Explore our [Ultralytics Solutions](https://www.ultralytics.com/solutions) to see how we apply AI in real-world applications.
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
