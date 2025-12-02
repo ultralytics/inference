@@ -2,7 +2,7 @@
 
 [package]
 name = "inference"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 authors = ["Glenn Jocher <glenn.jocher@ultralytics.com>","Onuralp Sezer <onuralp@ultralytics.com>"]
 description = "Ultralytics YOLO inference library and CLI for Rust"
@@ -10,7 +10,17 @@ license = "AGPL-3.0"
 repository = "https://github.com/ultralytics/inference"
 readme = "README.md"
 keywords = ["yolo", "ultralytics", "inference", "computer-vision", "ml"]
-categories = ["computer-vision", "science", "command-line-utilities"]
+categories = ["computer-vision", "science", "command-line-interface","image-processing","artificial-intelligence","web-assembly"]
+
+[lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
 
 [lib]
 name = "inference"
@@ -55,7 +65,7 @@ tvm = ["ort/tvm"]            # Apache TVM
 migraphx = ["ort/migraphx"]  # AMD MIGraphX
 rknpu = ["ort/rknpu"]        # Rockchip NPU
 vitis = ["ort/vitis"]        # Xilinx Vitis AI
-can = ["ort/can"]          # Huawei CAN
+cann = ["ort/cann"]          # Huawei CANN
 webgpu = ["ort/webgpu"]      # WebGPU
 azure = ["ort/azure"]        # Azure
 
@@ -64,7 +74,7 @@ nvidia = ["cuda", "tensorrt"]
 amd = ["rocm", "migraphx"]
 intel = ["openvino", "onednn"]
 mobile = ["nnapi", "coreml", "qnn"]
-all = ["cuda", "tensorrt", "rocm", "openvino", "onednn", "directml", "nnapi", "coreml", "xnnpack", "acl", "armnn", "tvm", "migraphx", "rknpu", "vitis", "can", "qnn", "webgpu", "azure"]
+all = ["cuda", "tensorrt", "rocm", "openvino", "onednn", "directml", "nnapi", "coreml", "xnnpack", "acl", "armnn", "tvm", "migraphx", "rknpu", "vitis", "cann", "qnn", "webgpu", "azure"]
 
 [dev-dependencies]
 # Testing dependencies
