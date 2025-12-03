@@ -65,7 +65,7 @@ tvm = ["ort/tvm"]            # Apache TVM
 migraphx = ["ort/migraphx"]  # AMD MIGraphX
 rknpu = ["ort/rknpu"]        # Rockchip NPU
 vitis = ["ort/vitis"]        # Xilinx Vitis AI
-can = ["ort/can"]          # Huawei CAN
+cann = ["ort/cann"]          # Huawei CANN
 webgpu = ["ort/webgpu"]      # WebGPU
 azure = ["ort/azure"]        # Azure
 
@@ -74,7 +74,7 @@ nvidia = ["cuda", "tensorrt"]
 amd = ["rocm", "migraphx"]
 intel = ["openvino", "onednn"]
 mobile = ["nnapi", "coreml", "qnn"]
-all = ["cuda", "tensorrt", "rocm", "openvino", "onednn", "directml", "nnapi", "coreml", "xnnpack", "acl", "armnn", "tvm", "migraphx", "rknpu", "vitis", "can", "qnn", "webgpu", "azure"]
+all = ["cuda", "tensorrt", "rocm", "openvino", "onednn", "directml", "nnapi", "coreml", "xnnpack", "acl", "armnn", "tvm", "migraphx", "rknpu", "vitis", "cann", "qnn", "webgpu", "azure"]
 
 [dev-dependencies]
 # Testing dependencies
