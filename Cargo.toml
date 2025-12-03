@@ -10,7 +10,7 @@ license = "AGPL-3.0"
 repository = "https://github.com/ultralytics/inference"
 readme = "README.md"
 keywords = ["yolo", "ultralytics", "inference", "computer-vision", "ml"]
-categories = ["computer-vision", "science", "command-line-interface","web-assembly"]
+categories = ["computer-vision", "science", "command-line-interface", "wasm"]
 
 [lints.rust]
 unsafe_code = "warn"
