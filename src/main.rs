@@ -144,22 +144,23 @@ fn print_version() {
 /// Displays a help message with all supported commands, their descriptions,
 /// and example usage patterns.
 fn print_usage() {
-    println!(r#"
-    Ultralytics YOLO Inference CLI
-    =============================
-    Usage:
-        inference predict --model <model_path> --source <image_path>
-        inference version
-        inference help
+    const BIN_NAME: &str = env!("CARGO_PKG_NAME");
+    println!(
+        "Ultralytics YOLO Inference CLI
+=============================
+Usage:
+    {bin} predict --model <model_path> --source <image_path>
+    {bin} version
+    {bin} help
 
-    Commands:
-        predict    Run inference on an image or video
-        version    Print version information
-        help       Show this help message
+Commands:
+    predict    Run inference on an image or video
+    version    Print version information
+    help       Show this help message
 
-    Examples:
-        inference predict --model yolov8n.onnx --source image.jpg
-        inference predict --model yolov8n.onnx --source video.mp4
-
-    "#);
+Examples:
+    {bin} predict --model yolov8n.onnx --source image.jpg
+    {bin} predict --model yolov8n.onnx --source video.mp4",
+        bin = BIN_NAME
+    );
 }
