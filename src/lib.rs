@@ -11,7 +11,6 @@
 //! - Fast inference using ONNX Runtime
 //! - Support for all YOLO versions (YOLOv5, YOLOv8, YOLO11, etc.)
 //! - Thread-safe model loading and inference
-//! - Python bindings via PyO3 (future)
 //!
 //! ## Example
 //!
