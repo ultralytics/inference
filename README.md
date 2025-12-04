@@ -195,13 +195,13 @@ fn main() {
 
 ```bash
 # Run inference on an image
-inference predict --model yolov8n.onnx --source image.jpg
+inference predict --model yolo11n.onnx --source image.jpg
 
 # Run inference on a video
-inference predict --model yolov8n.onnx --source video.mp4
+inference predict --model yolo11n.onnx --source video.mp4
 
 # Run inference on a webcam
-inference predict --model yolov8n.onnx --source 0
+inference predict --model yolo11n.onnx --source 0
 ```
 
 ## 🔧 Building for Production

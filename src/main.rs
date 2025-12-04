@@ -15,8 +15,8 @@
 //! # Examples
 //!
 //! ```bash
-//! inference predict --model yolov8n.onnx --source image.jpg
-//! inference predict --model yolov8n.onnx --source video.mp4
+//! inference predict --model yolo11n.onnx --source image.jpg
+//! inference predict --model yolo11n.onnx --source video.mp4
 //! ```
 //!
 //! # Note
@@ -72,7 +72,7 @@ fn main() {
 ///
 /// # Required Flags
 ///
-/// - `--model` - Path to the ONNX model file (e.g., `yolov8n.onnx`)
+/// - `--model` - Path to the ONNX model file (e.g., `yolo11n.onnx`)
 /// - `--source` - Path to the input image or video file
 ///
 /// # Panics
@@ -159,8 +159,8 @@ Commands:
     help       Show this help message
 
 Examples:
-    {bin} predict --model yolov8n.onnx --source image.jpg
-    {bin} predict --model yolov8n.onnx --source video.mp4",
+    {bin} predict --model yolo11n.onnx --source image.jpg
+    {bin} predict --model yolo11n.onnx --source video.mp4",
         bin = BIN_NAME
     );
 }

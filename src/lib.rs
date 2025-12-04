@@ -9,7 +9,7 @@
 //! ## Features
 //!
 //! - Fast inference using ONNX Runtime
-//! - Support for all YOLO versions (YOLOv5, YOLOv8, YOLOv11, etc.)
+//! - Support for all YOLO versions (YOLOv5, YOLOv8, YOLO11, etc.)
 //! - Thread-safe model loading and inference
 //! - Python bindings via PyO3 (future)
 //!
@@ -19,7 +19,7 @@
 //! use inference::YoloModel;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let model = YoloModel::load("yolov8n.onnx")?;
+//!     let model = YoloModel::load("yolo11n.onnx")?;
 //!     let results = model.predict("image.jpg")?;
 //!     println!("Detected {} objects", results.len());
 //!     Ok(())

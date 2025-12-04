@@ -23,7 +23,7 @@ impl YoloModel {
     /// ```no_run
     /// use inference::YoloModel;
     ///
-    /// let model = YoloModel::load("yolov8n.onnx").unwrap();
+    /// let model = YoloModel::load("yolo11n.onnx").unwrap();
     /// ```
     pub fn load(path: &str) -> Result<Self> {
         // TODO: Implement actual model loading with ONNX Runtime
