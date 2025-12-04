@@ -1,11 +1,46 @@
 // © 2014-2025 Ultralytics Inc. 🚀 All rights reserved. CONFIDENTIAL: Unauthorized use or distribution prohibited.
 
+//! Ultralytics YOLO Inference CLI
+//!
+//! A command-line interface for running YOLO model inference on images and videos.
+//!
+//! # Usage
+//!
+//! ```bash
+//! ultralytics-inference predict --model <model_path> --source <image_path>
+//! ultralytics-inference version
+//! ultralytics-inference help
+//! ```
+//!
+//! # Examples
+//!
+//! ```bash
+//! inference predict --model yolov8n.onnx --source image.jpg
+//! inference predict --model yolov8n.onnx --source video.mp4
+//! ```
+//!
+//! # Note
+//!
+//! This is a stub implementation. Full YOLO inference will be implemented
+//! once dependencies (ONNX Runtime, image processing, etc.) are added.
+
 use std::env;
 use std::process;
 
-// Note: This is a stub implementation. Full YOLO inference will be implemented
-// once dependencies (ONNX Runtime, image processing, etc.) are added.
-
+/// Entry point for the Ultralytics YOLO Inference CLI.
+///
+/// Parses command-line arguments and dispatches to the appropriate handler.
+///
+/// # Supported Commands
+///
+/// - `predict` - Run inference on an image or video
+/// - `version` - Print version information
+/// - `help` - Show usage information
+///
+/// # Exit Codes
+///
+/// - `0` - Success
+/// - `1` - Error (invalid arguments, unknown command, etc.)
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -28,6 +63,24 @@ fn main() {
     }
 }
 
+/// Runs YOLO model inference on the specified source.
+///
+/// # Arguments
+///
+/// * `args` - A slice of command-line arguments following the `predict` command.
+///            Expected format: `--model <path> --source <path>`
+///
+/// # Required Flags
+///
+/// - `--model` - Path to the ONNX model file (e.g., `yolov8n.onnx`)
+/// - `--source` - Path to the input image or video file
+///
+/// # Panics
+///
+/// This function will exit the process with code `1` if:
+/// - Required arguments are missing
+/// - Unknown arguments are provided
+/// - Flag values are not provided
 fn run_prediction(args: &[String]) {
     if args.len() < 4 {
         eprintln!("Error: predict command requires --model and --source arguments");
@@ -79,21 +132,34 @@ fn run_prediction(args: &[String]) {
     }
 }
 
+/// Prints the current version of the Ultralytics Inference CLI.
+///
+/// The version is read from `CARGO_PKG_VERSION` at compile time.
 fn print_version() {
     println!("Ultralytics Inference v{}", env!("CARGO_PKG_VERSION"));
 }
 
+/// Prints usage information and available commands.
+///
+/// Displays a help message with all supported commands, their descriptions,
+/// and example usage patterns.
 fn print_usage() {
-    println!("Ultralytics YOLO Inference CLI");
-    println!("\nUsage:");
-    println!("  inference predict --model <model_path> --source <image_path>");
-    println!("  inference version");
-    println!("  inference help");
-    println!("\nCommands:");
-    println!("  predict    Run inference on an image or video");
-    println!("  version    Print version information");
-    println!("  help       Show this help message");
-    println!("\nExamples:");
-    println!("  inference predict --model yolov8n.onnx --source image.jpg");
-    println!("  inference predict --model yolov8n.onnx --source video.mp4");
+    println!(r#"
+    Ultralytics YOLO Inference CLI
+    =============================
+    Usage:
+        inference predict --model <model_path> --source <image_path>
+        inference version
+        inference help
+
+    Commands:
+        predict    Run inference on an image or video
+        version    Print version information
+        help       Show this help message
+
+    Examples:
+        inference predict --model yolov8n.onnx --source image.jpg
+        inference predict --model yolov8n.onnx --source video.mp4
+
+    "#);
 }
