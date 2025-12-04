@@ -7,9 +7,9 @@
 //! # Usage
 //!
 //! ```bash
-//! ultralytics-inference predict --model <model_path> --source <image_path>
-//! ultralytics-inference version
-//! ultralytics-inference help
+//! inference predict --model <model_path> --source <image_path>
+//! inference version
+//! inference help
 //! ```
 //!
 //! # Examples
