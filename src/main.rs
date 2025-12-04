@@ -75,12 +75,14 @@ fn main() {
 /// - `--model` - Path to the ONNX model file (e.g., `yolo11n.onnx`)
 /// - `--source` - Path to the input image or video file
 ///
-/// # Panics
+/// # Process Termination
 ///
-/// This function will exit the process with code `1` if:
+/// This function will terminate the process with exit code `1` if:
 /// - Required arguments are missing
 /// - Unknown arguments are provided
 /// - Flag values are not provided
+///
+/// Note: This function does not return on error—it calls `process::exit(1)` directly.
 fn run_prediction(args: &[String]) {
     if args.len() < 4 {
         eprintln!("Error: predict command requires --model and --source arguments");
