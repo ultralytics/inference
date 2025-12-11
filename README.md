@@ -1,242 +1,303 @@
 <a href="https://www.ultralytics.com/"><img src="https://raw.githubusercontent.com/ultralytics/assets/main/logo/Ultralytics_Logotype_Original.svg" width="320" alt="Ultralytics logo"></a>
 
-# 🛠 Ultralytics Inference
+# 🦀 Ultralytics YOLO Rust Inference
 
-Welcome to Ultralytics Inference! This repository provides a high-performance Rust library and CLI application for running YOLO models. Built with Rust for maximum performance and safety, it can be used as both a standalone application and a reusable library for Rust and Python projects.
-
-**Key Features:**
-
-- 🚀 **Modular Architecture:** Choose only the acceleration backends you need (CUDA, TensorRT, OpenVINO, CoreML, etc.)
-- ⚡ **High Performance:** Built in Rust for zero-cost abstractions and memory safety
-- 🎯 **Multiple Deployment Options:** Use as a library or standalone CLI
-- 🔧 **Flexible:** Support for CPU, GPU, and specialized hardware accelerators
-
-Explore our [Ultralytics Solutions](https://www.ultralytics.com/solutions) to see how we apply AI in real-world applications.
+High-performance YOLO inference library written in Rust. This library provides a fast, safe, and efficient interface for running YOLO models using ONNX Runtime, with an API designed to match the [Ultralytics Python package](https://github.com/ultralytics/ultralytics).
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
 
-## 🗂️ Repository Structure
+## ✨ Features
 
-This project is organized following Rust best practices with a clear separation between library and application code:
+- 🚀 **High Performance** - Pure Rust implementation with zero-cost abstractions
+- 🎯 **Ultralytics API Compatible** - `Results`, `Boxes`, `Masks`, `Keypoints`, `Probs` classes matching Python
+- 🔧 **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
+- 📦 **Dual Use** - Library for Rust projects + standalone CLI application
+- 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
+- 🖼️ **Multiple Sources** - Images, directories, glob patterns (video/webcam coming soon)
 
-- `src/lib.rs`: Core library code that can be reused in other Rust projects or exposed to Python via PyO3
-- `src/main.rs`: CLI application entry point for running YOLO inference from the command line
-- `tests/`: Integration tests for the library
-- `docs/`: Project documentation
-- `Cargo.toml`: Rust project configuration, dependencies, and metadata
-- `.gitignore`: Configured to exclude Rust build artifacts (`target/`), editor files, etc.
-- `LICENSE`: Open-source license (AGPL-3.0)
-
-```plaintext
-inference/
-│
-├── src/
-│   ├── lib.rs              # Library entry point
-│   ├── main.rs             # CLI application
-│   ├── model/              # YOLO model implementations
-│   ├── inference/          # Inference engine
-│   └── utils/              # Utility functions
-│
-├── tests/                  # Integration tests
-│   └── integration_test.rs
-│
-├── docs/                   # Documentation
-│   └── README.md
-│
-├── Cargo.toml              # Rust project configuration
-├── .gitignore              # Git ignore rules
-├── LICENSE                 # Project license
-└── README.md               # This file
-```
-
-### 📦 Source Code Directory (`src/`)
-
-The `src/` directory contains the core Rust code for the YOLO inference engine. It's organized into:
-
-- **`lib.rs`**: The library entry point, exposing public APIs for use in other Rust projects or Python bindings
-- **`main.rs`**: The CLI application for running inference from the command line
-- Additional modules for model loading, inference execution, and utilities
-
-### 🧪 Testing Directory (`tests/`)
-
-Integration tests ensure the reliability of the inference engine across different models and inputs. Unit tests are typically co-located with source files in Rust.
-
-### 📚 Documentation Directory (`docs/`)
-
-Comprehensive documentation for using the library and CLI, including examples and API references.
-
-## ✨ Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Rust 1.70 or later (install via [rustup](https://rustup.rs/))
+- [Rust 1.70+](https://rustup.rs/) (install via rustup)
+- A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo11n.pt format=onnx`)
 
 ### Installation
 
-#### As a Library
-
-Add to your `Cargo.toml` with the features you need:
-
-```toml
-[dependencies]
-# Basic installation (CPU only)
-inference = { git = "https://github.com/ultralytics/inference.git" }
-
-# With NVIDIA GPU support
-inference = { git = "https://github.com/ultralytics/inference.git", features = ["cuda"] }
-
-# With multiple accelerators
-inference = { git = "https://github.com/ultralytics/inference.git", features = ["cuda", "tensorrt"] }
-
-# Convenience feature groups
-inference = { git = "https://github.com/ultralytics/inference.git", features = ["nvidia"] }  # CUDA + TensorRT
-inference = { git = "https://github.com/ultralytics/inference.git", features = ["intel"] }   # OpenVINO + oneDNN
-inference = { git = "https://github.com/ultralytics/inference.git", features = ["mobile"] }  # NNAPI + CoreML + QNN
-
-# All features (not recommended for most users)
-inference = { git = "https://github.com/ultralytics/inference.git", features = ["all"] }
-```
-
-#### Available Features
-
-**GPU Acceleration:**
-
-- `cuda` - NVIDIA CUDA support
-- `tensorrt` - NVIDIA TensorRT optimization
-- `rocm` - AMD ROCm support
-- `nvidia` - Convenience feature (CUDA + TensorRT)
-- `amd` - Convenience feature (ROCm + MIGraphX)
-
-**CPU Acceleration:**
-
-- `openvino` - Intel OpenVINO
-- `onednn` - Intel oneDNN
-- `xnnpack` - XNNPACK (cross-platform)
-- `intel` - Convenience feature (OpenVINO + oneDNN)
-
-**Mobile/Embedded:**
-
-- `nnapi` - Android Neural Networks API
-- `coreml` - Apple CoreML (iOS/macOS)
-- `qnn` - Qualcomm AI Engine
-- `mobile` - Convenience feature (NNAPI + CoreML + QNN)
-
-**Platform-Specific:**
-
-- `directml` - DirectML (Windows)
-- `webgpu` - WebGPU support
-- `azure` - Azure acceleration
-
-**Advanced:**
-
-- `acl` - ARM Compute Library
-- `armnn` - ARM NN
-- `tvm` - Apache TVM
-- `migraphx` - AMD MIGraphX
-- `rknpu` - Rockchip NPU
-- `vitis` - Xilinx Vitis AI
-- `can` - Huawei CAN
-
-#### As a CLI Tool
-
 ```bash
-# Basic installation (CPU only)
-cargo install --git https://github.com/ultralytics/inference.git
+# Clone the repository
+git clone https://github.com/ultralytics/inference.git
+cd inference
 
-# With specific features
-cargo install --git https://github.com/ultralytics/inference.git --features cuda
-cargo install --git https://github.com/ultralytics/inference.git --features nvidia
-```
-
-### Development Setup
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/ultralytics/inference.git
-   cd inference
-   ```
-
-2. Build the project:
-
-   ```bash
-   cargo build --release
-   ```
-
-3. Run tests:
-
-   ```bash
-   cargo test
-   ```
-
-4. Run the CLI:
-
-   ```bash
-   cargo run -- --help
-   ```
-
-## 🚀 Usage
-
-### As a Rust Library
-
-```rust
-use inference::YOLOModel;
-
-fn main() {
-    let model = YOLOModel::load("path/to/model.onnx").unwrap();
-    let results = model.predict("path/to/image.jpg").unwrap();
-    println!("Detections: {:?}", results);
-}
-```
-
-### As a CLI
-
-```bash
-# Run inference on an image
-inference predict --model yolo11n.onnx --source image.jpg
-
-# Run inference on a video
-inference predict --model yolo11n.onnx --source video.mp4
-
-# Run inference on a webcam
-inference predict --model yolo11n.onnx --source 0
-```
-
-## 🔧 Building for Production
-
-For optimized release builds:
-
-```bash
+# Build release version
 cargo build --release
 ```
 
-The compiled binary will be available in `target/release/inference`.
+### Export a YOLO Model to ONNX
 
-## 💡 Contribute
+```bash
+# Using Ultralytics CLI
+yolo export model=yolo11n.pt format=onnx
 
-Ultralytics thrives on community collaboration, and we deeply value your contributions! Whether it's reporting bugs, suggesting features, or submitting code changes, your involvement is crucial.
+# Or with Python
+from ultralytics import YOLO
+model = YOLO("yolo11n.pt")
+model.export(format="onnx")
+```
 
-- **Reporting Issues**: Encounter a bug? Please report it on [GitHub Issues](https://github.com/ultralytics/inference/issues).
-- **Feature Requests**: Have an idea for improvement? Share it via [GitHub Issues](https://github.com/ultralytics/inference/issues).
-- **Pull Requests**: Want to contribute code? Please read our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) first, then submit a Pull Request.
-- **Feedback**: Share your thoughts and experiences by participating in our official [Survey](https://www.ultralytics.com/survey?utm_source=github&utm_medium=social&utm_campaign=Survey).
+### Run Inference
 
-A heartfelt thank you 🙏 goes out to all our contributors! Your efforts help make Ultralytics tools better for everyone.
+```bash
+# With defaults (auto-detects yolo11n.onnx and assets/ folder)
+cargo run --release -- predict
 
-[![Ultralytics open-source contributors](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
+# With explicit arguments
+cargo run --release -- predict --model yolo11n.onnx --source image.jpg
+
+# On a directory of images
+cargo run --release -- predict --model yolo11n.onnx --source assets/
+
+# With custom thresholds
+cargo run --release -- predict -m yolo11n.onnx -s image.jpg --conf 0.5 --iou 0.45
+```
+
+### Example Output
+
+```
+WARNING ⚠️ 'source' argument is missing. Using default 'source=assets'.
+Ultralytics 0.0.3 🚀 Rust ONNX CPU
+YOLO11 summary: 80 classes, imgsz=(640, 640)
+
+image 1/2 assets/bus.jpg: 810x1080 4 persons, 1 bus, 27.3ms
+image 2/2 assets/zidane.jpg: 1280x720 2 persons, 1 tie, 24.9ms
+Speed: 9.4ms preprocess, 26.1ms inference, 0.8ms postprocess per image at shape (1, 3, 720, 1280)
+💡 Learn more at https://docs.ultralytics.com/modes/predict
+```
+
+## 📚 Usage
+
+### As a CLI Tool
+
+```bash
+# Show help
+cargo run --release -- help
+
+# Show version
+cargo run --release -- version
+
+# Run inference
+cargo run --release -- predict --model <model.onnx> --source <source>
+```
+
+**CLI Options:**
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--model` | `-m` | Path to ONNX model file | `yolo11n.onnx` |
+| `--source` | `-s` | Input source (image, directory, glob) | `assets` |
+| `--conf` | | Confidence threshold | `0.25` |
+| `--iou` | | IoU threshold for NMS | `0.45` |
+
+### As a Rust Library
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+inference = { git = "https://github.com/ultralytics/inference.git" }
+```
+
+**Basic Usage:**
+
+```rust
+use inference::{YOLOModel, InferenceConfig};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load model - metadata (classes, task, imgsz) is read automatically
+    let mut model = YOLOModel::load("yolo11n.onnx")?;
+
+    // Run inference
+    let results = model.predict("image.jpg")?;
+
+    // Process results
+    for result in &results {
+        if let Some(ref boxes) = result.boxes {
+            println!("Found {} detections", boxes.len());
+            for i in 0..boxes.len() {
+                let cls = boxes.cls()[i] as usize;
+                let conf = boxes.conf()[i];
+                let name = result.names.get(&cls).map(|s| s.as_str()).unwrap_or("unknown");
+                println!("  {} {:.2}", name, conf);
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+**With Custom Configuration:**
+
+```rust
+use inference::{YOLOModel, InferenceConfig};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = InferenceConfig::new()
+        .with_confidence(0.5)
+        .with_iou(0.45)
+        .with_max_detections(100);
+
+    let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
+    let results = model.predict("image.jpg")?;
+
+    Ok(())
+}
+```
+
+**Accessing Detection Data:**
+
+```rust
+if let Some(ref boxes) = result.boxes {
+    // Bounding boxes in different formats
+    let xyxy = boxes.xyxy();      // [x1, y1, x2, y2]
+    let xywh = boxes.xywh();      // [x_center, y_center, width, height]
+    let xyxyn = boxes.xyxyn();    // Normalized [0-1]
+    let xywhn = boxes.xywhn();    // Normalized [0-1]
+
+    // Confidence scores and class IDs
+    let conf = boxes.conf();      // Confidence scores
+    let cls = boxes.cls();        // Class IDs
+}
+```
+
+## 🗂️ Project Structure
+
+```
+inference/
+├── src/
+│   ├── lib.rs              # Library entry point and public exports
+│   ├── main.rs             # CLI application
+│   ├── model.rs            # YOLOModel - ONNX session and inference
+│   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb
+│   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize)
+│   ├── postprocessing.rs   # Detection post-processing (NMS, decode)
+│   ├── metadata.rs         # ONNX model metadata parsing
+│   ├── source.rs           # Input source handling
+│   ├── task.rs             # Task enum (Detect, Segment, Pose, etc.)
+│   ├── inference.rs        # InferenceConfig
+│   ├── error.rs            # Error types
+│   └── utils.rs            # Utility functions (NMS, IoU)
+├── tests/
+│   └── integration_test.rs # Integration tests
+├── assets/                 # Test images
+│   ├── bus.jpg
+│   └── zidane.jpg
+├── Cargo.toml              # Rust dependencies and features
+├── LICENSE                 # AGPL-3.0 License
+└── README.md               # This file
+```
+
+## ⚡ Hardware Acceleration
+
+Enable hardware acceleration by adding features to your build:
+
+```bash
+# NVIDIA GPU (CUDA)
+cargo build --release --features cuda
+
+# NVIDIA TensorRT
+cargo build --release --features tensorrt
+
+# Apple CoreML (macOS/iOS)
+cargo build --release --features coreml
+
+# Intel OpenVINO
+cargo build --release --features openvino
+
+# Multiple features
+cargo build --release --features "cuda,tensorrt"
+```
+
+**Available Features:**
+
+| Feature | Description |
+|---------|-------------|
+| `cuda` | NVIDIA CUDA support |
+| `tensorrt` | NVIDIA TensorRT optimization |
+| `coreml` | Apple CoreML (macOS/iOS) |
+| `openvino` | Intel OpenVINO |
+| `onednn` | Intel oneDNN |
+| `rocm` | AMD ROCm |
+| `directml` | DirectML (Windows) |
+| `nnapi` | Android Neural Networks API |
+| `xnnpack` | XNNPACK (cross-platform) |
+| `nvidia` | Convenience: CUDA + TensorRT |
+| `intel` | Convenience: OpenVINO + oneDNN |
+| `mobile` | Convenience: NNAPI + CoreML + QNN |
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+cargo test
+
+# Run with output
+cargo test -- --nocapture
+
+# Run specific test
+cargo test test_boxes_creation
+```
+
+## 📊 Performance
+
+Typical inference times on Apple M4 Pro (CPU):
+
+| Stage | Time |
+|-------|------|
+| Model Load | ~40ms |
+| Preprocess | ~10ms |
+| Inference | ~25ms |
+| Postprocess | <1ms |
+| **Total** | **~35-40ms** |
+
+## 🔮 Roadmap
+
+- [x] Detection inference
+- [x] ONNX model metadata parsing
+- [x] Ultralytics-compatible Results API
+- [x] Directory/glob source support
+- [ ] Segmentation post-processing
+- [ ] Pose estimation post-processing
+- [ ] Classification inference
+- [ ] OBB (oriented bounding box) support
+- [ ] Video file support
+- [ ] Webcam/RTSP streaming
+- [ ] Python bindings (PyO3)
+- [ ] Batch inference
+
+## 💡 Contributing
+
+Ultralytics thrives on community collaboration! We deeply value your contributions.
+
+- **Report Issues**: Found a bug? [Open an issue](https://github.com/ultralytics/inference/issues)
+- **Feature Requests**: Have an idea? [Share it](https://github.com/ultralytics/inference/issues)
+- **Pull Requests**: Read our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) first
+- **Feedback**: Take our [Survey](https://www.ultralytics.com/survey?utm_source=github&utm_medium=social&utm_campaign=Survey)
 
 ## 📄 License
 
-Ultralytics offers two licensing options to accommodate diverse needs:
+Ultralytics offers two licensing options:
 
-- **AGPL-3.0 License**: Ideal for students, researchers, and enthusiasts passionate about open collaboration and knowledge sharing. This [OSI-approved](https://opensource.org/license/agpl-v3) open-source license promotes transparency and community involvement. See the [LICENSE](LICENSE) file for details.
-- **Enterprise License**: Designed for commercial applications, this license permits the seamless integration of Ultralytics software and AI models into commercial products and services, bypassing the copyleft requirements of AGPL-3.0. For commercial use cases, please inquire about an [Ultralytics Enterprise License](https://www.ultralytics.com/license).
+- **AGPL-3.0 License**: Open-source license for students, researchers, and enthusiasts. See [LICENSE](LICENSE).
+- **Enterprise License**: For commercial applications. Contact [Ultralytics Licensing](https://www.ultralytics.com/license).
 
 ## 📮 Contact
 
-For bug reports or feature suggestions related to this project, please use [GitHub Issues](https://github.com/ultralytics/inference/issues). For general questions, discussions, and community support, join our [Discord](https://discord.com/invite/ultralytics) server!
+- **GitHub Issues**: [Bug reports and feature requests](https://github.com/ultralytics/inference/issues)
+- **Discord**: [Join our community](https://discord.com/invite/ultralytics)
+- **Documentation**: [docs.ultralytics.com](https://docs.ultralytics.com)
 
 <br>
 <div align="center">
