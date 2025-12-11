@@ -31,26 +31,28 @@ name = "inference"
 path = "src/main.rs"
 
 [dependencies]
-# Image processing with SIMD
-image = "0.25.9"
+# Core - Image loading and processing
+image = "0.25"
 fast_image_resize = { version = "5.1", features = ["image"] }
-imageproc = "0.25"
-ab_glyph = "0.2"
 
-# Numerical computing (must match ort's ndarray version)
+# Core - Numerical computing (must match ort's ndarray version)
 ndarray = { version = "0.16", features = ["rayon"] }
 
-# ONNX Runtime
+# Core - ONNX Runtime
 ort = { version = "2.0.0-rc.10", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "half"] }
 
-# FP16 support (must match ort's half version)
+# Core - FP16 support (required by ort's half feature)
 half = "2.4"
 
-# File pattern matching
-glob = "0.3"
+# Optional - Image annotation (for --save feature)
+imageproc = { version = "0.25", optional = true }
+ab_glyph = { version = "0.2", optional = true }
 
 [features]
-default = []
+default = ["annotate"]
+
+# Image annotation support (for --save feature in CLI)
+annotate = ["imageproc", "ab_glyph"]
 
 # NVIDIA GPU acceleration
 cuda = ["ort/cuda"]

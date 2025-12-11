@@ -426,6 +426,7 @@ mod tests {
         let output: Vec<f32> = vec![];
         let preprocess = PreprocessResult {
             tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
             orig_shape: (480, 640),
             scale: (1.0, 1.0),
             padding: (0.0, 0.0),

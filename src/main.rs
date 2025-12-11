@@ -16,13 +16,20 @@
 
 use std::collections::HashMap;
 use std::env;
-use std::fs;
 use std::path::Path;
 use std::process;
 
+#[cfg(feature = "annotate")]
+use std::fs;
+
+#[cfg(feature = "annotate")]
 use ab_glyph::{FontRef, PxScale};
-use image::{DynamicImage, Rgb};
+use image::DynamicImage;
+#[cfg(feature = "annotate")]
+use image::Rgb;
+#[cfg(feature = "annotate")]
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
+#[cfg(feature = "annotate")]
 use imageproc::rect::Rect;
 
 use inference::{InferenceConfig, Results, YOLOModel, VERSION};
