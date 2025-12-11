@@ -72,6 +72,54 @@ pub fn nms(boxes: &[([f32; 4], f32)], iou_threshold: f32) -> Vec<usize> {
     keep
 }
 
+/// Per-class Non-Maximum Suppression (NMS) for filtering overlapping detections
+///
+/// Only suppresses boxes within the same class, matching Ultralytics behavior.
+///
+/// # Arguments
+///
+/// * `boxes` - Vector of bounding boxes with scores and class IDs [(bbox, score, class_id)]
+/// * `iou_threshold` - IoU threshold for suppression
+///
+/// # Returns
+///
+/// Indices of boxes to keep
+pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Vec<usize> {
+    if boxes.is_empty() {
+        return vec![];
+    }
+
+    // Sort by score (descending)
+    let mut indices: Vec<usize> = (0..boxes.len()).collect();
+    indices.sort_by(|&a, &b| boxes[b].1.partial_cmp(&boxes[a].1).unwrap());
+
+    let mut keep = vec![];
+    let mut suppressed = vec![false; boxes.len()];
+
+    for &i in &indices {
+        if suppressed[i] {
+            continue;
+        }
+        keep.push(i);
+
+        let class_i = boxes[i].2;
+
+        for &j in &indices {
+            if !suppressed[j] && i != j {
+                // Only suppress boxes of the same class
+                if boxes[j].2 == class_i {
+                    let iou = calculate_iou(&boxes[i].0, &boxes[j].0);
+                    if iou > iou_threshold {
+                        suppressed[j] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    keep
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

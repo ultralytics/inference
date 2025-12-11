@@ -13,7 +13,7 @@ use crate::inference::InferenceConfig;
 use crate::preprocessing::{clip_coords, scale_coords, PreprocessResult};
 use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, Speed};
 use crate::task::Task;
-use crate::utils::nms;
+use crate::utils::nms_per_class;
 
 /// Post-process raw model output based on task type.
 ///
@@ -155,6 +155,10 @@ fn postprocess_detect(
 }
 
 /// Parse detection output shape to determine format.
+///
+/// Derives class count from output shape when metadata is missing (expected_classes == 0).
+/// YOLO outputs are either [1, num_features, num_preds] or [1, num_preds, num_features]
+/// where num_features = 4 (bbox) + num_classes.
 fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize, bool) {
     match shape.len() {
         2 => {
@@ -162,7 +166,15 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
             let (a, b) = (shape[0], shape[1]);
             // Handle edge case where either dimension is less than 4
             if a < 4 && b < 4 {
-                return (expected_classes, 0, false);
+                return (expected_classes.max(1), 0, false);
+            }
+            // When metadata is missing, infer from shape:
+            // The smaller dimension (if >= 5) is likely num_features, larger is num_preds
+            if expected_classes == 0 {
+                // No metadata - infer from shape
+                let (num_features, num_preds, transposed) = if a < b { (a, b, false) } else { (b, a, true) };
+                let inferred_classes = num_features.saturating_sub(4);
+                return (inferred_classes.max(1), num_preds, transposed);
             }
             if a == 4 + expected_classes || (a >= 4 && a > b) {
                 // [num_features, num_preds]
@@ -177,7 +189,15 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
             let (a, b) = (shape[1], shape[2]);
             // Handle edge case where num_predictions is 0 or very small
             if b == 0 || a < 4 {
-                return (expected_classes, 0, false);
+                return (expected_classes.max(1), 0, false);
+            }
+            // When metadata is missing, infer from shape
+            if expected_classes == 0 {
+                // No metadata - infer from shape
+                // Typically num_features < num_preds (e.g., 84 < 8400)
+                let (num_features, num_preds, transposed) = if a < b { (a, b, false) } else { (b, a, true) };
+                let inferred_classes = num_features.saturating_sub(4);
+                return (inferred_classes.max(1), num_preds, transposed);
             }
             if a == 4 + expected_classes || (expected_classes > 0 && a < b) {
                 // [1, num_features, num_preds]
@@ -187,7 +207,7 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
                 (b.saturating_sub(4), a, true)
             }
         }
-        _ => (expected_classes, 0, false),
+        _ => (expected_classes.max(1), 0, false),
     }
 }
 
@@ -248,14 +268,8 @@ fn extract_detect_boxes(
         return Array2::zeros((0, 6));
     }
 
-    // Prepare for NMS
-    let nms_input: Vec<([f32; 4], f32)> = candidates
-        .iter()
-        .map(|(bbox, score, _)| (*bbox, *score))
-        .collect();
-
-    // Apply NMS
-    let keep_indices = nms(&nms_input, config.iou_threshold);
+    // Apply per-class NMS (only suppress boxes within the same class)
+    let keep_indices = nms_per_class(&candidates, config.iou_threshold);
 
     // Build output array with kept detections
     let num_kept = keep_indices.len().min(config.max_detections);
