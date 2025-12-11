@@ -93,12 +93,12 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option | Short | Description | Default |
-|--------|-------|-------------|---------|
-| `--model` | `-m` | Path to ONNX model file | `yolo11n.onnx` |
-| `--source` | `-s` | Input source (image, directory, glob) | `assets` |
-| `--conf` | | Confidence threshold | `0.25` |
-| `--iou` | | IoU threshold for NMS | `0.45` |
+| Option     | Short | Description                           | Default        |
+| ---------- | ----- | ------------------------------------- | -------------- |
+| `--model`  | `-m`  | Path to ONNX model file               | `yolo11n.onnx` |
+| `--source` | `-s`  | Input source (image, directory, glob) | `assets`       |
+| `--conf`   |       | Confidence threshold                  | `0.25`         |
+| `--iou`    |       | IoU threshold for NMS                 | `0.45`         |
 
 ### As a Rust Library
 
@@ -222,20 +222,20 @@ cargo build --release --features "cuda,tensorrt"
 
 **Available Features:**
 
-| Feature | Description |
-|---------|-------------|
-| `cuda` | NVIDIA CUDA support |
-| `tensorrt` | NVIDIA TensorRT optimization |
-| `coreml` | Apple CoreML (macOS/iOS) |
-| `openvino` | Intel OpenVINO |
-| `onednn` | Intel oneDNN |
-| `rocm` | AMD ROCm |
-| `directml` | DirectML (Windows) |
-| `nnapi` | Android Neural Networks API |
-| `xnnpack` | XNNPACK (cross-platform) |
-| `nvidia` | Convenience: CUDA + TensorRT |
-| `intel` | Convenience: OpenVINO + oneDNN |
-| `mobile` | Convenience: NNAPI + CoreML + QNN |
+| Feature    | Description                       |
+| ---------- | --------------------------------- |
+| `cuda`     | NVIDIA CUDA support               |
+| `tensorrt` | NVIDIA TensorRT optimization      |
+| `coreml`   | Apple CoreML (macOS/iOS)          |
+| `openvino` | Intel OpenVINO                    |
+| `onednn`   | Intel oneDNN                      |
+| `rocm`     | AMD ROCm                          |
+| `directml` | DirectML (Windows)                |
+| `nnapi`    | Android Neural Networks API       |
+| `xnnpack`  | XNNPACK (cross-platform)          |
+| `nvidia`   | Convenience: CUDA + TensorRT      |
+| `intel`    | Convenience: OpenVINO + oneDNN    |
+| `mobile`   | Convenience: NNAPI + CoreML + QNN |
 
 ## 🧪 Testing
 
@@ -254,13 +254,13 @@ cargo test test_boxes_creation
 
 Typical inference times on Apple M4 Pro (CPU):
 
-| Stage | Time |
-|-------|------|
-| Model Load | ~40ms |
-| Preprocess | ~10ms |
-| Inference | ~25ms |
-| Postprocess | <1ms |
-| **Total** | **~35-40ms** |
+| Stage       | Time         |
+| ----------- | ------------ |
+| Model Load  | ~40ms        |
+| Preprocess  | ~10ms        |
+| Inference   | ~25ms        |
+| Postprocess | <1ms         |
+| **Total**   | **~35-40ms** |
 
 ## 🔮 Roadmap
 
