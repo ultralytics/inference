@@ -49,6 +49,8 @@ pub struct YOLOModel {
     output_names: Vec<String>,
     /// Inference configuration.
     config: InferenceConfig,
+    /// Whether model has been warmed up.
+    warmed_up: bool,
 }
 
 impl YOLOModel {
@@ -99,6 +101,7 @@ impl YOLOModel {
         }
 
         // Create ONNX Runtime session with optimizations
+        #[allow(unused_mut)]
         let mut builder = Session::builder()
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to create session builder: {e}")))?;
 
@@ -108,7 +111,7 @@ impl YOLOModel {
             builder = builder
                 .with_execution_providers([
                     CoreMLExecutionProvider::default()
-                        .with_subgraphs() // Enable on subgraphs for better coverage
+                        .with_subgraphs(true) // Enable on subgraphs for better coverage
                         .build()
                 ])
                 .map_err(|e| InferenceError::ModelLoadError(format!("Failed to register CoreML EP: {e}")))?;
@@ -122,15 +125,6 @@ impl YOLOModel {
             // Intra-op threads: parallelization within individual operators (e.g., matrix multiply)
             .with_intra_threads(config.num_threads)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set intra-thread count: {e}")))?
-            // Inter-op threads: parallelization across independent operators in the graph
-            .with_inter_threads(config.num_threads)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set inter-thread count: {e}")))?
-            // Enable parallel execution mode for graph-level parallelism
-            .with_parallel_execution(true)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to enable parallel execution: {e}")))?
-            // Enable memory pattern optimization - reuses memory allocations between runs
-            .with_memory_pattern(true)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}")))?
             .commit_from_file(path)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
@@ -158,7 +152,29 @@ impl YOLOModel {
             input_name,
             output_names,
             config,
+            warmed_up: false,
         })
+    }
+
+    /// Warm up the model by running inference with a dummy input.
+    ///
+    /// This pre-allocates memory and optimizes the execution graph for faster
+    /// subsequent inferences. Warmup is automatically called on first predict.
+    pub fn warmup(&mut self) -> Result<()> {
+        if self.warmed_up {
+            return Ok(());
+        }
+
+        let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);
+
+        // Create dummy input tensor (zeros)
+        let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
+
+        // Run warmup inference (discard results)
+        let _ = self.run_inference(&dummy_input)?;
+
+        self.warmed_up = true;
+        Ok(())
     }
 
     /// Extract metadata from the ONNX model session.
@@ -246,7 +262,10 @@ impl YOLOModel {
     ///
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        let _start_total = Instant::now();
+        // Warmup on first inference (pre-allocates memory, optimizes graph)
+        if !self.warmed_up {
+            self.warmup()?;
+        }
 
         // Get target size from config or metadata
         let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);

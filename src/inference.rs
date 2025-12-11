@@ -39,17 +39,12 @@ pub struct InferenceConfig {
 
 impl Default for InferenceConfig {
     fn default() -> Self {
-        // Use all available CPU cores for maximum performance
-        let num_threads = std::thread::available_parallelism()
-            .map(|p| p.get())
-            .unwrap_or(4);
-
         Self {
             confidence_threshold: 0.25,
             iou_threshold: 0.45,
             max_detections: 300,
             imgsz: None,
-            num_threads,
+            num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
             half: false,
         }
     }
