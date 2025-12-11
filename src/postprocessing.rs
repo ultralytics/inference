@@ -27,11 +27,13 @@ use crate::utils::nms;
 /// * `orig_img` - Original image as HWC array.
 /// * `path` - Source image path.
 /// * `speed` - Timing information.
+/// * `inference_shape` - The inference tensor shape (height, width) after letterboxing.
 ///
 /// # Returns
 ///
 /// Processed Results object.
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn postprocess(
     output: &[f32],
     output_shape: &[usize],
@@ -42,6 +44,7 @@ pub fn postprocess(
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
+    inference_shape: (u32, u32),
 ) -> Results {
     match task {
         Task::Detect => postprocess_detect(
@@ -53,6 +56,7 @@ pub fn postprocess(
             orig_img,
             path,
             speed,
+            inference_shape,
         ),
         Task::Segment => postprocess_segment(
             output,
@@ -63,6 +67,7 @@ pub fn postprocess(
             orig_img,
             path,
             speed,
+            inference_shape,
         ),
         Task::Pose => postprocess_pose(
             output,
@@ -73,9 +78,10 @@ pub fn postprocess(
             orig_img,
             path,
             speed,
+            inference_shape,
         ),
         Task::Classify => {
-            postprocess_classify(output, output_shape, names, orig_img, path, speed)
+            postprocess_classify(output, output_shape, names, orig_img, path, speed, inference_shape)
         }
         Task::Obb => postprocess_obb(
             output,
@@ -86,6 +92,7 @@ pub fn postprocess(
             orig_img,
             path,
             speed,
+            inference_shape,
         ),
     }
 }
@@ -95,6 +102,7 @@ pub fn postprocess(
 /// YOLO detection models output shape is typically [1, 84, 8400] where:
 /// - 84 = 4 (bbox) + 80 (classes for COCO)
 /// - 8400 = number of predictions (varies by input size)
+#[allow(clippy::too_many_arguments)]
 fn postprocess_detect(
     output: &[f32],
     output_shape: &[usize],
@@ -104,8 +112,9 @@ fn postprocess_detect(
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
+    inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed);
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
     let (num_classes, num_predictions, is_transposed) = parse_detect_shape(output_shape, names.len());
@@ -266,6 +275,7 @@ fn extract_detect_boxes(
 }
 
 /// Post-process segmentation model output (placeholder).
+#[allow(clippy::too_many_arguments)]
 fn postprocess_segment(
     _output: &[f32],
     _output_shape: &[usize],
@@ -275,10 +285,11 @@ fn postprocess_segment(
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
+    inference_shape: (u32, u32),
 ) -> Results {
     // TODO: Implement segmentation post-processing
     // Segmentation models output both detection boxes and mask coefficients
-    let mut results = Results::new(orig_img, path, names.clone(), speed);
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     // Placeholder - return empty masks
     results.masks = Some(Masks::new(
@@ -290,6 +301,7 @@ fn postprocess_segment(
 }
 
 /// Post-process pose estimation model output (placeholder).
+#[allow(clippy::too_many_arguments)]
 fn postprocess_pose(
     _output: &[f32],
     _output_shape: &[usize],
@@ -299,10 +311,11 @@ fn postprocess_pose(
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
+    inference_shape: (u32, u32),
 ) -> Results {
     // TODO: Implement pose estimation post-processing
     // Pose models output boxes + keypoints
-    let mut results = Results::new(orig_img, path, names.clone(), speed);
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     // Placeholder - return empty keypoints
     results.keypoints = Some(Keypoints::new(
@@ -321,8 +334,9 @@ fn postprocess_classify(
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
+    inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed);
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     if output.is_empty() {
         return results;
@@ -336,6 +350,7 @@ fn postprocess_classify(
 }
 
 /// Post-process OBB (oriented bounding box) model output (placeholder).
+#[allow(clippy::too_many_arguments)]
 fn postprocess_obb(
     _output: &[f32],
     _output_shape: &[usize],
@@ -345,10 +360,11 @@ fn postprocess_obb(
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
+    inference_shape: (u32, u32),
 ) -> Results {
     // TODO: Implement OBB post-processing
     // OBB models output rotated bounding boxes
-    let mut results = Results::new(orig_img, path, names.clone(), speed);
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     // Placeholder - return empty OBBs
     results.obb = Some(Obb::new(Array2::zeros((0, 7)), preprocess.orig_shape));
@@ -397,6 +413,7 @@ mod tests {
             orig_img,
             String::new(),
             Speed::default(),
+            (640, 640),
         );
 
         assert!(results.is_empty());

@@ -122,11 +122,11 @@ fn letterbox_image(
     pad_top: u32,
     target_size: (usize, usize),
 ) -> RgbImage {
-    // Resize image
+    // Resize image using bilinear (faster than Lanczos3, similar to OpenCV default)
     let resized = image.resize_exact(
         new_width,
         new_height,
-        image::imageops::FilterType::Lanczos3,
+        image::imageops::FilterType::Triangle, // Bilinear interpolation
     );
     let resized_rgb = resized.to_rgb8();
 
@@ -134,14 +134,8 @@ fn letterbox_image(
     let mut output: RgbImage =
         ImageBuffer::from_pixel(target_size.1 as u32, target_size.0 as u32, Rgb(LETTERBOX_COLOR));
 
-    // Copy resized image onto output
-    for (x, y, pixel) in resized_rgb.enumerate_pixels() {
-        let out_x = x + pad_left;
-        let out_y = y + pad_top;
-        if out_x < output.width() && out_y < output.height() {
-            output.put_pixel(out_x, out_y, *pixel);
-        }
-    }
+    // Copy resized image onto output using image::imageops for efficiency
+    image::imageops::overlay(&mut output, &resized_rgb, i64::from(pad_left), i64::from(pad_top));
 
     output
 }
@@ -157,13 +151,21 @@ fn letterbox_image(
 /// Array4 with shape (1, 3, H, W) and values in [0, 1].
 fn image_to_tensor(image: &RgbImage) -> Array4<f32> {
     let (width, height) = image.dimensions();
-    let mut tensor = Array4::zeros((1, 3, height as usize, width as usize));
+    let (w, h) = (width as usize, height as usize);
+    let pixels = image.as_raw();
 
-    for (x, y, pixel) in image.enumerate_pixels() {
-        let [r, g, b] = pixel.0;
-        tensor[[0, 0, y as usize, x as usize]] = f32::from(r) / 255.0;
-        tensor[[0, 1, y as usize, x as usize]] = f32::from(g) / 255.0;
-        tensor[[0, 2, y as usize, x as usize]] = f32::from(b) / 255.0;
+    // Pre-allocate tensor
+    let mut tensor = Array4::zeros((1, 3, h, w));
+
+    // Get mutable slices for each channel for faster access
+    let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
+    let (g_slice, b_slice) = rest.split_at_mut(h * w);
+
+    // Convert HWC interleaved RGB to CHW planar format
+    for (i, chunk) in pixels.chunks_exact(3).enumerate() {
+        r_slice[i] = f32::from(chunk[0]) / 255.0;
+        g_slice[i] = f32::from(chunk[1]) / 255.0;
+        b_slice[i] = f32::from(chunk[2]) / 255.0;
     }
 
     tensor
@@ -201,15 +203,11 @@ pub fn array_to_tensor(image: &Array3<u8>) -> Array4<f32> {
 pub fn image_to_array(image: &DynamicImage) -> Array3<u8> {
     let rgb = image.to_rgb8();
     let (width, height) = rgb.dimensions();
-    let mut array = Array3::zeros((height as usize, width as usize, 3));
+    let pixels = rgb.into_raw();
 
-    for (x, y, pixel) in rgb.enumerate_pixels() {
-        array[[y as usize, x as usize, 0]] = pixel[0];
-        array[[y as usize, x as usize, 1]] = pixel[1];
-        array[[y as usize, x as usize, 2]] = pixel[2];
-    }
-
-    array
+    // Create array directly from raw pixels (already in HWC format)
+    Array3::from_shape_vec((height as usize, width as usize, 3), pixels)
+        .expect("Failed to create array from image pixels")
 }
 
 /// Scale coordinates from model output space back to original image space.

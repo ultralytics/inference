@@ -244,6 +244,10 @@ impl YOLOModel {
 
         let speed = Speed::new(preprocess_time, inference_time, 0.0);
 
+        // Extract inference tensor shape (height, width) from preprocessed tensor
+        let tensor_shape = preprocess_result.tensor.shape();
+        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
+
         let result = postprocess(
             &output_data,
             &output_shape,
@@ -254,6 +258,7 @@ impl YOLOModel {
             orig_img,
             path,
             speed,
+            inference_shape,
         );
 
         let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;

@@ -130,6 +130,12 @@ impl Results {
         self.orig_shape
     }
 
+    /// Get the inference tensor shape (height, width) after letterboxing.
+    #[must_use]
+    pub const fn inference_shape(&self) -> (u32, u32) {
+        self.inference_shape
+    }
+
     /// Generate a verbose log string describing the results.
     #[must_use]
     pub fn verbose(&self) -> String {

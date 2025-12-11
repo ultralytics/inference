@@ -175,7 +175,7 @@ fn run_prediction(args: &[String]) {
     let mut total_preprocess = 0.0;
     let mut total_inference = 0.0;
     let mut total_postprocess = 0.0;
-    let mut last_shape = (0, 0);
+    let mut last_inference_shape = (0, 0);
 
     for (idx, image_path) in images.iter().enumerate() {
         let results = match model.predict(image_path) {
@@ -192,16 +192,18 @@ fn run_prediction(args: &[String]) {
 
             // Get image dimensions from result
             let orig_shape = result.orig_shape();
-            last_shape = (orig_shape.0 as usize, orig_shape.1 as usize);
+            let inference_shape = result.inference_shape();
+            last_inference_shape = (inference_shape.0 as usize, inference_shape.1 as usize);
 
             // Print per-image output matching Ultralytics format
+            // Use original image dimensions for the per-image output
             println!(
                 "image {}/{} {}: {}x{} {}, {:.1}ms",
                 idx + 1,
                 total_images,
                 image_path,
-                last_shape.1, // width first in output
-                last_shape.0, // then height
+                orig_shape.1, // width first in output
+                orig_shape.0, // then height
                 detection_summary,
                 result.speed.inference.unwrap_or(0.0)
             );
@@ -215,15 +217,15 @@ fn run_prediction(args: &[String]) {
         }
     }
 
-    // Print speed summary
+    // Print speed summary with inference tensor shape (after letterboxing)
     let num_results = all_results.len().max(1) as f64;
     println!(
         "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
         total_preprocess / num_results,
         total_inference / num_results,
         total_postprocess / num_results,
-        last_shape.0,
-        last_shape.1
+        last_inference_shape.0,
+        last_inference_shape.1
     );
 
     // Print footer

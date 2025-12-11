@@ -73,7 +73,7 @@ fn test_results_creation() {
     let names = HashMap::new();
     let speed = Speed::default();
 
-    let results = Results::new(orig_img, "test.jpg".to_string(), names, speed);
+    let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
 
     assert!(results.boxes.is_none());
     assert!(results.masks.is_none());
@@ -88,7 +88,7 @@ fn test_results_with_boxes() {
     let names = HashMap::new();
     let speed = Speed::default();
 
-    let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed);
+    let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
 
     let boxes_data = ndarray::array![
         [10.0f32, 20.0, 30.0, 40.0, 0.95, 0.0],
@@ -106,7 +106,7 @@ fn test_results_is_empty() {
     let names = HashMap::new();
     let speed = Speed::default();
 
-    let results = Results::new(orig_img, "test.jpg".to_string(), names, speed);
+    let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
 
     assert!(results.is_empty());
 }
