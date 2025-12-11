@@ -20,10 +20,10 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-use image::{DynamicImage, Rgb, RgbImage};
+use ab_glyph::{FontRef, PxScale};
+use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
-use rusttype::{Font, Scale};
 
 use inference::{InferenceConfig, Results, YOLOModel, VERSION};
 
@@ -451,14 +451,17 @@ fn get_class_color(class_id: usize) -> Rgb<u8> {
     Rgb(color)
 }
 
+/// Embedded font data (DejaVu Sans Mono - a free font)
+/// Using a simple embedded approach for cross-platform compatibility
+const FONT_DATA: &[u8] = include_bytes!("../assets/DejaVuSans.ttf");
+
 /// Annotate an image with detection boxes and labels
 fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
     let mut img = image.to_rgb8();
     let (width, height) = img.dimensions();
 
-    // Load embedded font (use a simple built-in approach)
-    let font_data = include_bytes!("/System/Library/Fonts/Helvetica.ttc");
-    let font = Font::try_from_bytes(font_data as &[u8]);
+    // Load font
+    let font = FontRef::try_from_slice(FONT_DATA).ok();
 
     if let Some(ref boxes) = result.boxes {
         let xyxy = boxes.xyxy();
@@ -484,12 +487,11 @@ fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
             let color = get_class_color(class_id);
 
             // Draw bounding box (multiple times for thickness)
-            for offset in 0..3 {
-                if let Some(rect) = Rect::at(x1 - offset, y1 - offset)
-                    .of_size((x2 - x1 + 2 * offset) as u32, (y2 - y1 + 2 * offset) as u32)
-                {
-                    draw_hollow_rect_mut(&mut img, rect, color);
-                }
+            for offset in 0..3_i32 {
+                let rect_width = (x2 - x1 + 2 * offset).max(1) as u32;
+                let rect_height = (y2 - y1 + 2 * offset).max(1) as u32;
+                let rect = Rect::at(x1 - offset, y1 - offset).of_size(rect_width, rect_height);
+                draw_hollow_rect_mut(&mut img, rect, color);
             }
 
             // Draw label
@@ -501,8 +503,8 @@ fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
             let label = format!("{} {:.2}", class_name, confidence);
 
             if let Some(ref f) = font {
-                let scale = Scale::uniform(16.0);
-                let y_text = if y1 > 20 { y1 - 5 } else { y2 + 15 };
+                let scale = PxScale::from(20.0);
+                let y_text = if y1 > 25 { y1 - 8 } else { y2 + 20 };
                 draw_text_mut(&mut img, color, x1, y_text, scale, f, &label);
             }
         }
