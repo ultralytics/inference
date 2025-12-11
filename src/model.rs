@@ -12,6 +12,8 @@ use std::time::Instant;
 use image::DynamicImage;
 use ndarray::Array3;
 use ort::session::Session;
+#[cfg(feature = "coreml")]
+use ort::execution_providers::CoreMLExecutionProvider;
 use ort::value::TensorRef;
 
 use crate::error::{InferenceError, Result};
@@ -96,13 +98,39 @@ impl YOLOModel {
             )));
         }
 
-        // Create ONNX Runtime session
-        let session = Session::builder()
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to create session builder: {e}")))?
+        // Create ONNX Runtime session with optimizations
+        let mut builder = Session::builder()
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to create session builder: {e}")))?;
+
+        // Configure execution providers (hardware acceleration)
+        #[cfg(feature = "coreml")]
+        {
+            builder = builder
+                .with_execution_providers([
+                    CoreMLExecutionProvider::default()
+                        .with_subgraphs() // Enable on subgraphs for better coverage
+                        .build()
+                ])
+                .map_err(|e| InferenceError::ModelLoadError(format!("Failed to register CoreML EP: {e}")))?;
+        }
+
+        // Apply session optimizations
+        let session = builder
+            // Graph optimization - Level3 enables all optimizations including extended graph optimizations
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}")))?
+            // Intra-op threads: parallelization within individual operators (e.g., matrix multiply)
             .with_intra_threads(config.num_threads)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set thread count: {e}")))?
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set intra-thread count: {e}")))?
+            // Inter-op threads: parallelization across independent operators in the graph
+            .with_inter_threads(config.num_threads)
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set inter-thread count: {e}")))?
+            // Enable parallel execution mode for graph-level parallelism
+            .with_parallel_execution(true)
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to enable parallel execution: {e}")))?
+            // Enable memory pattern optimization - reuses memory allocations between runs
+            .with_memory_pattern(true)
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}")))?
             .commit_from_file(path)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
