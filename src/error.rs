@@ -1,43 +1,76 @@
-// © 2014-2025 Ultralytics Inc. 🚀 All rights reserved. CONFIDENTIAL: Unauthorized use or distribution prohibited.
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-//! Error types for the inference library
+//! Error types for the inference library.
 
 use std::fmt;
 
-/// Result type alias for inference operations
+/// Result type alias for inference operations.
 pub type Result<T> = std::result::Result<T, InferenceError>;
 
-/// Main error type for the inference library
+/// Main error type for the inference library.
 #[derive(Debug)]
 pub enum InferenceError {
-    /// Error loading model
+    /// Error loading the ONNX model.
     ModelLoadError(String),
-    /// Error during inference
+    /// Error during model inference.
     InferenceError(String),
-    /// Image processing error
+    /// Error processing images.
     ImageError(String),
-    /// Invalid configuration
+    /// Invalid configuration provided.
     ConfigError(String),
-    /// IO error
+    /// IO error (file not found, permission denied, etc.).
     IoError(std::io::Error),
+    /// Error parsing model metadata.
+    MetadataError(String),
+    /// Video/stream processing error.
+    VideoError(String),
 }
 
 impl fmt::Display for InferenceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            InferenceError::ModelLoadError(msg) => write!(f, "Model load error: {}", msg),
-            InferenceError::InferenceError(msg) => write!(f, "Inference error: {}", msg),
-            InferenceError::ImageError(msg) => write!(f, "Image error: {}", msg),
-            InferenceError::ConfigError(msg) => write!(f, "Config error: {}", msg),
-            InferenceError::IoError(err) => write!(f, "IO error: {}", err),
+            Self::ModelLoadError(msg) => write!(f, "Model load error: {msg}"),
+            Self::InferenceError(msg) => write!(f, "Inference error: {msg}"),
+            Self::ImageError(msg) => write!(f, "Image error: {msg}"),
+            Self::ConfigError(msg) => write!(f, "Config error: {msg}"),
+            Self::IoError(err) => write!(f, "IO error: {err}"),
+            Self::MetadataError(msg) => write!(f, "Metadata error: {msg}"),
+            Self::VideoError(msg) => write!(f, "Video error: {msg}"),
         }
     }
 }
 
-impl std::error::Error for InferenceError {}
+impl std::error::Error for InferenceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::IoError(err) => Some(err),
+            _ => None,
+        }
+    }
+}
 
 impl From<std::io::Error> for InferenceError {
     fn from(err: std::io::Error) -> Self {
-        InferenceError::IoError(err)
+        Self::IoError(err)
+    }
+}
+
+impl From<image::ImageError> for InferenceError {
+    fn from(err: image::ImageError) -> Self {
+        Self::ImageError(err.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display() {
+        let err = InferenceError::ModelLoadError("test".to_string());
+        assert_eq!(err.to_string(), "Model load error: test");
+
+        let err = InferenceError::InferenceError("test".to_string());
+        assert_eq!(err.to_string(), "Inference error: test");
     }
 }
