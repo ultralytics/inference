@@ -105,34 +105,73 @@ impl YOLOModel {
             )));
         }
 
+        // Determine optimal thread count based on available parallelism
+        let num_threads = if config.num_threads > 0 {
+            config.num_threads
+        } else {
+            // Use all available cores for intra-op parallelism (single inference)
+            std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(4)
+        };
+
         // Create ONNX Runtime session with optimizations
-        #[allow(unused_mut)]
-        let mut builder = Session::builder()
+        let mut session_builder = Session::builder()
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to create session builder: {e}")))?;
 
-        // Configure execution providers (hardware acceleration)
+        // Register execution providers based on features
+        #[allow(unused_mut)]
+        let mut eps: Vec<ort::execution_providers::ExecutionProviderDispatch> = Vec::new();
+
         #[cfg(feature = "coreml")]
         {
-            builder = builder
-                .with_execution_providers([
-                    CoreMLExecutionProvider::default()
-                        .with_subgraphs(true) // Enable on subgraphs for better coverage
-                        .build()
-                ])
-                .map_err(|e| InferenceError::ModelLoadError(format!("Failed to register CoreML EP: {e}")))?;
+            eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
         }
 
-        // Apply session optimizations
-        let session = builder
-            // Graph optimization - Level3 enables all optimizations including extended graph optimizations
+        #[cfg(feature = "cuda")]
+        {
+            eps.push(ort::execution_providers::CUDAExecutionProvider::default().build());
+        }
+
+        #[cfg(feature = "tensorrt")]
+        {
+            eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
+        }
+
+        #[cfg(feature = "rocm")]
+        {
+            eps.push(ort::execution_providers::ROCmExecutionProvider::default().build());
+        }
+
+        #[cfg(feature = "directml")]
+        {
+            eps.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
+        }
+
+        #[cfg(feature = "openvino")]
+        {
+            eps.push(ort::execution_providers::OpenVINOExecutionProvider::default().build());
+        }
+
+        #[cfg(feature = "xnnpack")]
+        {
+            eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+        }
+
+        if !eps.is_empty() {
+            session_builder = session_builder
+                .with_execution_providers(eps)
+                .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}")))?;
+        }
+
+        let session = session_builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}")))?
-            // Intra-op threads: parallelization within individual operators (e.g., matrix multiply)
-            .with_intra_threads(config.num_threads)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set intra-thread count: {e}")))?
-            // Flush denormal floats to zero - speeds up FP math on some CPUs
-            .with_denormal_as_zero()
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set denormal mode: {e}")))?
+            .with_intra_threads(num_threads)
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set intra-op thread count: {e}")))?
+            .with_memory_pattern(true)
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}")))?
+
             .commit_from_file(path)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
@@ -163,7 +202,7 @@ impl YOLOModel {
             ..config
         };
 
-        Ok(Self {
+        let mut model = Self {
             session,
             metadata,
             input_name,
@@ -171,7 +210,12 @@ impl YOLOModel {
             config,
             warmed_up: false,
             fp16_input,
-        })
+        };
+
+        // Warmup inference to trigger JIT compilation and memory allocation
+        model.warmup()?;
+
+        Ok(model)
     }
 
     /// Warm up the model by running inference with a dummy input.
@@ -213,7 +257,7 @@ impl YOLOModel {
         ];
 
         for key in &keys {
-            if let Ok(Some(value)) = model_metadata.custom(key) {
+            if let Some(value) = model_metadata.custom(key) {
                 metadata_map.insert((*key).to_string(), value);
             }
         }
@@ -232,7 +276,7 @@ impl YOLOModel {
 
         // Also try getting metadata from a single combined key
         for key in &["", "metadata", "model_metadata"] {
-            if let Ok(Some(value)) = model_metadata.custom(key) {
+            if let Some(value) = model_metadata.custom(key) {
                 metadata_map.insert((*key).to_string(), value);
             }
         }
@@ -379,8 +423,8 @@ impl YOLOModel {
         // Ensure input is contiguous in memory (CowArray)
         let input_contiguous = input.as_standard_layout();
 
-        // Create input tensor reference from ndarray view (pass reference to CowArray)
-        let input_tensor = TensorRef::from_array_view(&input_contiguous)
+        // Create input tensor reference from ndarray view
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view())
             .map_err(|e| InferenceError::InferenceError(format!("Failed to create input tensor: {e}")))?;
 
         // Run session - inputs! macro returns a Vec, not a Result
