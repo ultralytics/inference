@@ -406,6 +406,22 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_detect_shape_no_metadata() {
+        // When metadata is missing (expected_classes == 0), infer from shape
+        // Standard YOLO output [1, 84, 8400] with no metadata
+        let (nc, np, transposed) = parse_detect_shape(&[1, 84, 8400], 0);
+        assert_eq!(nc, 80);  // Inferred: 84 - 4 = 80 classes
+        assert_eq!(np, 8400);
+        assert!(!transposed);
+
+        // Transposed format [1, 8400, 84] with no metadata
+        let (nc, np, transposed) = parse_detect_shape(&[1, 8400, 84], 0);
+        assert_eq!(nc, 80);  // Inferred: 84 - 4 = 80 classes
+        assert_eq!(np, 8400);
+        assert!(transposed);
+    }
+
+    #[test]
     fn test_empty_output() {
         let output: Vec<f32> = vec![];
         let preprocess = PreprocessResult {

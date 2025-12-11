@@ -144,4 +144,29 @@ mod tests {
         assert!(keep.contains(&2));
         assert!(keep.contains(&0));
     }
+
+    #[test]
+    fn test_nms_per_class() {
+        // Two overlapping boxes of different classes should both be kept
+        let boxes = vec![
+            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),  // class 0
+            ([1.0, 1.0, 11.0, 11.0], 0.8, 1),  // class 1 (different class)
+            ([100.0, 100.0, 110.0, 110.0], 0.95, 0),  // class 0, non-overlapping
+        ];
+        let keep = nms_per_class(&boxes, 0.5);
+        // All 3 boxes should be kept (overlapping boxes are different classes)
+        assert_eq!(keep.len(), 3);
+    }
+
+    #[test]
+    fn test_nms_per_class_suppression() {
+        // Two overlapping boxes of the same class - lower score suppressed
+        let boxes = vec![
+            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),  // class 0, higher score
+            ([1.0, 1.0, 11.0, 11.0], 0.8, 0),  // class 0, lower score (suppressed)
+        ];
+        let keep = nms_per_class(&boxes, 0.5);
+        assert_eq!(keep.len(), 1);
+        assert!(keep.contains(&0));  // Keep higher score box
+    }
 }
