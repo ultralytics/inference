@@ -44,7 +44,7 @@ impl Default for InferenceConfig {
             iou_threshold: 0.45,
             max_detections: 300,
             imgsz: None,
-            num_threads: 4,
+            num_threads: 0,
             half: false,
         }
     }
