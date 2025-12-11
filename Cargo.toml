@@ -34,6 +34,8 @@ path = "src/main.rs"
 # Image processing with SIMD
 image = "0.25.9"
 fast_image_resize = { version = "5.1", features = ["image"] }
+imageproc = "0.25"
+rusttype = "0.9"
 
 # Numerical computing (must match ort's ndarray version)
 ndarray = { version = "0.16", features = ["rayon"] }

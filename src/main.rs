@@ -16,8 +16,14 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::Path;
 use std::process;
+
+use image::{DynamicImage, Rgb, RgbImage};
+use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
+use imageproc::rect::Rect;
+use rusttype::{Font, Scale};
 
 use inference::{InferenceConfig, Results, YOLOModel, VERSION};
 
@@ -56,6 +62,7 @@ fn run_prediction(args: &[String]) {
     let mut source_path: Option<&String> = None;
     let mut conf_threshold = 0.25_f32;
     let mut iou_threshold = 0.45_f32;
+    let mut save = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -96,6 +103,10 @@ fn run_prediction(args: &[String]) {
                     process::exit(1);
                 }
             }
+            "--save" => {
+                save = true;
+                i += 1;
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 process::exit(1);
@@ -132,6 +143,15 @@ fn run_prediction(args: &[String]) {
 
     // Print banner matching Ultralytics format
     println!("Ultralytics {} 🚀 Rust ONNX CPU", VERSION);
+
+    // Create save directory if --save is specified
+    let save_dir = if save {
+        let dir = find_next_run_dir("runs/detect", "predict");
+        fs::create_dir_all(&dir).expect("Failed to create save directory");
+        Some(dir)
+    } else {
+        None
+    };
 
     // Load model
     let config = InferenceConfig::new()
@@ -208,6 +228,21 @@ fn run_prediction(args: &[String]) {
                 result.speed.inference.unwrap_or(0.0)
             );
 
+            // Save annotated image if --save is specified
+            if let Some(ref dir) = save_dir {
+                if let Ok(img) = image::open(image_path) {
+                    let annotated = annotate_image(&img, &result);
+                    let filename = Path::new(image_path)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    let save_path = format!("{dir}/{filename}");
+                    if let Err(e) = annotated.save(&save_path) {
+                        eprintln!("Error saving {save_path}: {e}");
+                    }
+                }
+            }
+
             // Accumulate timings
             total_preprocess += result.speed.preprocess.unwrap_or(0.0);
             total_inference += result.speed.inference.unwrap_or(0.0);
@@ -227,6 +262,11 @@ fn run_prediction(args: &[String]) {
         last_inference_shape.0,
         last_inference_shape.1
     );
+
+    // Print save directory if --save was used
+    if let Some(ref dir) = save_dir {
+        println!("Results saved to {dir}");
+    }
 
     // Print footer
     println!("💡 Learn more at https://docs.ultralytics.com/modes/predict");
@@ -349,11 +389,124 @@ Options:
     --source, -s    Input source (image, video, webcam index, or URL)
     --conf          Confidence threshold (default: 0.25)
     --iou           IoU threshold for NMS (default: 0.45)
+    --save          Save annotated images to runs/detect/predict
 
 Examples:
     inference predict --model yolo11n.onnx --source image.jpg
     inference predict --model yolo11n.onnx --source video.mp4
     inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    inference predict -m yolo11n.onnx -s rtsp://example.com/stream"#
+    inference predict -m yolo11n.onnx -s assets/ --save"#
     );
+}
+
+/// Find the next available run directory (predict, predict2, predict3, etc.)
+fn find_next_run_dir(base: &str, prefix: &str) -> String {
+    let base_path = Path::new(base);
+
+    // First try without number
+    let first = base_path.join(prefix);
+    if !first.exists() {
+        return first.to_string_lossy().to_string();
+    }
+
+    // Try with incrementing numbers
+    for i in 2.. {
+        let numbered = base_path.join(format!("{prefix}{i}"));
+        if !numbered.exists() {
+            return numbered.to_string_lossy().to_string();
+        }
+    }
+
+    // Fallback (should never reach here)
+    base_path.join(prefix).to_string_lossy().to_string()
+}
+
+/// Color palette for different classes (similar to Ultralytics)
+const COLORS: [[u8; 3]; 20] = [
+    [255, 56, 56],    // Red
+    [255, 157, 151],  // Light red
+    [255, 112, 31],   // Orange
+    [255, 178, 29],   // Yellow-orange
+    [207, 210, 49],   // Yellow-green
+    [72, 249, 10],    // Green
+    [146, 204, 23],   // Light green
+    [61, 219, 134],   // Teal
+    [26, 147, 52],    // Dark green
+    [0, 212, 187],    // Cyan
+    [44, 153, 168],   // Dark cyan
+    [0, 194, 255],    // Light blue
+    [52, 69, 147],    // Dark blue
+    [100, 115, 255],  // Blue
+    [0, 24, 236],     // Bright blue
+    [132, 56, 255],   // Purple
+    [82, 0, 133],     // Dark purple
+    [203, 56, 255],   // Magenta
+    [255, 149, 200],  // Pink
+    [255, 55, 199],   // Hot pink
+];
+
+/// Get color for a class ID
+fn get_class_color(class_id: usize) -> Rgb<u8> {
+    let color = COLORS[class_id % COLORS.len()];
+    Rgb(color)
+}
+
+/// Annotate an image with detection boxes and labels
+fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
+    let mut img = image.to_rgb8();
+    let (width, height) = img.dimensions();
+
+    // Load embedded font (use a simple built-in approach)
+    let font_data = include_bytes!("/System/Library/Fonts/Helvetica.ttc");
+    let font = Font::try_from_bytes(font_data as &[u8]);
+
+    if let Some(ref boxes) = result.boxes {
+        let xyxy = boxes.xyxy();
+        let conf = boxes.conf();
+        let cls = boxes.cls();
+
+        for i in 0..boxes.len() {
+            let class_id = cls[i] as usize;
+            let confidence = conf[i];
+
+            // Get box coordinates
+            let x1 = xyxy[[i, 0]].round() as i32;
+            let y1 = xyxy[[i, 1]].round() as i32;
+            let x2 = xyxy[[i, 2]].round() as i32;
+            let y2 = xyxy[[i, 3]].round() as i32;
+
+            // Clamp to image bounds
+            let x1 = x1.max(0).min(width as i32 - 1);
+            let y1 = y1.max(0).min(height as i32 - 1);
+            let x2 = x2.max(0).min(width as i32 - 1);
+            let y2 = y2.max(0).min(height as i32 - 1);
+
+            let color = get_class_color(class_id);
+
+            // Draw bounding box (multiple times for thickness)
+            for offset in 0..3 {
+                if let Some(rect) = Rect::at(x1 - offset, y1 - offset)
+                    .of_size((x2 - x1 + 2 * offset) as u32, (y2 - y1 + 2 * offset) as u32)
+                {
+                    draw_hollow_rect_mut(&mut img, rect, color);
+                }
+            }
+
+            // Draw label
+            let class_name = result
+                .names
+                .get(&class_id)
+                .map(String::as_str)
+                .unwrap_or("object");
+            let label = format!("{} {:.2}", class_name, confidence);
+
+            if let Some(ref f) = font {
+                let scale = Scale::uniform(16.0);
+                let y_text = if y1 > 20 { y1 - 5 } else { y2 + 15 };
+                draw_text_mut(&mut img, color, x1, y_text, scale, f, &label);
+            }
+        }
+    }
+
+    DynamicImage::ImageRgb8(img)
 }
