@@ -245,22 +245,23 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 
 ### Core Dependencies (always included)
 
-| Crate               | Purpose                    |
-| ------------------- | -------------------------- |
-| `ort`               | ONNX Runtime bindings      |
-| `ndarray`           | N-dimensional arrays       |
-| `image`             | Image loading/decoding     |
-| `fast_image_resize` | SIMD-optimized resizing    |
-| `half`              | FP16 support               |
+| Crate               | Purpose                 |
+| ------------------- | ----------------------- |
+| `ort`               | ONNX Runtime bindings   |
+| `ndarray`           | N-dimensional arrays    |
+| `image`             | Image loading/decoding  |
+| `fast_image_resize` | SIMD-optimized resizing |
+| `half`              | FP16 support            |
 
 ### Optional Dependencies (for `--save` feature)
 
-| Crate      | Purpose                      |
-| ---------- | ---------------------------- |
-| `imageproc`| Drawing boxes and shapes     |
-| `ab_glyph` | Text rendering (embedded font)|
+| Crate       | Purpose                        |
+| ----------- | ------------------------------ |
+| `imageproc` | Drawing boxes and shapes       |
+| `ab_glyph`  | Text rendering (embedded font) |
 
 To build without annotation support (smaller binary):
+
 ```bash
 cargo build --release --no-default-features
 ```
@@ -284,12 +285,13 @@ Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
 
 ### YOLO11n Detection Model (640x640)
 
-| Precision | Model Size | Preprocess | Inference | Postprocess | Total  |
-| --------- | ---------- | ---------- | --------- | ----------- | ------ |
-| FP32      | 10.2 MB    | ~9ms       | ~21ms     | <1ms        | ~31ms  |
-| FP16      | 5.2 MB     | ~9ms       | ~24ms     | <1ms        | ~34ms  |
+| Precision | Model Size | Preprocess | Inference | Postprocess | Total |
+| --------- | ---------- | ---------- | --------- | ----------- | ----- |
+| FP32      | 10.2 MB    | ~9ms       | ~21ms     | <1ms        | ~31ms |
+| FP16      | 5.2 MB     | ~9ms       | ~24ms     | <1ms        | ~34ms |
 
 **Key findings:**
+
 - **FP16 models are ~50% smaller** (5.2 MB vs 10.2 MB)
 - **FP32 is slightly faster on CPU** (~21ms vs ~24ms) due to CPU's native FP32 support
 - FP16 requires upcasting to FP32 for computation on most CPUs, adding overhead
@@ -298,6 +300,7 @@ Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
 ### Threading Optimization
 
 ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose optimal thread count:
+
 - Manual threading (4 threads): ~40ms inference
 - Auto threading (0 = ORT decides): ~21ms inference
 
