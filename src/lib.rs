@@ -15,10 +15,10 @@
 //! ## Example
 //!
 //! ```no_run
-//! use inference::YoloModel;
+//! use inference::YOLOModel;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let model = YoloModel::load("yolo11n.onnx")?;
+//!     let model = YOLOModel::load("yolo11n.onnx")?;
 //!     let results = model.predict("image.jpg")?;
 //!     println!("Detected {} objects", results.len());
 //!     Ok(())
@@ -32,7 +32,7 @@ pub mod utils;
 
 // Re-export main types
 pub use error::{InferenceError, Result};
-pub use model::YoloModel;
+pub use model::YOLOModel;
 pub use inference::{DetectionResult, InferenceConfig};
 
 /// Library version

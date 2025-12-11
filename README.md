@@ -182,10 +182,10 @@ cargo install --git https://github.com/ultralytics/inference.git --features nvid
 ### As a Rust Library
 
 ```rust
-use inference::YoloModel;
+use inference::YOLOModel;
 
 fn main() {
-    let model = YoloModel::load("path/to/model.onnx").unwrap();
+    let model = YOLOModel::load("path/to/model.onnx").unwrap();
     let results = model.predict("path/to/image.jpg").unwrap();
     println!("Detections: {:?}", results);
 }
