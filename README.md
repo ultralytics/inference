@@ -16,6 +16,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns (video/webcam coming soon)
+- 🪶 **Minimal Dependencies** - No PyTorch, no heavy ML frameworks - just 5 core crates
 
 ## 🚀 Quick Start
 
@@ -99,6 +100,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `--source` | `-s`  | Input source (image, directory, glob) | `assets`       |
 | `--conf`   |       | Confidence threshold                  | `0.25`         |
 | `--iou`    |       | IoU threshold for NMS                 | `0.45`         |
+| `--save`   |       | Save annotated images to runs/detect/ |                |
 
 ### As a Rust Library
 
@@ -237,6 +239,32 @@ cargo build --release --features "cuda,tensorrt"
 | `intel`    | Convenience: OpenVINO + oneDNN    |
 | `mobile`   | Convenience: NNAPI + CoreML + QNN |
 
+## 📦 Dependencies
+
+One of the key benefits of this library is **minimal dependencies** - no PyTorch, TensorFlow, or heavy ML frameworks required.
+
+### Core Dependencies (always included)
+
+| Crate               | Purpose                    |
+| ------------------- | -------------------------- |
+| `ort`               | ONNX Runtime bindings      |
+| `ndarray`           | N-dimensional arrays       |
+| `image`             | Image loading/decoding     |
+| `fast_image_resize` | SIMD-optimized resizing    |
+| `half`              | FP16 support               |
+
+### Optional Dependencies (for `--save` feature)
+
+| Crate      | Purpose                      |
+| ---------- | ---------------------------- |
+| `imageproc`| Drawing boxes and shapes     |
+| `ab_glyph` | Text rendering (embedded font)|
+
+To build without annotation support (smaller binary):
+```bash
+cargo build --release --no-default-features
+```
+
 ## 🧪 Testing
 
 ```bash
@@ -252,15 +280,26 @@ cargo test test_boxes_creation
 
 ## 📊 Performance
 
-Typical inference times on Apple M4 Pro (CPU):
+Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
 
-| Stage       | Time         |
-| ----------- | ------------ |
-| Model Load  | ~40ms        |
-| Preprocess  | ~10ms        |
-| Inference   | ~25ms        |
-| Postprocess | <1ms         |
-| **Total**   | **~35-40ms** |
+### YOLO11n Detection Model (640x640)
+
+| Precision | Model Size | Preprocess | Inference | Postprocess | Total  |
+| --------- | ---------- | ---------- | --------- | ----------- | ------ |
+| FP32      | 10.2 MB    | ~9ms       | ~21ms     | <1ms        | ~31ms  |
+| FP16      | 5.2 MB     | ~9ms       | ~24ms     | <1ms        | ~34ms  |
+
+**Key findings:**
+- **FP16 models are ~50% smaller** (5.2 MB vs 10.2 MB)
+- **FP32 is slightly faster on CPU** (~21ms vs ~24ms) due to CPU's native FP32 support
+- FP16 requires upcasting to FP32 for computation on most CPUs, adding overhead
+- Use **FP32 for CPU** inference, **FP16 for GPU** (where it provides speedup)
+
+### Threading Optimization
+
+ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose optimal thread count:
+- Manual threading (4 threads): ~40ms inference
+- Auto threading (0 = ORT decides): ~21ms inference
 
 ## 🔮 Roadmap
 

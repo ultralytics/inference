@@ -24,9 +24,8 @@ use std::fs;
 
 #[cfg(feature = "annotate")]
 use ab_glyph::{FontRef, PxScale};
-use image::DynamicImage;
 #[cfg(feature = "annotate")]
-use image::Rgb;
+use image::{DynamicImage, Rgb};
 #[cfg(feature = "annotate")]
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
 #[cfg(feature = "annotate")]
@@ -152,6 +151,7 @@ fn run_prediction(args: &[String]) {
     println!("Ultralytics {} 🚀 Rust ONNX CPU", VERSION);
 
     // Create save directory if --save is specified
+    #[cfg(feature = "annotate")]
     let save_dir = if save {
         let dir = find_next_run_dir("runs/detect", "predict");
         fs::create_dir_all(&dir).expect("Failed to create save directory");
@@ -159,6 +159,12 @@ fn run_prediction(args: &[String]) {
     } else {
         None
     };
+
+    // Warn if --save is used without annotate feature
+    #[cfg(not(feature = "annotate"))]
+    if save {
+        eprintln!("WARNING: --save requires the 'annotate' feature. Rebuild with: cargo build --features annotate");
+    }
 
     // Load model
     let config = InferenceConfig::new()
@@ -236,6 +242,7 @@ fn run_prediction(args: &[String]) {
             );
 
             // Save annotated image if --save is specified
+            #[cfg(feature = "annotate")]
             if let Some(ref dir) = save_dir {
                 if let Ok(img) = image::open(image_path) {
                     let annotated = annotate_image(&img, &result);
@@ -271,6 +278,7 @@ fn run_prediction(args: &[String]) {
     );
 
     // Print save directory if --save was used
+    #[cfg(feature = "annotate")]
     if let Some(ref dir) = save_dir {
         println!("Results saved to {dir}");
     }
@@ -407,6 +415,7 @@ Examples:
 }
 
 /// Find the next available run directory (predict, predict2, predict3, etc.)
+#[cfg(feature = "annotate")]
 fn find_next_run_dir(base: &str, prefix: &str) -> String {
     let base_path = Path::new(base);
 
@@ -429,6 +438,7 @@ fn find_next_run_dir(base: &str, prefix: &str) -> String {
 }
 
 /// Color palette for different classes (similar to Ultralytics)
+#[cfg(feature = "annotate")]
 const COLORS: [[u8; 3]; 20] = [
     [255, 56, 56],    // Red
     [255, 157, 151],  // Light red
@@ -453,6 +463,7 @@ const COLORS: [[u8; 3]; 20] = [
 ];
 
 /// Get color for a class ID
+#[cfg(feature = "annotate")]
 fn get_class_color(class_id: usize) -> Rgb<u8> {
     let color = COLORS[class_id % COLORS.len()];
     Rgb(color)
@@ -460,9 +471,11 @@ fn get_class_color(class_id: usize) -> Rgb<u8> {
 
 /// Embedded font data (DejaVu Sans Mono - a free font)
 /// Using a simple embedded approach for cross-platform compatibility
+#[cfg(feature = "annotate")]
 const FONT_DATA: &[u8] = include_bytes!("../assets/DejaVuSans.ttf");
 
 /// Annotate an image with detection boxes and labels
+#[cfg(feature = "annotate")]
 fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
     let mut img = image.to_rgb8();
     let (width, height) = img.dimensions();

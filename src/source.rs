@@ -223,14 +223,53 @@ impl SourceIterator {
     }
 
     /// Collect image paths from a glob pattern.
+    ///
+    /// Note: This is a simplified glob implementation that only supports patterns like "dir/*.jpg"
+    /// For more complex glob patterns, consider adding the `glob` crate.
     fn collect_images_from_glob(pattern: &str) -> Result<Vec<PathBuf>> {
-        let paths: Vec<PathBuf> = glob::glob(pattern)
-            .map_err(|e| InferenceError::ImageError(format!("Invalid glob pattern: {e}")))?
-            .filter_map(|entry| entry.ok())
-            .filter(|path| Self::is_image_file(path))
-            .collect();
+        // Simple glob: split into directory and extension pattern
+        // Supports patterns like "images/*.jpg" or "path/to/dir/*.png"
+        if let Some(star_pos) = pattern.find('*') {
+            let dir_part = &pattern[..star_pos];
+            let dir = if dir_part.is_empty() {
+                Path::new(".")
+            } else {
+                Path::new(dir_part.trim_end_matches('/').trim_end_matches('\\'))
+            };
 
-        Ok(paths)
+            // Get extension filter from pattern (e.g., "*.jpg" -> "jpg")
+            let ext_filter: Option<String> = pattern[star_pos..]
+                .strip_prefix("*.")
+                .map(|s| s.to_lowercase());
+
+            if !dir.is_dir() {
+                return Err(InferenceError::ImageError(format!(
+                    "Directory not found: {}",
+                    dir.display()
+                )));
+            }
+
+            let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+                .map_err(InferenceError::IoError)?
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    if let Some(ref ext) = ext_filter {
+                        path.extension()
+                            .map(|e| e.to_string_lossy().to_lowercase() == *ext)
+                            .unwrap_or(false)
+                    } else {
+                        Self::is_image_file(path)
+                    }
+                })
+                .collect();
+
+            paths.sort();
+            Ok(paths)
+        } else {
+            // No glob pattern, treat as single file
+            Ok(vec![PathBuf::from(pattern)])
+        }
     }
 
     /// Check if a path is an image file based on extension.
