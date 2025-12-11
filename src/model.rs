@@ -6,12 +6,12 @@ use crate::error::{InferenceError, Result};
 use crate::inference::DetectionResult;
 
 /// YOLO model structure
-pub struct YoloModel {
+pub struct YOLOModel {
     model_path: String,
     // Future: Add ONNX runtime session, model metadata, etc.
 }
 
-impl YoloModel {
+impl YOLOModel {
     /// Load a YOLO model from an ONNX file
     ///
     /// # Arguments
@@ -21,9 +21,9 @@ impl YoloModel {
     /// # Example
     ///
     /// ```no_run
-    /// use inference::YoloModel;
+    /// use inference::YOLOModel;
     ///
-    /// let model = YoloModel::load("yolo11n.onnx").unwrap();
+    /// let model = YOLOModel::load("yolo11n.onnx").unwrap();
     /// ```
     pub fn load(path: &str) -> Result<Self> {
         // TODO: Implement actual model loading with ONNX Runtime
@@ -34,7 +34,7 @@ impl YoloModel {
             )));
         }
 
-        Ok(YoloModel {
+        Ok(YOLOModel {
             model_path: path.to_string(),
         })
     }
