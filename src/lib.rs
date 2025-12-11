@@ -79,7 +79,7 @@ pub use task::Task;
 pub use metadata::ModelMetadata;
 
 // Re-export preprocessing utilities
-pub use preprocessing::{preprocess_image, PreprocessResult};
+pub use preprocessing::{preprocess_image, preprocess_image_with_precision, PreprocessResult, TensorData};
 
 /// Library version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

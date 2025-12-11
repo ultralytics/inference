@@ -6,17 +6,40 @@
 //! running YOLO model inference, including resizing, padding, and normalization.
 
 use fast_image_resize::{images::Image, ResizeAlg, ResizeOptions, Resizer};
+use half::f16;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
 use ndarray::{Array3, Array4};
 
 /// Default letterbox padding color (gray).
 pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
 
+/// Tensor data that can be either FP32 or FP16.
+#[derive(Debug, Clone)]
+pub enum TensorData {
+    /// 32-bit floating point tensor.
+    Float32(Array4<f32>),
+    /// 16-bit floating point tensor.
+    Float16(Array4<f16>),
+}
+
+impl TensorData {
+    /// Get the shape of the tensor.
+    #[must_use]
+    pub fn shape(&self) -> &[usize] {
+        match self {
+            Self::Float32(t) => t.shape(),
+            Self::Float16(t) => t.shape(),
+        }
+    }
+}
+
 /// Result of preprocessing an image, containing the tensor and transform info.
 #[derive(Debug, Clone)]
 pub struct PreprocessResult {
     /// Preprocessed image tensor in NCHW format, normalized to [0, 1].
     pub tensor: Array4<f32>,
+    /// Preprocessed FP16 tensor (if requested).
+    pub tensor_f16: Option<Array4<f16>>,
     /// Original image dimensions (height, width).
     pub orig_shape: (u32, u32),
     /// Scale factors applied (scale_y, scale_x).
@@ -45,6 +68,28 @@ pub fn preprocess_image(
     target_size: (usize, usize),
     stride: u32,
 ) -> PreprocessResult {
+    preprocess_image_with_precision(image, target_size, stride, false)
+}
+
+/// Preprocess an image for YOLO inference with optional FP16 output.
+///
+/// # Arguments
+///
+/// * `image` - Input image.
+/// * `target_size` - Target size as (height, width).
+/// * `stride` - Model stride for padding alignment (typically 32).
+/// * `half` - If true, also generate FP16 tensor for FP16 models.
+///
+/// # Returns
+///
+/// Preprocessed tensor and transform information for post-processing.
+#[must_use]
+pub fn preprocess_image_with_precision(
+    image: &DynamicImage,
+    target_size: (usize, usize),
+    stride: u32,
+    half: bool,
+) -> PreprocessResult {
     let (orig_width, orig_height) = image.dimensions();
     let orig_shape = (orig_height, orig_width);
 
@@ -55,11 +100,19 @@ pub fn preprocess_image(
     // Perform letterbox resize
     let letterboxed = letterbox_image(image, new_width, new_height, pad_left, pad_top, target_size);
 
-    // Convert to normalized NCHW tensor
+    // Convert to normalized NCHW tensor (always compute FP32 for postprocessing)
     let tensor = image_to_tensor(&letterboxed);
+
+    // Optionally compute FP16 tensor directly from image (avoiding FP32 round-trip)
+    let tensor_f16 = if half {
+        Some(image_to_tensor_f16(&letterboxed))
+    } else {
+        None
+    };
 
     PreprocessResult {
         tensor,
+        tensor_f16,
         orig_shape,
         scale,
         padding: (pad_top as f32, pad_left as f32),
@@ -160,7 +213,7 @@ fn letterbox_image(
     output
 }
 
-/// Convert an RGB image to a normalized NCHW tensor.
+/// Convert an RGB image to a normalized NCHW tensor (FP32).
 ///
 /// # Arguments
 ///
@@ -186,6 +239,42 @@ fn image_to_tensor(image: &RgbImage) -> Array4<f32> {
         r_slice[i] = f32::from(chunk[0]) / 255.0;
         g_slice[i] = f32::from(chunk[1]) / 255.0;
         b_slice[i] = f32::from(chunk[2]) / 255.0;
+    }
+
+    tensor
+}
+
+/// Convert an RGB image to a normalized NCHW tensor (FP16).
+///
+/// Converts directly from u8 to f16, avoiding intermediate f32 conversion.
+///
+/// # Arguments
+///
+/// * `image` - RGB image to convert.
+///
+/// # Returns
+///
+/// Array4 with shape (1, 3, H, W) and f16 values in [0, 1].
+fn image_to_tensor_f16(image: &RgbImage) -> Array4<f16> {
+    let (width, height) = image.dimensions();
+    let (w, h) = (width as usize, height as usize);
+    let pixels = image.as_raw();
+
+    // Pre-allocate tensor
+    let mut tensor = Array4::from_elem((1, 3, h, w), f16::ZERO);
+
+    // Get mutable slices for each channel for faster access
+    let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
+    let (g_slice, b_slice) = rest.split_at_mut(h * w);
+
+    // Precompute 1/255 as f16 for direct conversion
+    let scale = f16::from_f32(1.0 / 255.0);
+
+    // Convert HWC interleaved RGB to CHW planar format directly to f16
+    for (i, chunk) in pixels.chunks_exact(3).enumerate() {
+        r_slice[i] = f16::from_f32(f32::from(chunk[0])) * scale;
+        g_slice[i] = f16::from_f32(f32::from(chunk[1])) * scale;
+        b_slice[i] = f16::from_f32(f32::from(chunk[2])) * scale;
     }
 
     tensor

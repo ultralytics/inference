@@ -9,9 +9,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
+use half::f16;
 use image::DynamicImage;
 use ndarray::Array3;
 use ort::session::Session;
+use ort::tensor::TensorElementType;
+use ort::value::ValueType;
 #[cfg(feature = "coreml")]
 use ort::execution_providers::CoreMLExecutionProvider;
 use ort::value::TensorRef;
@@ -20,7 +23,7 @@ use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
-use crate::preprocessing::{image_to_array, preprocess_image};
+use crate::preprocessing::{image_to_array, preprocess_image_with_precision};
 use crate::results::{Results, Speed};
 use crate::task::Task;
 
@@ -51,6 +54,8 @@ pub struct YOLOModel {
     config: InferenceConfig,
     /// Whether model has been warmed up.
     warmed_up: bool,
+    /// Whether model expects FP16 input.
+    fp16_input: bool,
 }
 
 impl YOLOModel {
@@ -125,18 +130,30 @@ impl YOLOModel {
             // Intra-op threads: parallelization within individual operators (e.g., matrix multiply)
             .with_intra_threads(config.num_threads)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set intra-thread count: {e}")))?
+            // Flush denormal floats to zero - speeds up FP math on some CPUs
+            .with_denormal_as_zero()
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set denormal mode: {e}")))?
             .commit_from_file(path)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
         // Extract metadata from model
         let metadata = Self::extract_metadata(&session)?;
 
-        // Get input/output names
-        let input_name = session
-            .inputs
-            .first()
+        // Get input/output names and detect input type
+        let input_info = session.inputs.first();
+        let input_name = input_info
             .map(|i| i.name.clone())
             .unwrap_or_else(|| "images".to_string());
+
+        // Check if model expects FP16 input
+        let fp16_input = input_info
+            .map(|i| {
+                matches!(
+                    &i.input_type,
+                    ValueType::Tensor { ty: TensorElementType::Float16, .. }
+                )
+            })
+            .unwrap_or(false);
 
         let output_names: Vec<String> = session.outputs.iter().map(|o| o.name.clone()).collect();
 
@@ -153,6 +170,7 @@ impl YOLOModel {
             output_names,
             config,
             warmed_up: false,
+            fp16_input,
         })
     }
 
@@ -262,25 +280,30 @@ impl YOLOModel {
     ///
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        // Warmup on first inference (pre-allocates memory, optimizes graph)
-        if !self.warmed_up {
-            self.warmup()?;
-        }
-
         // Get target size from config or metadata
         let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);
 
-        // Preprocess
+        // Preprocess - generate FP16 tensor if model expects FP16 input
         let start_preprocess = Instant::now();
-        let preprocess_result = preprocess_image(image, target_size, self.metadata.stride);
+        let preprocess_result =
+            preprocess_image_with_precision(image, target_size, self.metadata.stride, self.fp16_input);
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
 
         // Convert original image to array for results
         let orig_img = image_to_array(image);
 
-        // Run inference
+        // Run inference with appropriate precision
         let start_inference = Instant::now();
-        let outputs = self.run_inference(&preprocess_result.tensor)?;
+        let outputs = if self.fp16_input {
+            // Use FP16 tensor directly (no round-trip through FP32)
+            let tensor_f16 = preprocess_result
+                .tensor_f16
+                .as_ref()
+                .expect("FP16 tensor should be available");
+            self.run_inference_f16(tensor_f16)?
+        } else {
+            self.run_inference(&preprocess_result.tensor)?
+        };
         let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0;
 
         // Post-process
@@ -348,7 +371,7 @@ impl YOLOModel {
         self.predict_image(&dynamic_img, path)
     }
 
-    /// Run the ONNX model inference.
+    /// Run the ONNX model inference with FP32 input.
     fn run_inference(
         &mut self,
         input: &ndarray::Array4<f32>,
@@ -381,6 +404,52 @@ impl YOLOModel {
 
         let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
         let data_vec: Vec<f32> = data.to_vec();
+
+        Ok((data_vec, shape_vec))
+    }
+
+    /// Run the ONNX model inference with FP16 input.
+    fn run_inference_f16(
+        &mut self,
+        input: &ndarray::Array4<f16>,
+    ) -> Result<(Vec<f32>, Vec<usize>)> {
+        // Ensure input is contiguous in memory (CowArray)
+        let input_contiguous = input.as_standard_layout();
+
+        // Create input tensor reference from ndarray view
+        let input_tensor = TensorRef::from_array_view(&input_contiguous)
+            .map_err(|e| InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}")))?;
+
+        // Run session
+        let inputs = ort::inputs![&self.input_name => input_tensor];
+
+        let outputs = self
+            .session
+            .run(inputs)
+            .map_err(|e| InferenceError::InferenceError(format!("FP16 inference failed: {e}")))?;
+
+        // Extract output
+        let output_name = &self.output_names[0];
+        let output = outputs
+            .get(output_name.as_str())
+            .ok_or_else(|| InferenceError::InferenceError(format!("Output '{}' not found", output_name)))?;
+
+        // Try to extract as f32 first (model may have FP32 output even with FP16 input)
+        // If that fails, extract as f16 and convert
+        let (shape_vec, data_vec) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
+            let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+            let data_vec: Vec<f32> = data.to_vec();
+            (shape_vec, data_vec)
+        } else {
+            // Extract as f16 and convert to f32 for postprocessing
+            let (shape, data) = output
+                .try_extract_tensor::<f16>()
+                .map_err(|e| InferenceError::InferenceError(format!("Failed to extract FP16 output: {e}")))?;
+
+            let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+            let data_vec: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
+            (shape_vec, data_vec)
+        };
 
         Ok((data_vec, shape_vec))
     }

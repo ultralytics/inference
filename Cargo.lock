@@ -639,6 +639,7 @@ dependencies = [
  "ab_glyph",
  "fast_image_resize",
  "glob",
+ "half",
  "image",
  "imageproc",
  "ndarray",
