@@ -129,7 +129,13 @@ impl ModelMetadata {
                         })?;
                     }
                     "half" => {
-                        metadata.half = value == "true";
+                        metadata.half = value == "true" || value == "True";
+                    }
+                    "args" => {
+                        // Parse args dict for half flag: {'half': True, ...}
+                        if value.contains("'half': True") || value.contains("\"half\": true") || value.contains("'half':True") {
+                            metadata.half = true;
+                        }
                     }
                     _ => {
                         // Check for class name entries (numeric keys)

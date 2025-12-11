@@ -69,6 +69,7 @@ fn run_prediction(args: &[String]) {
     let mut conf_threshold = 0.25_f32;
     let mut iou_threshold = 0.45_f32;
     let mut save = false;
+    let mut half = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -113,6 +114,10 @@ fn run_prediction(args: &[String]) {
                 save = true;
                 i += 1;
             }
+            "--half" => {
+                half = true;
+                i += 1;
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 process::exit(1);
@@ -147,9 +152,6 @@ fn run_prediction(args: &[String]) {
         }
     };
 
-    // Print banner matching Ultralytics format
-    println!("Ultralytics {} 🚀 Rust ONNX CPU", VERSION);
-
     // Create save directory if --save is specified
     #[cfg(feature = "annotate")]
     let save_dir = if save {
@@ -169,7 +171,8 @@ fn run_prediction(args: &[String]) {
     // Load model
     let config = InferenceConfig::new()
         .with_confidence(conf_threshold)
-        .with_iou(iou_threshold);
+        .with_iou(iou_threshold)
+        .with_half(half);
 
     let mut model = match YOLOModel::load_with_config(&model_path, config) {
         Ok(m) => m,
@@ -178,6 +181,11 @@ fn run_prediction(args: &[String]) {
             process::exit(1);
         }
     };
+
+    // Print banner matching Ultralytics format (after model load to detect precision)
+    let is_half = model.metadata().half || half;
+    let precision = if is_half { "FP16" } else { "FP32" };
+    println!("Ultralytics {} 🚀 Rust ONNX {} CPU", VERSION, precision);
 
     // Print model summary
     let imgsz = model.imgsz();
@@ -404,13 +412,14 @@ Options:
     --source, -s    Input source (image, video, webcam index, or URL)
     --conf          Confidence threshold (default: 0.25)
     --iou           IoU threshold for NMS (default: 0.45)
+    --half          Use FP16 half-precision inference
     --save          Save annotated images to runs/detect/predict
 
 Examples:
     inference predict --model yolo11n.onnx --source image.jpg
     inference predict --model yolo11n.onnx --source video.mp4
     inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    inference predict -m yolo11n.onnx -s assets/ --save"#
+    inference predict -m yolo11n.onnx -s assets/ --save --half"#
     );
 }
 

@@ -184,8 +184,8 @@ impl YOLOModel {
             .map(|i| i.name.clone())
             .unwrap_or_else(|| "images".to_string());
 
-        // Check if model expects FP16 input
-        let fp16_input = input_info
+        // Check if model input tensor expects FP16 (rare - most models use FP32 input even with half weights)
+        let model_input_fp16 = input_info
             .map(|i| {
                 matches!(
                     &i.input_type,
@@ -194,11 +194,16 @@ impl YOLOModel {
             })
             .unwrap_or(false);
 
+        // Use FP16 input if model tensor type requires it
+        let fp16_input = model_input_fp16;
+
         let output_names: Vec<String> = session.outputs.iter().map(|o| o.name.clone()).collect();
 
         // Update config with model metadata if not overridden
+        // Sync half flag with model's half metadata (for display purposes)
         let config = InferenceConfig {
             imgsz: config.imgsz.or(Some(metadata.imgsz)),
+            half: config.half || metadata.half, // Use half if user requested OR model was exported with half
             ..config
         };
 
@@ -253,7 +258,7 @@ impl YOLOModel {
         // List of all Ultralytics metadata keys
         let keys = [
             "description", "author", "date", "version", "license", "docs",
-            "stride", "task", "batch", "imgsz", "names", "half", "channels",
+            "stride", "task", "batch", "imgsz", "names", "half", "channels", "args",
         ];
 
         for key in &keys {
@@ -526,6 +531,12 @@ impl YOLOModel {
     #[must_use]
     pub const fn stride(&self) -> u32 {
         self.metadata.stride
+    }
+
+    /// Check if model is using FP16 (half precision) inference.
+    #[must_use]
+    pub const fn is_half(&self) -> bool {
+        self.fp16_input
     }
 
     /// Get the model metadata.
