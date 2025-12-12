@@ -43,7 +43,7 @@ ndarray = { version = "0.17", features = ["rayon"] }
 ort = { git = "https://github.com/pykeio/ort.git", default-features = false, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "half", "tls-native"] }
 
 # Core - FP16 support (required by ort's half feature)
-half = "2.4"
+half = { version = "2.4", features = ["num-traits"] }
 ureq = "3.1.4"
 dirs = "6.0"
 
