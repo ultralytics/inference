@@ -58,6 +58,7 @@
 // Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
+pub mod download;
 pub mod error;
 pub mod inference;
 pub mod metadata;
