@@ -1,9 +1,9 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 use crate::results::Results;
-use ab_glyph::{FontRef, PxScale};
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
-use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
+use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
@@ -268,16 +268,27 @@ pub fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
                 .get(&class_id)
                 .map(String::as_str)
                 .unwrap_or("object");
-            let label = format!("{} {:.2}", class_name, confidence);
+            let label = format!(" {class_name} {:.2} ", confidence);
 
             if let Some(ref f) = font {
-                let scale = PxScale::from(16.0);
+                let scale = PxScale::from(24.0);
+                let scaled_font = f.as_scaled(scale);
+                let mut text_w = 0.0;
+                for c in label.chars() {
+                    text_w += scaled_font.h_advance(scaled_font.glyph_id(c));
+                }
+                let text_w = text_w.ceil() as i32;
+                let text_h = scale.y.ceil() as i32;
+
                 // Position text above box if there's room, otherwise below
-                let text_y = if y1 > 20 { y1 - 20 } else { y2 + 5 };
-                let text_x = x1.max(0);
-                // Only draw text if within bounds
-                if text_x >= 0 && text_y >= 0 && text_x < width as i32 && text_y < height as i32 {
-                    draw_text_mut(&mut img, color, text_x, text_y, scale, f, &label);
+                let text_y = if y1 > text_h { y1 - text_h } else { y1 };
+                let text_x = x1;
+
+                // Draw background
+                if text_x >= 0 && text_y >= 0 && text_x + text_w < width as i32 && text_y + text_h < height as i32 {
+                   let rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+                   draw_filled_rect_mut(&mut img, rect, color);
+                   draw_text_mut(&mut img, Rgb([255, 255, 255]), text_x, text_y, scale, f, &label);
                 }
             }
         }
