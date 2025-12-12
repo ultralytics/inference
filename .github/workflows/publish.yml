@@ -1,0 +1,150 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# Publish crate to crates.io https://crates.io/crates/ultralytics-template-rust
+
+name: Publish to crates.io
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        type: boolean
+        description: Publish to crates.io
+
+jobs:
+  check:
+    if: github.repository == 'ultralytics/inference'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      increment: ${{ steps.check_version.outputs.increment }}
+      current_tag: ${{ steps.check_version.outputs.current_tag }}
+      previous_tag: ${{ steps.check_version.outputs.previous_tag }}
+      crate_url: https://crates.io/crates/ultralytics-template-rust
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install ultralytics-actions
+        run: uv pip install --system --no-cache ultralytics-actions
+      - name: Fetch tags
+        run: git fetch --tags --force
+      - id: check_version
+        shell: python
+        run: |
+          import os
+          import re
+          import subprocess
+
+          version = None
+          with open("Cargo.toml") as f:
+            for line in f:
+              m = re.search(r'version\s*=\s*"([^"]+)"', line)
+              if m:
+                version = m.group(1)
+                break
+          if not version:
+            raise SystemExit("Version not found in Cargo.toml")
+
+          current_tag = f"v{version}"
+          tags = subprocess.run(
+            ["git", "tag", "--sort=-creatordate"],
+            text=True,
+            capture_output=True,
+            check=True,
+          ).stdout.strip().splitlines()
+          previous_tag = next((t for t in tags if t != current_tag), "")
+
+          remote = subprocess.run(
+            ["git", "ls-remote", "--tags", "origin", current_tag],
+            text=True,
+            capture_output=True,
+          )
+          tag_exists = current_tag in tags or bool(remote.stdout.strip())
+          increment = str(not tag_exists)
+
+          print(f"Local version: {version}")
+          print(f"Current tag: {current_tag}")
+          print(f"Previous tag: {previous_tag or '<none>'}")
+          print(f"Tag exists: {tag_exists}")
+
+          os.system(f'echo "increment={increment}" >> $GITHUB_OUTPUT')
+          os.system(f'echo "current_tag={current_tag}" >> $GITHUB_OUTPUT')
+          os.system(f'echo "previous_tag={previous_tag}" >> $GITHUB_OUTPUT')
+          if increment == "True":
+            print("Ready to publish new version to crates.io ✅.")
+      - name: Tag and Release
+        if: steps.check_version.outputs.increment == 'True'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ steps.check_version.outputs.current_tag }}
+          PREVIOUS_TAG: ${{ steps.check_version.outputs.previous_tag }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          git config --global user.name "UltralyticsAssistant"
+          git config --global user.email "web@ultralytics.com"
+          git tag -a "$CURRENT_TAG" -m "$(git log -1 --pretty=%B)"
+          git push origin "$CURRENT_TAG"
+          ultralytics-actions-summarize-release
+          uv cache prune --ci
+
+  build:
+    needs: check
+    if: needs.check.outputs.increment == 'True'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all --all-features
+
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.increment == 'True'
+    runs-on: ubuntu-latest
+    environment:
+      name: Release - crates.io
+      url: ${{ needs.check.outputs.crate_url }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  sbom:
+    needs: [check, build, publish]
+    if: needs.check.outputs.increment == 'True'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate Cargo.lock for SBOM
+        run: cargo generate-lockfile
+      - uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+          path: .
+      - run: gh release upload ${{ needs.check.outputs.current_tag }} sbom.spdx.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
