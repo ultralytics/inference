@@ -587,6 +587,7 @@ dependencies = [
  "half",
  "image",
  "imageproc",
+ "jpeg-decoder",
  "ndarray",
  "ort",
 ]
@@ -634,6 +635,15 @@ checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
+]
+
+[[package]]
+name = "jpeg-decoder"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]

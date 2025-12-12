@@ -30,6 +30,10 @@ use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
 #[cfg(feature = "annotate")]
 use imageproc::rect::Rect;
+#[cfg(feature = "annotate")]
+use std::fs::File;
+#[cfg(feature = "annotate")]
+use std::io::BufReader;
 
 use inference::{InferenceConfig, Results, YOLOModel, VERSION};
 
@@ -252,7 +256,7 @@ fn run_prediction(args: &[String]) {
             // Save annotated image if --save is specified
             #[cfg(feature = "annotate")]
             if let Some(ref dir) = save_dir {
-                if let Ok(img) = image::open(image_path) {
+                if let Ok(img) = load_image(image_path) {
                     let annotated = annotate_image(&img, &result);
                     let filename = Path::new(image_path)
                         .file_name()
@@ -478,6 +482,40 @@ fn get_class_color(class_id: usize) -> Rgb<u8> {
     Rgb(color)
 }
 
+/// Load image helper to bypass zune-jpeg stride issues
+#[cfg(feature = "annotate")]
+fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
+    let path_obj = Path::new(path);
+    let ext = path_obj.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase());
+
+    if let Some("jpg") | Some("jpeg") = ext.as_deref() {
+        if let Ok(file) = File::open(path) {
+            let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
+            if let Ok(pixels) = decoder.decode() {
+                if let Some(metadata) = decoder.info() {
+                    let width = metadata.width as u32;
+                    let height = metadata.height as u32;
+                    match metadata.pixel_format {
+                        jpeg_decoder::PixelFormat::RGB24 => {
+                             if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
+                                return Ok(DynamicImage::ImageRgb8(buffer));
+                             }
+                        },
+                        jpeg_decoder::PixelFormat::L8 => {
+                             if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
+                                return Ok(DynamicImage::ImageLuma8(buffer));
+                             }
+                        },
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    // Fallback
+    image::open(path)
+}
+
 /// Embedded font data (DejaVu Sans Mono - a free font)
 /// Using a simple embedded approach for cross-platform compatibility
 #[cfg(feature = "annotate")]
@@ -501,26 +539,40 @@ fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
             let class_id = cls[i] as usize;
             let confidence = conf[i];
 
-            // Get box coordinates
-            let x1 = xyxy[[i, 0]].round() as i32;
-            let y1 = xyxy[[i, 1]].round() as i32;
-            let x2 = xyxy[[i, 2]].round() as i32;
-            let y2 = xyxy[[i, 3]].round() as i32;
+            // Get box coordinates and clamp to image bounds
+            let mut x1 = xyxy[[i, 0]].round() as i32;
+            let mut y1 = xyxy[[i, 1]].round() as i32;
+            let mut x2 = xyxy[[i, 2]].round() as i32;
+            let mut y2 = xyxy[[i, 3]].round() as i32;
+
+            // Ensure x1 < x2 and y1 < y2
+            if x1 > x2 { std::mem::swap(&mut x1, &mut x2); }
+            if y1 > y2 { std::mem::swap(&mut y1, &mut y2); }
 
             // Clamp to image bounds
-            let x1 = x1.max(0).min(width as i32 - 1);
-            let y1 = y1.max(0).min(height as i32 - 1);
-            let x2 = x2.max(0).min(width as i32 - 1);
-            let y2 = y2.max(0).min(height as i32 - 1);
+            x1 = x1.max(0).min(width as i32 - 1);
+            y1 = y1.max(0).min(height as i32 - 1);
+            x2 = x2.max(0).min(width as i32 - 1);
+            y2 = y2.max(0).min(height as i32 - 1);
+
+            // Skip invalid boxes
+            if x2 <= x1 || y2 <= y1 {
+                continue;
+            }
 
             let color = get_class_color(class_id);
 
-            // Draw bounding box (multiple times for thickness)
-            for offset in 0..3_i32 {
-                let rect_width = (x2 - x1 + 2 * offset).max(1) as u32;
-                let rect_height = (y2 - y1 + 2 * offset).max(1) as u32;
-                let rect = Rect::at(x1 - offset, y1 - offset).of_size(rect_width, rect_height);
-                draw_hollow_rect_mut(&mut img, rect, color);
+            // Draw bounding box with fixed thickness
+            let thickness = 3;
+            for t in 0..thickness {
+                let tx1 = (x1 + t).min(x2);
+                let ty1 = (y1 + t).min(y2);
+                let tx2 = (x2 - t).max(tx1);
+                let ty2 = (y2 - t).max(ty1);
+                if tx2 > tx1 && ty2 > ty1 {
+                    let rect = Rect::at(tx1, ty1).of_size((tx2 - tx1) as u32, (ty2 - ty1) as u32);
+                    draw_hollow_rect_mut(&mut img, rect, color);
+                }
             }
 
             // Draw label
@@ -532,9 +584,14 @@ fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
             let label = format!("{} {:.2}", class_name, confidence);
 
             if let Some(ref f) = font {
-                let scale = PxScale::from(20.0);
-                let y_text = if y1 > 25 { y1 - 8 } else { y2 + 20 };
-                draw_text_mut(&mut img, color, x1, y_text, scale, f, &label);
+                let scale = PxScale::from(16.0);
+                // Position text above box if there's room, otherwise below
+                let text_y = if y1 > 20 { y1 - 20 } else { y2 + 5 };
+                let text_x = x1.max(0);
+                // Only draw text if within bounds
+                if text_x >= 0 && text_y >= 0 && text_x < width as i32 && text_y < height as i32 {
+                    draw_text_mut(&mut img, color, text_x, text_y, scale, f, &label);
+                }
             }
         }
     }
