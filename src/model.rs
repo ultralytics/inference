@@ -239,10 +239,14 @@ impl YOLOModel {
     pub fn warmup(&mut self) -> Result<()> {
         if !self.warmed_up {
             let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);
-            // Create dummy input tensor (zeros)
-            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            // Run warmup inference (discard results)
-            let _ = self.run_inference(&dummy_input)?;
+            if self.fp16_input {
+                // Use FP16 dummy input if model expects FP16
+                let dummy_input = ndarray::Array4::<half::f16>::zeros((1, 3, target_size.0, target_size.1));
+                let _ = self.run_inference_f16(&dummy_input)?;
+            } else {
+                let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
+                let _ = self.run_inference(&dummy_input)?;
+            }
             self.warmed_up = true;
         }
         Ok(())
@@ -324,14 +328,14 @@ impl YOLOModel {
     ///
     /// Returns an error if the image can't be loaded or inference fails.
     pub fn predict<P: AsRef<Path>>(&mut self, path: P) -> Result<Vec<Results>> {
-        self.warmup()?;
-
         let path = path.as_ref();
 
         // Load image
         let img = image::open(path).map_err(|e| {
             InferenceError::ImageError(format!("Failed to load image {}: {e}", path.display()))
         })?;
+
+        self.warmup()?;
 
         self.predict_image(&img, path.to_string_lossy().to_string())
     }
