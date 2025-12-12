@@ -1,5 +1,10 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+//! Image annotation utilities.
+//!
+//! This module provides functions for drawing bounding boxes, labels, and other
+//! annotations on images based on inference results.
+
 use crate::results::Results;
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
