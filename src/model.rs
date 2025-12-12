@@ -329,7 +329,7 @@ impl YOLOModel {
     ///
     /// Returns an error if the image can't be loaded or inference fails.
     pub fn predict<P: AsRef<Path>>(&mut self, path: P) -> Result<Vec<Results>> {
-        self.warmup()?;
+        if !self.warmed_up { self.warmup()?; }
 
         let path = path.as_ref();
 
