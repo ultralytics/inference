@@ -23,17 +23,7 @@ use std::process;
 use std::fs;
 
 #[cfg(feature = "annotate")]
-use ab_glyph::{FontRef, PxScale};
-#[cfg(feature = "annotate")]
-use image::{DynamicImage, Rgb};
-#[cfg(feature = "annotate")]
-use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
-#[cfg(feature = "annotate")]
-use imageproc::rect::Rect;
-#[cfg(feature = "annotate")]
-use std::fs::File;
-#[cfg(feature = "annotate")]
-use std::io::BufReader;
+use inference::annotate::{annotate_image, find_next_run_dir, load_image};
 
 use inference::{InferenceConfig, Results, YOLOModel, VERSION};
 
@@ -169,7 +159,9 @@ fn run_prediction(args: &[String]) {
     // Warn if --save is used without annotate feature
     #[cfg(not(feature = "annotate"))]
     if save {
-        eprintln!("WARNING: --save requires the 'annotate' feature. Rebuild with: cargo build --features annotate");
+        eprintln!(
+            "WARNING: --save requires the 'annotate' feature. Rebuild with: cargo build --features annotate"
+        );
     }
 
     // Load model
@@ -425,176 +417,4 @@ Examples:
     inference predict --model yolo11n.onnx --source 0 --conf 0.5
     inference predict -m yolo11n.onnx -s assets/ --save --half"#
     );
-}
-
-/// Find the next available run directory (predict, predict2, predict3, etc.)
-#[cfg(feature = "annotate")]
-fn find_next_run_dir(base: &str, prefix: &str) -> String {
-    let base_path = Path::new(base);
-
-    // First try without number
-    let first = base_path.join(prefix);
-    if !first.exists() {
-        return first.to_string_lossy().to_string();
-    }
-
-    // Try with incrementing numbers
-    for i in 2.. {
-        let numbered = base_path.join(format!("{prefix}{i}"));
-        if !numbered.exists() {
-            return numbered.to_string_lossy().to_string();
-        }
-    }
-
-    // Fallback (should never reach here)
-    base_path.join(prefix).to_string_lossy().to_string()
-}
-
-/// Color palette for different classes (similar to Ultralytics)
-#[cfg(feature = "annotate")]
-const COLORS: [[u8; 3]; 20] = [
-    [255, 56, 56],    // Red
-    [255, 157, 151],  // Light red
-    [255, 112, 31],   // Orange
-    [255, 178, 29],   // Yellow-orange
-    [207, 210, 49],   // Yellow-green
-    [72, 249, 10],    // Green
-    [146, 204, 23],   // Light green
-    [61, 219, 134],   // Teal
-    [26, 147, 52],    // Dark green
-    [0, 212, 187],    // Cyan
-    [44, 153, 168],   // Dark cyan
-    [0, 194, 255],    // Light blue
-    [52, 69, 147],    // Dark blue
-    [100, 115, 255],  // Blue
-    [0, 24, 236],     // Bright blue
-    [132, 56, 255],   // Purple
-    [82, 0, 133],     // Dark purple
-    [203, 56, 255],   // Magenta
-    [255, 149, 200],  // Pink
-    [255, 55, 199],   // Hot pink
-];
-
-/// Get color for a class ID
-#[cfg(feature = "annotate")]
-fn get_class_color(class_id: usize) -> Rgb<u8> {
-    let color = COLORS[class_id % COLORS.len()];
-    Rgb(color)
-}
-
-/// Load image helper to bypass zune-jpeg stride issues
-#[cfg(feature = "annotate")]
-fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
-    let path_obj = Path::new(path);
-    let ext = path_obj.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase());
-
-    if let Some("jpg") | Some("jpeg") = ext.as_deref() {
-        if let Ok(file) = File::open(path) {
-            let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
-            if let Ok(pixels) = decoder.decode() {
-                if let Some(metadata) = decoder.info() {
-                    let width = metadata.width as u32;
-                    let height = metadata.height as u32;
-                    match metadata.pixel_format {
-                        jpeg_decoder::PixelFormat::RGB24 => {
-                             if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
-                                return Ok(DynamicImage::ImageRgb8(buffer));
-                             }
-                        },
-                        jpeg_decoder::PixelFormat::L8 => {
-                             if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
-                                return Ok(DynamicImage::ImageLuma8(buffer));
-                             }
-                        },
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-    // Fallback
-    image::open(path)
-}
-
-/// Embedded font data (DejaVu Sans Mono - a free font)
-/// Using a simple embedded approach for cross-platform compatibility
-#[cfg(feature = "annotate")]
-const FONT_DATA: &[u8] = include_bytes!("../assets/DejaVuSans.ttf");
-
-/// Annotate an image with detection boxes and labels
-#[cfg(feature = "annotate")]
-fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
-    let mut img = image.to_rgb8();
-    let (width, height) = img.dimensions();
-
-    // Load font
-    let font = FontRef::try_from_slice(FONT_DATA).ok();
-
-    if let Some(ref boxes) = result.boxes {
-        let xyxy = boxes.xyxy();
-        let conf = boxes.conf();
-        let cls = boxes.cls();
-
-        for i in 0..boxes.len() {
-            let class_id = cls[i] as usize;
-            let confidence = conf[i];
-
-            // Get box coordinates and clamp to image bounds
-            let mut x1 = xyxy[[i, 0]].round() as i32;
-            let mut y1 = xyxy[[i, 1]].round() as i32;
-            let mut x2 = xyxy[[i, 2]].round() as i32;
-            let mut y2 = xyxy[[i, 3]].round() as i32;
-
-            // Ensure x1 < x2 and y1 < y2
-            if x1 > x2 { std::mem::swap(&mut x1, &mut x2); }
-            if y1 > y2 { std::mem::swap(&mut y1, &mut y2); }
-
-            // Clamp to image bounds
-            x1 = x1.max(0).min(width as i32 - 1);
-            y1 = y1.max(0).min(height as i32 - 1);
-            x2 = x2.max(0).min(width as i32 - 1);
-            y2 = y2.max(0).min(height as i32 - 1);
-
-            // Skip invalid boxes
-            if x2 <= x1 || y2 <= y1 {
-                continue;
-            }
-
-            let color = get_class_color(class_id);
-
-            // Draw bounding box with fixed thickness
-            let thickness = 3;
-            for t in 0..thickness {
-                let tx1 = (x1 + t).min(x2);
-                let ty1 = (y1 + t).min(y2);
-                let tx2 = (x2 - t).max(tx1);
-                let ty2 = (y2 - t).max(ty1);
-                if tx2 > tx1 && ty2 > ty1 {
-                    let rect = Rect::at(tx1, ty1).of_size((tx2 - tx1) as u32, (ty2 - ty1) as u32);
-                    draw_hollow_rect_mut(&mut img, rect, color);
-                }
-            }
-
-            // Draw label
-            let class_name = result
-                .names
-                .get(&class_id)
-                .map(String::as_str)
-                .unwrap_or("object");
-            let label = format!("{} {:.2}", class_name, confidence);
-
-            if let Some(ref f) = font {
-                let scale = PxScale::from(16.0);
-                // Position text above box if there's room, otherwise below
-                let text_y = if y1 > 20 { y1 - 20 } else { y2 + 5 };
-                let text_x = x1.max(0);
-                // Only draw text if within bounds
-                if text_x >= 0 && text_y >= 0 && text_x < width as i32 && text_y < height as i32 {
-                    draw_text_mut(&mut img, color, text_x, text_y, scale, f, &label);
-                }
-            }
-        }
-    }
-
-    DynamicImage::ImageRgb8(img)
 }

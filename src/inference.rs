@@ -100,58 +100,6 @@ impl InferenceConfig {
     }
 }
 
-/// Legacy detection result type for backward compatibility.
-///
-/// Use [`crate::results::Results`] for new code.
-#[derive(Debug, Clone)]
-#[deprecated(since = "0.1.0", note = "Use Results and Boxes from results module instead")]
-pub struct DetectionResult {
-    /// Bounding box coordinates [x1, y1, x2, y2].
-    pub bbox: [f32; 4],
-    /// Confidence score.
-    pub confidence: f32,
-    /// Class ID.
-    pub class_id: usize,
-    /// Class name (if available).
-    pub class_name: Option<String>,
-}
-
-#[allow(deprecated)]
-impl DetectionResult {
-    /// Create a new detection result.
-    #[must_use]
-    pub const fn new(bbox: [f32; 4], confidence: f32, class_id: usize) -> Self {
-        Self {
-            bbox,
-            confidence,
-            class_id,
-            class_name: None,
-        }
-    }
-
-    /// Get the center point of the bounding box.
-    #[must_use]
-    pub fn center(&self) -> (f32, f32) {
-        let x = (self.bbox[0] + self.bbox[2]) / 2.0;
-        let y = (self.bbox[1] + self.bbox[3]) / 2.0;
-        (x, y)
-    }
-
-    /// Get the width and height of the bounding box.
-    #[must_use]
-    pub fn size(&self) -> (f32, f32) {
-        let w = self.bbox[2] - self.bbox[0];
-        let h = self.bbox[3] - self.bbox[1];
-        (w, h)
-    }
-
-    /// Get the area of the bounding box.
-    #[must_use]
-    pub fn area(&self) -> f32 {
-        let (w, h) = self.size();
-        w * h
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -180,13 +128,5 @@ mod tests {
         assert_eq!(config.imgsz, Some((640, 640)));
         assert_eq!(config.num_threads, 8);
     }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_legacy_detection_result() {
-        let det = DetectionResult::new([10.0, 20.0, 50.0, 80.0], 0.95, 0);
-        assert_eq!(det.center(), (30.0, 50.0));
-        assert_eq!(det.size(), (40.0, 60.0));
-        assert!((det.area() - 2400.0).abs() < f32::EPSILON);
-    }
 }
+
