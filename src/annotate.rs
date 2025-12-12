@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 use crate::results::Results;
 use ab_glyph::{FontRef, PxScale};
 use image::{DynamicImage, Rgb};
