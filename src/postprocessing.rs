@@ -80,9 +80,15 @@ pub fn postprocess(
             speed,
             inference_shape,
         ),
-        Task::Classify => {
-            postprocess_classify(output, output_shape, names, orig_img, path, speed, inference_shape)
-        }
+        Task::Classify => postprocess_classify(
+            output,
+            output_shape,
+            names,
+            orig_img,
+            path,
+            speed,
+            inference_shape,
+        ),
         Task::Obb => postprocess_obb(
             output,
             output_shape,
@@ -117,7 +123,8 @@ fn postprocess_detect(
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
-    let (num_classes, num_predictions, is_transposed) = parse_detect_shape(output_shape, names.len());
+    let (num_classes, num_predictions, is_transposed) =
+        parse_detect_shape(output_shape, names.len());
 
     if output.is_empty() || num_predictions == 0 {
         return results;
@@ -140,12 +147,7 @@ fn postprocess_detect(
     }
 
     // Extract boxes and scores
-    let boxes_data = extract_detect_boxes(
-        output_2d.view(),
-        num_classes,
-        preprocess,
-        config,
-    );
+    let boxes_data = extract_detect_boxes(output_2d.view(), num_classes, preprocess, config);
 
     if !boxes_data.is_empty() {
         results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
@@ -172,7 +174,8 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
             // The smaller dimension (if >= 5) is likely num_features, larger is num_preds
             if expected_classes == 0 {
                 // No metadata - infer from shape
-                let (num_features, num_preds, transposed) = if a < b { (a, b, false) } else { (b, a, true) };
+                let (num_features, num_preds, transposed) =
+                    if a < b { (a, b, false) } else { (b, a, true) };
                 let inferred_classes = num_features.saturating_sub(4);
                 return (inferred_classes.max(1), num_preds, transposed);
             }
@@ -195,7 +198,8 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
             if expected_classes == 0 {
                 // No metadata - infer from shape
                 // Typically num_features < num_preds (e.g., 84 < 8400)
-                let (num_features, num_preds, transposed) = if a < b { (a, b, false) } else { (b, a, true) };
+                let (num_features, num_preds, transposed) =
+                    if a < b { (a, b, false) } else { (b, a, true) };
                 let inferred_classes = num_features.saturating_sub(4);
                 return (inferred_classes.max(1), num_preds, transposed);
             }
@@ -410,13 +414,13 @@ mod tests {
         // When metadata is missing (expected_classes == 0), infer from shape
         // Standard YOLO output [1, 84, 8400] with no metadata
         let (nc, np, transposed) = parse_detect_shape(&[1, 84, 8400], 0);
-        assert_eq!(nc, 80);  // Inferred: 84 - 4 = 80 classes
+        assert_eq!(nc, 80); // Inferred: 84 - 4 = 80 classes
         assert_eq!(np, 8400);
         assert!(!transposed);
 
         // Transposed format [1, 8400, 84] with no metadata
         let (nc, np, transposed) = parse_detect_shape(&[1, 8400, 84], 0);
-        assert_eq!(nc, 80);  // Inferred: 84 - 4 = 80 classes
+        assert_eq!(nc, 80); // Inferred: 84 - 4 = 80 classes
         assert_eq!(np, 8400);
         assert!(transposed);
     }

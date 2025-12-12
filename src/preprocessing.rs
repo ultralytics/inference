@@ -182,9 +182,13 @@ fn letterbox_image(
     let (src_w, src_h) = src_rgb.dimensions();
 
     // Create source image for fast_image_resize
-    let src_image =
-        Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), fast_image_resize::PixelType::U8x3)
-            .expect("Failed to create source image");
+    let src_image = Image::from_vec_u8(
+        src_w,
+        src_h,
+        src_rgb.into_raw(),
+        fast_image_resize::PixelType::U8x3,
+    )
+    .expect("Failed to create source image");
 
     // Create destination image
     let mut dst_image = Image::new(new_width, new_height, fast_image_resize::PixelType::U8x3);
@@ -199,16 +203,23 @@ fn letterbox_image(
         .expect("Failed to resize image");
 
     // Create output image with letterbox color
-    let mut output: RgbImage =
-        ImageBuffer::from_pixel(target_size.1 as u32, target_size.0 as u32, Rgb(LETTERBOX_COLOR));
+    let mut output: RgbImage = ImageBuffer::from_pixel(
+        target_size.1 as u32,
+        target_size.0 as u32,
+        Rgb(LETTERBOX_COLOR),
+    );
 
     // Create RgbImage from resized data
-    let resized_rgb: RgbImage =
-        ImageBuffer::from_raw(new_width, new_height, dst_image.into_vec())
-            .expect("Failed to create resized image buffer");
+    let resized_rgb: RgbImage = ImageBuffer::from_raw(new_width, new_height, dst_image.into_vec())
+        .expect("Failed to create resized image buffer");
 
     // Copy resized image onto output
-    image::imageops::overlay(&mut output, &resized_rgb, i64::from(pad_left), i64::from(pad_top));
+    image::imageops::overlay(
+        &mut output,
+        &resized_rgb,
+        i64::from(pad_left),
+        i64::from(pad_top),
+    );
 
     output
 }

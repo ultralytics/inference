@@ -12,12 +12,12 @@ use std::time::Instant;
 use half::f16;
 use image::DynamicImage;
 use ndarray::Array3;
-use ort::session::Session;
-use ort::tensor::TensorElementType;
-use ort::value::ValueType;
 #[cfg(feature = "coreml")]
 use ort::execution_providers::CoreMLExecutionProvider;
+use ort::session::Session;
+use ort::tensor::TensorElementType;
 use ort::value::TensorRef;
+use ort::value::ValueType;
 
 use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
@@ -116,8 +116,9 @@ impl YOLOModel {
         };
 
         // Create ONNX Runtime session with optimizations
-        let mut session_builder = Session::builder()
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to create session builder: {e}")))?;
+        let mut session_builder = Session::builder().map_err(|e| {
+            InferenceError::ModelLoadError(format!("Failed to create session builder: {e}"))
+        })?;
 
         // Register execution providers based on features
         #[allow(unused_mut)]
@@ -159,19 +160,24 @@ impl YOLOModel {
         }
 
         if !eps.is_empty() {
-            session_builder = session_builder
-                .with_execution_providers(eps)
-                .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}")))?;
+            session_builder = session_builder.with_execution_providers(eps).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}"))
+            })?;
         }
 
         let session = session_builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}")))?
+            .map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}"))
+            })?
             .with_intra_threads(num_threads)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to set intra-op thread count: {e}")))?
+            .map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to set intra-op thread count: {e}"))
+            })?
             .with_memory_pattern(true)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}")))?
-
+            .map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))
+            })?
             .commit_from_file(path)
             .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
@@ -189,7 +195,10 @@ impl YOLOModel {
             .map(|i| {
                 matches!(
                     &i.input_type,
-                    ValueType::Tensor { ty: TensorElementType::Float16, .. }
+                    ValueType::Tensor {
+                        ty: TensorElementType::Float16,
+                        ..
+                    }
                 )
             })
             .unwrap_or(false);
@@ -247,9 +256,9 @@ impl YOLOModel {
     /// Extract metadata from the ONNX model session.
     fn extract_metadata(session: &Session) -> Result<ModelMetadata> {
         // Get metadata from the model
-        let model_metadata = session
-            .metadata()
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to get model metadata: {e}")))?;
+        let model_metadata = session.metadata().map_err(|e| {
+            InferenceError::ModelLoadError(format!("Failed to get model metadata: {e}"))
+        })?;
 
         // Ultralytics stores metadata under individual keys
         // Try to get each key separately and build a YAML string
@@ -257,8 +266,20 @@ impl YOLOModel {
 
         // List of all Ultralytics metadata keys
         let keys = [
-            "description", "author", "date", "version", "license", "docs",
-            "stride", "task", "batch", "imgsz", "names", "half", "channels", "args",
+            "description",
+            "author",
+            "date",
+            "version",
+            "license",
+            "docs",
+            "stride",
+            "task",
+            "batch",
+            "imgsz",
+            "names",
+            "half",
+            "channels",
+            "args",
         ];
 
         for key in &keys {
@@ -334,8 +355,12 @@ impl YOLOModel {
 
         // Preprocess - generate FP16 tensor if model expects FP16 input
         let start_preprocess = Instant::now();
-        let preprocess_result =
-            preprocess_image_with_precision(image, target_size, self.metadata.stride, self.fp16_input);
+        let preprocess_result = preprocess_image_with_precision(
+            image,
+            target_size,
+            self.metadata.stride,
+            self.fp16_input,
+        );
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
 
         // Convert original image to array for results
@@ -413,24 +438,23 @@ impl YOLOModel {
             }
         }
 
-        let img_buffer = image::RgbImage::from_raw(width, height, rgb_data)
-            .ok_or_else(|| InferenceError::ImageError("Failed to create image buffer".to_string()))?;
+        let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+            InferenceError::ImageError("Failed to create image buffer".to_string())
+        })?;
 
         let dynamic_img = DynamicImage::ImageRgb8(img_buffer);
         self.predict_image(&dynamic_img, path)
     }
 
     /// Run the ONNX model inference with FP32 input.
-    fn run_inference(
-        &mut self,
-        input: &ndarray::Array4<f32>,
-    ) -> Result<(Vec<f32>, Vec<usize>)> {
+    fn run_inference(&mut self, input: &ndarray::Array4<f32>) -> Result<(Vec<f32>, Vec<usize>)> {
         // Ensure input is contiguous in memory (CowArray)
         let input_contiguous = input.as_standard_layout();
 
         // Create input tensor reference from ndarray view
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view())
-            .map_err(|e| InferenceError::InferenceError(format!("Failed to create input tensor: {e}")))?;
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+        })?;
 
         // Run session - inputs! macro returns a Vec, not a Result
         let inputs = ort::inputs![&self.input_name => input_tensor];
@@ -442,14 +466,14 @@ impl YOLOModel {
 
         // Extract output
         let output_name = &self.output_names[0];
-        let output = outputs
-            .get(output_name.as_str())
-            .ok_or_else(|| InferenceError::InferenceError(format!("Output '{}' not found", output_name)))?;
+        let output = outputs.get(output_name.as_str()).ok_or_else(|| {
+            InferenceError::InferenceError(format!("Output '{}' not found", output_name))
+        })?;
 
         // Get output as f32 tensor - use try_extract_tensor which returns (shape, data)
-        let (shape, data) = output
-            .try_extract_tensor::<f32>()
-            .map_err(|e| InferenceError::InferenceError(format!("Failed to extract output: {e}")))?;
+        let (shape, data) = output.try_extract_tensor::<f32>().map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to extract output: {e}"))
+        })?;
 
         let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
         let data_vec: Vec<f32> = data.to_vec();
@@ -466,8 +490,9 @@ impl YOLOModel {
         let input_contiguous = input.as_standard_layout();
 
         // Create input tensor reference from ndarray view
-        let input_tensor = TensorRef::from_array_view(&input_contiguous)
-            .map_err(|e| InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}")))?;
+        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
+        })?;
 
         // Run session
         let inputs = ort::inputs![&self.input_name => input_tensor];
@@ -479,9 +504,9 @@ impl YOLOModel {
 
         // Extract output
         let output_name = &self.output_names[0];
-        let output = outputs
-            .get(output_name.as_str())
-            .ok_or_else(|| InferenceError::InferenceError(format!("Output '{}' not found", output_name)))?;
+        let output = outputs.get(output_name.as_str()).ok_or_else(|| {
+            InferenceError::InferenceError(format!("Output '{}' not found", output_name))
+        })?;
 
         // Try to extract as f32 first (model may have FP32 output even with FP16 input)
         // If that fails, extract as f16 and convert
@@ -491,9 +516,9 @@ impl YOLOModel {
             (shape_vec, data_vec)
         } else {
             // Extract as f16 and convert to f32 for postprocessing
-            let (shape, data) = output
-                .try_extract_tensor::<f16>()
-                .map_err(|e| InferenceError::InferenceError(format!("Failed to extract FP16 output: {e}")))?;
+            let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to extract FP16 output: {e}"))
+            })?;
 
             let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
             let data_vec: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
@@ -573,6 +598,9 @@ mod tests {
     fn test_model_not_found() {
         let result = YOLOModel::load("nonexistent.onnx");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), InferenceError::ModelLoadError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            InferenceError::ModelLoadError(_)
+        ));
     }
 }

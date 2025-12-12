@@ -365,8 +365,9 @@ fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
         }
     }
 
-    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data)
-        .ok_or_else(|| InferenceError::ImageError("Failed to create image from array".to_string()))?;
+    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+        InferenceError::ImageError("Failed to create image from array".to_string())
+    })?;
 
     Ok(DynamicImage::ImageRgb8(img_buffer))
 }
@@ -379,7 +380,10 @@ mod tests {
     fn test_source_from_string() {
         assert!(matches!(Source::from("image.jpg"), Source::Image(_)));
         assert!(matches!(Source::from("video.mp4"), Source::Video(_)));
-        assert!(matches!(Source::from("rtsp://example.com"), Source::Stream(_)));
+        assert!(matches!(
+            Source::from("rtsp://example.com"),
+            Source::Stream(_)
+        ));
         assert!(matches!(Source::from("0"), Source::Webcam(0)));
         assert!(matches!(Source::from("*.jpg"), Source::Glob(_)));
     }

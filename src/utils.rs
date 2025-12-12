@@ -19,7 +19,7 @@ pub fn calculate_iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
     let y2 = box1[3].min(box2[3]);
 
     let intersection = ((x2 - x1).max(0.0)) * ((y2 - y1).max(0.0));
-    
+
     let area1 = (box1[2] - box1[0]) * (box1[3] - box1[1]);
     let area2 = (box2[2] - box2[0]) * (box2[3] - box2[1]);
     let union = area1 + area2 - intersection;
@@ -149,9 +149,9 @@ mod tests {
     fn test_nms_per_class() {
         // Two overlapping boxes of different classes should both be kept
         let boxes = vec![
-            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),  // class 0
-            ([1.0, 1.0, 11.0, 11.0], 0.8, 1),  // class 1 (different class)
-            ([100.0, 100.0, 110.0, 110.0], 0.95, 0),  // class 0, non-overlapping
+            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),        // class 0
+            ([1.0, 1.0, 11.0, 11.0], 0.8, 1),        // class 1 (different class)
+            ([100.0, 100.0, 110.0, 110.0], 0.95, 0), // class 0, non-overlapping
         ];
         let keep = nms_per_class(&boxes, 0.5);
         // All 3 boxes should be kept (overlapping boxes are different classes)
@@ -162,11 +162,11 @@ mod tests {
     fn test_nms_per_class_suppression() {
         // Two overlapping boxes of the same class - lower score suppressed
         let boxes = vec![
-            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),  // class 0, higher score
-            ([1.0, 1.0, 11.0, 11.0], 0.8, 0),  // class 0, lower score (suppressed)
+            ([0.0, 0.0, 10.0, 10.0], 0.9, 0), // class 0, higher score
+            ([1.0, 1.0, 11.0, 11.0], 0.8, 0), // class 0, lower score (suppressed)
         ];
         let keep = nms_per_class(&boxes, 0.5);
         assert_eq!(keep.len(), 1);
-        assert!(keep.contains(&0));  // Keep higher score box
+        assert!(keep.contains(&0)); // Keep higher score box
     }
 }
