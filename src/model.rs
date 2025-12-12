@@ -242,10 +242,10 @@ impl YOLOModel {
             if self.fp16_input {
                 // Use FP16 dummy input if model expects FP16
                 let dummy_input = ndarray::Array4::<half::f16>::zeros((1, 3, target_size.0, target_size.1));
-                let _ = self.run_inference_f16(&dummy_input)?;
+                self.run_inference_f16(&dummy_input)?;
             } else {
                 let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-                let _ = self.run_inference(&dummy_input)?;
+                self.run_inference(&dummy_input)?;
             }
             self.warmed_up = true;
         }
