@@ -19,6 +19,7 @@ use ort::tensor::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
 
+use crate::download::try_download_model;
 use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
@@ -97,13 +98,14 @@ impl YOLOModel {
     pub fn load_with_config<P: AsRef<Path>>(path: P, config: InferenceConfig) -> Result<Self> {
         let path = path.as_ref();
 
-        // Check if file exists
-        if !path.exists() {
-            return Err(InferenceError::ModelLoadError(format!(
-                "Model file not found: {}",
-                path.display()
-            )));
-        }
+        // Check if file exists, attempt auto-download if not
+        let path = if !path.exists() {
+            // Try to download the model if it's a known downloadable model
+            std::borrow::Cow::Owned(try_download_model(path)?)
+        } else {
+            std::borrow::Cow::Borrowed(path)
+        };
+        let path = path.as_ref();
 
         // Determine optimal thread count based on available parallelism
         let num_threads = if config.num_threads > 0 {
