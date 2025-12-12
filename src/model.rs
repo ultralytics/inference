@@ -232,23 +232,40 @@ impl YOLOModel {
         Ok(model)
     }
 
+    /// Maximum allowed image dimension to prevent OOM during warmup.
+    const MAX_IMGSZ: usize = 8192;
+
     /// Warm up the model by running inference with a dummy input.
     ///
     /// This pre-allocates memory and optimizes the execution graph for faster
     /// subsequent inferences. Warmup is automatically called on first predict.
     pub fn warmup(&mut self) -> Result<()> {
-        if !self.warmed_up {
-            let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);
-            if self.fp16_input {
-                // Use FP16 dummy input if model expects FP16
-                let dummy_input = ndarray::Array4::<half::f16>::zeros((1, 3, target_size.0, target_size.1));
-                self.run_inference_f16(&dummy_input)?;
-            } else {
-                let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-                self.run_inference(&dummy_input)?;
-            }
-            self.warmed_up = true;
+        if self.warmed_up {
+            return Ok(());
         }
+
+        let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);
+
+        // Sanity check to prevent huge allocations from invalid imgsz
+        if target_size.0 > Self::MAX_IMGSZ || target_size.1 > Self::MAX_IMGSZ {
+            return Err(InferenceError::ConfigError(format!(
+                "Image size {}x{} exceeds maximum allowed {}x{}",
+                target_size.0,
+                target_size.1,
+                Self::MAX_IMGSZ,
+                Self::MAX_IMGSZ
+            )));
+        }
+
+        if self.fp16_input {
+            // Use FP16 dummy input if model expects FP16
+            let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
+            self.run_inference_f16(&dummy_input)?;
+        } else {
+            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
+            self.run_inference(&dummy_input)?;
+        }
+        self.warmed_up = true;
         Ok(())
     }
 
@@ -330,12 +347,13 @@ impl YOLOModel {
     pub fn predict<P: AsRef<Path>>(&mut self, path: P) -> Result<Vec<Results>> {
         let path = path.as_ref();
 
+        // Warmup first to fail fast before loading/decoding the image
+        self.warmup()?;
+
         // Load image
         let img = image::open(path).map_err(|e| {
             InferenceError::ImageError(format!("Failed to load image {}: {e}", path.display()))
         })?;
-
-        self.warmup()?;
 
         self.predict_image(&img, path.to_string_lossy().to_string())
     }
