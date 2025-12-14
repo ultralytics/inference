@@ -230,16 +230,8 @@ pub fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
 
         // Draw masks onto the overlay (opaque, last-one-wins for overlaps)
         if let Some(ref masks) = result.masks {
-            let (orig_h, orig_w) = result.orig_shape();
-            let (mask_n, mask_h, mask_w) = masks.data.dim();
-
-            // Calculate scaling factors
-            let (inf_h, inf_w) = result.inference_shape();
-            let scale_w = inf_w as f32 / orig_w as f32;
-            let scale_h = inf_h as f32 / orig_h as f32;
-            let scale = scale_w.min(scale_h);
-            let pad_w = (inf_w as f32 - orig_w as f32 * scale) / 2.0;
-            let pad_h = (inf_h as f32 - orig_h as f32 * scale) / 2.0;
+            let (_orig_h, _orig_w) = result.orig_shape();
+            let (mask_n, _mask_h, _mask_w) = masks.data.dim();
 
             for i in 0..boxes.len() {
                 // If we have fewer masks than boxes, skip
@@ -260,45 +252,16 @@ pub fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
                 let x2 = xyxy[[i, 2]].max(0.0).min(width as f32) as u32;
                 let y2 = xyxy[[i, 3]].max(0.0).min(height as f32) as u32;
 
-                // Iterate over pixels inside the bounding box
                 for y in y1..y2 {
                     for x in x1..x2 {
-                        // Map orig (x,y) to inference coords
-                        let inf_x = x as f32 * scale + pad_w;
-                        let inf_y = y as f32 * scale + pad_h;
-
-                        // Map inference coords to mask coords (160x160)
-                        let u = inf_x * mask_w as f32 / inf_w as f32;
-                        let v = inf_y * mask_h as f32 / inf_h as f32;
-
-                        // Bilinear Interpolation
-                        let u0 = u.floor() as usize;
-                        let v0 = v.floor() as usize;
-                        let u1 = (u0 + 1).min(mask_w - 1);
-                        let v1 = (v0 + 1).min(mask_h - 1);
-
-                        let du = u - u0 as f32;
-                        let dv = v - v0 as f32;
-
-                        if u0 < mask_w && v0 < mask_h {
-                            let val00 = masks.data[[i, v0, u0]];
-                            let val01 = masks.data[[i, v0, u1]];
-                            let val10 = masks.data[[i, v1, u0]];
-                            let val11 = masks.data[[i, v1, u1]];
-
-                            // Interpolate
-                            let val = (1.0 - du) * (1.0 - dv) * val00
-                                + du * (1.0 - dv) * val01
-                                + (1.0 - du) * dv * val10
-                                + du * dv * val11;
-
-                            if val > 0.5 {
-                                // Draw solid color on overlay
-                                let pixel = overlay.get_pixel_mut(x, y);
-                                pixel.0[0] = r;
-                                pixel.0[1] = g;
-                                pixel.0[2] = b;
-                            }
+                        // Masks are now resized to original image size in postprocessing
+                        // So we can access them directly with (x, y) coordinates
+                        if masks.data[[i, y as usize, x as usize]] > 0.5 {
+                            // Draw solid color on overlay
+                            let pixel = overlay.get_pixel_mut(x, y);
+                            pixel.0[0] = r;
+                            pixel.0[1] = g;
+                            pixel.0[2] = b;
                         }
                     }
                 }

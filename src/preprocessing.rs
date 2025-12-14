@@ -5,7 +5,7 @@
 //! This module handles all image preprocessing operations needed before
 //! running YOLO model inference, including resizing, padding, and normalization.
 
-use fast_image_resize::{images::Image, ResizeAlg, ResizeOptions, Resizer};
+
 use half::f16;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
 use ndarray::{Array3, Array4};
@@ -110,6 +110,7 @@ pub fn preprocess_image_with_precision(
         None
     };
 
+
     PreprocessResult {
         tensor,
         tensor_f16,
@@ -135,7 +136,7 @@ fn calculate_letterbox_params(
     orig_width: u32,
     orig_height: u32,
     target_size: (usize, usize),
-    stride: u32,
+    _stride: u32,
 ) -> (u32, u32, u32, u32, (f32, f32)) {
     let (target_h, target_w) = (target_size.0 as f32, target_size.1 as f32);
     let (orig_h, orig_w) = (orig_height as f32, orig_width as f32);
@@ -147,10 +148,11 @@ fn calculate_letterbox_params(
     let new_w = (orig_w * scale).round() as u32;
     let new_h = (orig_h * scale).round() as u32;
 
-    // Calculate padding to center the image
+    // Calculate padding to center the image (matching Python Ultralytics default)
     let pad_w = (target_size.1 as u32).saturating_sub(new_w);
     let pad_h = (target_size.0 as u32).saturating_sub(new_h);
 
+    // Center alignment: divide padding equally on both sides
     let pad_left = pad_w / 2;
     let pad_top = pad_h / 2;
 
@@ -160,7 +162,6 @@ fn calculate_letterbox_params(
 
     (new_w, new_h, pad_left, pad_top, (scale_y, scale_x))
 }
-
 /// Apply letterbox transformation to an image.
 ///
 /// Resizes the image maintaining aspect ratio and adds padding.
@@ -173,16 +174,26 @@ fn letterbox_image(
     pad_top: u32,
     target_size: (usize, usize),
 ) -> RgbImage {
+    use fast_image_resize::{images::Image, PixelType, ResizeAlg, ResizeOptions, Resizer};
+
     // Convert to RGB8
     let src_rgb = image.to_rgb8();
-    
-    // Resize using image::imageops (Triangle = Bilinear)
-    let resized_rgb = image::imageops::resize(
-        &src_rgb,
-        new_width,
-        new_height,
-        image::imageops::FilterType::Triangle,
-    );
+    let (src_w, src_h) = src_rgb.dimensions();
+
+    // Create source image for fast_image_resize
+    let src_image = Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), PixelType::U8x3)
+        .expect("Failed to create source image");
+
+    // Create destination image
+    let mut dst_image = Image::new(new_width, new_height, PixelType::U8x3);
+
+    // Resize using SIMD-accelerated bilinear interpolation
+    let mut resizer = Resizer::new();
+    let options =
+        ResizeOptions::new().resize_alg(ResizeAlg::Convolution(fast_image_resize::FilterType::Bilinear));
+    resizer
+        .resize(&src_image, &mut dst_image, Some(&options))
+        .expect("Failed to resize image");
 
     // Create output image with letterbox color
     let mut output: RgbImage = ImageBuffer::from_pixel(
@@ -190,6 +201,10 @@ fn letterbox_image(
         target_size.0 as u32,
         Rgb(LETTERBOX_COLOR),
     );
+
+    // Create RgbImage from resized data
+    let resized_rgb: RgbImage = ImageBuffer::from_raw(new_width, new_height, dst_image.into_vec())
+        .expect("Failed to create resized image buffer");
 
     // Copy resized image onto output
     image::imageops::overlay(

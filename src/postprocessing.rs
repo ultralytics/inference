@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 
+use fast_image_resize::images::Image;
+use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{s, Array2, Array3, ArrayView2};
 
 use crate::inference::InferenceConfig;
@@ -431,7 +433,7 @@ fn postprocess_segment(
         }
     }
 
-    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    results.boxes = Some(Boxes::new(boxes_data.clone(), preprocess.orig_shape));
 
     // 3. Process Masks
     // Protos: [1, 32, 160, 160] -> [32, 25600]
@@ -443,16 +445,66 @@ fn postprocess_segment(
     // Matrix Mul: [N, 32] x [32, 25600] -> [N, 25600]
     let masks_flat = mask_coeffs.dot(&protos);
 
-    // Reshape to [N, 160, 160]
-    let mut masks_data = Array3::zeros((num_kept, mh, mw));
+    // Resize and crop to original image size
+    let (oh, ow) = preprocess.orig_shape;
+    let (th, tw) = inference_shape;
+    let (pad_top, pad_left) = preprocess.padding;
+
+    // Pre-calculate crop parameters (same for all masks)
+    let scale_w = mw as f32 / tw as f32;
+    let scale_h = mh as f32 / th as f32;
+    let crop_x = pad_left * scale_w;
+    let crop_y = pad_top * scale_h;
+    let crop_w = mw as f32 - 2.0 * crop_x;
+    let crop_h = mh as f32 - 2.0 * crop_y;
+
+    // Process each mask sequentially (fastest for typical 1-10 masks)
+    let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
+    let mut resizer = Resizer::new();
+    let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
+
     for i in 0..num_kept {
         let row = masks_flat.row(i);
-        // Sigmoid
-        for j in 0..(mh * mw) {
-            let val = 1.0 / (1.0 + (-row[j]).exp());
-            let y = j / mw;
-            let x = j % mw;
-            masks_data[[i, y, x]] = val;
+
+        // Sigmoid and collect to bytes for Image
+        let f32_data: Vec<f32> = row.iter().map(|&val| 1.0 / (1.0 + (-val).exp())).collect();
+
+        // Create source image (160x160)
+        let src_bytes: Vec<u8> = f32_data.iter().flat_map(|x| x.to_le_bytes()).collect();
+        let src_image =
+            Image::from_vec_u8(mw as u32, mh as u32, src_bytes, PixelType::F32).unwrap();
+
+        // Create dest image (orig_w x orig_h)
+        let mut dst_image = Image::new(ow, oh, PixelType::F32);
+
+        // Configure resize with crop
+        let options = ResizeOptions::new()
+            .resize_alg(resize_alg)
+            .crop(crop_x as f64, crop_y as f64, crop_w as f64, crop_h as f64);
+
+        resizer
+            .resize(&src_image, &mut dst_image, &options)
+            .unwrap();
+
+        // Get resized data as f32 slice (safe conversion via bytemuck)
+        let dst_bytes = dst_image.buffer();
+        let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
+
+        // Apply bbox cropping and store directly to output array
+        let x1 = boxes_data[[i, 0]].max(0.0).min(ow as f32);
+        let y1 = boxes_data[[i, 1]].max(0.0).min(oh as f32);
+        let x2 = boxes_data[[i, 2]].max(0.0).min(ow as f32);
+        let y2 = boxes_data[[i, 3]].max(0.0).min(oh as f32);
+
+        for y in 0..oh as usize {
+            for x in 0..ow as usize {
+                let val = dst_slice[y * ow as usize + x];
+                let x_f = x as f32;
+                let y_f = y as f32;
+                if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
+                    masks_data[[i, y, x]] = val;
+                }
+            }
         }
     }
 
