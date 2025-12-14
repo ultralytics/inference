@@ -223,7 +223,6 @@ pub fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
         let conf = boxes.conf();
         let cls = boxes.cls();
 
-        // --- MASK OVERLAY START ---
         // Create an overlay image for masks to handle overlaps correctly (Python-style)
         let mut overlay = img.clone();
         let mut mask_present = false;
