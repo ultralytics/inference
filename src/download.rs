@@ -15,9 +15,16 @@ use crate::error::{InferenceError, Result};
 /// Default YOLO model name.
 pub const DEFAULT_MODEL: &str = "yolo11n.onnx";
 
+/// Default YOLO segmentation model name.
+pub const DEFAULT_SEGMENT_MODEL: &str = "yolo11n-seg.onnx";
+
 /// URL for downloading the default YOLO model.
-const DEFAULT_MODEL_URL: &str =
+const DEFAULT_DETECT_MODEL_URL: &str =
     "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.onnx";
+
+/// URL for downloading the default YOLO model.
+const DEFAULT_SEGMENT_MODEL_URL: &str =
+    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx";
 
 /// Connection timeout in seconds.
 const CONNECT_TIMEOUT: u64 = 30;
@@ -252,7 +259,8 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 /// Attempt to download a model if it matches a known downloadable model.
 ///
 /// Currently supports:
-/// - `yolo11n.onnx` - Default YOLO11n model
+/// - `yolo11n.onnx` - Default YOLO11n detection model
+/// - `yolo11n-seg.onnx` - YOLO11n segmentation model
 ///
 /// Downloads to the current working directory (or the directory specified in the path).
 ///
@@ -262,14 +270,14 @@ pub fn try_download_model<P: AsRef<Path>>(model_path: P) -> Result<PathBuf> {
     let path = model_path.as_ref();
     let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-    // Check if this is a model we can download
+    // Map of supported downloadable models
     let url = match filename {
-        DEFAULT_MODEL => DEFAULT_MODEL_URL,
+        DEFAULT_MODEL => DEFAULT_DETECT_MODEL_URL,
+        DEFAULT_SEGMENT_MODEL => DEFAULT_SEGMENT_MODEL_URL,
         _ => {
             return Err(InferenceError::ModelLoadError(format!(
-                "Model file not found: {}. Auto-download is only supported for '{}'.",
+                "Model file not found: {}. Auto-download is supported for: yolo11n.onnx, yolo11n-seg.onnx",
                 path.display(),
-                DEFAULT_MODEL
             )));
         }
     };
