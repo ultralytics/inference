@@ -260,10 +260,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 /// or the model is not a known downloadable model.
 pub fn try_download_model<P: AsRef<Path>>(model_path: P) -> Result<PathBuf> {
     let path = model_path.as_ref();
-    let filename = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     // Check if this is a model we can download
     let url = match filename {

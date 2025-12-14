@@ -19,7 +19,7 @@ use crate::utils::nms_per_class;
 ///
 /// # Arguments
 ///
-/// * `output` - Raw model output tensor.
+/// * `outputs` - Vector of raw model outputs (data, shape).
 /// * `task` - The task type (detect, segment, pose, etc.).
 /// * `preprocess` - Preprocessing result containing scale/padding info.
 /// * `config` - Inference configuration.
@@ -35,8 +35,7 @@ use crate::utils::nms_per_class;
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn postprocess(
-    output: &[f32],
-    output_shape: &[usize],
+    outputs: Vec<(Vec<f32>, Vec<usize>)>,
     task: Task,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
@@ -47,20 +46,22 @@ pub fn postprocess(
     inference_shape: (u32, u32),
 ) -> Results {
     match task {
-        Task::Detect => postprocess_detect(
-            output,
-            output_shape,
-            preprocess,
-            config,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
+        Task::Detect => {
+            let (output, shape) = &outputs[0];
+            postprocess_detect(
+                output,
+                shape,
+                preprocess,
+                config,
+                names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+            )
+        }
         Task::Segment => postprocess_segment(
-            output,
-            output_shape,
+            outputs,
             preprocess,
             config,
             names,
@@ -69,37 +70,38 @@ pub fn postprocess(
             speed,
             inference_shape,
         ),
-        Task::Pose => postprocess_pose(
-            output,
-            output_shape,
-            preprocess,
-            config,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
-        Task::Classify => postprocess_classify(
-            output,
-            output_shape,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
-        Task::Obb => postprocess_obb(
-            output,
-            output_shape,
-            preprocess,
-            config,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
+        Task::Pose => {
+            let (output, shape) = &outputs[0];
+            postprocess_pose(
+                output,
+                shape,
+                preprocess,
+                config,
+                names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+            )
+        }
+        Task::Classify => {
+            let (output, shape) = &outputs[0];
+            postprocess_classify(output, shape, names, orig_img, path, speed, inference_shape)
+        }
+        Task::Obb => {
+            let (output, shape) = &outputs[0];
+            postprocess_obb(
+                output,
+                shape,
+                preprocess,
+                config,
+                names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+            )
+        }
     }
 }
 
@@ -292,28 +294,169 @@ fn extract_detect_boxes(
     result
 }
 
-/// Post-process segmentation model output (placeholder).
+/// Post-process segmentation model output.
 #[allow(clippy::too_many_arguments)]
 fn postprocess_segment(
-    _output: &[f32],
-    _output_shape: &[usize],
+    outputs: Vec<(Vec<f32>, Vec<usize>)>,
     preprocess: &PreprocessResult,
-    _config: &InferenceConfig,
+    config: &InferenceConfig,
     names: &HashMap<usize, String>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    // TODO: Implement segmentation post-processing
-    // Segmentation models output both detection boxes and mask coefficients
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
-    // Placeholder - return empty masks
-    results.masks = Some(Masks::new(
-        Array3::zeros((0, 160, 160)),
-        preprocess.orig_shape,
-    ));
+    if outputs.len() < 2 {
+        // Fallback if protos missing
+        return results;
+    }
+
+    let (output0, shape0) = &outputs[0];
+    let (output1, shape1) = &outputs[1];
+
+    // output0: [1, 4 + nc + 32, 8400]
+    // output1: [1, 32, 160, 160] (protos)
+
+    // 1. Process Detections
+    // We need to parse shape0 to handle transposition
+    // "32" is standard number of masks, but let's derive it
+    // num_features = 4 + nc + num_masks
+    // We can assume num_masks=32 usually, but let's check.
+    // parse_detect_shape returns (classes, preds, transposed)
+    // It assumes features = 4 + classes. Here features = 4 + classes + masks.
+    // We can't use parse_detect_shape easily if we don't know masks, but standard is 32.
+    let num_masks = 32;
+    let expected_features = 4 + names.len() + num_masks;
+
+    // Manual shape check
+    let (num_preds, is_transposed) = if shape0.len() == 3 {
+        let (a, b) = (shape0[1], shape0[2]);
+        if a == expected_features {
+            (b, false) // [1, features, preds]
+        } else if b == expected_features {
+            (a, true) // [1, preds, features]
+        } else {
+            // Try to infer? simpler to assume standard [1, 116, 8400]
+            if a < b { (b, false) } else { (a, true) }
+        }
+    } else {
+        (0, false)
+    };
+
+    if output0.is_empty() || num_preds == 0 {
+        return results;
+    }
+
+    // Convert to 2D [preds, features]
+    let output_2d = if is_transposed {
+        Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)))
+    } else {
+        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)));
+        arr.t().to_owned()
+    };
+
+    // Filter and NMS
+    // Logic similar to extract_detect_boxes but we need to keep mask coefficients
+    let mut candidates = Vec::new(); // (bbox, score, class, original_index)
+
+    for i in 0..num_preds {
+        let scores = output_2d.slice(s![i, 4..4 + names.len()]);
+        let (best_class, best_score) = scores
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(idx, &score)| (idx, score))
+            .unwrap_or((0, 0.0));
+
+        if best_score < config.confidence_threshold {
+            continue;
+        }
+
+        // Box
+        let cx = output_2d[[i, 0]];
+        let cy = output_2d[[i, 1]];
+        let w = output_2d[[i, 2]];
+        let h = output_2d[[i, 3]];
+        let x1 = cx - w / 2.0;
+        let y1 = cy - h / 2.0;
+        let x2 = cx + w / 2.0;
+        let y2 = cy + h / 2.0;
+
+        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+        let clipped = clip_coords(&scaled, preprocess.orig_shape);
+
+        candidates.push((
+            [clipped[0], clipped[1], clipped[2], clipped[3]],
+            best_score,
+            best_class,
+            i, // Keep index to get coefficients
+        ));
+    }
+
+    if candidates.is_empty() {
+        return results;
+    }
+
+    // Prepare candidates for NMS (bbox, score, class)
+    let nms_candidates: Vec<_> = candidates
+        .iter()
+        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+        .collect();
+
+    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
+    let num_kept = keep_indices.len().min(config.max_detections);
+
+    // 2. Extract Box Results
+    let mut boxes_data = Array2::zeros((num_kept, 6));
+    let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
+
+    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+        let (bbox, score, class, orig_idx) = &candidates[keep_idx];
+        boxes_data[[out_idx, 0]] = bbox[0];
+        boxes_data[[out_idx, 1]] = bbox[1];
+        boxes_data[[out_idx, 2]] = bbox[2];
+        boxes_data[[out_idx, 3]] = bbox[3];
+        boxes_data[[out_idx, 4]] = *score;
+        boxes_data[[out_idx, 5]] = *class as f32;
+
+        // Extract coefficients: [orig_idx, 4+nc..]
+        let start = 4 + names.len();
+        let coeffs = output_2d.slice(s![*orig_idx, start..start + num_masks]);
+        for m in 0..num_masks {
+            mask_coeffs[[out_idx, m]] = coeffs[m];
+        }
+    }
+
+    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+
+    // 3. Process Masks
+    // Protos: [1, 32, 160, 160] -> [32, 25600]
+    let mh = shape1[2];
+    let mw = shape1[3];
+    let protos = Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec())
+        .unwrap_or_else(|_| Array2::zeros((0, 0)));
+
+    // Matrix Mul: [N, 32] x [32, 25600] -> [N, 25600]
+    let masks_flat = mask_coeffs.dot(&protos);
+
+    // Reshape to [N, 160, 160]
+    let mut masks_data = Array3::zeros((num_kept, mh, mw));
+    for i in 0..num_kept {
+        let row = masks_flat.row(i);
+        // Sigmoid
+        for j in 0..(mh * mw) {
+            let val = 1.0 / (1.0 + (-row[j]).exp());
+            let y = j / mw;
+            let x = j % mw;
+            masks_data[[i, y, x]] = val;
+        }
+    }
+
+    results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
     results
 }

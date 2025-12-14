@@ -100,7 +100,6 @@ impl InferenceConfig {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,4 +128,3 @@ mod tests {
         assert_eq!(config.num_threads, 8);
     }
 }
-

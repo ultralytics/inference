@@ -144,12 +144,8 @@ fn calculate_letterbox_params(
     let scale = (target_h / orig_h).min(target_w / orig_w);
 
     // New dimensions after scaling
-    let new_w = (orig_w * scale).round();
-    let new_h = (orig_h * scale).round();
-
-    // Ensure dimensions are divisible by stride
-    let new_w = ((new_w / stride as f32).ceil() * stride as f32) as u32;
-    let new_h = ((new_h / stride as f32).ceil() * stride as f32) as u32;
+    let new_w = (orig_w * scale).round() as u32;
+    let new_h = (orig_h * scale).round() as u32;
 
     // Calculate padding to center the image
     let pad_w = (target_size.1 as u32).saturating_sub(new_w);
@@ -179,28 +175,14 @@ fn letterbox_image(
 ) -> RgbImage {
     // Convert to RGB8
     let src_rgb = image.to_rgb8();
-    let (src_w, src_h) = src_rgb.dimensions();
-
-    // Create source image for fast_image_resize
-    let src_image = Image::from_vec_u8(
-        src_w,
-        src_h,
-        src_rgb.into_raw(),
-        fast_image_resize::PixelType::U8x3,
-    )
-    .expect("Failed to create source image");
-
-    // Create destination image
-    let mut dst_image = Image::new(new_width, new_height, fast_image_resize::PixelType::U8x3);
-
-    // Resize using SIMD-accelerated bilinear interpolation
-    let mut resizer = Resizer::new();
-    let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
-        fast_image_resize::FilterType::Bilinear,
-    ));
-    resizer
-        .resize(&src_image, &mut dst_image, Some(&options))
-        .expect("Failed to resize image");
+    
+    // Resize using image::imageops (Triangle = Bilinear)
+    let resized_rgb = image::imageops::resize(
+        &src_rgb,
+        new_width,
+        new_height,
+        image::imageops::FilterType::Triangle,
+    );
 
     // Create output image with letterbox color
     let mut output: RgbImage = ImageBuffer::from_pixel(
@@ -208,10 +190,6 @@ fn letterbox_image(
         target_size.0 as u32,
         Rgb(LETTERBOX_COLOR),
     );
-
-    // Create RgbImage from resized data
-    let resized_rgb: RgbImage = ImageBuffer::from_raw(new_width, new_height, dst_image.into_vec())
-        .expect("Failed to create resized image buffer");
 
     // Copy resized image onto output
     image::imageops::overlay(
