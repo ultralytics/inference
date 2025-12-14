@@ -2,7 +2,7 @@
 
 [package]
 name = "inference"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 authors = ["Glenn Jocher <glenn.jocher@ultralytics.com>", "Onuralp Sezer <onuralp@ultralytics.com>"]
 description = "Ultralytics YOLO inference library and CLI for Rust"
