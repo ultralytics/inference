@@ -175,6 +175,12 @@ fn run_prediction(args: &[String]) {
         None
     };
 
+    // Warn user if --save is specified but annotate feature is disabled
+    #[cfg(not(feature = "annotate"))]
+    if save {
+        eprintln!("WARNING ⚠️ --save requires the 'annotate' feature. Compile with --features annotate to enable saving.");
+    }
+
     // Print banner matching Ultralytics format (after model load to detect precision)
     let is_half = model.metadata().half || half;
     let precision = if is_half { "FP16" } else { "FP32" };
