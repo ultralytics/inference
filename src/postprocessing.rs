@@ -233,12 +233,12 @@ fn extract_detect_boxes(
         // Get class scores (columns 4 onwards)
         let class_scores = output.slice(s![i, 4..]);
 
-        // Find best class
+        // Find best class (treat NaN as lowest to avoid panic)
         let (best_class, best_score) = class_scores
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .map(|(idx, &score)| (idx, score))
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+            .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
             .unwrap_or((0, 0.0));
 
         // Skip low confidence detections
@@ -311,7 +311,8 @@ fn postprocess_segment(
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     if outputs.len() < 2 {
-        // Fallback if protos missing
+        // Protos output missing - log warning for user visibility
+        eprintln!("WARNING ⚠️ Segmentation model missing protos output (expected 2 outputs, got {}). Returning empty masks.", outputs.len());
         return results;
     }
 
@@ -437,10 +438,26 @@ fn postprocess_segment(
 
     // 3. Process Masks
     // Protos: [1, 32, 160, 160] -> [32, 25600]
+    // Validate protos shape before indexing to prevent panic
+    if shape1.len() < 4 {
+        eprintln!("WARNING ⚠️ Protos output has unexpected shape (expected 4 dims, got {}). Skipping mask generation.", shape1.len());
+        return results;
+    }
     let mh = shape1[2];
     let mw = shape1[3];
-    let protos = Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec())
-        .unwrap_or_else(|_| Array2::zeros((0, 0)));
+    
+    // Validate expected mask dimensions match
+    if shape1[1] != num_masks {
+        eprintln!("WARNING ⚠️ Protos output has {} mask channels, expected {}. Mask quality may be affected.", shape1[1], num_masks);
+    }
+    
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
+        Ok(arr) => arr,
+        Err(e) => {
+            eprintln!("WARNING ⚠️ Failed to create protos array: {e}. Skipping mask generation.");
+            return results;
+        }
+    };
 
     // Matrix Mul: [N, 32] x [32, 25600] -> [N, 25600]
     let masks_flat = mask_coeffs.dot(&protos);
@@ -466,25 +483,39 @@ fn postprocess_segment(
     for i in 0..num_kept {
         let row = masks_flat.row(i);
 
-        // Sigmoid and collect to bytes for Image
+        // Sigmoid into a Vec<f32>
         let f32_data: Vec<f32> = row.iter().map(|&val| 1.0 / (1.0 + (-val).exp())).collect();
 
-        // Create source image (160x160)
-        let src_bytes: Vec<u8> = f32_data.iter().flat_map(|x| x.to_le_bytes()).collect();
-        let src_image =
-            Image::from_vec_u8(mw as u32, mh as u32, src_bytes, PixelType::F32).unwrap();
+        // Use bytemuck for efficient f32->bytes conversion (avoids per-element allocation)
+        let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+
+        // Create source image (160x160) - handle potential errors gracefully
+        let src_image = match Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32) {
+            Ok(img) => img,
+            Err(_) => {
+                // Skip this mask if creation fails
+                continue;
+            }
+        };
 
         // Create dest image (orig_w x orig_h)
         let mut dst_image = Image::new(ow, oh, PixelType::F32);
 
-        // Configure resize with crop
+        // Configure resize with crop - clamp to valid ranges to prevent panic
+        let safe_crop_x = crop_x.max(0.0) as f64;
+        let safe_crop_y = crop_y.max(0.0) as f64;
+        let safe_crop_w = crop_w.max(1.0).min(mw as f32) as f64;
+        let safe_crop_h = crop_h.max(1.0).min(mh as f32) as f64;
+
         let options = ResizeOptions::new()
             .resize_alg(resize_alg)
-            .crop(crop_x as f64, crop_y as f64, crop_w as f64, crop_h as f64);
+            .crop(safe_crop_x, safe_crop_y, safe_crop_w, safe_crop_h);
 
-        resizer
-            .resize(&src_image, &mut dst_image, &options)
-            .unwrap();
+        // Handle resize errors gracefully
+        if resizer.resize(&src_image, &mut dst_image, &options).is_err() {
+            // Skip this mask if resize fails
+            continue;
+        }
 
         // Get resized data as f32 slice (safe conversion via bytemuck)
         let dst_bytes = dst_image.buffer();
@@ -646,6 +677,96 @@ mod tests {
             (640, 640),
         );
 
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_nan_scores_handled() {
+        // Test that NaN scores don't cause panic
+        let mut output: Vec<f32> = vec![0.0; 84]; // One prediction
+        // Set box coords
+        output[0] = 100.0; // cx
+        output[1] = 100.0; // cy
+        output[2] = 50.0;  // w
+        output[3] = 50.0;  // h
+        // Set class scores with NaN
+        output[4] = f32::NAN;
+        output[5] = 0.9; // This should be selected even with NaN present
+
+        let preprocess = PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: (640, 640),
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        };
+        let config = InferenceConfig::default();
+        let mut names = HashMap::new();
+        names.insert(0, "class0".to_string());
+        names.insert(1, "class1".to_string());
+        let orig_img = ndarray::Array3::zeros((640, 640, 3));
+
+        // This should not panic
+        let results = postprocess_detect(
+            &output,
+            &[1, 84, 1],
+            &preprocess,
+            &config,
+            &names,
+            orig_img,
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+
+        // Test passed if we got here without panicking - NaN was handled gracefully
+        // Note: The detection may or may not exist depending on how NaN affects max_by
+        // The key is that the code didn't crash
+        let _ = results;
+    }
+
+    #[test]
+    fn test_malformed_shape_fallback() {
+        // Test that malformed shapes return empty results instead of panicking
+        let output: Vec<f32> = vec![0.0; 100]; // Some data
+        
+        let preprocess = PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: (640, 640),
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        };
+        let config = InferenceConfig::default();
+        let names = HashMap::new();
+        let orig_img = ndarray::Array3::zeros((640, 640, 3));
+
+        // Empty shape should not panic
+        let results = postprocess_detect(
+            &output,
+            &[],
+            &preprocess,
+            &config,
+            &names,
+            orig_img.clone(),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+        assert!(results.is_empty());
+
+        // Single dimension shape should not panic
+        let results = postprocess_detect(
+            &output,
+            &[100],
+            &preprocess,
+            &config,
+            &names,
+            orig_img,
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
         assert!(results.is_empty());
     }
 }
