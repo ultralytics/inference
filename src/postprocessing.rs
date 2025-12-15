@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 
+use fast_image_resize::images::Image;
+use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{s, Array2, Array3, ArrayView2};
 
 use crate::inference::InferenceConfig;
@@ -19,7 +21,7 @@ use crate::utils::nms_per_class;
 ///
 /// # Arguments
 ///
-/// * `output` - Raw model output tensor.
+/// * `outputs` - Vector of raw model outputs (data, shape).
 /// * `task` - The task type (detect, segment, pose, etc.).
 /// * `preprocess` - Preprocessing result containing scale/padding info.
 /// * `config` - Inference configuration.
@@ -35,8 +37,7 @@ use crate::utils::nms_per_class;
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn postprocess(
-    output: &[f32],
-    output_shape: &[usize],
+    outputs: Vec<(Vec<f32>, Vec<usize>)>,
     task: Task,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
@@ -47,20 +48,22 @@ pub fn postprocess(
     inference_shape: (u32, u32),
 ) -> Results {
     match task {
-        Task::Detect => postprocess_detect(
-            output,
-            output_shape,
-            preprocess,
-            config,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
+        Task::Detect => {
+            let (output, shape) = &outputs[0];
+            postprocess_detect(
+                output,
+                shape,
+                preprocess,
+                config,
+                names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+            )
+        }
         Task::Segment => postprocess_segment(
-            output,
-            output_shape,
+            outputs,
             preprocess,
             config,
             names,
@@ -69,37 +72,38 @@ pub fn postprocess(
             speed,
             inference_shape,
         ),
-        Task::Pose => postprocess_pose(
-            output,
-            output_shape,
-            preprocess,
-            config,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
-        Task::Classify => postprocess_classify(
-            output,
-            output_shape,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
-        Task::Obb => postprocess_obb(
-            output,
-            output_shape,
-            preprocess,
-            config,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
+        Task::Pose => {
+            let (output, shape) = &outputs[0];
+            postprocess_pose(
+                output,
+                shape,
+                preprocess,
+                config,
+                names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+            )
+        }
+        Task::Classify => {
+            let (output, shape) = &outputs[0];
+            postprocess_classify(output, shape, names, orig_img, path, speed, inference_shape)
+        }
+        Task::Obb => {
+            let (output, shape) = &outputs[0];
+            postprocess_obb(
+                output,
+                shape,
+                preprocess,
+                config,
+                names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+            )
+        }
     }
 }
 
@@ -229,12 +233,12 @@ fn extract_detect_boxes(
         // Get class scores (columns 4 onwards)
         let class_scores = output.slice(s![i, 4..]);
 
-        // Find best class
+        // Find best class (treat NaN as lowest to avoid panic)
         let (best_class, best_score) = class_scores
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .map(|(idx, &score)| (idx, score))
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+            .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
             .unwrap_or((0, 0.0));
 
         // Skip low confidence detections
@@ -292,28 +296,250 @@ fn extract_detect_boxes(
     result
 }
 
-/// Post-process segmentation model output (placeholder).
+/// Post-process segmentation model output.
 #[allow(clippy::too_many_arguments)]
 fn postprocess_segment(
-    _output: &[f32],
-    _output_shape: &[usize],
+    outputs: Vec<(Vec<f32>, Vec<usize>)>,
     preprocess: &PreprocessResult,
-    _config: &InferenceConfig,
+    config: &InferenceConfig,
     names: &HashMap<usize, String>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    // TODO: Implement segmentation post-processing
-    // Segmentation models output both detection boxes and mask coefficients
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
-    // Placeholder - return empty masks
-    results.masks = Some(Masks::new(
-        Array3::zeros((0, 160, 160)),
-        preprocess.orig_shape,
-    ));
+    if outputs.len() < 2 {
+        // Protos output missing - log warning for user visibility
+        eprintln!("WARNING ⚠️ Segmentation model missing protos output (expected 2 outputs, got {}). Returning empty masks.", outputs.len());
+        return results;
+    }
+
+    let (output0, shape0) = &outputs[0];
+    let (output1, shape1) = &outputs[1];
+
+    // output0: [1, 4 + nc + 32, 8400]
+    // output1: [1, 32, 160, 160] (protos)
+
+    // 1. Process Detections
+    // We need to parse shape0 to handle transposition
+    // "32" is standard number of masks, but let's derive it
+    // num_features = 4 + nc + num_masks
+    // We can assume num_masks=32 usually, but let's check.
+    // parse_detect_shape returns (classes, preds, transposed)
+    // It assumes features = 4 + classes. Here features = 4 + classes + masks.
+    // We can't use parse_detect_shape easily if we don't know masks, but standard is 32.
+    let num_masks = 32;
+    let expected_features = 4 + names.len() + num_masks;
+
+    // Manual shape check
+    let (num_preds, is_transposed) = if shape0.len() == 3 {
+        let (a, b) = (shape0[1], shape0[2]);
+        if a == expected_features {
+            (b, false) // [1, features, preds]
+        } else if b == expected_features {
+            (a, true) // [1, preds, features]
+        } else {
+            // Try to infer? simpler to assume standard [1, 116, 8400]
+            if a < b { (b, false) } else { (a, true) }
+        }
+    } else {
+        (0, false)
+    };
+
+    if output0.is_empty() || num_preds == 0 {
+        return results;
+    }
+
+    // Convert to 2D [preds, features]
+    let output_2d = if is_transposed {
+        Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)))
+    } else {
+        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)));
+        arr.t().to_owned()
+    };
+
+    // Filter and NMS
+    // Logic similar to extract_detect_boxes but we need to keep mask coefficients
+    let mut candidates = Vec::new(); // (bbox, score, class, original_index)
+
+    for i in 0..num_preds {
+        let scores = output_2d.slice(s![i, 4..4 + names.len()]);
+        let (best_class, best_score) = scores
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(idx, &score)| (idx, score))
+            .unwrap_or((0, 0.0));
+
+        if best_score < config.confidence_threshold {
+            continue;
+        }
+
+        // Box
+        let cx = output_2d[[i, 0]];
+        let cy = output_2d[[i, 1]];
+        let w = output_2d[[i, 2]];
+        let h = output_2d[[i, 3]];
+        let x1 = cx - w / 2.0;
+        let y1 = cy - h / 2.0;
+        let x2 = cx + w / 2.0;
+        let y2 = cy + h / 2.0;
+
+        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+        let clipped = clip_coords(&scaled, preprocess.orig_shape);
+
+        candidates.push((
+            [clipped[0], clipped[1], clipped[2], clipped[3]],
+            best_score,
+            best_class,
+            i, // Keep index to get coefficients
+        ));
+    }
+
+    if candidates.is_empty() {
+        return results;
+    }
+
+    // Prepare candidates for NMS (bbox, score, class)
+    let nms_candidates: Vec<_> = candidates
+        .iter()
+        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+        .collect();
+
+    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
+    let num_kept = keep_indices.len().min(config.max_detections);
+
+    // 2. Extract Box Results
+    let mut boxes_data = Array2::zeros((num_kept, 6));
+    let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
+
+    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+        let (bbox, score, class, orig_idx) = &candidates[keep_idx];
+        boxes_data[[out_idx, 0]] = bbox[0];
+        boxes_data[[out_idx, 1]] = bbox[1];
+        boxes_data[[out_idx, 2]] = bbox[2];
+        boxes_data[[out_idx, 3]] = bbox[3];
+        boxes_data[[out_idx, 4]] = *score;
+        boxes_data[[out_idx, 5]] = *class as f32;
+
+        // Extract coefficients: [orig_idx, 4+nc..]
+        let start = 4 + names.len();
+        let coeffs = output_2d.slice(s![*orig_idx, start..start + num_masks]);
+        for m in 0..num_masks {
+            mask_coeffs[[out_idx, m]] = coeffs[m];
+        }
+    }
+
+    results.boxes = Some(Boxes::new(boxes_data.clone(), preprocess.orig_shape));
+
+    // 3. Process Masks
+    // Protos: [1, 32, 160, 160] -> [32, 25600]
+    // Validate protos shape before indexing to prevent panic
+    if shape1.len() < 4 {
+        eprintln!("WARNING ⚠️ Protos output has unexpected shape (expected 4 dims, got {}). Skipping mask generation.", shape1.len());
+        return results;
+    }
+    let mh = shape1[2];
+    let mw = shape1[3];
+    
+    // Validate expected mask dimensions match
+    if shape1[1] != num_masks {
+        eprintln!("WARNING ⚠️ Protos output has {} mask channels, expected {}. Mask quality may be affected.", shape1[1], num_masks);
+    }
+    
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
+        Ok(arr) => arr,
+        Err(e) => {
+            eprintln!("WARNING ⚠️ Failed to create protos array: {e}. Skipping mask generation.");
+            return results;
+        }
+    };
+
+    // Matrix Mul: [N, 32] x [32, 25600] -> [N, 25600]
+    let masks_flat = mask_coeffs.dot(&protos);
+
+    // Resize and crop to original image size
+    let (oh, ow) = preprocess.orig_shape;
+    let (th, tw) = inference_shape;
+    let (pad_top, pad_left) = preprocess.padding;
+
+    // Pre-calculate crop parameters (same for all masks)
+    let scale_w = mw as f32 / tw as f32;
+    let scale_h = mh as f32 / th as f32;
+    let crop_x = pad_left * scale_w;
+    let crop_y = pad_top * scale_h;
+    let crop_w = mw as f32 - 2.0 * crop_x;
+    let crop_h = mh as f32 - 2.0 * crop_y;
+
+    // Process each mask sequentially (fastest for typical 1-10 masks)
+    let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
+    let mut resizer = Resizer::new();
+    let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
+
+    for i in 0..num_kept {
+        let row = masks_flat.row(i);
+
+        // Sigmoid into a Vec<f32>
+        let f32_data: Vec<f32> = row.iter().map(|&val| 1.0 / (1.0 + (-val).exp())).collect();
+
+        // Use bytemuck for efficient f32->bytes conversion (avoids per-element allocation)
+        let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+
+        // Create source image (160x160) - handle potential errors gracefully
+        let src_image = match Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32) {
+            Ok(img) => img,
+            Err(_) => {
+                // Skip this mask if creation fails
+                continue;
+            }
+        };
+
+        // Create dest image (orig_w x orig_h)
+        let mut dst_image = Image::new(ow, oh, PixelType::F32);
+
+        // Configure resize with crop - clamp to valid ranges to prevent panic
+        let safe_crop_x = crop_x.max(0.0) as f64;
+        let safe_crop_y = crop_y.max(0.0) as f64;
+        let safe_crop_w = crop_w.max(1.0).min(mw as f32) as f64;
+        let safe_crop_h = crop_h.max(1.0).min(mh as f32) as f64;
+
+        let options = ResizeOptions::new()
+            .resize_alg(resize_alg)
+            .crop(safe_crop_x, safe_crop_y, safe_crop_w, safe_crop_h);
+
+        // Handle resize errors gracefully
+        if resizer.resize(&src_image, &mut dst_image, &options).is_err() {
+            // Skip this mask if resize fails
+            continue;
+        }
+
+        // Get resized data as f32 slice (safe conversion via bytemuck)
+        let dst_bytes = dst_image.buffer();
+        let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
+
+        // Apply bbox cropping and store directly to output array
+        let x1 = boxes_data[[i, 0]].max(0.0).min(ow as f32);
+        let y1 = boxes_data[[i, 1]].max(0.0).min(oh as f32);
+        let x2 = boxes_data[[i, 2]].max(0.0).min(ow as f32);
+        let y2 = boxes_data[[i, 3]].max(0.0).min(oh as f32);
+
+        for y in 0..oh as usize {
+            for x in 0..ow as usize {
+                let val = dst_slice[y * ow as usize + x];
+                let x_f = x as f32;
+                let y_f = y as f32;
+                if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
+                    masks_data[[i, y, x]] = val;
+                }
+            }
+        }
+    }
+
+    results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
     results
 }
@@ -451,6 +677,96 @@ mod tests {
             (640, 640),
         );
 
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_nan_scores_handled() {
+        // Test that NaN scores don't cause panic
+        let mut output: Vec<f32> = vec![0.0; 84]; // One prediction
+        // Set box coords
+        output[0] = 100.0; // cx
+        output[1] = 100.0; // cy
+        output[2] = 50.0;  // w
+        output[3] = 50.0;  // h
+        // Set class scores with NaN
+        output[4] = f32::NAN;
+        output[5] = 0.9; // This should be selected even with NaN present
+
+        let preprocess = PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: (640, 640),
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        };
+        let config = InferenceConfig::default();
+        let mut names = HashMap::new();
+        names.insert(0, "class0".to_string());
+        names.insert(1, "class1".to_string());
+        let orig_img = ndarray::Array3::zeros((640, 640, 3));
+
+        // This should not panic
+        let results = postprocess_detect(
+            &output,
+            &[1, 84, 1],
+            &preprocess,
+            &config,
+            &names,
+            orig_img,
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+
+        // Test passed if we got here without panicking - NaN was handled gracefully
+        // Note: The detection may or may not exist depending on how NaN affects max_by
+        // The key is that the code didn't crash
+        let _ = results;
+    }
+
+    #[test]
+    fn test_malformed_shape_fallback() {
+        // Test that malformed shapes return empty results instead of panicking
+        let output: Vec<f32> = vec![0.0; 100]; // Some data
+        
+        let preprocess = PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: (640, 640),
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        };
+        let config = InferenceConfig::default();
+        let names = HashMap::new();
+        let orig_img = ndarray::Array3::zeros((640, 640, 3));
+
+        // Empty shape should not panic
+        let results = postprocess_detect(
+            &output,
+            &[],
+            &preprocess,
+            &config,
+            &names,
+            orig_img.clone(),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+        assert!(results.is_empty());
+
+        // Single dimension shape should not panic
+        let results = postprocess_detect(
+            &output,
+            &[100],
+            &preprocess,
+            &config,
+            &names,
+            orig_img,
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
         assert!(results.is_empty());
     }
 }

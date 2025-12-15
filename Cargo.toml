@@ -2,7 +2,7 @@
 
 [package]
 name = "inference"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 authors = ["Glenn Jocher <glenn.jocher@ultralytics.com>", "Onuralp Sezer <onuralp@ultralytics.com>"]
 description = "Ultralytics YOLO inference library and CLI for Rust"
@@ -34,7 +34,9 @@ path = "src/main.rs"
 # Core - Image loading and processing
 image = "0.25"
 jpeg-decoder = "0.3"
-fast_image_resize = { version = "5.1", features = ["image"] }
+fast_image_resize = { version = "5.4", features = ["image", "rayon"] }
+# Workaround: Pin zune-jpeg to 0.5.5 due to a macOS-specific bug in 0.5.6
+zune-jpeg = "=0.5.5"
 
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "0.17", features = ["rayon"] }
@@ -46,6 +48,8 @@ ort = { git = "https://github.com/pykeio/ort.git", default-features = false, fea
 half = { version = "2.4", features = ["num-traits"] }
 ureq = "3.1.4"
 dirs = "6.0"
+bytemuck = { version = "1.21", features = ["derive"] }
+rayon = "1.10"
 
 # Optional - Image annotation (for --save feature)
 imageproc = { version = "0.25", optional = true }

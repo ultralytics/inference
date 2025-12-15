@@ -223,6 +223,76 @@ pub fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
         let conf = boxes.conf();
         let cls = boxes.cls();
 
+        // Create an overlay image for masks to handle overlaps correctly (Python-style)
+        let mut overlay = img.clone();
+        let mut mask_present = false;
+
+        // Draw masks onto the overlay (opaque, last-one-wins for overlaps)
+        if let Some(ref masks) = result.masks {
+            let (_orig_h, _orig_w) = result.orig_shape();
+            let (mask_n, _mask_h, _mask_w) = masks.data.dim();
+
+            for i in 0..boxes.len() {
+                // If we have fewer masks than boxes, skip
+                if i >= mask_n {
+                    break;
+                }
+
+                let class_id = cls[i] as usize;
+                let color = get_class_color(class_id);
+                let (r, g, b) = (color.0[0], color.0[1], color.0[2]);
+
+                // Mark that we have at least one mask to blend
+                mask_present = true;
+
+                // Get bounding box in original image coordinates
+                let x1 = xyxy[[i, 0]].max(0.0).min(width as f32) as u32;
+                let y1 = xyxy[[i, 1]].max(0.0).min(height as f32) as u32;
+                let x2 = xyxy[[i, 2]].max(0.0).min(width as f32) as u32;
+                let y2 = xyxy[[i, 3]].max(0.0).min(height as f32) as u32;
+
+                for y in y1..y2 {
+                    for x in x1..x2 {
+                        // Masks are now resized to original image size in postprocessing
+                        // So we can access them directly with (x, y) coordinates
+                        if masks.data[[i, y as usize, x as usize]] > 0.5 {
+                            // Draw solid color on overlay
+                            let pixel = overlay.get_pixel_mut(x, y);
+                            pixel.0[0] = r;
+                            pixel.0[1] = g;
+                            pixel.0[2] = b;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Blend overlay with original image if any masks were drawn
+        if mask_present {
+            let alpha = 0.3; // Global opacity for masks
+            // Use iterator for speed (though bounds check is minimal)
+            let (width, height) = img.dimensions();
+            for y in 0..height {
+                for x in 0..width {
+                    let p_img = img.get_pixel_mut(x, y);
+                    let p_overlay = overlay.get_pixel(x, y);
+
+                    // Python blends everything: im = im * (1-alpha) + overlay * alpha
+                    // Since overlay was initialized with img, pixels with no mask satisfy: overlay == img.
+                    // So: img * 0.7 + img * 0.3 = img. (No change).
+                    // This is safe and correct.
+
+                    p_img.0[0] =
+                        (p_overlay.0[0] as f32 * alpha + p_img.0[0] as f32 * (1.0 - alpha)) as u8;
+                    p_img.0[1] =
+                        (p_overlay.0[1] as f32 * alpha + p_img.0[1] as f32 * (1.0 - alpha)) as u8;
+                    p_img.0[2] =
+                        (p_overlay.0[2] as f32 * alpha + p_img.0[2] as f32 * (1.0 - alpha)) as u8;
+                }
+            }
+        }
+        // --- MASK OVERLAY END ---
+
         for i in 0..boxes.len() {
             let class_id = cls[i] as usize;
             let confidence = conf[i];
@@ -290,10 +360,22 @@ pub fn annotate_image(image: &DynamicImage, result: &Results) -> DynamicImage {
                 let text_x = x1;
 
                 // Draw background
-                if text_x >= 0 && text_y >= 0 && text_x + text_w < width as i32 && text_y + text_h < height as i32 {
-                   let rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-                   draw_filled_rect_mut(&mut img, rect, color);
-                   draw_text_mut(&mut img, Rgb([255, 255, 255]), text_x, text_y, scale, f, &label);
+                if text_x >= 0
+                    && text_y >= 0
+                    && text_x + text_w < width as i32
+                    && text_y + text_h < height as i32
+                {
+                    let rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+                    draw_filled_rect_mut(&mut img, rect, color);
+                    draw_text_mut(
+                        &mut img,
+                        Rgb([255, 255, 255]),
+                        text_x,
+                        text_y,
+                        scale,
+                        f,
+                        &label,
+                    );
                 }
             }
         }

@@ -146,24 +146,6 @@ fn run_prediction(args: &[String]) {
         }
     };
 
-    // Create save directory if --save is specified
-    #[cfg(feature = "annotate")]
-    let save_dir = if save {
-        let dir = find_next_run_dir("runs/detect", "predict");
-        fs::create_dir_all(&dir).expect("Failed to create save directory");
-        Some(dir)
-    } else {
-        None
-    };
-
-    // Warn if --save is used without annotate feature
-    #[cfg(not(feature = "annotate"))]
-    if save {
-        eprintln!(
-            "WARNING: --save requires the 'annotate' feature. Rebuild with: cargo build --features annotate"
-        );
-    }
-
     // Load model
     let config = InferenceConfig::new()
         .with_confidence(conf_threshold)
@@ -177,6 +159,27 @@ fn run_prediction(args: &[String]) {
             process::exit(1);
         }
     };
+
+    // Create save directory if --save is specified
+    #[cfg(feature = "annotate")]
+    let save_dir = if save {
+        let parent_dir = if model.task().has_masks() {
+            "runs/segment"
+        } else {
+            "runs/detect"
+        };
+        let dir = find_next_run_dir(parent_dir, "predict");
+        fs::create_dir_all(&dir).expect("Failed to create save directory");
+        Some(dir)
+    } else {
+        None
+    };
+
+    // Warn user if --save is specified but annotate feature is disabled
+    #[cfg(not(feature = "annotate"))]
+    if save {
+        eprintln!("WARNING ⚠️ --save requires the 'annotate' feature. Compile with --features annotate to enable saving.");
+    }
 
     // Print banner matching Ultralytics format (after model load to detect precision)
     let is_half = model.metadata().half || half;
