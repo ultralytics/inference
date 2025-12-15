@@ -310,7 +310,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] ONNX model metadata parsing
 - [x] Ultralytics-compatible Results API
 - [x] Directory/glob source support
-- [ ] Segmentation post-processing
+- [x] Segmentation post-processing
 - [ ] Pose estimation post-processing
 - [ ] Classification inference
 - [ ] OBB (oriented bounding box) support

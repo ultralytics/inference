@@ -188,6 +188,20 @@ name = "bytemuck"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "byteorder"
@@ -398,6 +412,7 @@ dependencies = [
  "document-features",
  "image",
  "num-traits",
+ "rayon",
  "thiserror",
 ]
 
@@ -563,7 +578,7 @@ dependencies = [
  "rgb",
  "tiff",
  "zune-core 0.5.0",
- "zune-jpeg 0.5.6",
+ "zune-jpeg 0.5.5",
 ]
 
 [[package]]
@@ -602,9 +617,10 @@ checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
 
 [[package]]
 name = "inference"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ab_glyph",
+ "bytemuck",
  "dirs",
  "fast_image_resize",
  "half",
@@ -613,7 +629,9 @@ dependencies = [
  "jpeg-decoder",
  "ndarray",
  "ort",
+ "rayon",
  "ureq",
+ "zune-jpeg 0.5.5",
 ]
 
 [[package]]
@@ -1010,7 +1028,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "ort"
 version = "2.0.0-rc.10"
-source = "git+https://github.com/pykeio/ort.git#c5b68a1cf606a4fa148096b8a239febaf96cd279"
+source = "git+https://github.com/pykeio/ort.git#0a593a59d778aa75d0617429c4620dcdc414427a"
 dependencies = [
  "half",
  "ndarray",
@@ -1023,7 +1041,7 @@ dependencies = [
 [[package]]
 name = "ort-sys"
 version = "2.0.0-rc.10"
-source = "git+https://github.com/pykeio/ort.git#c5b68a1cf606a4fa148096b8a239febaf96cd279"
+source = "git+https://github.com/pykeio/ort.git#0a593a59d778aa75d0617429c4620dcdc414427a"
 dependencies = [
  "glob",
  "hmac-sha256",
@@ -1954,9 +1972,9 @@ dependencies = [
 
 [[package]]
 name = "zune-jpeg"
-version = "0.5.6"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f520eebad972262a1dde0ec455bce4f8b298b1e5154513de58c114c4c54303e8"
+checksum = "dc6fb7703e32e9a07fb3f757360338b3a567a5054f21b5f52a666752e333d58e"
 dependencies = [
  "zune-core 0.5.0",
 ]
