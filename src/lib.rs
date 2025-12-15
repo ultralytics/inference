@@ -69,6 +69,7 @@ pub mod results;
 pub mod source;
 pub mod task;
 pub mod utils;
+pub mod color;
 
 // Re-export main types for convenience
 pub use error::{InferenceError, Result};
