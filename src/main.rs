@@ -163,10 +163,12 @@ fn run_prediction(args: &[String]) {
     // Create save directory if --save is specified
     #[cfg(feature = "annotate")]
     let save_dir = if save {
-        let parent_dir = if model.task().has_masks() {
-            "runs/segment"
-        } else {
-            "runs/detect"
+        let parent_dir = match model.task() {
+            inference::task::Task::Detect => "runs/detect",
+            inference::task::Task::Segment => "runs/segment",
+            inference::task::Task::Pose => "runs/pose",
+            inference::task::Task::Classify => "runs/classify",
+            inference::task::Task::Obb => "runs/obb",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         fs::create_dir_all(&dir).expect("Failed to create save directory");
@@ -252,7 +254,7 @@ fn run_prediction(args: &[String]) {
             #[cfg(feature = "annotate")]
             if let Some(ref dir) = save_dir {
                 if let Ok(img) = load_image(image_path) {
-                    let annotated = annotate_image(&img, &result);
+                    let annotated = annotate_image(&img, &result, None);
                     let filename = Path::new(image_path)
                         .file_name()
                         .unwrap_or_default()
