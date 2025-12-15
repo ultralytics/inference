@@ -24,8 +24,9 @@ use std::fs;
 
 #[cfg(feature = "annotate")]
 use inference::annotate::{annotate_image, find_next_run_dir, load_image};
+pub mod color;
 
-use inference::{InferenceConfig, Results, YOLOModel, VERSION};
+use inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
@@ -163,10 +164,12 @@ fn run_prediction(args: &[String]) {
     // Create save directory if --save is specified
     #[cfg(feature = "annotate")]
     let save_dir = if save {
-        let parent_dir = if model.task().has_masks() {
-            "runs/segment"
-        } else {
-            "runs/detect"
+        let parent_dir = match model.task() {
+            inference::task::Task::Detect => "runs/detect",
+            inference::task::Task::Segment => "runs/segment",
+            inference::task::Task::Pose => "runs/pose",
+            inference::task::Task::Classify => "runs/classify",
+            inference::task::Task::Obb => "runs/obb",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         fs::create_dir_all(&dir).expect("Failed to create save directory");
@@ -178,7 +181,9 @@ fn run_prediction(args: &[String]) {
     // Warn user if --save is specified but annotate feature is disabled
     #[cfg(not(feature = "annotate"))]
     if save {
-        eprintln!("WARNING ⚠️ --save requires the 'annotate' feature. Compile with --features annotate to enable saving.");
+        eprintln!(
+            "WARNING ⚠️ --save requires the 'annotate' feature. Compile with --features annotate to enable saving."
+        );
     }
 
     // Print banner matching Ultralytics format (after model load to detect precision)
@@ -252,7 +257,7 @@ fn run_prediction(args: &[String]) {
             #[cfg(feature = "annotate")]
             if let Some(ref dir) = save_dir {
                 if let Ok(img) = load_image(image_path) {
-                    let annotated = annotate_image(&img, &result);
+                    let annotated = annotate_image(&img, &result, None);
                     let filename = Path::new(image_path)
                         .file_name()
                         .unwrap_or_default()
@@ -335,7 +340,23 @@ fn format_detection_summary(result: &Results) -> String {
 
         parts.join(", ")
     } else if result.probs.is_some() {
-        "classification".to_string()
+        if let Some(probs) = &result.probs {
+            let top5 = probs.top5();
+            let parts: Vec<String> = top5
+                .iter()
+                .map(|&i| {
+                    let name = result
+                        .names
+                        .get(&i)
+                        .map(String::as_str)
+                        .unwrap_or("unknown");
+                    format!("{} {:.2}", name, probs.data[[i]])
+                })
+                .collect();
+            parts.join(", ")
+        } else {
+            "classification".to_string()
+        }
     } else {
         String::new()
     }

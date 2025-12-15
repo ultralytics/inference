@@ -5,7 +5,6 @@
 //! This module handles all image preprocessing operations needed before
 //! running YOLO model inference, including resizing, padding, and normalization.
 
-
 use half::f16;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
 use ndarray::{Array3, Array4};
@@ -110,7 +109,6 @@ pub fn preprocess_image_with_precision(
         None
     };
 
-
     PreprocessResult {
         tensor,
         tensor_f16,
@@ -189,8 +187,9 @@ fn letterbox_image(
 
     // Resize using SIMD-accelerated bilinear interpolation
     let mut resizer = Resizer::new();
-    let options =
-        ResizeOptions::new().resize_alg(ResizeAlg::Convolution(fast_image_resize::FilterType::Bilinear));
+    let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
+        fast_image_resize::FilterType::Bilinear,
+    ));
     resizer
         .resize(&src_image, &mut dst_image, Some(&options))
         .expect("Failed to resize image");
@@ -366,6 +365,127 @@ pub fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
         coords[2].clamp(0.0, w),
         coords[3].clamp(0.0, h),
     ]
+}
+
+/// Preprocess an image for YOLO classification (Center Crop).
+///
+/// Resizes the image so the shortest side matches `target_size`, then center crops.
+///
+/// # Arguments
+///
+/// * `image` - Input image.
+/// * `target_size` - Target size as (height, width).
+/// * `half` - If true, also generate FP16 tensor.
+///
+/// # Returns
+///
+/// Preprocessed tensor and transform information.
+#[must_use]
+pub fn preprocess_image_center_crop(
+    image: &DynamicImage,
+    target_size: (usize, usize),
+    half: bool,
+) -> PreprocessResult {
+    let (orig_width, orig_height) = image.dimensions();
+    let orig_shape = (orig_height, orig_width);
+
+    // Perform center crop resize
+    let (cropped, scale) = center_crop_image(image, target_size);
+
+    // Convert to normalized NCHW tensor
+    let tensor = image_to_tensor(&cropped);
+
+    // Optionally compute FP16 tensor
+    let tensor_f16 = if half {
+        Some(image_to_tensor_f16(&cropped))
+    } else {
+        None
+    };
+
+    // For classification, we don't need complex coordinate mapping back to original
+    // But we provide approximate scale/padding to satisfy strict types if needed.
+    // In classification, we rarely map bounding boxes back, so these are less critical.
+    let padding = (0.0, 0.0);
+
+    PreprocessResult {
+        tensor,
+        tensor_f16,
+        orig_shape,
+        scale,
+        padding,
+    }
+}
+
+/// Resize and center crop image.
+///
+/// Resizes the image such that the shortest side equals the target dimension,
+/// maintaining aspect ratio, then crops the center `target_size`.
+fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbImage, (f32, f32)) {
+    use fast_image_resize::{images::Image, PixelType, ResizeAlg, ResizeOptions, Resizer};
+
+    let (src_w, src_h) = image.dimensions();
+    let (target_h, target_w) = (target_size.0 as u32, target_size.1 as u32);
+
+    // Calculate scale to "cover" the target area
+    // scale = max(target_w / src_w, target_h / src_h)
+    let scale_x = target_w as f32 / src_w as f32;
+    let scale_y = target_h as f32 / src_h as f32;
+    let scale = scale_x.max(scale_y);
+
+    let (new_w, new_h) = if scale_x >= scale_y {
+        (target_w, (src_h as f32 * scale_x) as u32)
+    } else {
+        ((src_w as f32 * scale_y) as u32, target_h)
+    };
+
+    // Resize first
+    let src_rgb = image.to_rgb8();
+    let src_image = Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), PixelType::U8x3)
+        .expect("Failed to create source image");
+
+    // Ensure dimensions are valid (>0)
+    let safe_new_w = new_w.max(1);
+    let safe_new_h = new_h.max(1);
+
+    let mut dst_image = Image::new(safe_new_w, safe_new_h, PixelType::U8x3);
+
+    let mut resizer = Resizer::new();
+    let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
+        fast_image_resize::FilterType::Bilinear,
+    ));
+    resizer
+        .resize(&src_image, &mut dst_image, Some(&options))
+        .expect("Failed to resize image");
+
+    // Convert back to RgbImage to crop
+    let resized_buffer = dst_image.into_vec();
+    let resized_rgb = RgbImage::from_raw(safe_new_w, safe_new_h, resized_buffer)
+        .expect("Failed to create resized buffer");
+
+    // Calculate crop offsets using Banker's Rounding (to match Python round())
+    let crop_x_float = (new_w.saturating_sub(target_w)) as f32 / 2.0;
+    let crop_y_float = (new_h.saturating_sub(target_h)) as f32 / 2.0;
+
+    let crop_x = bankers_round(crop_x_float) as u32;
+    let crop_y = bankers_round(crop_y_float) as u32;
+
+    // Perform center crop
+    let cropped =
+        image::imageops::crop_imm(&resized_rgb, crop_x, crop_y, target_w, target_h).to_image();
+
+    (cropped, (scale, scale))
+}
+
+/// Round float to nearest integer, rounding half to even (Banker's Rounding).
+/// This matches Python's round() behavior.
+fn bankers_round(v: f32) -> f32 {
+    let n = v.floor();
+    let d = v - n;
+    if (d - 0.5).abs() < 1e-6 {
+        if n % 2.0 == 0.0 { n } else { n + 1.0 }
+    } else {
+        v.round()
+    }
 }
 
 #[cfg(test)]
