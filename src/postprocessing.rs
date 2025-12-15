@@ -544,28 +544,179 @@ fn postprocess_segment(
     results
 }
 
-/// Post-process pose estimation model output (placeholder).
+/// Post-process pose estimation model output.
+///
+/// YOLO pose models output shape is typically [1, 56, 8400] where:
+/// - 56 = 4 (bbox) + 1 (class for person) + 51 (17 keypoints × 3)
+/// - 8400 = number of predictions (varies by input size)
+/// Each keypoint has 3 values: [x, y, confidence]
 #[allow(clippy::too_many_arguments)]
 fn postprocess_pose(
-    _output: &[f32],
-    _output_shape: &[usize],
+    output: &[f32],
+    output_shape: &[usize],
     preprocess: &PreprocessResult,
-    _config: &InferenceConfig,
+    config: &InferenceConfig,
     names: &HashMap<usize, String>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    // TODO: Implement pose estimation post-processing
-    // Pose models output boxes + keypoints
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
-    // Placeholder - return empty keypoints
-    results.keypoints = Some(Keypoints::new(
-        Array3::zeros((0, 17, 3)),
-        preprocess.orig_shape,
-    ));
+    // Standard COCO pose has 17 keypoints, each with (x, y, conf)
+    let num_keypoints = 17;
+    let kpt_dim = 3; // x, y, visibility/confidence
+    let kpt_features = num_keypoints * kpt_dim; // 51
+
+    // Pose typically has 1 class (person), so features = 4 + 1 + 51 = 56
+    let num_classes = names.len().max(1);
+    let expected_features = 4 + num_classes + kpt_features;
+
+    // Parse output shape
+    let (num_preds, is_transposed) = if output_shape.len() == 3 {
+        let (a, b) = (output_shape[1], output_shape[2]);
+        if a == expected_features || (a < b && a >= 4 + kpt_features) {
+            (b, false) // [1, features, preds]
+        } else {
+            (a, true) // [1, preds, features]
+        }
+    } else if output_shape.len() == 2 {
+        let (a, b) = (output_shape[0], output_shape[1]);
+        if a < b { (b, false) } else { (a, true) }
+    } else {
+        (0, false)
+    };
+
+    if output.is_empty() || num_preds == 0 {
+        return results;
+    }
+
+    // Infer actual feature count from data
+    let actual_features = output.len() / num_preds;
+    if actual_features < 4 + kpt_features {
+        eprintln!("WARNING ⚠️ Pose model has insufficient features ({actual_features}), expected at least {}", 4 + kpt_features);
+        return results;
+    }
+
+    // Convert to 2D [preds, features]
+    let output_2d = if is_transposed {
+        Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)))
+    } else {
+        let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)));
+        arr.t().to_owned()
+    };
+
+    if output_2d.is_empty() {
+        return results;
+    }
+
+    // Derive number of classes from actual features
+    let derived_classes = actual_features.saturating_sub(4 + kpt_features);
+    let num_classes = derived_classes.max(1);
+
+    // Filter and NMS - store candidates with keypoints
+    let mut candidates: Vec<([f32; 4], f32, usize, Vec<[f32; 3]>)> = Vec::new();
+
+    for i in 0..num_preds {
+        // Get class score(s) - for pose, typically just "person" class
+        let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
+        let (best_class, best_score) = class_scores
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+            .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
+            .unwrap_or((0, 0.0));
+
+        if best_score < config.confidence_threshold {
+            continue;
+        }
+
+        // Extract box coordinates (xywh format)
+        let cx = output_2d[[i, 0]];
+        let cy = output_2d[[i, 1]];
+        let w = output_2d[[i, 2]];
+        let h = output_2d[[i, 3]];
+
+        // Convert to xyxy
+        let x1 = cx - w / 2.0;
+        let y1 = cy - h / 2.0;
+        let x2 = cx + w / 2.0;
+        let y2 = cy + h / 2.0;
+
+        // Scale box to original image space
+        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+        let clipped = clip_coords(&scaled, preprocess.orig_shape);
+
+        // Extract keypoints (after class scores)
+        let kpt_start = 4 + num_classes;
+        let mut keypoints = Vec::with_capacity(num_keypoints);
+        for k in 0..num_keypoints {
+            let kpt_offset = kpt_start + k * kpt_dim;
+            let kpt_x = output_2d[[i, kpt_offset]];
+            let kpt_y = output_2d[[i, kpt_offset + 1]];
+            let kpt_conf = output_2d[[i, kpt_offset + 2]];
+
+            // Scale keypoint coordinates to original image space
+            let scaled_kpt = scale_coords(&[kpt_x, kpt_y, kpt_x, kpt_y], preprocess.scale, preprocess.padding);
+            let (oh, ow) = preprocess.orig_shape;
+            let scaled_x = scaled_kpt[0].max(0.0).min(ow as f32);
+            let scaled_y = scaled_kpt[1].max(0.0).min(oh as f32);
+
+            keypoints.push([scaled_x, scaled_y, kpt_conf]);
+        }
+
+        candidates.push((
+            [clipped[0], clipped[1], clipped[2], clipped[3]],
+            best_score,
+            best_class,
+            keypoints,
+        ));
+    }
+
+    if candidates.is_empty() {
+        results.keypoints = Some(Keypoints::new(
+            Array3::zeros((0, num_keypoints, kpt_dim)),
+            preprocess.orig_shape,
+        ));
+        return results;
+    }
+
+    // Apply NMS
+    let nms_candidates: Vec<_> = candidates
+        .iter()
+        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+        .collect();
+    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
+    let num_kept = keep_indices.len().min(config.max_detections);
+
+    // Build output arrays
+    let mut boxes_data = Array2::zeros((num_kept, 6));
+    let mut keypoints_data = Array3::zeros((num_kept, num_keypoints, kpt_dim));
+
+    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+        let (bbox, score, class, kpts) = &candidates[keep_idx];
+
+        // Store box data
+        boxes_data[[out_idx, 0]] = bbox[0];
+        boxes_data[[out_idx, 1]] = bbox[1];
+        boxes_data[[out_idx, 2]] = bbox[2];
+        boxes_data[[out_idx, 3]] = bbox[3];
+        boxes_data[[out_idx, 4]] = *score;
+        boxes_data[[out_idx, 5]] = *class as f32;
+
+        // Store keypoints
+        for (k, kpt) in kpts.iter().enumerate() {
+            keypoints_data[[out_idx, k, 0]] = kpt[0]; // x
+            keypoints_data[[out_idx, k, 1]] = kpt[1]; // y
+            keypoints_data[[out_idx, k, 2]] = kpt[2]; // confidence
+        }
+    }
+
+    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    results.keypoints = Some(Keypoints::new(keypoints_data, preprocess.orig_shape));
 
     results
 }
@@ -586,32 +737,187 @@ fn postprocess_classify(
         return results;
     }
 
-    // Classification output is class probabilities (softmax applied)
-    let probs = ndarray::Array1::from_vec(output.to_vec());
+    // Filter out NaN values and ensure valid probabilities
+    let mut probs_vec: Vec<f32> = output
+        .iter()
+        .map(|&v| if v.is_nan() { 0.0 } else { v })
+        .collect();
+
+    // Check if softmax is already applied (sum ≈ 1.0)
+    let sum: f32 = probs_vec.iter().sum();
+    if (sum - 1.0).abs() > 0.1 && sum > 0.0 {
+        // Apply softmax normalization
+        let max_val = probs_vec.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let exp_vals: Vec<f32> = probs_vec.iter().map(|&v| (v - max_val).exp()).collect();
+        let exp_sum: f32 = exp_vals.iter().sum();
+        if exp_sum > 0.0 {
+            probs_vec = exp_vals.iter().map(|&v| v / exp_sum).collect();
+        }
+    }
+
+    let probs = ndarray::Array1::from_vec(probs_vec);
     results.probs = Some(Probs::new(probs));
 
     results
 }
 
-/// Post-process OBB (oriented bounding box) model output (placeholder).
+/// Post-process OBB (oriented bounding box) model output.
+///
+/// YOLO OBB models output shape is typically [1, 4+nc+1, 8400] where:
+/// - 4 = bbox (xywh center format)
+/// - nc = number of classes (e.g., 15 for DOTA dataset)
+/// - 1 = rotation angle in radians
+/// The angle is the last value, typically in range [-π/2, π/2]
 #[allow(clippy::too_many_arguments)]
 fn postprocess_obb(
-    _output: &[f32],
-    _output_shape: &[usize],
+    output: &[f32],
+    output_shape: &[usize],
     preprocess: &PreprocessResult,
-    _config: &InferenceConfig,
+    config: &InferenceConfig,
     names: &HashMap<usize, String>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    // TODO: Implement OBB post-processing
-    // OBB models output rotated bounding boxes
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
-    // Placeholder - return empty OBBs
-    results.obb = Some(Obb::new(Array2::zeros((0, 7)), preprocess.orig_shape));
+    // OBB format: [xywh, class_scores..., rotation_angle]
+    // features = 4 (bbox) + num_classes + 1 (angle)
+    let num_classes = names.len().max(1);
+    let expected_features = 4 + num_classes + 1;
+
+    // Parse output shape
+    let (num_preds, is_transposed) = if output_shape.len() == 3 {
+        let (a, b) = (output_shape[1], output_shape[2]);
+        if a == expected_features || (a < b && a >= 6) {
+            (b, false) // [1, features, preds]
+        } else {
+            (a, true) // [1, preds, features]
+        }
+    } else if output_shape.len() == 2 {
+        let (a, b) = (output_shape[0], output_shape[1]);
+        if a < b { (b, false) } else { (a, true) }
+    } else {
+        (0, false)
+    };
+
+    if output.is_empty() || num_preds == 0 {
+        return results;
+    }
+
+    // Infer actual feature count from data
+    let actual_features = output.len() / num_preds;
+    if actual_features < 6 {
+        eprintln!("WARNING ⚠️ OBB model has insufficient features ({actual_features}), expected at least 6");
+        return results;
+    }
+
+    // Convert to 2D [preds, features]
+    let output_2d = if is_transposed {
+        Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)))
+    } else {
+        let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)));
+        arr.t().to_owned()
+    };
+
+    if output_2d.is_empty() {
+        return results;
+    }
+
+    // Derive number of classes from features: features = 4 + nc + 1
+    let derived_classes = actual_features.saturating_sub(5); // 4 bbox + 1 angle
+    let num_classes = derived_classes.max(1);
+
+    // Filter and NMS - store candidates with angle
+    let mut candidates: Vec<([f32; 5], f32, usize)> = Vec::new(); // [cx, cy, w, h, angle], conf, class
+
+    for i in 0..num_preds {
+        // Get class scores
+        let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
+        let (best_class, best_score) = class_scores
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+            .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
+            .unwrap_or((0, 0.0));
+
+        if best_score < config.confidence_threshold {
+            continue;
+        }
+
+        // Extract OBB: xywh + rotation
+        let cx = output_2d[[i, 0]];
+        let cy = output_2d[[i, 1]];
+        let w = output_2d[[i, 2]];
+        let h = output_2d[[i, 3]];
+        let angle = output_2d[[i, 4 + num_classes]]; // Last value is rotation angle (radians)
+
+        // Scale center coordinates to original image space
+        let scaled = scale_coords(&[cx, cy, cx, cy], preprocess.scale, preprocess.padding);
+        let scaled_cx = scaled[0];
+        let scaled_cy = scaled[1];
+
+        // Scale width and height (note: don't apply padding, just scale)
+        let scaled_w = w / preprocess.scale.0;
+        let scaled_h = h / preprocess.scale.1;
+
+        // Clip center to image bounds
+        let (oh, ow) = preprocess.orig_shape;
+        let clipped_cx = scaled_cx.max(0.0).min(ow as f32);
+        let clipped_cy = scaled_cy.max(0.0).min(oh as f32);
+
+        candidates.push((
+            [clipped_cx, clipped_cy, scaled_w, scaled_h, angle],
+            best_score,
+            best_class,
+        ));
+    }
+
+    if candidates.is_empty() {
+        results.obb = Some(Obb::new(Array2::zeros((0, 7)), preprocess.orig_shape));
+        return results;
+    }
+
+    // Apply NMS using axis-aligned bounding boxes (approximation)
+    // Convert xywhr to xyxy for NMS purposes
+    let nms_candidates: Vec<_> = candidates
+        .iter()
+        .map(|(xywhr, score, class)| {
+            let cx = xywhr[0];
+            let cy = xywhr[1];
+            let w = xywhr[2];
+            let h = xywhr[3];
+            // Use max dimension for axis-aligned approximation
+            let max_dim = w.max(h);
+            let x1 = cx - max_dim / 2.0;
+            let y1 = cy - max_dim / 2.0;
+            let x2 = cx + max_dim / 2.0;
+            let y2 = cy + max_dim / 2.0;
+            ([x1, y1, x2, y2], *score, *class)
+        })
+        .collect();
+
+    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
+    let num_kept = keep_indices.len().min(config.max_detections);
+
+    // Build output array: [cx, cy, w, h, rotation, conf, cls]
+    let mut obb_data = Array2::zeros((num_kept, 7));
+
+    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+        let (xywhr, score, class) = &candidates[keep_idx];
+        obb_data[[out_idx, 0]] = xywhr[0]; // cx
+        obb_data[[out_idx, 1]] = xywhr[1]; // cy
+        obb_data[[out_idx, 2]] = xywhr[2]; // w
+        obb_data[[out_idx, 3]] = xywhr[3]; // h
+        obb_data[[out_idx, 4]] = xywhr[4]; // rotation (radians)
+        obb_data[[out_idx, 5]] = *score;
+        obb_data[[out_idx, 6]] = *class as f32;
+    }
+
+    results.obb = Some(Obb::new(obb_data, preprocess.orig_shape));
 
     results
 }
@@ -768,5 +1074,121 @@ mod tests {
             (640, 640),
         );
         assert!(results.is_empty());
+    }
+
+
+    #[test]
+    fn test_postprocess_pose_logic() {
+        // Mock output for pose: [1, 56, 100]
+        // 56 features = 4 bbox + 1 class + 51 keypoints (17*3)
+        let num_preds = 100;
+        let num_features = 56;
+        let mut output = vec![0.0; num_preds * num_features];
+
+        // Fill one prediction
+        let idx = 0;
+        // BBox: cx, cy, w, h
+        output[idx] = 100.0;
+        output[idx + num_preds] = 100.0;
+        output[idx + num_preds * 2] = 50.0;
+        output[idx + num_preds * 3] = 50.0;
+        // Class score
+        output[idx + num_preds * 4] = 0.9;
+        // Keypoints: 17 * 3
+        for k in 0..17 {
+            let offset = 5 + k * 3;
+            output[idx + num_preds * offset] = 100.0;     // x
+            output[idx + num_preds * (offset + 1)] = 100.0; // y
+            output[idx + num_preds * (offset + 2)] = 0.8;   // conf
+        }
+
+        let preprocess = PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: (640, 640),
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        };
+        let config = InferenceConfig::default();
+        let mut names = HashMap::new();
+        names.insert(0, "person".to_string());
+        
+        // Shape [1, 56, 100]
+        let results = postprocess_pose(
+            &output,
+            &[1, num_features, num_preds],
+            &preprocess,
+            &config,
+            &names,
+            ndarray::Array3::zeros((640, 640, 3)),
+            "test.jpg".to_string(),
+            Speed::default(),
+            (640, 640),
+        );
+
+        assert!(results.keypoints.is_some());
+        let kpts = results.keypoints.unwrap();
+        assert_eq!(kpts.data.shape()[0], 1); // 1 detection
+        assert_eq!(kpts.data.shape()[1], 17); // 17 keypoints
+        assert_eq!(kpts.data.shape()[2], 3); // x, y, conf
+        
+        // Verify values
+        assert_eq!(kpts.data[[0, 0, 0]], 100.0);
+        assert_eq!(kpts.data[[0, 0, 2]], 0.8);
+    }
+
+    #[test]
+    fn test_postprocess_obb_logic() {
+        // Mock output for OBB: [1, 6, 100]
+        // 6 features = 4 bbox + 1 class + 1 angle
+        let num_preds = 100;
+        let num_features = 6;
+        let mut output = vec![0.0; num_preds * num_features];
+
+        // Fill one prediction
+        let idx = 0;
+        // BBox: cx, cy, w, h
+        output[idx] = 100.0;
+        output[idx + num_preds] = 100.0;
+        output[idx + num_preds * 2] = 50.0;
+        output[idx + num_preds * 3] = 20.0;
+        // Class score
+        output[idx + num_preds * 4] = 0.95;
+        // Angle
+        output[idx + num_preds * 5] = std::f32::consts::FRAC_PI_4; // 45 degrees
+
+        let preprocess = PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: (640, 640),
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        };
+        let config = InferenceConfig::default();
+        let mut names = HashMap::new();
+        names.insert(0, "object".to_string());
+        
+        // Shape [1, 6, 100]
+        let results = postprocess_obb(
+            &output,
+            &[1, num_features, num_preds],
+            &preprocess,
+            &config,
+            &names,
+            ndarray::Array3::zeros((640, 640, 3)),
+            "test.jpg".to_string(),
+            Speed::default(),
+            (640, 640),
+        );
+
+        assert!(results.obb.is_some());
+        let obb = results.obb.unwrap();
+        assert_eq!(obb.len(), 1);
+        
+        // Verify values
+        let data = obb.data.row(0);
+        assert_eq!(data[0], 100.0); // cx
+        assert_eq!(data[4], std::f32::consts::FRAC_PI_4); // angle
+        assert_eq!(data[5], 0.95); // conf
     }
 }
