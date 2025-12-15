@@ -187,16 +187,16 @@ impl YOLOModel {
         let metadata = Self::extract_metadata(&session)?;
 
         // Get input/output names and detect input type
-        let input_info = session.inputs.first();
+        let input_info = session.inputs().first();
         let input_name = input_info
-            .map(|i| i.name.clone())
+            .map(|i| i.name().to_string())
             .unwrap_or_else(|| "images".to_string());
 
         // Check if model input tensor expects FP16 (rare - most models use FP32 input even with half weights)
         let model_input_fp16 = input_info
             .map(|i| {
                 matches!(
-                    &i.input_type,
+                    i.dtype(),
                     ValueType::Tensor {
                         ty: TensorElementType::Float16,
                         ..
@@ -208,7 +208,7 @@ impl YOLOModel {
         // Use FP16 input if model tensor type requires it
         let fp16_input = model_input_fp16;
 
-        let output_names: Vec<String> = session.outputs.iter().map(|o| o.name.clone()).collect();
+        let output_names: Vec<String> = session.outputs().iter().map(|o| o.name().to_string()).collect();
 
         // Update config with model metadata if not overridden
         // Sync half flag with model's half metadata (for display purposes)
