@@ -312,7 +312,10 @@ fn postprocess_segment(
 
     if outputs.len() < 2 {
         // Protos output missing - log warning for user visibility
-        eprintln!("WARNING ⚠️ Segmentation model missing protos output (expected 2 outputs, got {}). Returning empty masks.", outputs.len());
+        eprintln!(
+            "WARNING ⚠️ Segmentation model missing protos output (expected 2 outputs, got {}). Returning empty masks.",
+            outputs.len()
+        );
         return results;
     }
 
@@ -440,17 +443,23 @@ fn postprocess_segment(
     // Protos: [1, 32, 160, 160] -> [32, 25600]
     // Validate protos shape before indexing to prevent panic
     if shape1.len() < 4 {
-        eprintln!("WARNING ⚠️ Protos output has unexpected shape (expected 4 dims, got {}). Skipping mask generation.", shape1.len());
+        eprintln!(
+            "WARNING ⚠️ Protos output has unexpected shape (expected 4 dims, got {}). Skipping mask generation.",
+            shape1.len()
+        );
         return results;
     }
     let mh = shape1[2];
     let mw = shape1[3];
-    
+
     // Validate expected mask dimensions match
     if shape1[1] != num_masks {
-        eprintln!("WARNING ⚠️ Protos output has {} mask channels, expected {}. Mask quality may be affected.", shape1[1], num_masks);
+        eprintln!(
+            "WARNING ⚠️ Protos output has {} mask channels, expected {}. Mask quality may be affected.",
+            shape1[1], num_masks
+        );
     }
-    
+
     let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
         Ok(arr) => arr,
         Err(e) => {
@@ -490,13 +499,14 @@ fn postprocess_segment(
         let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
 
         // Create source image (160x160) - handle potential errors gracefully
-        let src_image = match Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32) {
-            Ok(img) => img,
-            Err(_) => {
-                // Skip this mask if creation fails
-                continue;
-            }
-        };
+        let src_image =
+            match Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32) {
+                Ok(img) => img,
+                Err(_) => {
+                    // Skip this mask if creation fails
+                    continue;
+                }
+            };
 
         // Create dest image (orig_w x orig_h)
         let mut dst_image = Image::new(ow, oh, PixelType::F32);
@@ -507,12 +517,18 @@ fn postprocess_segment(
         let safe_crop_w = crop_w.max(1.0).min(mw as f32) as f64;
         let safe_crop_h = crop_h.max(1.0).min(mh as f32) as f64;
 
-        let options = ResizeOptions::new()
-            .resize_alg(resize_alg)
-            .crop(safe_crop_x, safe_crop_y, safe_crop_w, safe_crop_h);
+        let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+            safe_crop_x,
+            safe_crop_y,
+            safe_crop_w,
+            safe_crop_h,
+        );
 
         // Handle resize errors gracefully
-        if resizer.resize(&src_image, &mut dst_image, &options).is_err() {
+        if resizer
+            .resize(&src_image, &mut dst_image, &options)
+            .is_err()
+        {
             // Skip this mask if resize fails
             continue;
         }
@@ -595,7 +611,10 @@ fn postprocess_pose(
     // Infer actual feature count from data
     let actual_features = output.len() / num_preds;
     if actual_features < 4 + kpt_features {
-        eprintln!("WARNING ⚠️ Pose model has insufficient features ({actual_features}), expected at least {}", 4 + kpt_features);
+        eprintln!(
+            "WARNING ⚠️ Pose model has insufficient features ({actual_features}), expected at least {}",
+            4 + kpt_features
+        );
         return results;
     }
 
@@ -660,7 +679,11 @@ fn postprocess_pose(
             let kpt_conf = output_2d[[i, kpt_offset + 2]];
 
             // Scale keypoint coordinates to original image space
-            let scaled_kpt = scale_coords(&[kpt_x, kpt_y, kpt_x, kpt_y], preprocess.scale, preprocess.padding);
+            let scaled_kpt = scale_coords(
+                &[kpt_x, kpt_y, kpt_x, kpt_y],
+                preprocess.scale,
+                preprocess.padding,
+            );
             let (oh, ow) = preprocess.orig_shape;
             let scaled_x = scaled_kpt[0].max(0.0).min(ow as f32);
             let scaled_y = scaled_kpt[1].max(0.0).min(oh as f32);
@@ -809,7 +832,9 @@ fn postprocess_obb(
     // Infer actual feature count from data
     let actual_features = output.len() / num_preds;
     if actual_features < 6 {
-        eprintln!("WARNING ⚠️ OBB model has insufficient features ({actual_features}), expected at least 6");
+        eprintln!(
+            "WARNING ⚠️ OBB model has insufficient features ({actual_features}), expected at least 6"
+        );
         return results;
     }
 
@@ -993,8 +1018,8 @@ mod tests {
         // Set box coords
         output[0] = 100.0; // cx
         output[1] = 100.0; // cy
-        output[2] = 50.0;  // w
-        output[3] = 50.0;  // h
+        output[2] = 50.0; // w
+        output[3] = 50.0; // h
         // Set class scores with NaN
         output[4] = f32::NAN;
         output[5] = 0.9; // This should be selected even with NaN present
@@ -1035,7 +1060,7 @@ mod tests {
     fn test_malformed_shape_fallback() {
         // Test that malformed shapes return empty results instead of panicking
         let output: Vec<f32> = vec![0.0; 100]; // Some data
-        
+
         let preprocess = PreprocessResult {
             tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
             tensor_f16: None,
@@ -1076,7 +1101,6 @@ mod tests {
         assert!(results.is_empty());
     }
 
-
     #[test]
     fn test_postprocess_pose_logic() {
         // Mock output for pose: [1, 56, 100]
@@ -1097,9 +1121,9 @@ mod tests {
         // Keypoints: 17 * 3
         for k in 0..17 {
             let offset = 5 + k * 3;
-            output[idx + num_preds * offset] = 100.0;     // x
+            output[idx + num_preds * offset] = 100.0; // x
             output[idx + num_preds * (offset + 1)] = 100.0; // y
-            output[idx + num_preds * (offset + 2)] = 0.8;   // conf
+            output[idx + num_preds * (offset + 2)] = 0.8; // conf
         }
 
         let preprocess = PreprocessResult {
@@ -1112,7 +1136,7 @@ mod tests {
         let config = InferenceConfig::default();
         let mut names = HashMap::new();
         names.insert(0, "person".to_string());
-        
+
         // Shape [1, 56, 100]
         let results = postprocess_pose(
             &output,
@@ -1131,7 +1155,7 @@ mod tests {
         assert_eq!(kpts.data.shape()[0], 1); // 1 detection
         assert_eq!(kpts.data.shape()[1], 17); // 17 keypoints
         assert_eq!(kpts.data.shape()[2], 3); // x, y, conf
-        
+
         // Verify values
         assert_eq!(kpts.data[[0, 0, 0]], 100.0);
         assert_eq!(kpts.data[[0, 0, 2]], 0.8);
@@ -1167,7 +1191,7 @@ mod tests {
         let config = InferenceConfig::default();
         let mut names = HashMap::new();
         names.insert(0, "object".to_string());
-        
+
         // Shape [1, 6, 100]
         let results = postprocess_obb(
             &output,
@@ -1184,7 +1208,7 @@ mod tests {
         assert!(results.obb.is_some());
         let obb = results.obb.unwrap();
         assert_eq!(obb.len(), 1);
-        
+
         // Verify values
         let data = obb.data.row(0);
         assert_eq!(data[0], 100.0); // cx

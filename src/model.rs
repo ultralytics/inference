@@ -24,7 +24,9 @@ use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
-use crate::preprocessing::{image_to_array, preprocess_image_with_precision};
+use crate::preprocessing::{
+    image_to_array, preprocess_image_center_crop, preprocess_image_with_precision,
+};
 use crate::results::{Results, Speed};
 use crate::task::Task;
 
@@ -208,7 +210,11 @@ impl YOLOModel {
         // Use FP16 input if model tensor type requires it
         let fp16_input = model_input_fp16;
 
-        let output_names: Vec<String> = session.outputs().iter().map(|o| o.name().to_string()).collect();
+        let output_names: Vec<String> = session
+            .outputs()
+            .iter()
+            .map(|o| o.name().to_string())
+            .collect();
 
         // Update config with model metadata if not overridden
         // Sync half flag with model's half metadata (for display purposes)
@@ -376,12 +382,16 @@ impl YOLOModel {
 
         // Preprocess - generate FP16 tensor if model expects FP16 input
         let start_preprocess = Instant::now();
-        let preprocess_result = preprocess_image_with_precision(
-            image,
-            target_size,
-            self.metadata.stride,
-            self.fp16_input,
-        );
+        let preprocess_result = if self.metadata.task == Task::Classify {
+            preprocess_image_center_crop(image, target_size, self.fp16_input)
+        } else {
+            preprocess_image_with_precision(
+                image,
+                target_size,
+                self.metadata.stride,
+                self.fp16_input,
+            )
+        };
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
 
         // Convert original image to array for results

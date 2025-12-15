@@ -24,8 +24,9 @@ use std::fs;
 
 #[cfg(feature = "annotate")]
 use inference::annotate::{annotate_image, find_next_run_dir, load_image};
+pub mod color;
 
-use inference::{InferenceConfig, Results, YOLOModel, VERSION};
+use inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
@@ -180,7 +181,9 @@ fn run_prediction(args: &[String]) {
     // Warn user if --save is specified but annotate feature is disabled
     #[cfg(not(feature = "annotate"))]
     if save {
-        eprintln!("WARNING ⚠️ --save requires the 'annotate' feature. Compile with --features annotate to enable saving.");
+        eprintln!(
+            "WARNING ⚠️ --save requires the 'annotate' feature. Compile with --features annotate to enable saving."
+        );
     }
 
     // Print banner matching Ultralytics format (after model load to detect precision)
@@ -337,7 +340,23 @@ fn format_detection_summary(result: &Results) -> String {
 
         parts.join(", ")
     } else if result.probs.is_some() {
-        "classification".to_string()
+        if let Some(probs) = &result.probs {
+            let top5 = probs.top5();
+            let parts: Vec<String> = top5
+                .iter()
+                .map(|&i| {
+                    let name = result
+                        .names
+                        .get(&i)
+                        .map(String::as_str)
+                        .unwrap_or("unknown");
+                    format!("{} {:.2}", name, probs.data[[i]])
+                })
+                .collect();
+            parts.join(", ")
+        } else {
+            "classification".to_string()
+        }
     } else {
         String::new()
     }

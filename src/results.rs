@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Axis};
+use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
 /// Timing information for inference operations (in milliseconds).
 #[derive(Debug, Clone, Default)]
@@ -528,9 +528,6 @@ impl Probs {
             .map(|(i, _)| i)
             .unwrap_or(0)
     }
-
-    /// Get the indices of the top-5 classes.
-    #[must_use]
     /// Get the indices of the top-5 classes.
     #[must_use]
     pub fn top5(&self) -> Vec<usize> {
