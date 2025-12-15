@@ -531,14 +531,22 @@ impl Probs {
 
     /// Get the indices of the top-5 classes.
     #[must_use]
+    /// Get the indices of the top-5 classes.
+    #[must_use]
     pub fn top5(&self) -> Vec<usize> {
+        self.top_k(5)
+    }
+
+    /// Get the indices of the top-k classes.
+    #[must_use]
+    pub fn top_k(&self, k: usize) -> Vec<usize> {
         let mut indices: Vec<usize> = (0..self.data.len()).collect();
         indices.sort_by(|&a, &b| {
             self.data[b]
                 .partial_cmp(&self.data[a])
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        indices.truncate(5);
+        indices.truncate(k);
         indices
     }
 
@@ -621,7 +629,81 @@ impl Obb {
         }
     }
 
-    // TODO: Implement xyxyxyxy and xyxy conversion methods
+    /// Get corner points for each OBB as (N, 4, 2) array.
+    /// Returns the 4 corner points of each rotated bounding box.
+    #[must_use]
+    pub fn xyxyxyxy(&self) -> Array3<f32> {
+        let n = self.len();
+        let mut corners = Array3::zeros((n, 4, 2));
+
+        for i in 0..n {
+            let cx = self.data[[i, 0]];
+            let cy = self.data[[i, 1]];
+            let w = self.data[[i, 2]];
+            let h = self.data[[i, 3]];
+            let angle = self.data[[i, 4]];
+
+            // Calculate corner offsets from center
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+
+            // Half dimensions
+            let hw = w / 2.0;
+            let hh = h / 2.0;
+
+            // Corner offsets relative to center (before rotation)
+            let corners_rel = [
+                (-hw, -hh), // top-left
+                (hw, -hh),  // top-right
+                (hw, hh),   // bottom-right
+                (-hw, hh),  // bottom-left
+            ];
+
+            // Apply rotation and translate to absolute coordinates
+            for (j, (dx, dy)) in corners_rel.iter().enumerate() {
+                let rotated_x = dx * cos_a - dy * sin_a;
+                let rotated_y = dx * sin_a + dy * cos_a;
+                corners[[i, j, 0]] = cx + rotated_x;
+                corners[[i, j, 1]] = cy + rotated_y;
+            }
+        }
+
+        corners
+    }
+
+    /// Get axis-aligned bounding box containing each OBB.
+    /// Returns array of shape (N, 4) with [x1, y1, x2, y2] for each OBB.
+    #[must_use]
+    pub fn xyxy(&self) -> Array2<f32> {
+        let corners = self.xyxyxyxy();
+        let n = self.len();
+        let mut xyxy = Array2::zeros((n, 4));
+
+        for i in 0..n {
+            let mut min_x = f32::INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+
+            for j in 0..4 {
+                let x = corners[[i, j, 0]];
+                let y = corners[[i, j, 1]];
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+
+            // Clip to image bounds
+            let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
+            xyxy[[i, 0]] = min_x.max(0.0).min(w);
+            xyxy[[i, 1]] = min_y.max(0.0).min(h);
+            xyxy[[i, 2]] = max_x.max(0.0).min(w);
+            xyxy[[i, 3]] = max_y.max(0.0).min(h);
+        }
+
+        xyxy
+    }
 }
 
 #[cfg(test)]
