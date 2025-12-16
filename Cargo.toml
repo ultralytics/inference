@@ -4,7 +4,10 @@
 name = "inference"
 version = "0.0.4"
 edition = "2024"
-authors = ["Glenn Jocher <glenn.jocher@ultralytics.com>", "Onuralp Sezer <onuralp@ultralytics.com>"]
+authors = [
+    "Glenn Jocher <glenn.jocher@ultralytics.com>",
+    "Onuralp Sezer <onuralp@ultralytics.com>",
+]
 description = "Ultralytics YOLO inference library and CLI for Rust"
 license = "AGPL-3.0"
 repository = "https://github.com/ultralytics/inference"
@@ -42,21 +45,34 @@ zune-jpeg = "=0.5.5"
 ndarray = { version = "0.17", features = ["rayon"] }
 
 # ONNX Runtime 1.23 - using latest from GitHub for best performance
-ort = { git = "https://github.com/pykeio/ort.git", default-features = false, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "half", "tls-native"] }
+ort = { git = "https://github.com/pykeio/ort.git", default-features = false, features = [
+    "std",
+    "ndarray",
+    "download-binaries",
+    "copy-dylibs",
+    "half",
+    "tls-native",
+] }
 
 # Core - FP16 support (required by ort's half feature)
 half = { version = "2.4", features = ["num-traits"] }
 ureq = "3.1.4"
 dirs = "6.0"
-bytemuck = { version = "1.21", features = ["derive"] }
 rayon = "1.10"
+minifb = { version = "0.25", optional = true }
+video-rs = { version = "0.10.5", features = ["ndarray"], optional = true }
+bytemuck = { version = "1.21", features = ["derive"] }
+
 
 # Optional - Image annotation (for --save feature)
 imageproc = { version = "0.25", optional = true }
 ab_glyph = { version = "0.2", optional = true }
 
 [features]
-default = ["annotate"]
+default = ["annotate", "visualize"]
+
+# Real-time visualization
+visualize = ["minifb"]
 
 # Image annotation support (for --save feature in CLI)
 annotate = ["imageproc", "ab_glyph"]
@@ -76,28 +92,48 @@ onednn = ["ort/onednn"]
 directml = ["ort/directml"]
 
 # Mobile/Embedded
-nnapi = ["ort/nnapi"]        # Android
-coreml = ["ort/coreml"]      # iOS/macOS
-qnn = ["ort/qnn"]            # Qualcomm
+nnapi = ["ort/nnapi"]   # Android
+coreml = ["ort/coreml"] # iOS/macOS
+qnn = ["ort/qnn"]       # Qualcomm
 
 # Additional accelerators
 xnnpack = ["ort/xnnpack"]
-acl = ["ort/acl"]            # ARM Compute Library
-armnn = ["ort/armnn"]        # ARM NN
-tvm = ["ort/tvm"]            # Apache TVM
-migraphx = ["ort/migraphx"]  # AMD MIGraphX
-rknpu = ["ort/rknpu"]        # Rockchip NPU
-vitis = ["ort/vitis"]        # Xilinx Vitis AI
-cann = ["ort/cann"]          # Huawei CANN
-webgpu = ["ort/webgpu"]      # WebGPU
-azure = ["ort/azure"]        # Azure
+acl = ["ort/acl"]           # ARM Compute Library
+armnn = ["ort/armnn"]       # ARM NN
+tvm = ["ort/tvm"]           # Apache TVM
+migraphx = ["ort/migraphx"] # AMD MIGraphX
+rknpu = ["ort/rknpu"]       # Rockchip NPU
+vitis = ["ort/vitis"]       # Xilinx Vitis AI
+cann = ["ort/cann"]         # Huawei CANN
+webgpu = ["ort/webgpu"]     # WebGPU
+azure = ["ort/azure"]       # Azure
 
 # Convenience feature groups
 nvidia = ["cuda", "tensorrt"]
 amd = ["rocm", "migraphx"]
 intel = ["openvino", "onednn"]
 mobile = ["nnapi", "coreml", "qnn"]
-all = ["cuda", "tensorrt", "rocm", "openvino", "onednn", "directml", "nnapi", "coreml", "xnnpack", "acl", "armnn", "tvm", "migraphx", "rknpu", "vitis", "cann", "qnn", "webgpu", "azure"]
+all = [
+    "cuda",
+    "tensorrt",
+    "rocm",
+    "openvino",
+    "onednn",
+    "directml",
+    "nnapi",
+    "coreml",
+    "xnnpack",
+    "acl",
+    "armnn",
+    "tvm",
+    "migraphx",
+    "rknpu",
+    "vitis",
+    "cann",
+    "qnn",
+    "webgpu",
+    "azure",
+]
 
 [dev-dependencies]
 # Testing dependencies
