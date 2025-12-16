@@ -311,7 +311,7 @@ fn run_prediction(args: &[String]) {
                             }
                         } else {
                             // 500ms delay for images (single or directory)
-                            let _ = v.wait(std::time::Duration::from_millis(500));
+                            let _ = v.wait(std::time::Duration::from_millis(200));
                         }
                     }
                 }
