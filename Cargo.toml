@@ -74,6 +74,9 @@ default = ["annotate", "visualize"]
 # Real-time visualization
 visualize = ["minifb"]
 
+# Video support
+video = ["video-rs"]
+
 # Image annotation support (for --save feature in CLI)
 annotate = ["imageproc", "ab_glyph"]
 

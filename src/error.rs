@@ -28,6 +28,8 @@ pub enum InferenceError {
     VisualizerError(String),
     /// Video/stream processing error.
     VideoError(String),
+    /// Feature not enabled.
+    FeatureNotEnabled(String),
 }
 
 impl fmt::Display for InferenceError {
@@ -42,6 +44,7 @@ impl fmt::Display for InferenceError {
             Self::PostProcessingError(msg) => write!(f, "Post-processing error: {msg}"),
             Self::VisualizerError(msg) => write!(f, "Visualizer error: {msg}"),
             Self::VideoError(msg) => write!(f, "Video error: {msg}"),
+            Self::FeatureNotEnabled(msg) => write!(f, "Feature not enabled: {msg}"),
         }
     }
 }

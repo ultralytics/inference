@@ -253,18 +253,37 @@ fn run_prediction(args: &[String]) {
             let inference_shape = result.inference_shape();
             last_inference_shape = (inference_shape.0 as usize, inference_shape.1 as usize);
 
-            // Print per-image output matching Ultralytics format
-            // Use original image dimensions for the per-image output
-            println!(
-                "image {}/{} {}: {}x{} {}, {:.1}ms",
-                meta.frame_idx + 1,
-                meta.total_frames.unwrap_or(0),
-                image_path,
-                orig_shape.1, // width first in output
-                orig_shape.0, // then height
-                detection_summary,
-                result.speed.inference.unwrap_or(0.0)
-            );
+            // Format total frames for display
+            let total_frames_str = meta
+                .total_frames
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "?".to_string());
+
+            if is_video {
+                // Assuming single video input for now as per CLI structure
+                // Use "video 1/1"
+                println!(
+                    "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
+                    meta.frame_idx + 1,
+                    total_frames_str,
+                    image_path,
+                    orig_shape.1,
+                    orig_shape.0,
+                    detection_summary,
+                    result.speed.inference.unwrap_or(0.0)
+                );
+            } else {
+                println!(
+                    "image {}/{} {}: {}x{} {}, {:.1}ms",
+                    meta.frame_idx + 1,
+                    total_frames_str,
+                    image_path,
+                    orig_shape.1,
+                    orig_shape.0,
+                    detection_summary,
+                    result.speed.inference.unwrap_or(0.0)
+                );
+            }
 
             // Save annotated image if --save is specified
             #[cfg(feature = "annotate")]

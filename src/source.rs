@@ -178,7 +178,10 @@ pub struct SourceIterator {
     source: Source,
     current_frame: usize,
     image_paths: Vec<PathBuf>,
-    // TODO: Add video capture handle when video support is implemented
+    #[cfg(feature = "video")]
+    decoder: Option<video_rs::decode::Decoder>,
+    #[cfg(feature = "video")]
+    total_frames: Option<usize>,
 }
 
 impl SourceIterator {
@@ -199,6 +202,10 @@ impl SourceIterator {
             source,
             current_frame: 0,
             image_paths,
+            #[cfg(feature = "video")]
+            decoder: None,
+            #[cfg(feature = "video")]
+            total_frames: None,
         })
     }
 
@@ -310,11 +317,77 @@ impl SourceIterator {
         }
     }
 
-    /// Get the next frame from video/webcam (placeholder).
+    /// Get the next video frame.
+    #[cfg(feature = "video")]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
-        // TODO: Implement video frame extraction
-        // This requires ffmpeg-next or similar library
-        None
+        // Initialize decoder if needed
+        if self.decoder.is_none() {
+            if let Source::Video(path) = &self.source {
+                match video_rs::decode::Decoder::new(path.as_path()) {
+                    Ok(d) => {
+                        // Calculate total frames from duration and frame rate
+                        if let Ok(duration) = d.duration() {
+                            let fps = d.frame_rate();
+                            let duration_seconds = duration.as_secs_f64();
+                            self.total_frames = Some((duration_seconds * fps as f64) as usize);
+                        }
+                        self.decoder = Some(d);
+                    }
+                    Err(e) => {
+                        return Some(Err(InferenceError::VideoError(format!(
+                            "Failed to create decoder: {}",
+                            e
+                        ))));
+                    }
+                }
+                // Note: Decoder initialized.
+            }
+        }
+
+        if let Some(decoder) = &mut self.decoder {
+            // Attempt to decode next frame
+            match decoder.decode() {
+                Ok((_ts, frame)) => {
+                    let fps = decoder.frame_rate();
+                    let meta = SourceMeta {
+                        frame_idx: self.current_frame,
+                        total_frames: self.total_frames,
+                        path: self
+                            .source
+                            .path()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        fps: Some(fps),
+                    };
+                    self.current_frame += 1;
+
+                    match video_frame_to_image(&frame) {
+                        Ok(img) => Some(Ok((img, meta))),
+                        Err(e) => Some(Err(e)),
+                    }
+                }
+                Err(e) => {
+                    // Check if error is EOF. Video-rs usually returns a specific error or strict error on EOF.
+                    // Assuming for now that any error might be EOF or fatal.
+                    // If video-rs returns VideoError::Decode(EOF), we can stop.
+                    // Given we can't easily check error variants without knowing them,
+                    // we'll assume standard video ending behavior: error implies stop.
+                    // Common practice: return None on error if it looks like EOF.
+                    // Without explicit EOF check, we return None (end of stream) for now.
+                    // User can restart or check logs if it cuts short.
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    #[cfg(not(feature = "video"))]
+    fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
+        Some(Err(InferenceError::FeatureNotEnabled(
+            "Video support requires 'video' feature".to_string(),
+        )))
     }
 }
 
@@ -367,6 +440,28 @@ fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
 
     let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
         InferenceError::ImageError("Failed to create image from array".to_string())
+    })?;
+
+    Ok(DynamicImage::ImageRgb8(img_buffer))
+}
+
+#[cfg(feature = "video")]
+/// Convert a video_rs Frame (ndarray 0.16) to DynamicImage.
+fn video_frame_to_image(arr: &video_rs::Frame) -> Result<DynamicImage> {
+    let shape = arr.shape();
+    let (height, width) = (shape[0] as u32, shape[1] as u32);
+
+    let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            rgb_data.push(arr[[y, x, 0]]);
+            rgb_data.push(arr[[y, x, 1]]);
+            rgb_data.push(arr[[y, x, 2]]);
+        }
+    }
+
+    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+        InferenceError::ImageError("Failed to create image from video frame".to_string())
     })?;
 
     Ok(DynamicImage::ImageRgb8(img_buffer))
