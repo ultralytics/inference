@@ -4,7 +4,11 @@
 
 /// Color definitions and palettes.
 pub mod color;
-mod viewer;
+
+#[cfg(feature = "visualize")]
+pub mod viewer;
 
 pub use color::Color;
+
+#[cfg(feature = "visualize")]
 pub use viewer::Viewer;
