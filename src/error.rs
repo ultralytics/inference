@@ -22,6 +22,10 @@ pub enum InferenceError {
     IoError(std::io::Error),
     /// Error parsing model metadata.
     MetadataError(String),
+    /// Post-processing error.
+    PostProcessingError(String),
+    /// Visualizer error.
+    VisualizerError(String),
     /// Video/stream processing error.
     VideoError(String),
 }
@@ -35,6 +39,8 @@ impl fmt::Display for InferenceError {
             Self::ConfigError(msg) => write!(f, "Config error: {msg}"),
             Self::IoError(err) => write!(f, "IO error: {err}"),
             Self::MetadataError(msg) => write!(f, "Metadata error: {msg}"),
+            Self::PostProcessingError(msg) => write!(f, "Post-processing error: {msg}"),
+            Self::VisualizerError(msg) => write!(f, "Visualizer error: {msg}"),
             Self::VideoError(msg) => write!(f, "Video error: {msg}"),
         }
     }

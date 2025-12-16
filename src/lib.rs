@@ -69,7 +69,7 @@ pub mod results;
 pub mod source;
 pub mod task;
 pub mod utils;
-pub mod color;
+pub mod visualizer;
 
 // Re-export main types for convenience
 pub use error::{InferenceError, Result};
@@ -84,7 +84,7 @@ pub use metadata::ModelMetadata;
 
 // Re-export preprocessing utilities
 pub use preprocessing::{
-    preprocess_image, preprocess_image_with_precision, PreprocessResult, TensorData,
+    PreprocessResult, TensorData, preprocess_image, preprocess_image_with_precision,
 };
 
 /// Library version.

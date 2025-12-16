@@ -6,6 +6,7 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
+use crate::visualizer::color::{COLORS, POSE_COLORS};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
@@ -13,7 +14,6 @@ use imageproc::rect::Rect;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
-use crate::color::{COLORS, POSE_COLORS};
 
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
@@ -582,7 +582,7 @@ fn draw_classification(
 ) {
     if let Some(ref probs) = result.probs {
         let top_indices = probs.top_k(top_k);
-        let (width, height) = img.dimensions();
+        let (width, _height) = img.dimensions();
 
         if let Some(ref f) = font {
             // Adaptive font scale based on image width

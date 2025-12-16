@@ -24,7 +24,9 @@ use std::fs;
 
 #[cfg(feature = "annotate")]
 use inference::annotate::{annotate_image, find_next_run_dir, load_image};
-pub mod color;
+
+#[cfg(feature = "visualize")]
+use inference::visualizer::Viewer;
 
 use inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
@@ -65,6 +67,7 @@ fn run_prediction(args: &[String]) {
     let mut iou_threshold = 0.45_f32;
     let mut save = false;
     let mut half = false;
+    let mut show = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -111,6 +114,10 @@ fn run_prediction(args: &[String]) {
             }
             "--half" => {
                 half = true;
+                i += 1;
+            }
+            "--show" => {
+                show = true;
                 i += 1;
             }
             _ => {
@@ -222,6 +229,15 @@ fn run_prediction(args: &[String]) {
     let mut total_postprocess = 0.0;
     let mut last_inference_shape = (0, 0);
 
+    let mut last_inference_shape = (0, 0);
+
+    #[cfg(feature = "visualize")]
+    let mut viewer = if show {
+        Some(Viewer::new("Ultralytics YOLO Inference", 6400, 480).unwrap())
+    } else {
+        None
+    };
+
     for (idx, image_path) in images.iter().enumerate() {
         let results = match model.predict(image_path) {
             Ok(r) => r,
@@ -266,6 +282,16 @@ fn run_prediction(args: &[String]) {
                     if let Err(e) = annotated.save(&save_path) {
                         eprintln!("Error saving {save_path}: {e}");
                     }
+                }
+            }
+
+            // Show result in viewer if enabled
+            #[cfg(feature = "visualize")]
+            if let Some(ref mut v) = viewer {
+                if let Ok(img) = load_image(image_path) {
+                    let annotated = annotate_image(&img, &result, None);
+                    // Update viewer, resize window if needed happens inside update
+                    let _ = v.update(&annotated);
                 }
             }
 

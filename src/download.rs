@@ -26,6 +26,27 @@ const DEFAULT_DETECT_MODEL_URL: &str =
 const DEFAULT_SEGMENT_MODEL_URL: &str =
     "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx";
 
+/// Default YOLO pose model name.
+pub const DEFAULT_POSE_MODEL: &str = "yolo11n-pose.onnx";
+
+/// URL for downloading the default YOLO pose model.
+const DEFAULT_POSE_MODEL_URL: &str =
+    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.onnx";
+
+/// Default YOLO OBB model name.
+pub const DEFAULT_OBB_MODEL: &str = "yolo11n-obb.onnx";
+
+/// URL for downloading the default YOLO OBB model.
+const DEFAULT_OBB_MODEL_URL: &str =
+    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-obb.onnx";
+
+/// Default YOLO classification model name.
+pub const DEFAULT_CLS_MODEL: &str = "yolo11n-cls.onnx";
+
+/// URL for downloading the default YOLO classification model.
+const DEFAULT_CLS_MODEL_URL: &str =
+    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-cls.onnx";
+
 /// Connection timeout in seconds.
 const CONNECT_TIMEOUT: u64 = 30;
 
@@ -261,6 +282,9 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 /// Currently supports:
 /// - `yolo11n.onnx` - Default YOLO11n detection model
 /// - `yolo11n-seg.onnx` - YOLO11n segmentation model
+/// - `yolo11n-pose.onnx` - YOLO11n pose estimation model
+/// - `yolo11n-obb.onnx` - YOLO11n oriented bounding box model
+/// - `yolo11n-cls.onnx` - YOLO11n classification model
 ///
 /// Downloads to the current working directory (or the directory specified in the path).
 ///
@@ -274,9 +298,12 @@ pub fn try_download_model<P: AsRef<Path>>(model_path: P) -> Result<PathBuf> {
     let url = match filename {
         DEFAULT_MODEL => DEFAULT_DETECT_MODEL_URL,
         DEFAULT_SEGMENT_MODEL => DEFAULT_SEGMENT_MODEL_URL,
+        DEFAULT_POSE_MODEL => DEFAULT_POSE_MODEL_URL,
+        DEFAULT_OBB_MODEL => DEFAULT_OBB_MODEL_URL,
+        DEFAULT_CLS_MODEL => DEFAULT_CLS_MODEL_URL,
         _ => {
             return Err(InferenceError::ModelLoadError(format!(
-                "Model file not found: {}. Auto-download is supported for: yolo11n.onnx, yolo11n-seg.onnx",
+                "Model file not found: {}. Auto-download is supported for: yolo11n.onnx, yolo11n-seg.onnx, yolo11n-pose.onnx, yolo11n-obb.onnx, yolo11n-cls.onnx",
                 path.display(),
             )));
         }
