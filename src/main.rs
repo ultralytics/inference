@@ -23,7 +23,7 @@ use std::process;
 use std::fs;
 
 #[cfg(feature = "annotate")]
-use inference::annotate::{annotate_image, find_next_run_dir, load_image};
+use inference::annotate::{annotate_image, find_next_run_dir};
 
 #[cfg(feature = "visualize")]
 use inference::visualizer::Viewer;
@@ -168,7 +168,6 @@ fn run_prediction(args: &[String]) {
         }
     };
 
-    // Create save directory if --save is specified
     #[cfg(feature = "annotate")]
     let save_dir = if save {
         let parent_dir = match model.task() {
@@ -185,7 +184,6 @@ fn run_prediction(args: &[String]) {
         None
     };
 
-    // Warn user if --save is specified but annotate feature is disabled
     #[cfg(not(feature = "annotate"))]
     if save {
         eprintln!(
@@ -193,12 +191,10 @@ fn run_prediction(args: &[String]) {
         );
     }
 
-    // Print banner matching Ultralytics format (after model load to detect precision)
     let is_half = model.metadata().half || half;
     let precision = if is_half { "FP16" } else { "FP32" };
     println!("Ultralytics {} 🚀 Rust ONNX {} CPU", VERSION, precision);
 
-    // Print model summary
     let imgsz = model.imgsz();
     println!(
         "YOLO11 summary: {} classes, imgsz=({}, {})",
@@ -208,38 +204,39 @@ fn run_prediction(args: &[String]) {
     );
     println!();
 
-    // Collect images to process
-    let source_path_obj = Path::new(&source_path);
-    let images: Vec<String> = if source_path_obj.is_dir() {
-        collect_images_from_dir(source_path_obj)
-    } else {
-        vec![source_path.clone()]
+    // Initialize source
+    let source = inference::source::Source::from(source_path);
+    let is_video = source.is_video();
+    let source_iter = match inference::source::SourceIterator::new(source) {
+        Ok(iter) => iter,
+        Err(e) => {
+            eprintln!("Error initializing source: {e}");
+            process::exit(1);
+        }
     };
 
-    let total_images = images.len();
-    if total_images == 0 {
-        eprintln!("No images found in source: {source_path}");
-        process::exit(1);
-    }
-
-    // Process each image
+    // Process each image/frame
     let mut all_results: Vec<(String, Results)> = Vec::new();
     let mut total_preprocess = 0.0;
     let mut total_inference = 0.0;
     let mut total_postprocess = 0.0;
     let mut last_inference_shape = (0, 0);
 
-    let mut last_inference_shape = (0, 0);
-
     #[cfg(feature = "visualize")]
-    let mut viewer = if show {
-        Some(Viewer::new("Ultralytics YOLO Inference", 6400, 480).unwrap())
-    } else {
-        None
-    };
+    let mut viewer: Option<Viewer> = None;
 
-    for (idx, image_path) in images.iter().enumerate() {
-        let results = match model.predict(image_path) {
+    let mut frame_count = 0;
+    for item in source_iter {
+        let (img, meta) = match item {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("Error reading source: {e}");
+                continue;
+            }
+        };
+
+        let image_path = meta.path;
+        let results = match model.predict_image(&img, image_path.clone()) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("Error processing {image_path}: {e}");
@@ -260,8 +257,8 @@ fn run_prediction(args: &[String]) {
             // Use original image dimensions for the per-image output
             println!(
                 "image {}/{} {}: {}x{} {}, {:.1}ms",
-                idx + 1,
-                total_images,
+                meta.frame_idx + 1,
+                meta.total_frames.unwrap_or(0),
                 image_path,
                 orig_shape.1, // width first in output
                 orig_shape.0, // then height
@@ -272,26 +269,51 @@ fn run_prediction(args: &[String]) {
             // Save annotated image if --save is specified
             #[cfg(feature = "annotate")]
             if let Some(ref dir) = save_dir {
-                if let Ok(img) = load_image(image_path) {
-                    let annotated = annotate_image(&img, &result, None);
-                    let filename = Path::new(image_path)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy();
-                    let save_path = format!("{dir}/{filename}");
-                    if let Err(e) = annotated.save(&save_path) {
-                        eprintln!("Error saving {save_path}: {e}");
-                    }
+                let annotated = annotate_image(&img, &result, None);
+                let filename = Path::new(&image_path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let save_path = format!("{dir}/{filename}");
+                if let Err(e) = annotated.save(&save_path) {
+                    eprintln!("Error saving {save_path}: {e}");
                 }
             }
 
             // Show result in viewer if enabled
             #[cfg(feature = "visualize")]
-            if let Some(ref mut v) = viewer {
-                if let Ok(img) = load_image(image_path) {
+            if show {
+                // If viewer exists but dimensions don't match, drop it to recreate
+                if let Some(ref v) = viewer {
+                    if v.width != img.width() as usize || v.height != img.height() as usize {
+                        viewer = None;
+                    }
+                }
+
+                // Initialize viewer lazily with correct dimensions
+                if viewer.is_none() {
+                    let width = img.width() as usize;
+                    let height = img.height() as usize;
+                    viewer =
+                        Some(Viewer::new("Ultralytics YOLO Inference", width, height).unwrap());
+                }
+
+                if let Some(ref mut v) = viewer {
                     let annotated = annotate_image(&img, &result, None);
-                    // Update viewer, resize window if needed happens inside update
-                    let _ = v.update(&annotated);
+
+                    // Update viewer
+                    if v.update(&annotated).is_ok() {
+                        // Add delay logic based on source type
+                        if is_video {
+                            // 200ms delay for initial start of video
+                            if frame_count == 0 {
+                                let _ = v.wait(std::time::Duration::from_millis(200));
+                            }
+                        } else {
+                            // 500ms delay for images (single or directory)
+                            let _ = v.wait(std::time::Duration::from_millis(500));
+                        }
+                    }
                 }
             }
 
@@ -302,6 +324,7 @@ fn run_prediction(args: &[String]) {
 
             all_results.push((image_path.clone(), result));
         }
+        frame_count += 1;
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
@@ -407,29 +430,6 @@ fn pluralize(word: &str) -> String {
             }
         }
     }
-}
-
-/// Collect image paths from a directory.
-fn collect_images_from_dir(dir: &Path) -> Vec<String> {
-    let mut paths = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(ext) = path.extension() {
-                let ext = ext.to_string_lossy().to_lowercase();
-                if matches!(
-                    ext.as_str(),
-                    "jpg" | "jpeg" | "png" | "bmp" | "gif" | "webp" | "tiff" | "tif"
-                ) {
-                    paths.push(path.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-
-    paths.sort();
-    paths
 }
 
 /// Print version information.

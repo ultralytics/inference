@@ -10,8 +10,9 @@ use crate::error::{InferenceError, Result};
 /// A simple image viewer using minifb.
 pub struct Viewer {
     window: Window,
-    width: usize,
-    height: usize,
+    pub width: usize,
+    pub height: usize,
+    buffer: Vec<u32>,
 }
 
 impl Viewer {
@@ -35,6 +36,7 @@ impl Viewer {
             window,
             width,
             height,
+            buffer: Vec::new(),
         })
     }
 
@@ -51,35 +53,59 @@ impl Viewer {
 
         let (img_width, img_height) = (image.width() as usize, image.height() as usize);
 
-        // Convert image to BGRA format expected by minifb (u32 per pixel: 0x00RRGGBB)
-        // Note: minifb expects 0x00RRGGBB for 24-bit color, effectively RGB
-        let mut buffer: Vec<u32> = Vec::with_capacity(img_width * img_height);
+        // Resize buffer if needed
+        let num_pixels = img_width * img_height;
+        if self.buffer.len() != num_pixels {
+            self.buffer.resize(num_pixels, 0);
+        }
 
+        // Convert image to BGRA format expected by minifb (u32 per pixel: 0x00RRGGBB)
         let rgb = image.to_rgb8();
-        for pixel in rgb.pixels() {
+        for (i, pixel) in rgb.pixels().enumerate() {
             let r = pixel[0] as u32;
             let g = pixel[1] as u32;
             let b = pixel[2] as u32;
             // Pack as 0x00RRGGBB
-            let color = (r << 16) | (g << 8) | b;
-            buffer.push(color);
+            self.buffer[i] = (r << 16) | (g << 8) | b;
         }
 
-        // If window size matches image size, just update
+        // Update dimensions if changed
         if self.width != img_width || self.height != img_height {
-            // Recreate window if dimensions changed significantly?
-            // For now, simpler to just assume window matches image or handle resize later
-            // Actually minifb handles content resize if we update with buffer dimensions
             self.width = img_width;
             self.height = img_height;
         }
 
         self.window
-            .update_with_buffer(&buffer, img_width, img_height)
+            .update_with_buffer(&self.buffer, self.width, self.height)
             .map_err(|e| {
                 InferenceError::VisualizerError(format!("Failed to update window: {}", e))
             })?;
 
+        Ok(true)
+    }
+
+    /// Wait for a specified duration while keeping the window responsive.
+    pub fn wait(&mut self, duration: std::time::Duration) -> Result<bool> {
+        // If buffer is empty, we can't really update, just return
+        if self.buffer.is_empty() {
+            return Ok(true);
+        }
+
+        let start = std::time::Instant::now();
+        while start.elapsed() < duration {
+            if !self.window.is_open()
+                || self.window.is_key_down(Key::Escape)
+                || self.window.is_key_down(Key::Q)
+            {
+                return Ok(false);
+            }
+            // Use update_with_buffer to ensure the image persists
+            // minifb handles frame limiting, so this loop won't spin 100% CPU indiscriminately
+            // if limit_update_rate is set (which it is).
+            let _ = self
+                .window
+                .update_with_buffer(&self.buffer, self.width, self.height);
+        }
         Ok(true)
     }
 }
