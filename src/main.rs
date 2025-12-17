@@ -65,6 +65,7 @@ fn run_prediction(args: &[String]) {
     let mut source_path: Option<&String> = None;
     let mut conf_threshold = 0.25_f32;
     let mut iou_threshold = 0.45_f32;
+    let mut imgsz: Option<usize> = None;
     let mut save = false;
     let mut half = false;
     let mut show = false;
@@ -120,6 +121,15 @@ fn run_prediction(args: &[String]) {
                 show = true;
                 i += 1;
             }
+            "--imgsz" => {
+                if i + 1 < args.len() {
+                    imgsz = args[i + 1].parse().ok();
+                    i += 2;
+                } else {
+                    eprintln!("Error: --imgsz requires a value");
+                    process::exit(1);
+                }
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 process::exit(1);
@@ -155,10 +165,15 @@ fn run_prediction(args: &[String]) {
     };
 
     // Load model
-    let config = InferenceConfig::new()
+    let mut config = InferenceConfig::new()
         .with_confidence(conf_threshold)
         .with_iou(iou_threshold)
         .with_half(half);
+
+    // Apply imgsz if specified
+    if let Some(size) = imgsz {
+        config = config.with_imgsz(size, size);
+    }
 
     let mut model = match YOLOModel::load_with_config(&model_path, config) {
         Ok(m) => m,
@@ -477,13 +492,16 @@ Options:
     --source, -s    Input source (image, video, webcam index, or URL)
     --conf          Confidence threshold (default: 0.25)
     --iou           IoU threshold for NMS (default: 0.45)
+    --imgsz         Inference image size (default: 640)
     --half          Use FP16 half-precision inference
     --save          Save annotated images to runs/detect/predict
+    --show          Display results in a window
 
 Examples:
     inference predict --model yolo11n.onnx --source image.jpg
     inference predict --model yolo11n.onnx --source video.mp4
     inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    inference predict -m yolo11n.onnx -s assets/ --save --half"#
+    inference predict -m yolo11n.onnx -s assets/ --save --half
+    inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show"#
     );
 }
