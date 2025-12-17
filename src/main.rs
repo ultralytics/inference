@@ -249,7 +249,7 @@ fn run_prediction(args: &[String]) {
             let detection_summary = format_detection_summary(&result);
 
             // Get image dimensions from result
-            let orig_shape = result.orig_shape();
+            // let orig_shape = result.orig_shape();
             let inference_shape = result.inference_shape();
             last_inference_shape = (inference_shape.0 as usize, inference_shape.1 as usize);
 
@@ -267,8 +267,8 @@ fn run_prediction(args: &[String]) {
                     meta.frame_idx + 1,
                     total_frames_str,
                     image_path,
-                    orig_shape.1,
-                    orig_shape.0,
+                    inference_shape.1,
+                    inference_shape.0,
                     detection_summary,
                     result.speed.inference.unwrap_or(0.0)
                 );
@@ -278,8 +278,8 @@ fn run_prediction(args: &[String]) {
                     meta.frame_idx + 1,
                     total_frames_str,
                     image_path,
-                    orig_shape.1,
-                    orig_shape.0,
+                    inference_shape.1,
+                    inference_shape.0,
                     detection_summary,
                     result.speed.inference.unwrap_or(0.0)
                 );
