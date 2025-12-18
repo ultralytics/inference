@@ -21,6 +21,10 @@ pub enum Source {
     ImageBuffer(DynamicImage),
     /// Raw HWC u8 array.
     Array(Array3<u8>),
+    /// HTTP/HTTPS URL to an image file.
+    ImageUrl(String),
+    /// List of image paths.
+    ImageList(Vec<PathBuf>),
     /// Path to a video file.
     Video(PathBuf),
     /// Webcam device index.
@@ -37,7 +41,10 @@ impl Source {
     /// Check if this source is a single image.
     #[must_use]
     pub fn is_image(&self) -> bool {
-        matches!(self, Self::Image(_) | Self::ImageBuffer(_) | Self::Array(_))
+        matches!(
+            self,
+            Self::Image(_) | Self::ImageBuffer(_) | Self::Array(_) | Self::ImageUrl(_)
+        )
     }
 
     /// Check if this source is a video or stream.
@@ -49,7 +56,10 @@ impl Source {
     /// Check if this source is a directory or glob pattern.
     #[must_use]
     pub const fn is_batch(&self) -> bool {
-        matches!(self, Self::Directory(_) | Self::Glob(_))
+        matches!(
+            self,
+            Self::Directory(_) | Self::Glob(_) | Self::ImageList(_)
+        )
     }
 
     /// Get the path if this source has one.
@@ -59,6 +69,21 @@ impl Source {
             Self::Image(p) | Self::Video(p) | Self::Directory(p) => Some(p),
             _ => None,
         }
+    }
+
+    /// Check if a URL points to an image based on extension.
+    fn is_image_url(url: &str) -> bool {
+        let url_lower = url.to_lowercase();
+        // Remove query parameters if present
+        let path_part = url_lower.split('?').next().unwrap_or(&url_lower);
+        path_part.ends_with(".jpg")
+            || path_part.ends_with(".jpeg")
+            || path_part.ends_with(".png")
+            || path_part.ends_with(".bmp")
+            || path_part.ends_with(".gif")
+            || path_part.ends_with(".webp")
+            || path_part.ends_with(".tiff")
+            || path_part.ends_with(".tif")
     }
 }
 
@@ -70,12 +95,18 @@ impl From<&str> for Source {
             return Self::Webcam(idx);
         }
 
+        // Check for HTTP/HTTPS URLs
+        if s.starts_with("http://") || s.starts_with("https://") {
+            // Check if it's an image URL by extension
+            if Self::is_image_url(s) {
+                return Self::ImageUrl(s.to_string());
+            }
+            // Otherwise treat as video stream
+            return Self::Stream(s.to_string());
+        }
+
         // Check for streaming URLs
-        if s.starts_with("rtsp://")
-            || s.starts_with("rtmp://")
-            || s.starts_with("http://")
-            || s.starts_with("https://")
-        {
+        if s.starts_with("rtsp://") || s.starts_with("rtmp://") {
             return Self::Stream(s.to_string());
         }
 
@@ -195,6 +226,8 @@ impl SourceIterator {
             Source::Directory(path) => Self::collect_images_from_dir(path)?,
             Source::Glob(pattern) => Self::collect_images_from_glob(pattern)?,
             Source::Image(path) => vec![path.clone()],
+            Source::ImageUrl(_) => vec![], // URLs are handled separately
+            Source::ImageList(paths) => paths.clone(),
             _ => vec![],
         };
 
@@ -290,6 +323,42 @@ impl SourceIterator {
                 )
             })
             .unwrap_or(false)
+    }
+
+    /// Download an image from a URL.
+    fn download_image(url: &str) -> Result<DynamicImage> {
+        let mut response = ureq::get(url)
+            .call()
+            .map_err(|e| InferenceError::ImageError(format!("Failed to download {url}: {e}")))?
+            .into_body();
+
+        let bytes = response.read_to_vec().map_err(|e| {
+            InferenceError::ImageError(format!("Failed to read response from {url}: {e}"))
+        })?;
+
+        image::load_from_memory(&bytes).map_err(|e| {
+            InferenceError::ImageError(format!("Failed to decode image from {url}: {e}"))
+        })
+    }
+
+    /// Get the next image from a URL.
+    fn next_image_url(&mut self, url: &str) -> Option<Result<(DynamicImage, SourceMeta)>> {
+        if self.current_frame > 0 {
+            return None;
+        }
+
+        self.current_frame = 1;
+        let meta = SourceMeta {
+            frame_idx: 0,
+            total_frames: Some(1),
+            path: url.to_string(),
+            fps: None,
+        };
+
+        match Self::download_image(url) {
+            Ok(img) => Some(Ok((img, meta))),
+            Err(e) => Some(Err(e)),
+        }
     }
 
     /// Get the next image from the source.
@@ -396,7 +465,13 @@ impl Iterator for SourceIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &self.source {
-            Source::Image(_) | Source::Directory(_) | Source::Glob(_) => self.next_image(),
+            Source::Image(_) | Source::Directory(_) | Source::Glob(_) | Source::ImageList(_) => {
+                self.next_image()
+            }
+            Source::ImageUrl(url) => {
+                let url = url.clone();
+                self.next_image_url(&url)
+            }
             Source::ImageBuffer(img) => {
                 if self.current_frame == 0 {
                     self.current_frame = 1;
