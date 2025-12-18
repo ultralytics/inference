@@ -5,6 +5,9 @@
 /// Color definitions and palettes.
 pub mod color;
 
+/// Skeleton structures for pose estimation.
+pub mod skeleton;
+
 #[cfg(feature = "visualize")]
 pub mod viewer;
 
