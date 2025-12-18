@@ -35,14 +35,14 @@ path = "src/main.rs"
 
 [dependencies]
 # Core - Image loading and processing
-image = "0.25"
-jpeg-decoder = "0.3"
-fast_image_resize = { version = "5.4", features = ["image", "rayon"] }
+image = "^0.25"
+jpeg-decoder = "^0.3"
+fast_image_resize = { version = "^5.4", features = ["image", "rayon"] }
 # Workaround: Pin zune-jpeg to 0.5.5 due to a macOS-specific bug in 0.5.6
 zune-jpeg = "=0.5.5"
 
 # Numerical computing (must match ort's ndarray version 0.17)
-ndarray = { version = "0.17", features = ["rayon"] }
+ndarray = { version = "^0.17", features = ["rayon"] }
 
 # ONNX Runtime 1.23 - using latest from GitHub for best performance
 ort = { git = "https://github.com/pykeio/ort.git", default-features = false, features = [
@@ -55,18 +55,18 @@ ort = { git = "https://github.com/pykeio/ort.git", default-features = false, fea
 ] }
 
 # Core - FP16 support (required by ort's half feature)
-half = { version = "2.4", features = ["num-traits"] }
-ureq = "3.1.4"
-dirs = "6.0"
-rayon = "1.10"
-minifb = { version = "0.25", optional = true }
-video-rs = { version = "0.10.5", features = ["ndarray"], optional = true }
-bytemuck = { version = "1.21", features = ["derive"] }
+half = { version = "^2.4", features = ["num-traits"] }
+ureq = "^3.1.4"
+dirs = "^6.0"
+rayon = "^1.10"
+minifb = { version = "^0.28.0", optional = true }
+video-rs = { version = "^0.10.5", features = ["ndarray"], optional = true }
+bytemuck = { version = "^1.21", features = ["derive"] }
 
 
 # Optional - Image annotation (for --save feature)
-imageproc = { version = "0.25", optional = true }
-ab_glyph = { version = "0.2", optional = true }
+imageproc = { version = "^0.25", optional = true }
+ab_glyph = { version = "^0.2", optional = true }
 
 [features]
 default = ["annotate", "visualize"]
