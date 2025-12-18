@@ -6,9 +6,8 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
-use crate::visualizer::color::{
-    COLORS, KPT_COLOR_INDICES, LIMB_COLOR_INDICES, POSE_COLORS, SKELETON,
-};
+use crate::visualizer::color::{COLORS, POSE_COLORS};
+use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
@@ -179,7 +178,7 @@ pub fn annotate_image(
 
     // Draw all annotations using helpers
     draw_detection(&mut img, result, font.as_ref());
-    draw_pose(&mut img, result);
+    draw_pose(&mut img, result, None, None, None);
     draw_obb(&mut img, result, font.as_ref());
     draw_classification(&mut img, result, font.as_ref(), top_k.unwrap_or(5));
 
@@ -393,16 +392,57 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
 }
 
 /// Draw pose estimation results (skeleton and keypoints)
-fn draw_pose(img: &mut image::RgbImage, result: &Results) {
+///
+/// # Arguments
+///
+/// * `img` - The image to draw on
+/// * `result` - The inference results containing keypoints
+/// * `skeleton` - Optional custom skeleton structure (pairs of keypoint indices).
+///                If `None`, uses the default human pose skeleton from `SKELETON`.
+/// * `limb_colors` - Optional custom color indices for limbs.
+///                   If `None`, uses the default from `LIMB_COLOR_INDICES`.
+/// * `kpt_colors` - Optional custom color indices for keypoints.
+///                  If `None`, uses the default from `KPT_COLOR_INDICES`.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Use default human pose configuration
+/// draw_pose(&mut img, result, None, None, None);
+///
+/// // Use custom skeleton for animals
+/// const ANIMAL_SKELETON: [[usize; 2]; 10] = [...];
+/// const ANIMAL_LIMB_COLORS: [usize; 10] = [0, 0, 9, 9, ...];
+/// const ANIMAL_KPT_COLORS: [usize; 15] = [16, 16, 0, 0, ...];
+/// draw_pose(
+///     &mut img,
+///     result,
+///     Some(&ANIMAL_SKELETON),
+///     Some(&ANIMAL_LIMB_COLORS),
+///     Some(&ANIMAL_KPT_COLORS),
+/// );
+/// ```
+fn draw_pose(
+    img: &mut image::RgbImage,
+    result: &Results,
+    skeleton: Option<&[[usize; 2]]>,
+    limb_colors: Option<&[usize]>,
+    kpt_colors: Option<&[usize]>,
+) {
     let (width, height) = img.dimensions();
 
     if let Some(ref keypoints) = result.keypoints {
+        // Use provided parameters or defaults
+        let skeleton = skeleton.unwrap_or(&SKELETON);
+        let limb_colors = limb_colors.unwrap_or(&LIMB_COLOR_INDICES);
+        let kpt_colors = kpt_colors.unwrap_or(&KPT_COLOR_INDICES);
+
         let kpt_data = &keypoints.data;
         let n_persons = kpt_data.shape()[0];
         let n_kpts = kpt_data.shape()[1];
 
         for person_idx in 0..n_persons {
-            for (limb_idx, &[kpt_a, kpt_b]) in SKELETON.iter().enumerate() {
+            for (limb_idx, &[kpt_a, kpt_b]) in skeleton.iter().enumerate() {
                 if kpt_a >= n_kpts || kpt_b >= n_kpts {
                     continue;
                 }
@@ -415,7 +455,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results) {
                 let conf2 = kpt_data[[person_idx, kpt_b, 2]];
 
                 if conf1 > 0.5 && conf2 > 0.5 {
-                    let color_idx = LIMB_COLOR_INDICES[limb_idx % LIMB_COLOR_INDICES.len()];
+                    let color_idx = limb_colors[limb_idx % limb_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_line_segment(img, x1, y1, x2, y2, color, 2);
                 }
@@ -427,7 +467,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results) {
                 let conf = kpt_data[[person_idx, kpt_idx, 2]];
 
                 if conf > 0.5 && x >= 0.0 && y >= 0.0 && x < width as f32 && y < height as f32 {
-                    let color_idx = KPT_COLOR_INDICES[kpt_idx % KPT_COLOR_INDICES.len()];
+                    let color_idx = kpt_colors[kpt_idx % kpt_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_filled_circle(img, x as i32, y as i32, 5, color);
                 }
