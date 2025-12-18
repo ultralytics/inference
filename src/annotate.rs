@@ -6,7 +6,9 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
-use crate::visualizer::color::{COLORS, POSE_COLORS};
+use crate::visualizer::color::{
+    COLORS, KPT_COLOR_INDICES, LIMB_COLOR_INDICES, POSE_COLORS, SKELETON,
+};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
@@ -395,50 +397,6 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results) {
     let (width, height) = img.dimensions();
 
     if let Some(ref keypoints) = result.keypoints {
-        const SKELETON: [[usize; 2]; 19] = [
-            [15, 13],
-            [13, 11],
-            [16, 14],
-            [14, 12],
-            [11, 12],
-            [5, 11],
-            [6, 12],
-            [5, 6],
-            [5, 7],
-            [6, 8],
-            [7, 9],
-            [8, 10],
-            [1, 2],
-            [0, 1],
-            [0, 2],
-            [1, 3],
-            [2, 4],
-            [3, 5],
-            [4, 6],
-        ];
-
-        const LIMB_COLORS: [[u8; 3]; 19] = [
-            [255, 128, 0],
-            [255, 153, 51],
-            [255, 178, 102],
-            [230, 230, 0],
-            [255, 153, 255],
-            [153, 204, 255],
-            [255, 102, 255],
-            [255, 51, 255],
-            [102, 178, 255],
-            [51, 153, 255],
-            [255, 153, 153],
-            [255, 102, 102],
-            [255, 51, 51],
-            [153, 255, 153],
-            [102, 255, 102],
-            [51, 255, 51],
-            [0, 255, 0],
-            [0, 0, 255],
-            [255, 0, 0],
-        ];
-
         let kpt_data = &keypoints.data;
         let n_persons = kpt_data.shape()[0];
         let n_kpts = kpt_data.shape()[1];
@@ -457,7 +415,8 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results) {
                 let conf2 = kpt_data[[person_idx, kpt_b, 2]];
 
                 if conf1 > 0.5 && conf2 > 0.5 {
-                    let color = Rgb(LIMB_COLORS[limb_idx % LIMB_COLORS.len()]);
+                    let color_idx = LIMB_COLOR_INDICES[limb_idx % LIMB_COLOR_INDICES.len()];
+                    let color = Rgb(POSE_COLORS[color_idx]);
                     draw_line_segment(img, x1, y1, x2, y2, color, 2);
                 }
             }
@@ -468,7 +427,8 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results) {
                 let conf = kpt_data[[person_idx, kpt_idx, 2]];
 
                 if conf > 0.5 && x >= 0.0 && y >= 0.0 && x < width as f32 && y < height as f32 {
-                    let color = Rgb(POSE_COLORS[kpt_idx % POSE_COLORS.len()]);
+                    let color_idx = KPT_COLOR_INDICES[kpt_idx % KPT_COLOR_INDICES.len()];
+                    let color = Rgb(POSE_COLORS[color_idx]);
                     draw_filled_circle(img, x as i32, y as i32, 5, color);
                 }
             }
