@@ -211,6 +211,9 @@ impl Default for SourceMeta {
     }
 }
 
+#[cfg(feature = "video")]
+use ffmpeg_next as ffmpeg;
+
 /// Iterator over frames from a source.
 pub struct SourceIterator {
     source: Source,
@@ -219,7 +222,13 @@ pub struct SourceIterator {
     #[cfg(feature = "video")]
     decoder: Option<video_rs::decode::Decoder>,
     #[cfg(feature = "video")]
+    webcam_decoder: Option<(ffmpeg::format::context::Input, ffmpeg::decoder::Video)>,
+    #[cfg(feature = "video")]
+    webcam_stream_index: usize,
+    #[cfg(feature = "video")]
     total_frames: Option<usize>,
+    #[cfg(feature = "video")]
+    webcam_init_failed: bool,
 }
 
 impl SourceIterator {
@@ -245,7 +254,13 @@ impl SourceIterator {
             #[cfg(feature = "video")]
             decoder: None,
             #[cfg(feature = "video")]
+            webcam_decoder: None,
+            #[cfg(feature = "video")]
+            webcam_stream_index: 0,
+            #[cfg(feature = "video")]
             total_frames: None,
+            #[cfg(feature = "video")]
+            webcam_init_failed: false,
         })
     }
 
@@ -393,31 +408,224 @@ impl SourceIterator {
 
     /// Get the next video frame.
     #[cfg(feature = "video")]
+    #[allow(unsafe_code, clippy::too_many_lines)]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
-        // Initialize decoder if needed
-        if self.decoder.is_none()
-            && let Source::Video(path) = &self.source
-        {
-            match video_rs::decode::Decoder::new(path.as_path()) {
-                Ok(d) => {
-                    // Calculate total frames from duration and frame rate
-                    if let Ok(duration) = d.duration() {
-                        let fps = d.frame_rate();
-                        let duration_seconds = duration.as_secs_f64();
-                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                        {
-                            self.total_frames = Some((duration_seconds * f64::from(fps)) as usize);
-                        }
-                    }
-                    self.decoder = Some(d);
-                }
-                Err(e) => {
+        // Handle Webcam separately using native ffmpeg
+        if let Source::Webcam(idx) = &self.source {
+            if self.webcam_init_failed {
+                return None;
+            }
+
+            if self.webcam_decoder.is_none() {
+                // Initialize webcam
+                ffmpeg::init().ok();
+
+                // Get format by name (returns Option<Format>)
+                let input_format_name = if cfg!(target_os = "macos") {
+                    "avfoundation"
+                } else if cfg!(target_os = "linux") {
+                    "video4linux2"
+                } else if cfg!(target_os = "windows") {
+                    "dshow"
+                } else {
+                    self.webcam_init_failed = true;
+                    return Some(Err(InferenceError::VideoError(
+                        "Unsupported OS for webcam".to_string(),
+                    )));
+                };
+
+                // Find input format by name using low-level C API
+                let c_name = std::ffi::CString::new(input_format_name).unwrap();
+                #[allow(unsafe_code)]
+                let ptr = unsafe { ffmpeg_sys_next::av_find_input_format(c_name.as_ptr()) };
+
+                let input_format = if ptr.is_null() {
+                    self.webcam_init_failed = true;
                     return Some(Err(InferenceError::VideoError(format!(
-                        "Failed to create decoder: {e}"
+                        "Input format '{input_format_name}' not found"
                     ))));
+                } else {
+                    #[allow(unsafe_code, clippy::ptr_cast_constness)]
+                    unsafe {
+                        ffmpeg::format::Input::wrap(ptr.cast_mut())
+                    }
+                };
+
+                // Determine device name based on OS and index
+                let device_name = if cfg!(target_os = "macos") {
+                    idx.to_string() // Just index for avfoundation
+                } else if cfg!(target_os = "linux") {
+                    format!("/dev/video{idx}")
+                } else if cfg!(target_os = "windows") {
+                    format!("video={idx}")
+                } else {
+                    self.webcam_init_failed = true;
+                    return Some(Err(InferenceError::VideoError(
+                        "Unsupported OS for webcam device name".to_string(),
+                    )));
+                };
+
+                // Set explicit framerate to avoid default NTSC mismatch
+                let mut options = ffmpeg::Dictionary::new();
+                options.set("framerate", "30");
+
+                match ffmpeg::format::open_with(
+                    &PathBuf::from(&device_name),
+                    &ffmpeg::Format::Input(input_format),
+                    options,
+                ) {
+                    #[allow(clippy::single_match_else)]
+                    Ok(ctx) => match ctx {
+                        ffmpeg::format::context::Context::Input(ictx) => {
+                            let input =
+                                ictx.streams()
+                                    .best(ffmpeg::media::Type::Video)
+                                    .ok_or_else(|| {
+                                        InferenceError::VideoError(
+                                            "No video stream found in webcam".to_string(),
+                                        )
+                                    });
+
+                            match input {
+                                Ok(stream) => {
+                                    let stream_index = stream.index();
+                                    self.webcam_stream_index = stream_index;
+                                    let context_decoder =
+                                        ffmpeg::codec::context::Context::from_parameters(
+                                            stream.parameters(),
+                                        )
+                                        .unwrap();
+                                    match context_decoder.decoder().video() {
+                                        Ok(decoder) => {
+                                            self.webcam_decoder = Some((ictx, decoder));
+                                        }
+                                        Err(e) => {
+                                            self.webcam_init_failed = true;
+                                            return Some(Err(InferenceError::VideoError(format!(
+                                                "Failed to create webcam decoder: {e}"
+                                            ))));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    self.webcam_init_failed = true;
+                                    return Some(Err(e));
+                                }
+                            }
+                        }
+                        ffmpeg::format::context::Context::Output(_) => {
+                            self.webcam_init_failed = true;
+                            return Some(Err(InferenceError::VideoError(
+                                "Opened context is not an input context".to_string(),
+                            )));
+                        }
+                    },
+                    Err(e) => {
+                        self.webcam_init_failed = true;
+                        return Some(Err(InferenceError::VideoError(format!(
+                            "Failed to open webcam: {e}"
+                        ))));
+                    }
                 }
             }
-            // Note: Decoder initialized.
+
+            if let Some((ictx, decoder)) = &mut self.webcam_decoder {
+                let mut decoded = ffmpeg::util::frame::video::Video::empty();
+
+                // Read packets until we get a full frame
+                for (stream, packet) in ictx.packets() {
+                    if stream.index() == self.webcam_stream_index
+                        && decoder.send_packet(&packet).is_ok()
+                        && decoder.receive_frame(&mut decoded).is_ok()
+                    {
+                        // Convert to DynamicImage
+                        // Handle pixel formatting manually or use a helper
+                        // For simplicity, we assume RGB24 or BGR24 or similar, likely need swscale
+
+                        // We need a scaler to ensure RGB output
+                        let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
+                        let mut scaler = ffmpeg::software::scaling::context::Context::get(
+                            decoded.format(),
+                            decoded.width(),
+                            decoded.height(),
+                            ffmpeg::format::Pixel::RGB24,
+                            decoded.width(),
+                            decoded.height(),
+                            ffmpeg::software::scaling::flag::Flags::BILINEAR,
+                        )
+                        .unwrap();
+
+                        scaler.run(&decoded, &mut rgb_frame).ok();
+
+                        let width = rgb_frame.width();
+                        let height = rgb_frame.height();
+                        let data = rgb_frame.data(0);
+                        let stride = rgb_frame.stride(0);
+
+                        // Tightly packed RGB data
+                        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+                        for y in 0..height as usize {
+                            let row = &data[y * stride..y * stride + (width as usize) * 3];
+                            rgb_data.extend_from_slice(row);
+                        }
+
+                        let img_buffer =
+                            image::RgbImage::from_raw(width, height, rgb_data).unwrap();
+                        let img = DynamicImage::ImageRgb8(img_buffer);
+
+                        let meta = SourceMeta {
+                            frame_idx: self.current_frame,
+                            total_frames: None,
+                            path: format!("Webcam {idx}"),
+                            fps: None,
+                        };
+                        self.current_frame += 1;
+                        return Some(Ok((img, meta)));
+                    }
+                }
+                return None; // End of stream or error
+            }
+            return None;
+        }
+
+        // Initialize decoder if needed (Video/Stream)
+        if self.decoder.is_none() {
+            let path_str = match &self.source {
+                Source::Video(p) => Some(p.to_string_lossy().to_string()),
+                Source::Stream(s) => Some(s.clone()),
+                // Webcam handled above
+                _ => None,
+            };
+
+            if let Some(path_str) = path_str {
+                match video_rs::decode::Decoder::new(Path::new(&path_str)) {
+                    Ok(d) => {
+                        // Calculate total frames from duration and frame rate
+                        // Note: limit to Video source only as streams/webcams are infinite
+                        #[allow(clippy::collapsible_if)]
+                        if let Source::Video(_) = &self.source {
+                            if let Ok(duration) = d.duration() {
+                                let fps = d.frame_rate();
+                                let duration_seconds = duration.as_secs_f64();
+                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                                {
+                                    self.total_frames =
+                                        Some((duration_seconds * f64::from(fps)) as usize);
+                                }
+                            }
+                        }
+                        self.decoder = Some(d);
+                    }
+                    Err(e) => {
+                        // Debug: print error to stderr
+                        eprintln!("Debug: Decode failed: {e}");
+                        return Some(Err(InferenceError::VideoError(format!(
+                            "Failed to create decoder: {e}"
+                        ))));
+                    }
+                }
+                // Note: Decoder initialized.
+            }
         }
 
         if let Some(decoder) = &mut self.decoder {
@@ -442,15 +650,8 @@ impl SourceIterator {
                         Err(e) => Some(Err(e)),
                     }
                 }
-                Err(_e) => {
-                    // Check if error is EOF. Video-rs usually returns a specific error or strict error on EOF.
-                    // Assuming for now that any error might be EOF or fatal.
-                    // If video-rs returns VideoError::Decode(EOF), we can stop.
-                    // Given we can't easily check error variants without knowing them,
-                    // we'll assume standard video ending behavior: error implies stop.
-                    // Common practice: return None on error if it looks like EOF.
-                    // Without explicit EOF check, we return None (end of stream) for now.
-                    // User can restart or check logs if it cuts short.
+                Err(e) => {
+                    eprintln!("Debug: Decode failed: {e}");
                     None
                 }
             }
@@ -460,6 +661,11 @@ impl SourceIterator {
     }
 
     #[cfg(not(feature = "video"))]
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        clippy::needless_pass_by_ref_mut
+    )]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         Some(Err(InferenceError::FeatureNotEnabled(
             "Video support requires 'video' feature".to_string(),
