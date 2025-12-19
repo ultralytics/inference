@@ -133,20 +133,17 @@ jobs:
       - name: Build (annotate + video features)
         run: cargo build --features annotate,video
 
-  # Code coverage (runs on ubuntu container with ffmpeg for all features)
+  # Code coverage (runs on macOS with ffmpeg for full feature coverage)
   coverage:
     name: coverage
-    runs-on: ubuntu-latest
-    container: jrottenberg/ffmpeg:7.1-ubuntu
+    runs-on: macos-latest
     needs: [test, test-video]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          DEBIAN_FRONTEND=noninteractive apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ca-certificates clang curl pkg-config libssl-dev libc6-dev
+        run: brew install ffmpeg@7 pkg-config
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -162,7 +159,9 @@ jobs:
       - name: Coverage
         run: cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
         env:
-          RUSTFLAGS: "-C linker=gcc"
+          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib"
+          CPPFLAGS: "-I/opt/homebrew/opt/ffmpeg@7/include"
+          PKG_CONFIG_PATH: "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
