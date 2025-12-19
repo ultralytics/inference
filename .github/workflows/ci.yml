@@ -161,6 +161,8 @@ jobs:
 
       - name: Coverage
         run: cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
+        env:
+          RUSTFLAGS: "-C linker=gcc"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
