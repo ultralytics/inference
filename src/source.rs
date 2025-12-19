@@ -661,6 +661,11 @@ impl SourceIterator {
     }
 
     #[cfg(not(feature = "video"))]
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        clippy::needless_pass_by_ref_mut
+    )]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         Some(Err(InferenceError::FeatureNotEnabled(
             "Video support requires 'video' feature".to_string(),

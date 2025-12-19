@@ -330,7 +330,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Classification inference
 - [x] OBB (oriented bounding box) support
 - [x] Video file support
-- [ ] Webcam/RTSP streaming
+- [x] Webcam/RTSP streaming
 - [ ] Python bindings (PyO3)
 - [ ] Batch inference
 
