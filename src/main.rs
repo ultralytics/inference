@@ -338,26 +338,35 @@ fn run_prediction(args: &[String]) {
             // Show result in viewer if enabled
             #[cfg(feature = "visualize")]
             if show {
+                // Use inference shape for viewer dimensions
+                let view_width = inference_shape.1 as usize;
+                let view_height = inference_shape.0 as usize;
+
                 // If viewer exists but dimensions don't match, drop it to recreate
                 if let Some(ref v) = viewer
-                    && (v.width != img.width() as usize || v.height != img.height() as usize)
+                    && (v.width != view_width || v.height != view_height)
                 {
                     viewer = None;
                 }
 
-                // Initialize viewer lazily with correct dimensions
+                // Initialize viewer lazily with inference dimensions
                 if viewer.is_none() {
-                    let width = img.width() as usize;
-                    let height = img.height() as usize;
-                    viewer =
-                        Some(Viewer::new("Ultralytics YOLO Inference", width, height).unwrap());
+                    viewer = Some(
+                        Viewer::new("Ultralytics Inference", view_width, view_height).unwrap(),
+                    );
                 }
 
                 if let Some(ref mut v) = viewer {
                     let annotated = annotate_image(&img, &result, None);
+                    // Resize annotated image to inference dimensions
+                    let resized = annotated.resize_exact(
+                        view_width as u32,
+                        view_height as u32,
+                        image::imageops::FilterType::Triangle,
+                    );
 
                     // Update viewer
-                    if v.update(&annotated).is_ok() {
+                    if v.update(&resized).is_ok() {
                         // Add delay logic based on source type
                         if is_video {
                             // 200ms delay for initial start of video
