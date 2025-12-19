@@ -17,20 +17,17 @@ impl Color {
     pub const BLACK: Self = Self(0, 0, 0);
 
     /// Create a new color from RGB values.
-    #[must_use] 
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self(r, g, b)
     }
 
     /// Get a color from the predefined palette by index.
-    #[must_use] 
     pub const fn from_index(index: usize) -> Self {
         let color = COLORS[index % COLORS.len()];
         Self(color[0], color[1], color[2])
     }
 
     /// Get a color from the pose palette by index.
-    #[must_use] 
     pub const fn from_pose_index(index: usize) -> Self {
         let color = POSE_COLORS[index % POSE_COLORS.len()];
         Self(color[0], color[1], color[2])
