@@ -65,7 +65,6 @@ cargo run --release -- predict -m yolo11n.onnx -s image.jpg --conf 0.5 --iou 0.4
 
 # With visualization and custom image size
 cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --show --imgsz 1280
-
 ```
 
 ### Example Output
@@ -271,10 +270,10 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 
 ### Optional Dependencies (for Video & Visualization)
 
-| Crate      | Purpose                               |
-| ---------- | ------------------------------------- |
-| `minifb`   | Window creation and buffer display    |
-| `video-rs` | Video decoding/encoding (ffmpeg)      |
+| Crate      | Purpose                            |
+| ---------- | ---------------------------------- |
+| `minifb`   | Window creation and buffer display |
+| `video-rs` | Video decoding/encoding (ffmpeg)   |
 
 To build without annotation support (smaller binary):
 
