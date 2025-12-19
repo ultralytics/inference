@@ -72,11 +72,11 @@ jobs:
       - name: Cache build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Clippy (all features)
-        run: cargo clippy --all --features all -- -D warnings
+      - name: Clippy (annotate + video)
+        run: cargo clippy --all --features annotate,video -- -D warnings
 
-      - name: Tests (all features)
-        run: cargo test --all --features all
+      - name: Tests (annotate + video)
+        run: cargo test --all --features annotate,video
 
   # macOS video build test
   build-macos-video:

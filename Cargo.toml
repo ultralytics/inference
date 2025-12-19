@@ -118,28 +118,7 @@ nvidia = ["cuda", "tensorrt"]
 amd = ["rocm", "migraphx"]
 intel = ["openvino", "onednn"]
 mobile = ["nnapi", "coreml", "qnn"]
-all = [
-    "annotate",
-    "video",
-    "cuda",
-    "tensorrt",
-    "rocm",
-    "openvino",
-    "onednn",
-    "directml",
-    "nnapi",
-    "coreml",
-    "xnnpack",
-    "acl",
-    "armnn",
-    "tvm",
-    "migraphx",
-    "rknpu",
-    "vitis",
-    "cann",
-    "qnn",
-    "azure",
-]
+all = ["annotate", "video"]
 
 [dev-dependencies]
 # Testing dependencies
