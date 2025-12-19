@@ -12,8 +12,7 @@ use std::str::FromStr;
 ///
 /// Each task type corresponds to a different type of computer vision problem
 /// that YOLO models can solve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Task {
     /// Object detection - predicts bounding boxes and class labels.
     #[default]
@@ -92,7 +91,6 @@ impl FromStr for Task {
         }
     }
 }
-
 
 /// Error returned when parsing an invalid task string.
 #[derive(Debug, Clone)]
