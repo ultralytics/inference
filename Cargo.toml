@@ -119,6 +119,8 @@ amd = ["rocm", "migraphx"]
 intel = ["openvino", "onednn"]
 mobile = ["nnapi", "coreml", "qnn"]
 all = [
+    "annotate",
+    "video",
     "cuda",
     "tensorrt",
     "rocm",
@@ -136,7 +138,6 @@ all = [
     "vitis",
     "cann",
     "qnn",
-    "webgpu",
     "azure",
 ]
 

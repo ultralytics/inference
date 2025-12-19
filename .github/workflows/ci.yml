@@ -38,8 +38,6 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
-      # Note: We skip 'visualize' feature in CI as minifb requires platform-specific
-      # libraries (webgpu_dawn) that aren't available in GitHub Actions runners
       - name: Clippy (annotate feature)
         run: cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
 
@@ -75,10 +73,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Clippy (all features)
-        run: cargo clippy --all --all-features -- -D warnings
+        run: cargo clippy --all --features all -- -D warnings
 
       - name: Tests (all features)
-        run: cargo test --all --all-features
+        run: cargo test --all --features all
 
   # macOS video build test
   build-macos-video:
@@ -97,8 +95,8 @@ jobs:
       - name: Cache build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Build (all features)
-        run: cargo build --all-features
+      - name: Build (annotate + video features)
+        run: cargo build --features annotate,video
         env:
           LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib"
           CPPFLAGS: "-I/opt/homebrew/opt/ffmpeg@7/include"
@@ -132,8 +130,8 @@ jobs:
       - name: Cache build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Build (all features)
-        run: cargo build --all-features
+      - name: Build (annotate + video features)
+        run: cargo build --features annotate,video
 
   # Code coverage (runs on ubuntu container with ffmpeg for all features)
   coverage:
@@ -162,7 +160,7 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Coverage
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
