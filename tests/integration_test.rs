@@ -1,4 +1,5 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 #![allow(clippy::float_cmp)]
 
 //! Integration tests for the inference library
