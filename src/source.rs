@@ -407,9 +407,8 @@ impl SourceIterator {
     }
 
     /// Get the next video frame.
-    /// Get the next video frame.
     #[cfg(feature = "video")]
-    #[allow(unsafe_code)]
+    #[allow(unsafe_code, clippy::too_many_lines)]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         // Handle Webcam separately using native ffmpeg
         if let Source::Webcam(idx) = &self.source {
@@ -443,23 +442,22 @@ impl SourceIterator {
                 let input_format = if ptr.is_null() {
                     self.webcam_init_failed = true;
                     return Some(Err(InferenceError::VideoError(format!(
-                        "Input format '{}' not found",
-                        input_format_name
+                        "Input format '{input_format_name}' not found"
                     ))));
                 } else {
-                    #[allow(unsafe_code)]
+                    #[allow(unsafe_code, clippy::ptr_cast_constness)]
                     unsafe {
-                        ffmpeg::format::Input::wrap(ptr as *mut _)
+                        ffmpeg::format::Input::wrap(ptr.cast_mut())
                     }
                 };
 
                 // Determine device name based on OS and index
                 let device_name = if cfg!(target_os = "macos") {
-                    format!("{}", idx) // Just index for avfoundation
+                    idx.to_string() // Just index for avfoundation
                 } else if cfg!(target_os = "linux") {
-                    format!("/dev/video{}", idx)
+                    format!("/dev/video{idx}")
                 } else if cfg!(target_os = "windows") {
-                    format!("video={}", idx)
+                    format!("video={idx}")
                 } else {
                     self.webcam_init_failed = true;
                     return Some(Err(InferenceError::VideoError(
@@ -476,6 +474,7 @@ impl SourceIterator {
                     &ffmpeg::Format::Input(input_format),
                     options,
                 ) {
+                    #[allow(clippy::single_match_else)]
                     Ok(ctx) => match ctx {
                         ffmpeg::format::context::Context::Input(ictx) => {
                             let input =
@@ -514,7 +513,7 @@ impl SourceIterator {
                                 }
                             }
                         }
-                        _ => {
+                        ffmpeg::format::context::Context::Output(_) => {
                             self.webcam_init_failed = true;
                             return Some(Err(InferenceError::VideoError(
                                 "Opened context is not an input context".to_string(),
@@ -535,55 +534,53 @@ impl SourceIterator {
 
                 // Read packets until we get a full frame
                 for (stream, packet) in ictx.packets() {
-                    if stream.index() == self.webcam_stream_index {
-                        if decoder.send_packet(&packet).is_ok() {
-                            if decoder.receive_frame(&mut decoded).is_ok() {
-                                // Convert to DynamicImage
-                                // Handle pixel formatting manually or use a helper
-                                // For simplicity, we assume RGB24 or BGR24 or similar, likely need swscale
+                    if stream.index() == self.webcam_stream_index
+                        && decoder.send_packet(&packet).is_ok()
+                        && decoder.receive_frame(&mut decoded).is_ok()
+                    {
+                        // Convert to DynamicImage
+                        // Handle pixel formatting manually or use a helper
+                        // For simplicity, we assume RGB24 or BGR24 or similar, likely need swscale
 
-                                // We need a scaler to ensure RGB output
-                                let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
-                                let mut scaler = ffmpeg::software::scaling::context::Context::get(
-                                    decoded.format(),
-                                    decoded.width(),
-                                    decoded.height(),
-                                    ffmpeg::format::Pixel::RGB24,
-                                    decoded.width(),
-                                    decoded.height(),
-                                    ffmpeg::software::scaling::flag::Flags::BILINEAR,
-                                )
-                                .unwrap();
+                        // We need a scaler to ensure RGB output
+                        let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
+                        let mut scaler = ffmpeg::software::scaling::context::Context::get(
+                            decoded.format(),
+                            decoded.width(),
+                            decoded.height(),
+                            ffmpeg::format::Pixel::RGB24,
+                            decoded.width(),
+                            decoded.height(),
+                            ffmpeg::software::scaling::flag::Flags::BILINEAR,
+                        )
+                        .unwrap();
 
-                                scaler.run(&decoded, &mut rgb_frame).ok();
+                        scaler.run(&decoded, &mut rgb_frame).ok();
 
-                                let width = rgb_frame.width();
-                                let height = rgb_frame.height();
-                                let data = rgb_frame.data(0);
-                                let stride = rgb_frame.stride(0) as usize;
+                        let width = rgb_frame.width();
+                        let height = rgb_frame.height();
+                        let data = rgb_frame.data(0);
+                        let stride = rgb_frame.stride(0);
 
-                                // Tightly packed RGB data
-                                let mut rgb_data =
-                                    Vec::with_capacity((width * height * 3) as usize);
-                                for y in 0..height as usize {
-                                    let row = &data[y * stride..y * stride + (width as usize) * 3];
-                                    rgb_data.extend_from_slice(row);
-                                }
-
-                                let img_buffer =
-                                    image::RgbImage::from_raw(width, height, rgb_data).unwrap();
-                                let img = DynamicImage::ImageRgb8(img_buffer);
-
-                                let meta = SourceMeta {
-                                    frame_idx: self.current_frame,
-                                    total_frames: None,
-                                    path: format!("Webcam {}", idx),
-                                    fps: None,
-                                };
-                                self.current_frame += 1;
-                                return Some(Ok((img, meta)));
-                            }
+                        // Tightly packed RGB data
+                        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+                        for y in 0..height as usize {
+                            let row = &data[y * stride..y * stride + (width as usize) * 3];
+                            rgb_data.extend_from_slice(row);
                         }
+
+                        let img_buffer =
+                            image::RgbImage::from_raw(width, height, rgb_data).unwrap();
+                        let img = DynamicImage::ImageRgb8(img_buffer);
+
+                        let meta = SourceMeta {
+                            frame_idx: self.current_frame,
+                            total_frames: None,
+                            path: format!("Webcam {idx}"),
+                            fps: None,
+                        };
+                        self.current_frame += 1;
+                        return Some(Ok((img, meta)));
                     }
                 }
                 return None; // End of stream or error
