@@ -174,9 +174,8 @@ fn run_prediction(args: &[String]) {
     };
 
     // Determine source
-    let source = match source_path {
-        Some(s) => inference::source::Source::from(s.as_str()),
-        None => {
+    let source = source_path.as_ref().map_or_else(
+        || {
             // Select default images based on model task
             let default_urls = match model.task() {
                 inference::task::Task::Obb => &[inference::download::DEFAULT_OBB_IMAGE],
@@ -203,8 +202,9 @@ fn run_prediction(args: &[String]) {
                 .collect();
 
             inference::source::Source::ImageList(paths)
-        }
-    };
+        },
+        |s| inference::source::Source::from(s.as_str()),
+    );
 
     #[cfg(feature = "annotate")]
     let save_dir = if save {

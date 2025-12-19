@@ -356,6 +356,8 @@ pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
 ///
 /// # Returns
 /// The path to the downloaded (or existing) file, or an error if download fails
+/// # Errors
+/// Returns an error if the download fails or file I/O errors occur
 pub fn download_image(url: &str) -> Result<String> {
     let filename = url.rsplit('/').next().unwrap_or("image.jpg");
     let dest_path = Path::new(filename);
@@ -379,6 +381,7 @@ pub fn download_image(url: &str) -> Result<String> {
 ///
 /// # Arguments
 /// * `urls` - Slice of URLs to download
+#[must_use]
 pub fn download_images(urls: &[&str]) -> Vec<String> {
     urls.iter()
         .filter_map(|url| download_image(url).ok())

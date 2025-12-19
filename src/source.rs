@@ -76,14 +76,20 @@ impl Source {
         let url_lower = url.to_lowercase();
         // Remove query parameters if present
         let path_part = url_lower.split('?').next().unwrap_or(&url_lower);
-        path_part.ends_with(".jpg")
-            || path_part.ends_with(".jpeg")
-            || path_part.ends_with(".png")
-            || path_part.ends_with(".bmp")
-            || path_part.ends_with(".gif")
-            || path_part.ends_with(".webp")
-            || path_part.ends_with(".tiff")
-            || path_part.ends_with(".tif")
+
+        std::path::Path::new(path_part)
+            .extension()
+            .is_some_and(|ext| {
+                let s = ext.to_string_lossy();
+                s.eq_ignore_ascii_case("jpg")
+                    || s.eq_ignore_ascii_case("jpeg")
+                    || s.eq_ignore_ascii_case("png")
+                    || s.eq_ignore_ascii_case("bmp")
+                    || s.eq_ignore_ascii_case("gif")
+                    || s.eq_ignore_ascii_case("webp")
+                    || s.eq_ignore_ascii_case("tiff")
+                    || s.eq_ignore_ascii_case("tif")
+            })
     }
 }
 
@@ -227,7 +233,7 @@ impl SourceIterator {
             Source::Directory(path) => Self::collect_images_from_dir(path)?,
             Source::Glob(pattern) => Self::collect_images_from_glob(pattern)?,
             Source::Image(path) => vec![path.clone()],
-            Source::ImageUrl(_) => vec![], // URLs are handled separately
+            // URLs are handled separately via next_image_url
             Source::ImageList(paths) => paths.clone(),
             _ => vec![],
         };
