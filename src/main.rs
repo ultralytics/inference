@@ -33,8 +33,6 @@ use inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
-/// Default source path when not specified.
-const DEFAULT_SOURCE: &str = "assets";
 
 /// Entry point for the Ultralytics YOLO Inference CLI.
 fn main() {
@@ -147,7 +145,6 @@ fn run_prediction(args: &[String]) {
 
     // Use defaults with warnings if not specified
     let default_model = DEFAULT_MODEL.to_string();
-    let default_source = DEFAULT_SOURCE.to_string();
 
     let model_path = if let Some(m) = model_path {
         m.clone()
@@ -156,19 +153,7 @@ fn run_prediction(args: &[String]) {
         default_model
     };
 
-    let source_path = if let Some(s) = source_path {
-        s.clone()
-    } else {
-        let cwd = env::current_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_default();
-        eprintln!(
-            "WARNING ⚠️ 'source' argument is missing. Using default 'source={cwd}/{DEFAULT_SOURCE}'."
-        );
-        default_source
-    };
-
-    // Load model
+    // Load model first so we can determine appropriate default source based on task
     let mut config = InferenceConfig::new()
         .with_confidence(conf_threshold)
         .with_iou(iou_threshold)
@@ -184,6 +169,39 @@ fn run_prediction(args: &[String]) {
         Err(e) => {
             eprintln!("Error loading model: {e}");
             process::exit(1);
+        }
+    };
+
+    // Determine source
+    let source = match source_path {
+        Some(s) => inference::source::Source::from(s.as_str()),
+        None => {
+            // Select default images based on model task
+            let default_urls = match model.task() {
+                inference::task::Task::Obb => &[inference::download::DEFAULT_OBB_IMAGE],
+                _ => inference::download::DEFAULT_IMAGES,
+            };
+
+            eprintln!(
+                "WARNING ⚠️ 'source' argument is missing. Using default images: {}",
+                default_urls.join(", ")
+            );
+
+            // Download images to current directory (skips if already exists)
+            let downloaded_files = inference::download::download_images(default_urls);
+
+            if downloaded_files.is_empty() {
+                eprintln!("Error: Failed to download any images");
+                process::exit(1);
+            }
+
+            // Convert to PathBufs for ImageList
+            let paths = downloaded_files
+                .into_iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+
+            inference::source::Source::ImageList(paths)
         }
     };
 
@@ -223,8 +241,7 @@ fn run_prediction(args: &[String]) {
     );
     println!();
 
-    // Initialize source
-    let source = inference::source::Source::from(source_path);
+    // Source is already initialized above
     let is_video = source.is_video();
     let source_iter = match inference::source::SourceIterator::new(source) {
         Ok(iter) => iter,

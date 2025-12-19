@@ -47,6 +47,21 @@ pub const DEFAULT_CLS_MODEL: &str = "yolo11n-cls.onnx";
 const DEFAULT_CLS_MODEL_URL: &str =
     "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-cls.onnx";
 
+/// URL for downloading the default Bus.jpg image
+const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
+
+/// URL for downloading the default Zidane.jpg image
+const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
+
+/// URL for downloading the default Boats.jpg image (for OBB)
+const DEFAULT_BOATS_IMAGE_URL: &str = "https://ultralytics.com/images/boats.jpg";
+
+/// Default image URLs for detection, segmentation, pose, and classification tasks
+pub const DEFAULT_IMAGES: &[&str] = &[DEFAULT_BUS_IMAGE_URL, DEFAULT_ZIDANE_IMAGE_URL];
+
+/// Default image URL for OBB (Oriented Bounding Box) tasks
+pub const DEFAULT_OBB_IMAGE: &str = DEFAULT_BOATS_IMAGE_URL;
+
 /// Connection timeout in seconds.
 const CONNECT_TIMEOUT: u64 = 30;
 
@@ -331,6 +346,43 @@ pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     download_file(url, &dest_path)?;
 
     Ok(dest_path)
+}
+
+/// Download an image from a URL to the current directory.
+/// Skips download if the file already exists.
+///
+/// # Arguments
+/// * `url` - The URL to download from
+///
+/// # Returns
+/// The path to the downloaded (or existing) file, or an error if download fails
+pub fn download_image(url: &str) -> Result<String> {
+    let filename = url.rsplit('/').next().unwrap_or("image.jpg");
+    let dest_path = Path::new(filename);
+
+    // Skip download if file already exists
+    if dest_path.exists() {
+        eprintln!("Image already exists: {filename}");
+        return Ok(filename.to_string());
+    }
+
+    eprintln!("Downloading {url}...");
+
+    download_file(url, dest_path)?;
+
+    Ok(filename.to_string())
+}
+
+/// Download multiple images from URLs to the current directory.
+/// Returns a vector of paths to the successfully downloaded files.
+/// Skips files that already exist.
+///
+/// # Arguments
+/// * `urls` - Slice of URLs to download
+pub fn download_images(urls: &[&str]) -> Vec<String> {
+    urls.iter()
+        .filter_map(|url| download_image(url).ok())
+        .collect()
 }
 
 #[cfg(test)]
