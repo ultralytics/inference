@@ -80,6 +80,7 @@ impl Results {
         inference_shape: (u32, u32),
     ) -> Self {
         let shape = orig_img.shape();
+        #[allow(clippy::cast_possible_truncation)]
         let orig_shape = (shape[0] as u32, shape[1] as u32);
 
         Self {
@@ -110,7 +111,7 @@ impl Results {
             return keypoints.len();
         }
         if let Some(ref probs) = self.probs {
-            return if probs.data.is_empty() { 0 } else { 1 };
+            return usize::from(!probs.data.is_empty());
         }
         if let Some(ref obb) = self.obb {
             return obb.len();
@@ -164,7 +165,8 @@ impl Results {
         if let Some(ref boxes) = self.boxes {
             let cls = boxes.cls();
             let mut counts: HashMap<usize, usize> = HashMap::new();
-            for &c in cls.iter() {
+            for &c in cls {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 let c = c as usize;
                 *counts.entry(c).or_insert(0) += 1;
             }
@@ -212,6 +214,7 @@ impl Results {
 
         if let Some(ref boxes) = self.boxes {
             let (h, w) = if normalize {
+                #[allow(clippy::cast_precision_loss)]
                 (self.orig_shape.0 as f32, self.orig_shape.1 as f32)
             } else {
                 (1.0, 1.0)
@@ -222,6 +225,7 @@ impl Results {
             let cls = boxes.cls();
 
             for i in 0..boxes.len() {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 let class_id = cls[i] as usize;
                 let mut entry = HashMap::new();
                 entry.insert(
@@ -261,7 +265,7 @@ pub enum SummaryValue {
     /// Float value.
     Float(f32),
     /// Box coordinates.
-    Box(HashMap<String, SummaryValue>),
+    Box(HashMap<String, Self>),
 }
 
 /// Detection bounding boxes.
@@ -271,7 +275,7 @@ pub enum SummaryValue {
 #[derive(Debug, Clone)]
 pub struct Boxes {
     /// Raw data array with shape (N, 6) containing [x1, y1, x2, y2, conf, cls].
-    /// Or shape (N, 7) if tracking: [x1, y1, x2, y2, track_id, conf, cls].
+    /// Or shape (N, 7) if tracking: [x1, y1, x2, y2, `track_id`, conf, cls].
     pub data: Array2<f32>,
     /// Original image shape (height, width) for normalization.
     pub orig_shape: (u32, u32),
@@ -336,7 +340,7 @@ impl Boxes {
         }
     }
 
-    /// Get boxes in xywh format [x_center, y_center, width, height].
+    /// Get boxes in xywh format [`x_center`, `y_center`, width, height].
     #[must_use]
     pub fn xywh(&self) -> Array2<f32> {
         let xyxy = self.xyxy();
@@ -349,8 +353,8 @@ impl Boxes {
             let x2 = xyxy[[i, 2]];
             let y2 = xyxy[[i, 3]];
 
-            xywh[[i, 0]] = (x1 + x2) / 2.0; // x_center
-            xywh[[i, 1]] = (y1 + y2) / 2.0; // y_center
+            xywh[[i, 0]] = f32::midpoint(x1, x2); // x_center
+            xywh[[i, 1]] = f32::midpoint(y1, y2); // y_center
             xywh[[i, 2]] = x2 - x1; // width
             xywh[[i, 3]] = y2 - y1; // height
         }
@@ -362,6 +366,7 @@ impl Boxes {
     #[must_use]
     pub fn xyxyn(&self) -> Array2<f32> {
         let mut xyxyn = self.xyxy().to_owned();
+        #[allow(clippy::cast_precision_loss)]
         let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
 
         for mut row in xyxyn.rows_mut() {
@@ -378,6 +383,7 @@ impl Boxes {
     #[must_use]
     pub fn xywhn(&self) -> Array2<f32> {
         let mut xywhn = self.xywh();
+        #[allow(clippy::cast_precision_loss)]
         let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
 
         for mut row in xywhn.rows_mut() {
@@ -477,6 +483,7 @@ impl Keypoints {
     #[must_use]
     pub fn xyn(&self) -> Array3<f32> {
         let mut xyn = self.xy();
+        #[allow(clippy::cast_precision_loss)]
         let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
 
         for mut point in xyn.axis_iter_mut(Axis(2)) {
@@ -507,7 +514,7 @@ impl Keypoints {
 /// Stores class probabilities with convenience methods for top predictions.
 #[derive(Debug, Clone)]
 pub struct Probs {
-    /// Raw probability data with shape (num_classes,).
+    /// Raw probability data with shape (`num_classes`,).
     pub data: Array1<f32>,
 }
 
@@ -519,14 +526,17 @@ impl Probs {
     }
 
     /// Get the index of the top-1 class.
+    ///
+    /// # Panics
+    ///
+    /// Panics if valid comparison cannot be made (e.g. NaN) in `max_by`.
     #[must_use]
     pub fn top1(&self) -> usize {
         self.data
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .map(|(i, _)| i)
-            .unwrap_or(0)
+            .map_or(0, |(i, _)| i)
     }
     /// Get the indices of the top-5 classes.
     #[must_use]
@@ -598,7 +608,7 @@ impl Obb {
         self.data.is_empty()
     }
 
-    /// Get boxes in xywhr format [x_center, y_center, width, height, rotation].
+    /// Get boxes in xywhr format [`x_center`, `y_center`, width, height, rotation].
     #[must_use]
     pub fn xywhr(&self) -> ArrayView2<'_, f32> {
         self.data.slice(s![.., 0..5])
@@ -692,6 +702,7 @@ impl Obb {
             }
 
             // Clip to image bounds
+            #[allow(clippy::cast_precision_loss)]
             let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
             xyxy[[i, 0]] = min_x.max(0.0).min(w);
             xyxy[[i, 1]] = min_y.max(0.0).min(h);

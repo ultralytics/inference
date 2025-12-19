@@ -1,4 +1,5 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+#![allow(clippy::multiple_crate_versions)]
 
 //! # Ultralytics YOLO Inference Library
 //!
@@ -9,7 +10,7 @@
 //! ## Features
 //!
 //! - Fast inference using ONNX Runtime
-//! - Support for all YOLO versions (YOLOv5, YOLOv8, YOLO11, etc.)
+//! - Support for all YOLO versions (`YOLOv5`, `YOLOv8`, YOLO11, etc.)
 //! - Support for all YOLO tasks (detection, segmentation, pose, classification, OBB)
 //! - Ultralytics-compatible Results API
 //! - Thread-safe model loading and inference

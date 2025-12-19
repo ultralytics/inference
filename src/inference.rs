@@ -25,7 +25,7 @@
 pub struct InferenceConfig {
     /// Confidence threshold for detections (0.0 to 1.0).
     pub confidence_threshold: f32,
-    /// IoU threshold for NMS (0.0 to 1.0).
+    /// `IoU` threshold for NMS (0.0 to 1.0).
     pub iou_threshold: f32,
     /// Maximum number of detections to return.
     pub max_detections: usize,
@@ -64,7 +64,7 @@ impl InferenceConfig {
         self
     }
 
-    /// Set the IoU threshold for NMS.
+    /// Set the `IoU` threshold for NMS.
     #[must_use]
     pub const fn with_iou(mut self, threshold: f32) -> Self {
         self.iou_threshold = threshold;

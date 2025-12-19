@@ -1,8 +1,9 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+#![allow(clippy::float_cmp)]
 
 //! Integration tests for the inference library
 
-use inference::{InferenceConfig, Results, Boxes, Speed};
+use inference::{Boxes, InferenceConfig, Results, Speed};
 use ndarray::Array3;
 use std::collections::HashMap;
 
@@ -42,9 +43,7 @@ fn test_boxes_creation() {
 
 #[test]
 fn test_boxes_xyxy() {
-    let data = ndarray::array![
-        [10.0f32, 20.0, 30.0, 40.0, 0.95, 0.0],
-    ];
+    let data = ndarray::array![[10.0f32, 20.0, 30.0, 40.0, 0.95, 0.0],];
 
     let boxes = Boxes::new(data, (480, 640));
     let xyxy = boxes.xyxy();
@@ -57,9 +56,7 @@ fn test_boxes_xyxy() {
 
 #[test]
 fn test_boxes_conf_and_cls() {
-    let data = ndarray::array![
-        [10.0f32, 20.0, 30.0, 40.0, 0.95, 2.0],
-    ];
+    let data = ndarray::array![[10.0f32, 20.0, 30.0, 40.0, 0.95, 2.0],];
 
     let boxes = Boxes::new(data, (480, 640));
 
@@ -90,9 +87,7 @@ fn test_results_with_boxes() {
 
     let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
 
-    let boxes_data = ndarray::array![
-        [10.0f32, 20.0, 30.0, 40.0, 0.95, 0.0],
-    ];
+    let boxes_data = ndarray::array![[10.0f32, 20.0, 30.0, 40.0, 0.95, 0.0],];
     results.boxes = Some(Boxes::new(boxes_data, (480, 640)));
 
     assert!(results.boxes.is_some());

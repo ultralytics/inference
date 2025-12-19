@@ -9,10 +9,10 @@ use std::collections::HashMap;
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{s, Array2, Array3, ArrayView2};
+use ndarray::{Array2, Array3, ArrayView2, s};
 
 use crate::inference::InferenceConfig;
-use crate::preprocessing::{clip_coords, scale_coords, PreprocessResult};
+use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
 use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, Speed};
 use crate::task::Task;
 use crate::utils::nms_per_class;
@@ -35,7 +35,11 @@ use crate::utils::nms_per_class;
 ///
 /// Processed Results object.
 #[must_use]
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::similar_names,
+    clippy::implicit_hasher
+)]
 pub fn postprocess(
     outputs: Vec<(Vec<f32>, Vec<usize>)>,
     task: Task,
@@ -112,7 +116,11 @@ pub fn postprocess(
 /// YOLO detection models output shape is typically [1, 84, 8400] where:
 /// - 84 = 4 (bbox) + 80 (classes for COCO)
 /// - 8400 = number of predictions (varies by input size)
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::similar_names,
+    clippy::cast_precision_loss
+)]
 fn postprocess_detect(
     output: &[f32],
     output_shape: &[usize],
@@ -162,9 +170,9 @@ fn postprocess_detect(
 
 /// Parse detection output shape to determine format.
 ///
-/// Derives class count from output shape when metadata is missing (expected_classes == 0).
-/// YOLO outputs are either [1, num_features, num_preds] or [1, num_preds, num_features]
-/// where num_features = 4 (bbox) + num_classes.
+/// Derives class count from output shape when metadata is missing (`expected_classes` == 0).
+/// YOLO outputs are either [1, `num_features`, `num_preds`] or [1, `num_preds`, `num_features`]
+/// where `num_features` = 4 (bbox) + `num_classes`.
 fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize, bool) {
     match shape.len() {
         2 => {
@@ -220,6 +228,7 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
 }
 
 /// Extract detection boxes from model output.
+#[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
 fn extract_detect_boxes(
     output: ArrayView2<f32>,
     _num_classes: usize,
@@ -238,8 +247,9 @@ fn extract_detect_boxes(
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
-            .unwrap_or((0, 0.0));
+            .map_or((0, 0.0), |(idx, &score)| {
+                (idx, if score.is_nan() { 0.0 } else { score })
+            });
 
         // Skip low confidence detections
         if best_score < config.confidence_threshold {
@@ -297,7 +307,15 @@ fn extract_detect_boxes(
 }
 
 /// Post-process segmentation model output.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::similar_names,
+    clippy::cast_precision_loss,
+    clippy::too_many_lines,
+    clippy::needless_pass_by_value,
+    clippy::manual_let_else,
+    clippy::cast_possible_truncation
+)]
 fn postprocess_segment(
     outputs: Vec<(Vec<f32>, Vec<usize>)>,
     preprocess: &PreprocessResult,
@@ -357,10 +375,10 @@ fn postprocess_segment(
 
     // Convert to 2D [preds, features]
     let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
+        Array2::from_shape_vec((num_preds, expected_features), output0.clone())
             .unwrap_or_else(|_| Array2::zeros((0, 0)))
     } else {
-        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
+        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.clone())
             .unwrap_or_else(|_| Array2::zeros((0, 0)));
         arr.t().to_owned()
     };
@@ -375,8 +393,7 @@ fn postprocess_segment(
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .map(|(idx, &score)| (idx, score))
-            .unwrap_or((0, 0.0));
+            .map_or((0, 0.0), |(idx, &score)| (idx, score));
 
         if best_score < config.confidence_threshold {
             continue;
@@ -460,7 +477,7 @@ fn postprocess_segment(
         );
     }
 
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.clone()) {
         Ok(arr) => arr,
         Err(e) => {
             eprintln!("WARNING ⚠️ Failed to create protos array: {e}. Skipping mask generation.");
@@ -481,8 +498,8 @@ fn postprocess_segment(
     let scale_h = mh as f32 / th as f32;
     let crop_x = pad_left * scale_w;
     let crop_y = pad_top * scale_h;
-    let crop_w = mw as f32 - 2.0 * crop_x;
-    let crop_h = mh as f32 - 2.0 * crop_y;
+    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
+    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
 
     // Process each mask sequentially (fastest for typical 1-10 masks)
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
@@ -512,10 +529,10 @@ fn postprocess_segment(
         let mut dst_image = Image::new(ow, oh, PixelType::F32);
 
         // Configure resize with crop - clamp to valid ranges to prevent panic
-        let safe_crop_x = crop_x.max(0.0) as f64;
-        let safe_crop_y = crop_y.max(0.0) as f64;
-        let safe_crop_w = crop_w.max(1.0).min(mw as f32) as f64;
-        let safe_crop_h = crop_h.max(1.0).min(mh as f32) as f64;
+        let safe_crop_x = f64::from(crop_x.max(0.0));
+        let safe_crop_y = f64::from(crop_y.max(0.0));
+        let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
+        let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
 
         let options = ResizeOptions::new().resize_alg(resize_alg).crop(
             safe_crop_x,
@@ -566,7 +583,14 @@ fn postprocess_segment(
 /// - 56 = 4 (bbox) + 1 (class for person) + 51 (17 keypoints × 3)
 /// - 8400 = number of predictions (varies by input size)
 /// Each keypoint has 3 values: [x, y, confidence]
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::similar_names,
+    clippy::type_complexity,
+    clippy::cast_precision_loss,
+    clippy::doc_lazy_continuation
+)]
 fn postprocess_pose(
     output: &[f32],
     output_shape: &[usize],
@@ -646,8 +670,9 @@ fn postprocess_pose(
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
-            .unwrap_or((0, 0.0));
+            .map_or((0, 0.0), |(idx, &score)| {
+                (idx, if score.is_nan() { 0.0 } else { score })
+            });
 
         if best_score < config.confidence_threshold {
             continue;
@@ -685,7 +710,9 @@ fn postprocess_pose(
                 preprocess.padding,
             );
             let (oh, ow) = preprocess.orig_shape;
+            #[allow(clippy::cast_precision_loss)]
             let scaled_x = scaled_kpt[0].max(0.0).min(ow as f32);
+            #[allow(clippy::cast_precision_loss)]
             let scaled_y = scaled_kpt[1].max(0.0).min(oh as f32);
 
             keypoints.push([scaled_x, scaled_y, kpt_conf]);
@@ -728,7 +755,9 @@ fn postprocess_pose(
         boxes_data[[out_idx, 2]] = bbox[2];
         boxes_data[[out_idx, 3]] = bbox[3];
         boxes_data[[out_idx, 4]] = *score;
-        boxes_data[[out_idx, 5]] = *class as f32;
+        #[allow(clippy::cast_precision_loss)]
+        let class_f32 = *class as f32;
+        boxes_data[[out_idx, 5]] = class_f32;
 
         // Store keypoints
         for (k, kpt) in kpts.iter().enumerate() {
@@ -770,7 +799,7 @@ fn postprocess_classify(
     let sum: f32 = probs_vec.iter().sum();
     if (sum - 1.0).abs() > 0.1 && sum > 0.0 {
         // Apply softmax normalization
-        let max_val = probs_vec.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let max_val = probs_vec.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let exp_vals: Vec<f32> = probs_vec.iter().map(|&v| (v - max_val).exp()).collect();
         let exp_sum: f32 = exp_vals.iter().sum();
         if exp_sum > 0.0 {
@@ -790,8 +819,12 @@ fn postprocess_classify(
 /// - 4 = bbox (xywh center format)
 /// - nc = number of classes (e.g., 15 for DOTA dataset)
 /// - 1 = rotation angle in radians
-/// The angle is the last value, typically in range [-π/2, π/2]
-#[allow(clippy::too_many_arguments)]
+///   The angle is the last value, typically in range [-π/2, π/2]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::similar_names
+)]
 fn postprocess_obb(
     output: &[f32],
     output_shape: &[usize],
@@ -866,8 +899,9 @@ fn postprocess_obb(
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
-            .unwrap_or((0, 0.0));
+            .map_or((0, 0.0), |(idx, &score)| {
+                (idx, if score.is_nan() { 0.0 } else { score })
+            });
 
         if best_score < config.confidence_threshold {
             continue;
@@ -891,7 +925,9 @@ fn postprocess_obb(
 
         // Clip center to image bounds
         let (oh, ow) = preprocess.orig_shape;
+        #[allow(clippy::cast_precision_loss)]
         let clipped_cx = scaled_cx.max(0.0).min(ow as f32);
+        #[allow(clippy::cast_precision_loss)]
         let clipped_cy = scaled_cy.max(0.0).min(oh as f32);
 
         candidates.push((
@@ -939,7 +975,9 @@ fn postprocess_obb(
         obb_data[[out_idx, 3]] = xywhr[3]; // h
         obb_data[[out_idx, 4]] = xywhr[4]; // rotation (radians)
         obb_data[[out_idx, 5]] = *score;
-        obb_data[[out_idx, 6]] = *class as f32;
+        #[allow(clippy::cast_precision_loss)]
+        let class_f32 = *class as f32;
+        obb_data[[out_idx, 6]] = class_f32;
     }
 
     results.obb = Some(Obb::new(obb_data, preprocess.orig_shape));
@@ -1156,9 +1194,12 @@ mod tests {
         assert_eq!(kpts.data.shape()[1], 17); // 17 keypoints
         assert_eq!(kpts.data.shape()[2], 3); // x, y, conf
 
-        // Verify values
-        assert_eq!(kpts.data[[0, 0, 0]], 100.0);
-        assert_eq!(kpts.data[[0, 0, 2]], 0.8);
+        #[allow(clippy::float_cmp)]
+        {
+            // Verify values
+            assert_eq!(kpts.data[[0, 0, 0]], 100.0);
+            assert_eq!(kpts.data[[0, 0, 2]], 0.8);
+        }
     }
 
     #[test]
@@ -1211,8 +1252,11 @@ mod tests {
 
         // Verify values
         let data = obb.data.row(0);
-        assert_eq!(data[0], 100.0); // cx
-        assert_eq!(data[4], std::f32::consts::FRAC_PI_4); // angle
-        assert_eq!(data[5], 0.95); // conf
+        #[allow(clippy::float_cmp)]
+        {
+            assert_eq!(data[0], 100.0); // cx
+            assert_eq!(data[4], std::f32::consts::FRAC_PI_4); // angle
+            assert_eq!(data[5], 0.95); // conf
+        }
     }
 }

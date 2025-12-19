@@ -20,12 +20,14 @@ use std::path::{Path, PathBuf};
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
 /// Get color for a class ID
-pub fn get_class_color(class_id: usize) -> Rgb<u8> {
+#[must_use]
+pub const fn get_class_color(class_id: usize) -> Rgb<u8> {
     let color = COLORS[class_id % COLORS.len()];
     Rgb(color)
 }
 
 /// Find the next available run directory (predict, predict2, predict3, etc.)
+#[must_use]
 pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
     let base_path = Path::new(base);
 
@@ -48,38 +50,35 @@ pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
 }
 
 /// Load image helper to bypass zune-jpeg stride issues
+#[allow(clippy::missing_errors_doc)]
 pub fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
     let path_obj = Path::new(path);
     let ext = path_obj
         .extension()
         .and_then(|e| e.to_str())
-        .map(|s| s.to_lowercase());
+        .map(str::to_lowercase);
 
-    if let Some("jpg") | Some("jpeg") = ext.as_deref() {
-        if let Ok(file) = File::open(path) {
-            let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
-            if let Ok(pixels) = decoder.decode() {
-                if let Some(metadata) = decoder.info() {
-                    let width = metadata.width as u32;
-                    let height = metadata.height as u32;
-                    match metadata.pixel_format {
-                        jpeg_decoder::PixelFormat::RGB24 => {
-                            if let Some(buffer) =
-                                image::ImageBuffer::from_raw(width, height, pixels)
-                            {
-                                return Ok(DynamicImage::ImageRgb8(buffer));
-                            }
-                        }
-                        jpeg_decoder::PixelFormat::L8 => {
-                            if let Some(buffer) =
-                                image::ImageBuffer::from_raw(width, height, pixels)
-                            {
-                                return Ok(DynamicImage::ImageLuma8(buffer));
-                            }
-                        }
-                        _ => {}
+    if let Some("jpg" | "jpeg") = ext.as_deref()
+        && let Ok(file) = File::open(path)
+    {
+        let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
+        if let Ok(pixels) = decoder.decode()
+            && let Some(metadata) = decoder.info()
+        {
+            let width = u32::from(metadata.width);
+            let height = u32::from(metadata.height);
+            match metadata.pixel_format {
+                jpeg_decoder::PixelFormat::RGB24 => {
+                    if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
+                        return Ok(DynamicImage::ImageRgb8(buffer));
                     }
                 }
+                jpeg_decoder::PixelFormat::L8 => {
+                    if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
+                        return Ok(DynamicImage::ImageLuma8(buffer));
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -87,6 +86,7 @@ pub fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
     image::open(path)
 }
 /// Check if font exists locally or download it
+#[must_use]
 pub fn check_font(font: &str) -> Option<PathBuf> {
     let font_name = Path::new(font).file_name()?.to_string_lossy();
     let config_dir = dirs::config_dir()?.join("Ultralytics");
@@ -134,17 +134,19 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
 }
 
 /// Helper to check if a string contains non-ASCII characters
-fn is_ascii(s: &str) -> bool {
+const fn is_ascii(s: &str) -> bool {
     s.is_ascii()
 }
+
 /// Annotate an image with detection boxes and labels
+#[must_use]
 pub fn annotate_image(
     image: &DynamicImage,
     result: &Results,
     top_k: Option<usize>,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
-    let (width, height) = img.dimensions();
+    let (_width, _height) = img.dimensions();
 
     // Check if any class name is non-ASCII to select font
     let mut use_unicode_font = false;
@@ -186,6 +188,11 @@ pub fn annotate_image(
 }
 
 /// Draw a line segment on an image
+#[allow(
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
 fn draw_line_segment(
     img: &mut image::RgbImage,
     x1: f32,
@@ -195,6 +202,11 @@ fn draw_line_segment(
     color: Rgb<u8>,
     thickness: i32,
 ) {
+    #[allow(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap
+    )]
     let (width, height) = img.dimensions();
 
     // Bresenham's line algorithm with thickness
@@ -235,6 +247,11 @@ fn draw_line_segment(
 }
 
 /// Draw a filled circle on an image
+#[allow(
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
 fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, color: Rgb<u8>) {
     let (width, height) = img.dimensions();
 
@@ -242,16 +259,27 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
         for x in (cx - radius)..=(cx + radius) {
             let dx = x - cx;
             let dy = y - cy;
-            if dx * dx + dy * dy <= radius * radius {
-                if x >= 0 && y >= 0 && x < width as i32 && y < height as i32 {
-                    img.put_pixel(x as u32, y as u32, color);
-                }
+            if dx * dx + dy * dy <= radius * radius
+                && x >= 0
+                && y >= 0
+                && x < width as i32
+                && y < height as i32
+            {
+                img.put_pixel(x as u32, y as u32, color);
             }
         }
     }
 }
 
 /// Draw object detection results (boxes and masks)
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::manual_clamp,
+    clippy::too_many_lines
+)]
 fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
@@ -305,12 +333,15 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
                     let p_img = img.get_pixel_mut(x, y);
                     let p_overlay = overlay.get_pixel(x, y);
 
-                    p_img.0[0] =
-                        (p_overlay.0[0] as f32 * alpha + p_img.0[0] as f32 * (1.0 - alpha)) as u8;
-                    p_img.0[1] =
-                        (p_overlay.0[1] as f32 * alpha + p_img.0[1] as f32 * (1.0 - alpha)) as u8;
-                    p_img.0[2] =
-                        (p_overlay.0[2] as f32 * alpha + p_img.0[2] as f32 * (1.0 - alpha)) as u8;
+                    p_img.0[0] = f32::from(p_overlay.0[0])
+                        .mul_add(alpha, f32::from(p_img.0[0]) * (1.0 - alpha))
+                        as u8;
+                    p_img.0[1] = f32::from(p_overlay.0[1])
+                        .mul_add(alpha, f32::from(p_img.0[1]) * (1.0 - alpha))
+                        as u8;
+                    p_img.0[2] = f32::from(p_overlay.0[2])
+                        .mul_add(alpha, f32::from(p_img.0[2]) * (1.0 - alpha))
+                        as u8;
                 }
             }
         }
@@ -357,12 +388,8 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             }
 
             // Draw label
-            let class_name = result
-                .names
-                .get(&class_id)
-                .map(String::as_str)
-                .unwrap_or("object");
-            let label = format!(" {class_name} {:.2} ", confidence);
+            let class_name = result.names.get(&class_id).map_or("object", String::as_str);
+            let label = format!(" {class_name} {confidence:.2} ");
 
             if let Some(ref f) = font {
                 let scale = PxScale::from(24.0);
@@ -422,6 +449,13 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
 ///     Some(&ANIMAL_KPT_COLORS),
 /// );
 /// ```
+#[allow(
+    clippy::doc_overindented_list_items,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap
+)]
 fn draw_pose(
     img: &mut image::RgbImage,
     result: &Results,
@@ -477,6 +511,13 @@ fn draw_pose(
 }
 
 /// Draw oriented bounding boxes (OBB)
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::manual_clamp
+)]
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
@@ -498,11 +539,7 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
                 draw_line_segment(img, x1, y1, x2, y2, color, 3);
             }
 
-            let class_name = result
-                .names
-                .get(&class_id)
-                .map(String::as_str)
-                .unwrap_or("object");
+            let class_name = result.names.get(&class_id).map_or("object", String::as_str);
             let label = format!(" {} {:.2} ", class_name, conf[i]);
 
             if let Some(ref f) = font {
@@ -532,6 +569,14 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
     }
 }
 /// Draw a transparent rectangle on an image
+#[allow(
+    clippy::many_single_char_names,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::manual_clamp
+)]
 fn draw_transparent_rect(
     img: &mut image::RgbImage,
     x: i32,
@@ -545,9 +590,9 @@ fn draw_transparent_rect(
     let alpha = alpha.max(0.0).min(1.0);
     let inv_alpha = 1.0 - alpha;
 
-    let r = color[0] as f32;
-    let g = color[1] as f32;
-    let b = color[2] as f32;
+    let r = f32::from(color[0]);
+    let g = f32::from(color[1]);
+    let b = f32::from(color[2]);
 
     for dy in 0..h {
         let py = y + dy as i32;
@@ -564,9 +609,9 @@ fn draw_transparent_rect(
             let pixel = img.get_pixel_mut(px as u32, py as u32);
             let current = pixel.0;
 
-            let new_r = (current[0] as f32 * inv_alpha + r * alpha) as u8;
-            let new_g = (current[1] as f32 * inv_alpha + g * alpha) as u8;
-            let new_b = (current[2] as f32 * inv_alpha + b * alpha) as u8;
+            let new_r = f32::from(current[0]).mul_add(inv_alpha, r * alpha) as u8;
+            let new_g = f32::from(current[1]).mul_add(inv_alpha, g * alpha) as u8;
+            let new_b = f32::from(current[2]).mul_add(inv_alpha, b * alpha) as u8;
 
             *pixel = Rgb([new_r, new_g, new_b]);
         }
@@ -574,6 +619,13 @@ fn draw_transparent_rect(
 }
 
 /// Draw classification results
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::manual_clamp
+)]
 fn draw_classification(
     img: &mut image::RgbImage,
     result: &Results,
@@ -604,13 +656,9 @@ fn draw_classification(
                     continue;
                 }
 
-                let class_name = result
-                    .names
-                    .get(&class_id)
-                    .map(String::as_str)
-                    .unwrap_or("class");
+                let class_name = result.names.get(&class_id).map_or("class", String::as_str);
 
-                let label = format!("{} {:.2}", class_name, score);
+                let label = format!("{class_name} {score:.2}");
                 entries.push(label);
             }
 

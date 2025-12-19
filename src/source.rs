@@ -36,7 +36,7 @@ pub enum Source {
 impl Source {
     /// Check if this source is a single image.
     #[must_use]
-    pub fn is_image(&self) -> bool {
+    pub const fn is_image(&self) -> bool {
         matches!(self, Self::Image(_) | Self::ImageBuffer(_) | Self::Array(_))
     }
 
@@ -145,6 +145,7 @@ impl From<u32> for Source {
 
 impl From<i32> for Source {
     fn from(idx: i32) -> Self {
+        #[allow(clippy::cast_sign_loss)]
         Self::Webcam(idx as u32)
     }
 }
@@ -219,8 +220,8 @@ impl SourceIterator {
         }
 
         let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map_err(|e| InferenceError::IoError(e))?
-            .filter_map(|entry| entry.ok())
+            .map_err(InferenceError::IoError)?
+            .filter_map(std::result::Result::ok)
             .map(|entry| entry.path())
             .filter(|path| Self::is_image_file(path))
             .collect();
@@ -247,7 +248,7 @@ impl SourceIterator {
             // Get extension filter from pattern (e.g., "*.jpg" -> "jpg")
             let ext_filter: Option<String> = pattern[star_pos..]
                 .strip_prefix("*.")
-                .map(|s| s.to_lowercase());
+                .map(str::to_lowercase);
 
             if !dir.is_dir() {
                 return Err(InferenceError::ImageError(format!(
@@ -258,16 +259,16 @@ impl SourceIterator {
 
             let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
                 .map_err(InferenceError::IoError)?
-                .filter_map(|entry| entry.ok())
+                .filter_map(std::result::Result::ok)
                 .map(|entry| entry.path())
                 .filter(|path| {
-                    if let Some(ref ext) = ext_filter {
-                        path.extension()
-                            .map(|e| e.to_string_lossy().to_lowercase() == *ext)
-                            .unwrap_or(false)
-                    } else {
-                        Self::is_image_file(path)
-                    }
+                    ext_filter.as_ref().map_or_else(
+                        || Self::is_image_file(path),
+                        |ext| {
+                            path.extension()
+                                .is_some_and(|e| e.to_string_lossy().to_lowercase() == *ext)
+                        },
+                    )
                 })
                 .collect();
 
@@ -281,15 +282,13 @@ impl SourceIterator {
 
     /// Check if a path is an image file based on extension.
     fn is_image_file(path: &Path) -> bool {
-        path.extension()
-            .map(|ext| {
-                let ext = ext.to_string_lossy().to_lowercase();
-                matches!(
-                    ext.as_str(),
-                    "jpg" | "jpeg" | "png" | "bmp" | "gif" | "webp" | "tiff" | "tif"
-                )
-            })
-            .unwrap_or(false)
+        path.extension().is_some_and(|ext| {
+            let ext = ext.to_string_lossy().to_lowercase();
+            matches!(
+                ext.as_str(),
+                "jpg" | "jpeg" | "png" | "bmp" | "gif" | "webp" | "tiff" | "tif"
+            )
+        })
     }
 
     /// Get the next image from the source.
@@ -321,27 +320,29 @@ impl SourceIterator {
     #[cfg(feature = "video")]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         // Initialize decoder if needed
-        if self.decoder.is_none() {
-            if let Source::Video(path) = &self.source {
-                match video_rs::decode::Decoder::new(path.as_path()) {
-                    Ok(d) => {
-                        // Calculate total frames from duration and frame rate
-                        if let Ok(duration) = d.duration() {
-                            let fps = d.frame_rate();
-                            let duration_seconds = duration.as_secs_f64();
-                            self.total_frames = Some((duration_seconds * fps as f64) as usize);
+        if self.decoder.is_none()
+            && let Source::Video(path) = &self.source
+        {
+            match video_rs::decode::Decoder::new(path.as_path()) {
+                Ok(d) => {
+                    // Calculate total frames from duration and frame rate
+                    if let Ok(duration) = d.duration() {
+                        let fps = d.frame_rate();
+                        let duration_seconds = duration.as_secs_f64();
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        {
+                            self.total_frames = Some((duration_seconds * f64::from(fps)) as usize);
                         }
-                        self.decoder = Some(d);
                     }
-                    Err(e) => {
-                        return Some(Err(InferenceError::VideoError(format!(
-                            "Failed to create decoder: {}",
-                            e
-                        ))));
-                    }
+                    self.decoder = Some(d);
                 }
-                // Note: Decoder initialized.
+                Err(e) => {
+                    return Some(Err(InferenceError::VideoError(format!(
+                        "Failed to create decoder: {e}"
+                    ))));
+                }
             }
+            // Note: Decoder initialized.
         }
 
         if let Some(decoder) = &mut self.decoder {
@@ -366,7 +367,7 @@ impl SourceIterator {
                         Err(e) => Some(Err(e)),
                     }
                 }
-                Err(e) => {
+                Err(_e) => {
                     // Check if error is EOF. Video-rs usually returns a specific error or strict error on EOF.
                     // Assuming for now that any error might be EOF or fatal.
                     // If video-rs returns VideoError::Decode(EOF), we can stop.
@@ -424,10 +425,13 @@ impl Iterator for SourceIterator {
     }
 }
 
-/// Convert an HWC u8 array to a DynamicImage.
+/// Convert an HWC u8 array to a `DynamicImage`.
 fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
     let shape = arr.shape();
-    let (height, width) = (shape[0] as u32, shape[1] as u32);
+    let height = u32::try_from(shape[0])
+        .map_err(|_| InferenceError::ImageError("Image height exceeds u32::MAX".to_string()))?;
+    let width = u32::try_from(shape[1])
+        .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
 
     let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
     for y in 0..height as usize {
@@ -446,10 +450,13 @@ fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
 }
 
 #[cfg(feature = "video")]
-/// Convert a video_rs Frame (ndarray 0.16) to DynamicImage.
+/// Convert a `video_rs` Frame (ndarray 0.16) to `DynamicImage`.
 fn video_frame_to_image(arr: &video_rs::Frame) -> Result<DynamicImage> {
     let shape = arr.shape();
-    let (height, width) = (shape[0] as u32, shape[1] as u32);
+    let height = u32::try_from(shape[0])
+        .map_err(|_| InferenceError::ImageError("Image height exceeds u32::MAX".to_string()))?;
+    let width = u32::try_from(shape[1])
+        .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
 
     let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
     for y in 0..height as usize {

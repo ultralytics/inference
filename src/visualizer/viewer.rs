@@ -10,13 +10,19 @@ use crate::error::{InferenceError, Result};
 /// A simple image viewer using minifb.
 pub struct Viewer {
     window: Window,
+    /// Window width
     pub width: usize,
+    /// Window height
     pub height: usize,
     buffer: Vec<u32>,
 }
 
 impl Viewer {
     /// Create a new viewer window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the window creation fails.
     pub fn new(title: &str, width: usize, height: usize) -> Result<Self> {
         let mut window = Window::new(
             title,
@@ -27,10 +33,10 @@ impl Viewer {
                 ..WindowOptions::default()
             },
         )
-        .map_err(|e| InferenceError::VisualizerError(format!("Failed to create window: {}", e)))?;
+        .map_err(|e| InferenceError::VisualizerError(format!("Failed to create window: {e}")))?;
 
         // Limit update rate
-        window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+        window.set_target_fps(60);
 
         Ok(Self {
             window,
@@ -43,6 +49,10 @@ impl Viewer {
     /// Update the window with a new image.
     ///
     /// The image is resized to fit the window if necessary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the window update fails.
     pub fn update(&mut self, image: &DynamicImage) -> Result<bool> {
         if !self.window.is_open()
             || self.window.is_key_down(Key::Escape)
@@ -62,9 +72,9 @@ impl Viewer {
         // Convert image to BGRA format expected by minifb (u32 per pixel: 0x00RRGGBB)
         let rgb = image.to_rgb8();
         for (i, pixel) in rgb.pixels().enumerate() {
-            let r = pixel[0] as u32;
-            let g = pixel[1] as u32;
-            let b = pixel[2] as u32;
+            let r = u32::from(pixel[0]);
+            let g = u32::from(pixel[1]);
+            let b = u32::from(pixel[2]);
             // Pack as 0x00RRGGBB
             self.buffer[i] = (r << 16) | (g << 8) | b;
         }
@@ -78,13 +88,17 @@ impl Viewer {
         self.window
             .update_with_buffer(&self.buffer, self.width, self.height)
             .map_err(|e| {
-                InferenceError::VisualizerError(format!("Failed to update window: {}", e))
+                InferenceError::VisualizerError(format!("Failed to update window: {e}"))
             })?;
 
         Ok(true)
     }
 
     /// Wait for a specified duration while keeping the window responsive.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the window update fails during the wait loop.
     pub fn wait(&mut self, duration: std::time::Duration) -> Result<bool> {
         // If buffer is empty, we can't really update, just return
         if self.buffer.is_empty() {

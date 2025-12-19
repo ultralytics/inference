@@ -12,8 +12,6 @@ use std::time::Instant;
 use half::f16;
 use image::DynamicImage;
 use ndarray::Array3;
-#[cfg(feature = "coreml")]
-use ort::execution_providers::CoreMLExecutionProvider;
 use ort::session::Session;
 use ort::tensor::TensorElementType;
 use ort::value::TensorRef;
@@ -61,6 +59,13 @@ pub struct YOLOModel {
     fp16_input: bool,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    clippy::needless_pass_by_value,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::cast_possible_truncation
+)]
 impl YOLOModel {
     /// Load a YOLO model from an ONNX file.
     ///
@@ -101,11 +106,11 @@ impl YOLOModel {
         let path = path.as_ref();
 
         // Check if file exists, attempt auto-download if not
-        let path = if !path.exists() {
+        let path = if path.exists() {
+            std::borrow::Cow::Borrowed(path)
+        } else {
             // Try to download the model if it's a known downloadable model
             std::borrow::Cow::Owned(try_download_model(path)?)
-        } else {
-            std::borrow::Cow::Borrowed(path)
         };
         let path = path.as_ref();
 
@@ -115,7 +120,7 @@ impl YOLOModel {
         } else {
             // Use all available cores for intra-op parallelism (single inference)
             std::thread::available_parallelism()
-                .map(|p| p.get())
+                .map(std::num::NonZero::get)
                 .unwrap_or(4)
         };
 
@@ -190,22 +195,18 @@ impl YOLOModel {
 
         // Get input/output names and detect input type
         let input_info = session.inputs().first();
-        let input_name = input_info
-            .map(|i| i.name().to_string())
-            .unwrap_or_else(|| "images".to_string());
+        let input_name = input_info.map_or_else(|| "images".to_string(), |i| i.name().to_string());
 
         // Check if model input tensor expects FP16 (rare - most models use FP32 input even with half weights)
-        let model_input_fp16 = input_info
-            .map(|i| {
-                matches!(
-                    i.dtype(),
-                    ValueType::Tensor {
-                        ty: TensorElementType::Float16,
-                        ..
-                    }
-                )
-            })
-            .unwrap_or(false);
+        let model_input_fp16 = input_info.is_some_and(|i| {
+            matches!(
+                i.dtype(),
+                ValueType::Tensor {
+                    ty: TensorElementType::Float16,
+                    ..
+                }
+            )
+        });
 
         // Use FP16 input if model tensor type requires it
         let fp16_input = model_input_fp16;
@@ -503,7 +504,7 @@ impl YOLOModel {
 
         for output_name in &self.output_names {
             let output = outputs.get(output_name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{}' not found", output_name))
+                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
             })?;
 
             // Get output as f32 tensor - use try_extract_tensor which returns (shape, data)
@@ -511,6 +512,7 @@ impl YOLOModel {
                 InferenceError::InferenceError(format!("Failed to extract output: {e}"))
             })?;
 
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
             let data_vec: Vec<f32> = data.to_vec();
             results.push((data_vec, shape_vec));
@@ -544,7 +546,7 @@ impl YOLOModel {
 
         for output_name in &self.output_names {
             let output = outputs.get(output_name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{}' not found", output_name))
+                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
             })?;
 
             // Try to extract as f32 first (model may have FP32 output even with FP16 input)
@@ -552,6 +554,7 @@ impl YOLOModel {
             let (shape_vec, data_vec) = if let Ok((shape, data)) =
                 output.try_extract_tensor::<f32>()
             {
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
                 let data_vec: Vec<f32> = data.to_vec();
                 (shape_vec, data_vec)
@@ -561,6 +564,7 @@ impl YOLOModel {
                     InferenceError::InferenceError(format!("Failed to extract FP16 output: {e}"))
                 })?;
 
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
                 let data_vec: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
                 (shape_vec, data_vec)
@@ -579,7 +583,7 @@ impl YOLOModel {
 
     /// Get the model's class names.
     #[must_use]
-    pub fn names(&self) -> &HashMap<usize, String> {
+    pub const fn names(&self) -> &HashMap<usize, String> {
         &self.metadata.names
     }
 
@@ -615,13 +619,14 @@ impl YOLOModel {
 
     /// Get the model path.
     #[must_use]
-    pub fn model_path(&self) -> &str {
+    pub const fn model_path(&self) -> &'static str {
         // Note: ONNX Runtime doesn't expose the original path
         // This is a placeholder - in practice, users should track the path themselves
         ""
     }
 }
 
+#[allow(clippy::missing_fields_in_debug)]
 impl std::fmt::Debug for YOLOModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("YOLOModel")

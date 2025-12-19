@@ -24,14 +24,14 @@ pub const SKELETON: [[usize; 2]; 19] = [
     [4, 6],   // right ear to right shoulder
 ];
 
-/// Limb color indices mapping to POSE_COLORS
+/// Limb color indices mapping to `POSE_COLORS`
 /// Defines which color from the pose palette to use for each limb
 /// Mapping: arms=blue, legs=orange, face=green
 pub const LIMB_COLOR_INDICES: [usize; 19] = [
     0, 0, 0, 0, 7, 7, 7, 9, 9, 9, 9, 9, 16, 16, 16, 16, 16, 16, 16,
 ];
 
-/// Keypoint color indices mapping to POSE_COLORS
+/// Keypoint color indices mapping to `POSE_COLORS`
 /// Defines which color from the pose palette to use for each keypoint
 /// Mapping: arms=blue, legs=orange, face=green
 pub const KPT_COLOR_INDICES: [usize; 17] = [16, 16, 16, 16, 16, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0, 0, 0];
