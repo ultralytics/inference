@@ -62,13 +62,16 @@ cargo run --release -- predict --model yolo11n.onnx --source assets/
 
 # With custom thresholds
 cargo run --release -- predict -m yolo11n.onnx -s image.jpg --conf 0.5 --iou 0.45
+
+# With visualization and custom image size
+cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --show --imgsz 1280
 ```
 
 ### Example Output
 
 ```
 WARNING ⚠️ 'source' argument is missing. Using default 'source=assets'.
-Ultralytics 0.0.3 🚀 Rust ONNX CPU
+Ultralytics 0.0.4 🚀 Rust ONNX CPU
 YOLO11 summary: 80 classes, imgsz=(640, 640)
 
 image 1/2 assets/bus.jpg: 810x1080 4 persons, 1 bus, 27.3ms
@@ -100,7 +103,10 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `--source` | `-s`  | Input source (image, directory, glob) | `assets`       |
 | `--conf`   |       | Confidence threshold                  | `0.25`         |
 | `--iou`    |       | IoU threshold for NMS                 | `0.45`         |
-| `--save`   |       | Save annotated images to runs/detect/ |                |
+| `--imgsz`  |       | Inference image size                  | `None`         |
+| `--half`   |       | Use FP16 half-precision inference     | `false`        |
+| `--show`   |       | Visualize results in a window         | `false`        |
+| `--save`   |       | Save annotated images to runs/detect/ | `false`        |
 
 ### As a Rust Library
 
@@ -189,6 +195,8 @@ inference/
 │   ├── source.rs           # Input source handling
 │   ├── task.rs             # Task enum (Detect, Segment, Pose, etc.)
 │   ├── inference.rs        # InferenceConfig
+│   ├── download.rs         # Model and asset downloading
+│   ├── visualizer/         # Visualization tools (Viewer)
 │   ├── error.rs            # Error types
 │   └── utils.rs            # Utility functions (NMS, IoU)
 ├── tests/
@@ -259,6 +267,13 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 | ----------- | ------------------------------ |
 | `imageproc` | Drawing boxes and shapes       |
 | `ab_glyph`  | Text rendering (embedded font) |
+
+### Optional Dependencies (for Video & Visualization)
+
+| Crate      | Purpose                            |
+| ---------- | ---------------------------------- |
+| `minifb`   | Window creation and buffer display |
+| `video-rs` | Video decoding/encoding (ffmpeg)   |
 
 To build without annotation support (smaller binary):
 
