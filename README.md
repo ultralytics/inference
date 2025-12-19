@@ -311,10 +311,10 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Ultralytics-compatible Results API
 - [x] Directory/glob source support
 - [x] Segmentation post-processing
-- [ ] Pose estimation post-processing
-- [ ] Classification inference
-- [ ] OBB (oriented bounding box) support
-- [ ] Video file support
+- [x] Pose estimation post-processing
+- [x] Classification inference
+- [x] OBB (oriented bounding box) support
+- [x] Video file support
 - [ ] Webcam/RTSP streaming
 - [ ] Python bindings (PyO3)
 - [ ] Batch inference

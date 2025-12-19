@@ -41,9 +41,9 @@ pub struct PreprocessResult {
     pub tensor_f16: Option<Array4<f16>>,
     /// Original image dimensions (height, width).
     pub orig_shape: (u32, u32),
-    /// Scale factors applied (scale_y, scale_x).
+    /// Scale factors applied (`scale_y`, `scale_x`).
     pub scale: (f32, f32),
-    /// Padding applied (pad_top, pad_left).
+    /// Padding applied (`pad_top`, `pad_left`).
     pub padding: (f32, f32),
 }
 
@@ -114,6 +114,7 @@ pub fn preprocess_image_with_precision(
         tensor_f16,
         orig_shape,
         scale,
+        #[allow(clippy::cast_precision_loss)]
         padding: (pad_top as f32, pad_left as f32),
     }
 }
@@ -129,25 +130,32 @@ pub fn preprocess_image_with_precision(
 ///
 /// # Returns
 ///
-/// Tuple of (new_width, new_height, pad_left, pad_top, (scale_y, scale_x)).
+/// Tuple of (`new_width`, `new_height`, `pad_left`, `pad_top`, (`scale_y`, `scale_x`)).
 fn calculate_letterbox_params(
     orig_width: u32,
     orig_height: u32,
     target_size: (usize, usize),
     _stride: u32,
 ) -> (u32, u32, u32, u32, (f32, f32)) {
+    #[allow(clippy::cast_precision_loss)]
     let (target_h, target_w) = (target_size.0 as f32, target_size.1 as f32);
+    #[allow(clippy::cast_precision_loss)]
     let (orig_h, orig_w) = (orig_height as f32, orig_width as f32);
 
     // Calculate scale to fit within target while maintaining aspect ratio
     let scale = (target_h / orig_h).min(target_w / orig_w);
 
     // New dimensions after scaling
+    // New dimensions after scaling
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let new_w = (orig_w * scale).round() as u32;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let new_h = (orig_h * scale).round() as u32;
 
     // Calculate padding to center the image (matching Python Ultralytics default)
+    #[allow(clippy::cast_possible_truncation)]
     let pad_w = (target_size.1 as u32).saturating_sub(new_w);
+    #[allow(clippy::cast_possible_truncation)]
     let pad_h = (target_size.0 as u32).saturating_sub(new_h);
 
     // Center alignment: divide padding equally on both sides
@@ -155,7 +163,9 @@ fn calculate_letterbox_params(
     let pad_top = pad_h / 2;
 
     // Scale factors for coordinate conversion back to original
+    #[allow(clippy::cast_precision_loss)]
     let scale_x = new_w as f32 / orig_w;
+    #[allow(clippy::cast_precision_loss)]
     let scale_y = new_h as f32 / orig_h;
 
     (new_w, new_h, pad_left, pad_top, (scale_y, scale_x))
@@ -163,7 +173,7 @@ fn calculate_letterbox_params(
 /// Apply letterbox transformation to an image.
 ///
 /// Resizes the image maintaining aspect ratio and adds padding.
-/// Uses SIMD-accelerated resizing via fast_image_resize.
+/// Uses SIMD-accelerated resizing via `fast_image_resize`.
 fn letterbox_image(
     image: &DynamicImage,
     new_width: u32,
@@ -172,7 +182,7 @@ fn letterbox_image(
     pad_top: u32,
     target_size: (usize, usize),
 ) -> RgbImage {
-    use fast_image_resize::{images::Image, PixelType, ResizeAlg, ResizeOptions, Resizer};
+    use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
 
     // Convert to RGB8
     let src_rgb = image.to_rgb8();
@@ -195,6 +205,7 @@ fn letterbox_image(
         .expect("Failed to resize image");
 
     // Create output image with letterbox color
+    #[allow(clippy::cast_possible_truncation)]
     let mut output: RgbImage = ImageBuffer::from_pixel(
         target_size.1 as u32,
         target_size.0 as u32,
@@ -311,6 +322,10 @@ pub fn array_to_tensor(image: &Array3<u8>) -> Array4<f32> {
 }
 
 /// Convert a `DynamicImage` to an HWC ndarray.
+///
+/// # Panics
+///
+/// Panics if the array cannot be created from the image pixels (e.g. dimension mismatch).
 #[must_use]
 pub fn image_to_array(image: &DynamicImage) -> Array3<u8> {
     let rgb = image.to_rgb8();
@@ -327,8 +342,8 @@ pub fn image_to_array(image: &DynamicImage) -> Array3<u8> {
 /// # Arguments
 ///
 /// * `coords` - Coordinates in model space (after letterbox).
-/// * `scale` - Scale factors (scale_y, scale_x) from preprocessing.
-/// * `padding` - Padding (pad_top, pad_left) from preprocessing.
+/// * `scale` - Scale factors (`scale_y`, `scale_x`) from preprocessing.
+/// * `padding` - Padding (`pad_top`, `pad_left`) from preprocessing.
 ///
 /// # Returns
 ///
@@ -357,7 +372,8 @@ pub fn scale_coords(coords: &[f32; 4], scale: (f32, f32), padding: (f32, f32)) -
 ///
 /// Clipped coordinates.
 #[must_use]
-pub fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
+pub const fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
+    #[allow(clippy::cast_precision_loss)]
     let (h, w) = (shape.0 as f32, shape.1 as f32);
     [
         coords[0].clamp(0.0, w),
@@ -420,21 +436,35 @@ pub fn preprocess_image_center_crop(
 ///
 /// Resizes the image such that the shortest side equals the target dimension,
 /// maintaining aspect ratio, then crops the center `target_size`.
+#[allow(clippy::similar_names)]
 fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbImage, (f32, f32)) {
-    use fast_image_resize::{images::Image, PixelType, ResizeAlg, ResizeOptions, Resizer};
+    use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
 
     let (src_w, src_h) = image.dimensions();
+    #[allow(clippy::cast_possible_truncation)]
     let (target_h, target_w) = (target_size.0 as u32, target_size.1 as u32);
 
     // Calculate scale to "cover" the target area
     // scale = max(target_w / src_w, target_h / src_h)
+    #[allow(clippy::cast_precision_loss)]
     let scale_x = target_w as f32 / src_w as f32;
+    #[allow(clippy::cast_precision_loss)]
     let scale_y = target_h as f32 / src_h as f32;
     let scale = scale_x.max(scale_y);
 
     let (new_w, new_h) = if scale_x >= scale_y {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
         (target_w, (src_h as f32 * scale_x) as u32)
     } else {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
         ((src_w as f32 * scale_y) as u32, target_h)
     };
 
@@ -463,10 +493,14 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
         .expect("Failed to create resized buffer");
 
     // Calculate crop offsets using Banker's Rounding (to match Python round())
+    #[allow(clippy::cast_precision_loss)]
     let crop_x_float = (new_w.saturating_sub(target_w)) as f32 / 2.0;
+    #[allow(clippy::cast_precision_loss)]
     let crop_y_float = (new_h.saturating_sub(target_h)) as f32 / 2.0;
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let crop_x = bankers_round(crop_x_float) as u32;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let crop_y = bankers_round(crop_y_float) as u32;
 
     // Perform center crop
@@ -477,7 +511,7 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
 }
 
 /// Round float to nearest integer, rounding half to even (Banker's Rounding).
-/// This matches Python's round() behavior.
+/// This matches Python's `round()` behavior.
 fn bankers_round(v: f32) -> f32 {
     let n = v.floor();
     let d = v - n;
@@ -488,6 +522,7 @@ fn bankers_round(v: f32) -> f32 {
     }
 }
 
+#[allow(clippy::similar_names)]
 #[cfg(test)]
 mod tests {
     use super::*;

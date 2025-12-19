@@ -1,5 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+#![allow(clippy::multiple_crate_versions)]
+
 //! # Ultralytics YOLO Inference Library
 //!
 //! High-performance YOLO model inference library written in Rust.
@@ -9,7 +11,7 @@
 //! ## Features
 //!
 //! - Fast inference using ONNX Runtime
-//! - Support for all YOLO versions (YOLOv5, YOLOv8, YOLO11, etc.)
+//! - Support for all YOLO versions (`YOLOv5`, `YOLOv8`, YOLO11, etc.)
 //! - Support for all YOLO tasks (detection, segmentation, pose, classification, OBB)
 //! - Ultralytics-compatible Results API
 //! - Thread-safe model loading and inference
@@ -69,7 +71,7 @@ pub mod results;
 pub mod source;
 pub mod task;
 pub mod utils;
-pub mod color;
+pub mod visualizer;
 
 // Re-export main types for convenience
 pub use error::{InferenceError, Result};
@@ -84,7 +86,7 @@ pub use metadata::ModelMetadata;
 
 // Re-export preprocessing utilities
 pub use preprocessing::{
-    preprocess_image, preprocess_image_with_precision, PreprocessResult, TensorData,
+    PreprocessResult, TensorData, preprocess_image, preprocess_image_with_precision,
 };
 
 /// Library version.

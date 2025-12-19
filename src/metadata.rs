@@ -16,7 +16,7 @@ use crate::task::Task;
 /// including class names, input dimensions, and task type.
 #[derive(Debug, Clone)]
 pub struct ModelMetadata {
-    /// Model description (e.g., "Ultralytics YOLO11n model trained on coco.yaml").
+    /// Model description (e.g., "Ultralytics `YOLO11n` model trained on coco.yaml").
     pub description: String,
     /// Model author.
     pub author: String,
@@ -162,17 +162,18 @@ impl ModelMetadata {
     }
 
     /// Parse the imgsz field which can be a YAML list.
+    #[allow(clippy::unnecessary_wraps)]
     fn parse_imgsz(yaml_str: &str, imgsz_line: &str) -> Result<(usize, usize)> {
         // Check if imgsz is on a single line like "imgsz: [640, 640]"
-        if let Some(bracket_start) = imgsz_line.find('[') {
-            if let Some(bracket_end) = imgsz_line.find(']') {
-                let values: Vec<usize> = imgsz_line[bracket_start + 1..bracket_end]
-                    .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
-                if values.len() >= 2 {
-                    return Ok((values[0], values[1]));
-                }
+        if let Some(bracket_start) = imgsz_line.find('[')
+            && let Some(bracket_end) = imgsz_line.find(']')
+        {
+            let values: Vec<usize> = imgsz_line[bracket_start + 1..bracket_end]
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+            if values.len() >= 2 {
+                return Ok((values[0], values[1]));
             }
         }
 
@@ -219,11 +220,11 @@ impl ModelMetadata {
             let trimmed = after_names.trim();
 
             // Check if it's Python dict format (starts with {)
-            if trimmed.starts_with('{') {
-                if let Some(end) = trimmed.find('}') {
-                    let dict_str = &trimmed[1..end];
-                    return Self::parse_python_dict(dict_str);
-                }
+            if trimmed.starts_with('{')
+                && let Some(end) = trimmed.find('}')
+            {
+                let dict_str = &trimmed[1..end];
+                return Self::parse_python_dict(dict_str);
             }
         }
 
@@ -256,11 +257,11 @@ impl ModelMetadata {
                 }
 
                 // Parse class entries like "0: person" or "  0: person"
-                if let Some((key, value)) = trimmed.split_once(':') {
-                    if let Ok(class_id) = key.trim().parse::<usize>() {
-                        let class_name = value.trim().trim_matches('\'').trim_matches('"');
-                        names.insert(class_id, class_name.to_string());
-                    }
+                if let Some((key, value)) = trimmed.split_once(':')
+                    && let Ok(class_id) = key.trim().parse::<usize>()
+                {
+                    let class_name = value.trim().trim_matches('\'').trim_matches('"');
+                    names.insert(class_id, class_name.to_string());
                 }
             }
         }
@@ -269,6 +270,7 @@ impl ModelMetadata {
     }
 
     /// Parse a Python dict string like `0: 'person', 1: 'bicycle'`.
+    #[allow(clippy::unnecessary_wraps)]
     fn parse_python_dict(dict_str: &str) -> Result<HashMap<usize, String>> {
         let mut names = HashMap::new();
 
@@ -324,7 +326,7 @@ impl Default for ModelMetadata {
 mod tests {
     use super::*;
 
-    const SAMPLE_METADATA: &str = r#"
+    const SAMPLE_METADATA: &str = r"
 description: Ultralytics YOLO11n model trained on /usr/src/ultralytics/ultralytics/cfg/datasets/coco.yaml
 author: Ultralytics
 date: '2025-12-11T20:19:45.464021'
@@ -343,7 +345,7 @@ names:
   2: car
   3: motorcycle
 channels: 3
-"#;
+";
 
     #[test]
     fn test_parse_metadata() {

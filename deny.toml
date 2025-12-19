@@ -1,0 +1,89 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# Configuration for https://github.com/EmbarkStudios/cargo-deny
+# Install: cargo install cargo-deny
+# Run: cargo deny check
+
+# This section is considered when running `cargo deny check advisories`
+# More documentation for the advisories section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+unmaintained = "workspace"
+yanked = "warn"
+ignore = [
+    # Add advisory IDs or package exceptions to ignore here with justification
+    # Example: "RUSTSEC-2021-0124", # reason for ignoring
+    # Ignore unmaintained transitive crates we accept for now
+]
+
+# This section is considered when running `cargo deny check licenses`
+# More documentation for the licenses section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+[licenses]
+# Allow only OSI-approved and FSF Free licenses by default
+# See https://spdx.org/licenses/ for full list
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "NCSA",
+    "Unlicense",
+    "Zlib",
+    "0BSD",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "AGPL-3.0-or-later",
+    "AGPL-3.0"
+]
+confidence-threshold = 0.8
+exceptions = [
+    # Add exceptions here for specific crates
+    # { allow = ["AGPL-3.0"], name = "your-crate" },
+]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 }
+]
+
+# This section is considered when running `cargo deny check bans`
+# More documentation for the bans section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+# Certain crates/versions that will be skipped when doing duplicate detection
+skip = [
+    # Add specific crate versions to skip here
+    # { name = "some-crate", version = "0.1.0" },
+]
+skip-tree = [
+    # Add entire crate trees to skip here
+    # { name = "some-crate", version = "0.1.0" },
+]
+deny = [
+    # Add crates to ban entirely here
+    # { name = "bad-crate", wrappers = [] },
+]
+
+# This section is considered when running `cargo deny check sources`
+# More documentation for the sources section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/pykeio/ort.git"]
+
+[sources.allow-org]
+github = ["ultralytics"]

@@ -2,7 +2,7 @@
 
 //! Utility functions for the inference library
 
-/// Calculate IoU (Intersection over Union) between two bounding boxes
+/// Calculate `IoU` (Intersection over Union) between two bounding boxes
 ///
 /// # Arguments
 ///
@@ -11,7 +11,8 @@
 ///
 /// # Returns
 ///
-/// IoU value between 0.0 and 1.0
+/// `IoU` value between 0.0 and 1.0
+#[must_use]
 pub fn calculate_iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
     let x1 = box1[0].max(box2[0]);
     let y1 = box1[1].max(box2[1]);
@@ -36,11 +37,16 @@ pub fn calculate_iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
 /// # Arguments
 ///
 /// * `boxes` - Vector of bounding boxes with scores [(bbox, score)]
-/// * `iou_threshold` - IoU threshold for suppression
+/// * `iou_threshold` - `IoU` threshold for suppression
 ///
 /// # Returns
 ///
 /// Indices of boxes to keep
+///
+/// # Panics
+///
+/// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
+#[must_use]
 pub fn nms(boxes: &[([f32; 4], f32)], iou_threshold: f32) -> Vec<usize> {
     if boxes.is_empty() {
         return vec![];
@@ -78,12 +84,17 @@ pub fn nms(boxes: &[([f32; 4], f32)], iou_threshold: f32) -> Vec<usize> {
 ///
 /// # Arguments
 ///
-/// * `boxes` - Vector of bounding boxes with scores and class IDs [(bbox, score, class_id)]
-/// * `iou_threshold` - IoU threshold for suppression
+/// * `boxes` - Vector of bounding boxes with scores and class IDs [(bbox, score, `class_id`)]
+/// * `iou_threshold` - `IoU` threshold for suppression
 ///
 /// # Returns
 ///
 /// Indices of boxes to keep
+///
+/// # Panics
+///
+/// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
+#[must_use]
 pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Vec<usize> {
     if boxes.is_empty() {
         return vec![];
@@ -129,7 +140,7 @@ mod tests {
         let box1 = [0.0, 0.0, 10.0, 10.0];
         let box2 = [5.0, 5.0, 15.0, 15.0];
         let iou = calculate_iou(&box1, &box2);
-        assert!((iou - 0.142857).abs() < 0.001); // 25 / (100 + 100 - 25)
+        assert!((iou - 0.142_857).abs() < 0.001); // 25 / (100 + 100 - 25)
     }
 
     #[test]

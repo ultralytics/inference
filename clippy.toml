@@ -1,0 +1,20 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# Configuration for https://doc.rust-lang.org/clippy/
+
+# Clippy lint configuration
+# Use `cargo clippy --all-targets --all-features -- -D warnings` to check
+
+# Enforce documentation
+# This encourages documenting public APIs
+warn-on-all-wildcard-imports = true
+
+# Complexity thresholds
+cognitive-complexity-threshold = 30
+type-complexity-threshold = 250
+
+# Allow certain patterns that are idiomatic or needed
+# Add exceptions here as needed with justification
+
+# Enforce stricter lints for production code
+# These help catch common mistakes and improve code quality

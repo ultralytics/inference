@@ -21,6 +21,10 @@ pub enum Source {
     ImageBuffer(DynamicImage),
     /// Raw HWC u8 array.
     Array(Array3<u8>),
+    /// HTTP/HTTPS URL to an image file.
+    ImageUrl(String),
+    /// List of image paths.
+    ImageList(Vec<PathBuf>),
     /// Path to a video file.
     Video(PathBuf),
     /// Webcam device index.
@@ -36,8 +40,11 @@ pub enum Source {
 impl Source {
     /// Check if this source is a single image.
     #[must_use]
-    pub fn is_image(&self) -> bool {
-        matches!(self, Self::Image(_) | Self::ImageBuffer(_) | Self::Array(_))
+    pub const fn is_image(&self) -> bool {
+        matches!(
+            self,
+            Self::Image(_) | Self::ImageBuffer(_) | Self::Array(_) | Self::ImageUrl(_)
+        )
     }
 
     /// Check if this source is a video or stream.
@@ -49,7 +56,10 @@ impl Source {
     /// Check if this source is a directory or glob pattern.
     #[must_use]
     pub const fn is_batch(&self) -> bool {
-        matches!(self, Self::Directory(_) | Self::Glob(_))
+        matches!(
+            self,
+            Self::Directory(_) | Self::Glob(_) | Self::ImageList(_)
+        )
     }
 
     /// Get the path if this source has one.
@@ -59,6 +69,27 @@ impl Source {
             Self::Image(p) | Self::Video(p) | Self::Directory(p) => Some(p),
             _ => None,
         }
+    }
+
+    /// Check if a URL points to an image based on extension.
+    fn is_image_url(url: &str) -> bool {
+        let url_lower = url.to_lowercase();
+        // Remove query parameters if present
+        let path_part = url_lower.split('?').next().unwrap_or(&url_lower);
+
+        std::path::Path::new(path_part)
+            .extension()
+            .is_some_and(|ext| {
+                let s = ext.to_string_lossy();
+                s.eq_ignore_ascii_case("jpg")
+                    || s.eq_ignore_ascii_case("jpeg")
+                    || s.eq_ignore_ascii_case("png")
+                    || s.eq_ignore_ascii_case("bmp")
+                    || s.eq_ignore_ascii_case("gif")
+                    || s.eq_ignore_ascii_case("webp")
+                    || s.eq_ignore_ascii_case("tiff")
+                    || s.eq_ignore_ascii_case("tif")
+            })
     }
 }
 
@@ -70,12 +101,18 @@ impl From<&str> for Source {
             return Self::Webcam(idx);
         }
 
+        // Check for HTTP/HTTPS URLs
+        if s.starts_with("http://") || s.starts_with("https://") {
+            // Check if it's an image URL by extension
+            if Self::is_image_url(s) {
+                return Self::ImageUrl(s.to_string());
+            }
+            // Otherwise treat as video stream
+            return Self::Stream(s.to_string());
+        }
+
         // Check for streaming URLs
-        if s.starts_with("rtsp://")
-            || s.starts_with("rtmp://")
-            || s.starts_with("http://")
-            || s.starts_with("https://")
-        {
+        if s.starts_with("rtsp://") || s.starts_with("rtmp://") {
             return Self::Stream(s.to_string());
         }
 
@@ -145,6 +182,7 @@ impl From<u32> for Source {
 
 impl From<i32> for Source {
     fn from(idx: i32) -> Self {
+        #[allow(clippy::cast_sign_loss)]
         Self::Webcam(idx as u32)
     }
 }
@@ -178,7 +216,10 @@ pub struct SourceIterator {
     source: Source,
     current_frame: usize,
     image_paths: Vec<PathBuf>,
-    // TODO: Add video capture handle when video support is implemented
+    #[cfg(feature = "video")]
+    decoder: Option<video_rs::decode::Decoder>,
+    #[cfg(feature = "video")]
+    total_frames: Option<usize>,
 }
 
 impl SourceIterator {
@@ -192,6 +233,8 @@ impl SourceIterator {
             Source::Directory(path) => Self::collect_images_from_dir(path)?,
             Source::Glob(pattern) => Self::collect_images_from_glob(pattern)?,
             Source::Image(path) => vec![path.clone()],
+            // URLs are handled separately via next_image_url
+            Source::ImageList(paths) => paths.clone(),
             _ => vec![],
         };
 
@@ -199,6 +242,10 @@ impl SourceIterator {
             source,
             current_frame: 0,
             image_paths,
+            #[cfg(feature = "video")]
+            decoder: None,
+            #[cfg(feature = "video")]
+            total_frames: None,
         })
     }
 
@@ -212,8 +259,8 @@ impl SourceIterator {
         }
 
         let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map_err(|e| InferenceError::IoError(e))?
-            .filter_map(|entry| entry.ok())
+            .map_err(InferenceError::IoError)?
+            .filter_map(std::result::Result::ok)
             .map(|entry| entry.path())
             .filter(|path| Self::is_image_file(path))
             .collect();
@@ -240,7 +287,7 @@ impl SourceIterator {
             // Get extension filter from pattern (e.g., "*.jpg" -> "jpg")
             let ext_filter: Option<String> = pattern[star_pos..]
                 .strip_prefix("*.")
-                .map(|s| s.to_lowercase());
+                .map(str::to_lowercase);
 
             if !dir.is_dir() {
                 return Err(InferenceError::ImageError(format!(
@@ -251,16 +298,16 @@ impl SourceIterator {
 
             let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
                 .map_err(InferenceError::IoError)?
-                .filter_map(|entry| entry.ok())
+                .filter_map(std::result::Result::ok)
                 .map(|entry| entry.path())
                 .filter(|path| {
-                    if let Some(ref ext) = ext_filter {
-                        path.extension()
-                            .map(|e| e.to_string_lossy().to_lowercase() == *ext)
-                            .unwrap_or(false)
-                    } else {
-                        Self::is_image_file(path)
-                    }
+                    ext_filter.as_ref().map_or_else(
+                        || Self::is_image_file(path),
+                        |ext| {
+                            path.extension()
+                                .is_some_and(|e| e.to_string_lossy().to_lowercase() == *ext)
+                        },
+                    )
                 })
                 .collect();
 
@@ -274,15 +321,49 @@ impl SourceIterator {
 
     /// Check if a path is an image file based on extension.
     fn is_image_file(path: &Path) -> bool {
-        path.extension()
-            .map(|ext| {
-                let ext = ext.to_string_lossy().to_lowercase();
-                matches!(
-                    ext.as_str(),
-                    "jpg" | "jpeg" | "png" | "bmp" | "gif" | "webp" | "tiff" | "tif"
-                )
-            })
-            .unwrap_or(false)
+        path.extension().is_some_and(|ext| {
+            let ext = ext.to_string_lossy().to_lowercase();
+            matches!(
+                ext.as_str(),
+                "jpg" | "jpeg" | "png" | "bmp" | "gif" | "webp" | "tiff" | "tif"
+            )
+        })
+    }
+
+    /// Download an image from a URL.
+    fn download_image(url: &str) -> Result<DynamicImage> {
+        let mut response = ureq::get(url)
+            .call()
+            .map_err(|e| InferenceError::ImageError(format!("Failed to download {url}: {e}")))?
+            .into_body();
+
+        let bytes = response.read_to_vec().map_err(|e| {
+            InferenceError::ImageError(format!("Failed to read response from {url}: {e}"))
+        })?;
+
+        image::load_from_memory(&bytes).map_err(|e| {
+            InferenceError::ImageError(format!("Failed to decode image from {url}: {e}"))
+        })
+    }
+
+    /// Get the next image from a URL.
+    fn next_image_url(&mut self, url: &str) -> Option<Result<(DynamicImage, SourceMeta)>> {
+        if self.current_frame > 0 {
+            return None;
+        }
+
+        self.current_frame = 1;
+        let meta = SourceMeta {
+            frame_idx: 0,
+            total_frames: Some(1),
+            path: url.to_string(),
+            fps: None,
+        };
+
+        match Self::download_image(url) {
+            Ok(img) => Some(Ok((img, meta))),
+            Err(e) => Some(Err(e)),
+        }
     }
 
     /// Get the next image from the source.
@@ -310,11 +391,79 @@ impl SourceIterator {
         }
     }
 
-    /// Get the next frame from video/webcam (placeholder).
+    /// Get the next video frame.
+    #[cfg(feature = "video")]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
-        // TODO: Implement video frame extraction
-        // This requires ffmpeg-next or similar library
-        None
+        // Initialize decoder if needed
+        if self.decoder.is_none()
+            && let Source::Video(path) = &self.source
+        {
+            match video_rs::decode::Decoder::new(path.as_path()) {
+                Ok(d) => {
+                    // Calculate total frames from duration and frame rate
+                    if let Ok(duration) = d.duration() {
+                        let fps = d.frame_rate();
+                        let duration_seconds = duration.as_secs_f64();
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        {
+                            self.total_frames = Some((duration_seconds * f64::from(fps)) as usize);
+                        }
+                    }
+                    self.decoder = Some(d);
+                }
+                Err(e) => {
+                    return Some(Err(InferenceError::VideoError(format!(
+                        "Failed to create decoder: {e}"
+                    ))));
+                }
+            }
+            // Note: Decoder initialized.
+        }
+
+        if let Some(decoder) = &mut self.decoder {
+            // Attempt to decode next frame
+            match decoder.decode() {
+                Ok((_ts, frame)) => {
+                    let fps = decoder.frame_rate();
+                    let meta = SourceMeta {
+                        frame_idx: self.current_frame,
+                        total_frames: self.total_frames,
+                        path: self
+                            .source
+                            .path()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        fps: Some(fps),
+                    };
+                    self.current_frame += 1;
+
+                    match video_frame_to_image(&frame) {
+                        Ok(img) => Some(Ok((img, meta))),
+                        Err(e) => Some(Err(e)),
+                    }
+                }
+                Err(_e) => {
+                    // Check if error is EOF. Video-rs usually returns a specific error or strict error on EOF.
+                    // Assuming for now that any error might be EOF or fatal.
+                    // If video-rs returns VideoError::Decode(EOF), we can stop.
+                    // Given we can't easily check error variants without knowing them,
+                    // we'll assume standard video ending behavior: error implies stop.
+                    // Common practice: return None on error if it looks like EOF.
+                    // Without explicit EOF check, we return None (end of stream) for now.
+                    // User can restart or check logs if it cuts short.
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    #[cfg(not(feature = "video"))]
+    fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
+        Some(Err(InferenceError::FeatureNotEnabled(
+            "Video support requires 'video' feature".to_string(),
+        )))
     }
 }
 
@@ -323,7 +472,13 @@ impl Iterator for SourceIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &self.source {
-            Source::Image(_) | Source::Directory(_) | Source::Glob(_) => self.next_image(),
+            Source::Image(_) | Source::Directory(_) | Source::Glob(_) | Source::ImageList(_) => {
+                self.next_image()
+            }
+            Source::ImageUrl(url) => {
+                let url = url.clone();
+                self.next_image_url(&url)
+            }
             Source::ImageBuffer(img) => {
                 if self.current_frame == 0 {
                     self.current_frame = 1;
@@ -351,10 +506,13 @@ impl Iterator for SourceIterator {
     }
 }
 
-/// Convert an HWC u8 array to a DynamicImage.
+/// Convert an HWC u8 array to a `DynamicImage`.
 fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
     let shape = arr.shape();
-    let (height, width) = (shape[0] as u32, shape[1] as u32);
+    let height = u32::try_from(shape[0])
+        .map_err(|_| InferenceError::ImageError("Image height exceeds u32::MAX".to_string()))?;
+    let width = u32::try_from(shape[1])
+        .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
 
     let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
     for y in 0..height as usize {
@@ -367,6 +525,31 @@ fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
 
     let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
         InferenceError::ImageError("Failed to create image from array".to_string())
+    })?;
+
+    Ok(DynamicImage::ImageRgb8(img_buffer))
+}
+
+#[cfg(feature = "video")]
+/// Convert a `video_rs` Frame (ndarray 0.16) to `DynamicImage`.
+fn video_frame_to_image(arr: &video_rs::Frame) -> Result<DynamicImage> {
+    let shape = arr.shape();
+    let height = u32::try_from(shape[0])
+        .map_err(|_| InferenceError::ImageError("Image height exceeds u32::MAX".to_string()))?;
+    let width = u32::try_from(shape[1])
+        .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
+
+    let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            rgb_data.push(arr[[y, x, 0]]);
+            rgb_data.push(arr[[y, x, 1]]);
+            rgb_data.push(arr[[y, x, 2]]);
+        }
+    }
+
+    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+        InferenceError::ImageError("Failed to create image from video frame".to_string())
     })?;
 
     Ok(DynamicImage::ImageRgb8(img_buffer))

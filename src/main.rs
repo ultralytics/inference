@@ -1,5 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+#![allow(clippy::multiple_crate_versions)]
+
 //! Ultralytics YOLO Inference CLI
 //!
 //! A command-line interface for running YOLO model inference on images and videos.
@@ -23,15 +25,15 @@ use std::process;
 use std::fs;
 
 #[cfg(feature = "annotate")]
-use inference::annotate::{annotate_image, find_next_run_dir, load_image};
-pub mod color;
+use inference::annotate::{annotate_image, find_next_run_dir};
+
+#[cfg(feature = "visualize")]
+use inference::visualizer::Viewer;
 
 use inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
-/// Default source path when not specified.
-const DEFAULT_SOURCE: &str = "assets";
 
 /// Entry point for the Ultralytics YOLO Inference CLI.
 fn main() {
@@ -57,14 +59,23 @@ fn main() {
 }
 
 /// Run YOLO model inference.
+#[allow(
+    clippy::too_many_lines,
+    clippy::option_if_let_else,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn run_prediction(args: &[String]) {
     // Parse arguments
     let mut model_path: Option<&String> = None;
     let mut source_path: Option<&String> = None;
     let mut conf_threshold = 0.25_f32;
     let mut iou_threshold = 0.45_f32;
+    let mut imgsz: Option<usize> = None;
     let mut save = false;
     let mut half = false;
+    let mut show = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -113,6 +124,19 @@ fn run_prediction(args: &[String]) {
                 half = true;
                 i += 1;
             }
+            "--show" => {
+                show = true;
+                i += 1;
+            }
+            "--imgsz" => {
+                if i + 1 < args.len() {
+                    imgsz = args[i + 1].parse().ok();
+                    i += 2;
+                } else {
+                    eprintln!("Error: --imgsz requires a value");
+                    process::exit(1);
+                }
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 process::exit(1);
@@ -122,36 +146,24 @@ fn run_prediction(args: &[String]) {
 
     // Use defaults with warnings if not specified
     let default_model = DEFAULT_MODEL.to_string();
-    let default_source = DEFAULT_SOURCE.to_string();
 
-    let model_path = match model_path {
-        Some(m) => m.clone(),
-        None => {
-            eprintln!(
-                "WARNING ⚠️ 'model' argument is missing. Using default 'model={DEFAULT_MODEL}'."
-            );
-            default_model
-        }
+    let model_path = if let Some(m) = model_path {
+        m.clone()
+    } else {
+        eprintln!("WARNING ⚠️ 'model' argument is missing. Using default 'model={DEFAULT_MODEL}'.");
+        default_model
     };
 
-    let source_path = match source_path {
-        Some(s) => s.clone(),
-        None => {
-            let cwd = env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-            eprintln!(
-                "WARNING ⚠️ 'source' argument is missing. Using default 'source={cwd}/{DEFAULT_SOURCE}'."
-            );
-            default_source
-        }
-    };
-
-    // Load model
-    let config = InferenceConfig::new()
+    // Load model first so we can determine appropriate default source based on task
+    let mut config = InferenceConfig::new()
         .with_confidence(conf_threshold)
         .with_iou(iou_threshold)
         .with_half(half);
+
+    // Apply imgsz if specified
+    if let Some(size) = imgsz {
+        config = config.with_imgsz(size, size);
+    }
 
     let mut model = match YOLOModel::load_with_config(&model_path, config) {
         Ok(m) => m,
@@ -161,7 +173,39 @@ fn run_prediction(args: &[String]) {
         }
     };
 
-    // Create save directory if --save is specified
+    // Determine source
+    let source = source_path.as_ref().map_or_else(
+        || {
+            // Select default images based on model task
+            let default_urls = match model.task() {
+                inference::task::Task::Obb => &[inference::download::DEFAULT_OBB_IMAGE],
+                _ => inference::download::DEFAULT_IMAGES,
+            };
+
+            eprintln!(
+                "WARNING ⚠️ 'source' argument is missing. Using default images: {}",
+                default_urls.join(", ")
+            );
+
+            // Download images to current directory (skips if already exists)
+            let downloaded_files = inference::download::download_images(default_urls);
+
+            if downloaded_files.is_empty() {
+                eprintln!("Error: Failed to download any images");
+                process::exit(1);
+            }
+
+            // Convert to PathBufs for ImageList
+            let paths = downloaded_files
+                .into_iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+
+            inference::source::Source::ImageList(paths)
+        },
+        |s| inference::source::Source::from(s.as_str()),
+    );
+
     #[cfg(feature = "annotate")]
     let save_dir = if save {
         let parent_dir = match model.task() {
@@ -178,7 +222,6 @@ fn run_prediction(args: &[String]) {
         None
     };
 
-    // Warn user if --save is specified but annotate feature is disabled
     #[cfg(not(feature = "annotate"))]
     if save {
         eprintln!(
@@ -186,12 +229,10 @@ fn run_prediction(args: &[String]) {
         );
     }
 
-    // Print banner matching Ultralytics format (after model load to detect precision)
     let is_half = model.metadata().half || half;
     let precision = if is_half { "FP16" } else { "FP32" };
-    println!("Ultralytics {} 🚀 Rust ONNX {} CPU", VERSION, precision);
+    println!("Ultralytics {VERSION} 🚀 Rust ONNX {precision} CPU");
 
-    // Print model summary
     let imgsz = model.imgsz();
     println!(
         "YOLO11 summary: {} classes, imgsz=({}, {})",
@@ -201,29 +242,38 @@ fn run_prediction(args: &[String]) {
     );
     println!();
 
-    // Collect images to process
-    let source_path_obj = Path::new(&source_path);
-    let images: Vec<String> = if source_path_obj.is_dir() {
-        collect_images_from_dir(source_path_obj)
-    } else {
-        vec![source_path.clone()]
+    // Source is already initialized above
+    let is_video = source.is_video();
+    let source_iter = match inference::source::SourceIterator::new(source) {
+        Ok(iter) => iter,
+        Err(e) => {
+            eprintln!("Error initializing source: {e}");
+            process::exit(1);
+        }
     };
 
-    let total_images = images.len();
-    if total_images == 0 {
-        eprintln!("No images found in source: {source_path}");
-        process::exit(1);
-    }
-
-    // Process each image
+    // Process each image/frame
     let mut all_results: Vec<(String, Results)> = Vec::new();
     let mut total_preprocess = 0.0;
     let mut total_inference = 0.0;
     let mut total_postprocess = 0.0;
     let mut last_inference_shape = (0, 0);
 
-    for (idx, image_path) in images.iter().enumerate() {
-        let results = match model.predict(image_path) {
+    #[cfg(feature = "visualize")]
+    let mut viewer: Option<Viewer> = None;
+
+    let mut frame_count = 0;
+    for item in source_iter {
+        let (img, meta) = match item {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("Error reading source: {e}");
+                continue;
+            }
+        };
+
+        let image_path = meta.path;
+        let results = match model.predict_image(&img, image_path.clone()) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("Error processing {image_path}: {e}");
@@ -236,35 +286,88 @@ fn run_prediction(args: &[String]) {
             let detection_summary = format_detection_summary(&result);
 
             // Get image dimensions from result
-            let orig_shape = result.orig_shape();
+            // let orig_shape = result.orig_shape();
             let inference_shape = result.inference_shape();
             last_inference_shape = (inference_shape.0 as usize, inference_shape.1 as usize);
 
-            // Print per-image output matching Ultralytics format
-            // Use original image dimensions for the per-image output
-            println!(
-                "image {}/{} {}: {}x{} {}, {:.1}ms",
-                idx + 1,
-                total_images,
-                image_path,
-                orig_shape.1, // width first in output
-                orig_shape.0, // then height
-                detection_summary,
-                result.speed.inference.unwrap_or(0.0)
-            );
+            // Format total frames for display
+            let total_frames_str = meta
+                .total_frames
+                .map_or_else(|| "?".to_string(), |n| n.to_string());
+
+            if is_video {
+                // Assuming single video input for now as per CLI structure
+                // Use "video 1/1"
+                println!(
+                    "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
+                    meta.frame_idx + 1,
+                    total_frames_str,
+                    image_path,
+                    inference_shape.1,
+                    inference_shape.0,
+                    detection_summary,
+                    result.speed.inference.unwrap_or(0.0)
+                );
+            } else {
+                println!(
+                    "image {}/{} {}: {}x{} {}, {:.1}ms",
+                    meta.frame_idx + 1,
+                    total_frames_str,
+                    image_path,
+                    inference_shape.1,
+                    inference_shape.0,
+                    detection_summary,
+                    result.speed.inference.unwrap_or(0.0)
+                );
+            }
 
             // Save annotated image if --save is specified
             #[cfg(feature = "annotate")]
             if let Some(ref dir) = save_dir {
-                if let Ok(img) = load_image(image_path) {
+                let annotated = annotate_image(&img, &result, None);
+                let filename = Path::new(&image_path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let save_path = format!("{dir}/{filename}");
+                if let Err(e) = annotated.save(&save_path) {
+                    eprintln!("Error saving {save_path}: {e}");
+                }
+            }
+
+            // Show result in viewer if enabled
+            #[cfg(feature = "visualize")]
+            if show {
+                // If viewer exists but dimensions don't match, drop it to recreate
+                if let Some(ref v) = viewer
+                    && (v.width != img.width() as usize || v.height != img.height() as usize)
+                {
+                    viewer = None;
+                }
+
+                // Initialize viewer lazily with correct dimensions
+                if viewer.is_none() {
+                    let width = img.width() as usize;
+                    let height = img.height() as usize;
+                    viewer =
+                        Some(Viewer::new("Ultralytics YOLO Inference", width, height).unwrap());
+                }
+
+                if let Some(ref mut v) = viewer {
                     let annotated = annotate_image(&img, &result, None);
-                    let filename = Path::new(image_path)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy();
-                    let save_path = format!("{dir}/{filename}");
-                    if let Err(e) = annotated.save(&save_path) {
-                        eprintln!("Error saving {save_path}: {e}");
+
+                    // Update viewer
+                    if v.update(&annotated).is_ok() {
+                        // Add delay logic based on source type
+                        if is_video {
+                            // 200ms delay for initial start of video
+                            if frame_count == 0 {
+                                let _ = v.wait(std::time::Duration::from_millis(200));
+                            }
+                        } else {
+                            // 500ms delay for images (single or directory)
+                            let _ = v.wait(std::time::Duration::from_millis(200));
+                        }
                     }
                 }
             }
@@ -276,6 +379,7 @@ fn run_prediction(args: &[String]) {
 
             all_results.push((image_path.clone(), result));
         }
+        frame_count += 1;
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
@@ -300,6 +404,11 @@ fn run_prediction(args: &[String]) {
 }
 
 /// Format detection summary like "4 persons, 1 bus".
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::option_if_let_else
+)]
 fn format_detection_summary(result: &Results) -> String {
     if let Some(ref boxes) = result.boxes {
         if boxes.is_empty() {
@@ -323,11 +432,7 @@ fn format_detection_summary(result: &Results) -> String {
         let parts: Vec<String> = sorted_counts
             .iter()
             .map(|(class_id, count)| {
-                let class_name = result
-                    .names
-                    .get(class_id)
-                    .map(String::as_str)
-                    .unwrap_or("object");
+                let class_name = result.names.get(class_id).map_or("object", String::as_str);
                 // Pluralize if count > 1
                 let name = if *count > 1 {
                     pluralize(class_name)
@@ -345,11 +450,7 @@ fn format_detection_summary(result: &Results) -> String {
             let parts: Vec<String> = top5
                 .iter()
                 .map(|&i| {
-                    let name = result
-                        .names
-                        .get(&i)
-                        .map(String::as_str)
-                        .unwrap_or("unknown");
+                    let name = result.names.get(&i).map_or("unknown", String::as_str);
                     format!("{} {:.2}", name, probs.data[[i]])
                 })
                 .collect();
@@ -383,29 +484,6 @@ fn pluralize(word: &str) -> String {
     }
 }
 
-/// Collect image paths from a directory.
-fn collect_images_from_dir(dir: &Path) -> Vec<String> {
-    let mut paths = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(ext) = path.extension() {
-                let ext = ext.to_string_lossy().to_lowercase();
-                if matches!(
-                    ext.as_str(),
-                    "jpg" | "jpeg" | "png" | "bmp" | "gif" | "webp" | "tiff" | "tif"
-                ) {
-                    paths.push(path.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-
-    paths.sort();
-    paths
-}
-
 /// Print version information.
 fn print_version() {
     println!("Ultralytics Inference v{VERSION}");
@@ -414,7 +492,7 @@ fn print_version() {
 /// Print usage information.
 fn print_usage() {
     println!(
-        r#"Ultralytics YOLO Inference CLI
+        r"Ultralytics YOLO Inference CLI
 ==============================
 
 Usage:
@@ -432,13 +510,16 @@ Options:
     --source, -s    Input source (image, video, webcam index, or URL)
     --conf          Confidence threshold (default: 0.25)
     --iou           IoU threshold for NMS (default: 0.45)
+    --imgsz         Inference image size (default: 640)
     --half          Use FP16 half-precision inference
     --save          Save annotated images to runs/detect/predict
+    --show          Display results in a window
 
 Examples:
     inference predict --model yolo11n.onnx --source image.jpg
     inference predict --model yolo11n.onnx --source video.mp4
     inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    inference predict -m yolo11n.onnx -s assets/ --save --half"#
+    inference predict -m yolo11n.onnx -s assets/ --save --half
+    inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show"
     );
 }
