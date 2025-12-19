@@ -75,6 +75,7 @@ fn run_prediction(args: &[String]) {
     let mut imgsz: Option<usize> = None;
     let mut save = false;
     let mut half = false;
+    #[cfg(feature = "visualize")]
     let mut show = false;
 
     let mut i = 0;
@@ -125,7 +126,16 @@ fn run_prediction(args: &[String]) {
                 i += 1;
             }
             "--show" => {
-                show = true;
+                #[cfg(feature = "visualize")]
+                {
+                    show = true;
+                }
+                #[cfg(not(feature = "visualize"))]
+                {
+                    eprintln!(
+                        "WARNING ⚠️ --show requires the 'visualize' feature. Compile with --features visualize to enable display."
+                    );
+                }
                 i += 1;
             }
             "--imgsz" => {
@@ -262,6 +272,7 @@ fn run_prediction(args: &[String]) {
     #[cfg(feature = "visualize")]
     let mut viewer: Option<Viewer> = None;
 
+    #[cfg(feature = "visualize")]
     let mut frame_count = 0;
     for item in source_iter {
         let (img, meta) = match item {
@@ -388,7 +399,10 @@ fn run_prediction(args: &[String]) {
 
             all_results.push((image_path.clone(), result));
         }
-        frame_count += 1;
+        #[cfg(feature = "visualize")]
+        {
+            frame_count += 1;
+        }
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
