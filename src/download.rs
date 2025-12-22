@@ -397,7 +397,7 @@ mod tests {
         let result = try_download_model("unknown_model.onnx");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("Auto-download is only supported"));
+        assert!(err.contains("Auto-download is supported for"));
     }
 
     #[test]

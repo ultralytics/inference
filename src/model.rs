@@ -359,8 +359,8 @@ impl YOLOModel {
         // Warmup first to fail fast before loading/decoding the image
         self.warmup()?;
 
-        // Load image using custom loader that bypasses zune-jpeg stride issues
-        let img = crate::annotate::load_image(&path.to_string_lossy()).map_err(|e| {
+        // Load image using standard image crate
+        let img = image::open(path).map_err(|e| {
             InferenceError::ImageError(format!("Failed to load image {}: {e}", path.display()))
         })?;
 
