@@ -11,7 +11,9 @@
 //! ```bash
 //! inference predict --model yolo11n.onnx --source image.jpg
 //! inference predict --model yolo11n.onnx --source video.mp4
-//! inference predict --model yolo11n.onnx --source 0  # webcam
+//! inference predict --model yolo11n.onnx --source 0 --conf 0.5
+//! inference predict -m yolo11n.onnx -s assets/ --save --half
+//! inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show
 //! inference version
 //! inference help
 //! ```
@@ -72,7 +74,7 @@ fn run_prediction(args: &[String]) {
     let mut source_path: Option<&String> = None;
     let mut conf_threshold = 0.25_f32;
     let mut iou_threshold = 0.45_f32;
-    let mut imgsz: Option<usize> = None;
+    let mut imgsz: usize = 640;
     let mut save = false;
     let mut half = false;
     #[cfg(feature = "visualize")]
@@ -140,7 +142,7 @@ fn run_prediction(args: &[String]) {
             }
             "--imgsz" => {
                 if i + 1 < args.len() {
-                    imgsz = args[i + 1].parse().ok();
+                    imgsz = args[i + 1].parse().unwrap_or(640);
                     i += 2;
                 } else {
                     eprintln!("Error: --imgsz requires a value");
@@ -170,10 +172,8 @@ fn run_prediction(args: &[String]) {
         .with_iou(iou_threshold)
         .with_half(half);
 
-    // Apply imgsz if specified
-    if let Some(size) = imgsz {
-        config = config.with_imgsz(size, size);
-    }
+    // Apply imgsz (default 640)
+    config = config.with_imgsz(imgsz, imgsz);
 
     let mut model = match YOLOModel::load_with_config(&model_path, config) {
         Ok(m) => m,
