@@ -51,7 +51,7 @@ model.export(format="onnx")
 ### Run Inference
 
 ```bash
-# With defaults (auto-detects yolo11n.onnx and assets/ folder)
+# With defaults (auto-downloads model and sample images)
 cargo run --release -- predict
 
 # With explicit arguments
@@ -70,12 +70,12 @@ cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --show --
 ### Example Output
 
 ```
-WARNING ⚠️ 'source' argument is missing. Using default 'source=assets'.
+WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
 Ultralytics 0.0.4 🚀 Rust ONNX CPU
 YOLO11 summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 assets/bus.jpg: 810x1080 4 persons, 1 bus, 27.3ms
-image 2/2 assets/zidane.jpg: 1280x720 2 persons, 1 tie, 24.9ms
+image 1/2 bus.jpg: 810x1080 4 persons, 1 bus, 27.3ms
+image 2/2 zidane.jpg: 1280x720 2 persons, 1 tie, 24.9ms
 Speed: 9.4ms preprocess, 26.1ms inference, 0.8ms postprocess per image at shape (1, 3, 720, 1280)
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
@@ -100,13 +100,24 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | Option     | Short | Description                                      | Default        |
 | ---------- | ----- | ------------------------------------------------ | -------------- |
 | `--model`  | `-m`  | Path to ONNX model file                          | `yolo11n.onnx` |
-| `--source` | `-s`  | Input source (image, video, webcam index, or URL)| `assets`       |
+| `--source` | `-s`  | Input source (image, video, webcam index, or URL)| `Task dependent Ultralytics URL assets`|
 | `--conf`   |       | Confidence threshold                             | `0.25`         |
 | `--iou`    |       | IoU threshold for NMS                            | `0.45`         |
 | `--imgsz`  |       | Inference image size                             | `640`          |
 | `--half`   |       | Use FP16 half-precision inference                | `false`        |
 | `--save`   |       | Save annotated images to runs/detect/predict     | `false`        |
 | `--show`   |       | Display results in a window                      | `false`        |
+
+**Source Options:**
+
+| Source Type | Example Input                   | Description                          |
+| ----------- | ------------------------------- | ------------------------------------ |
+| Image       | `image.jpg`                     | Single image file                    |
+| Directory   | `images/`                       | Directory of images                  |
+| Glob        | `images/*.jpg`                  | Glob pattern for images              |
+| Video       | `video.mp4`                     | Video file                           |
+| Webcam      | `0`,`1`                         | Webcam index (0 = default webcam)    |
+| URL         | `https://example.com/image.jpg` | Remote image URL                     |
 
 ### As a Rust Library
 
