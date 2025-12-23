@@ -97,27 +97,27 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option     | Short | Description                                      | Default        |
-| ---------- | ----- | ------------------------------------------------ | -------------- |
-| `--model`  | `-m`  | Path to ONNX model file                          | `yolo11n.onnx` |
-| `--source` | `-s`  | Input source (image, video, webcam index, or URL)| `Task dependent Ultralytics URL assets`|
-| `--conf`   |       | Confidence threshold                             | `0.25`         |
-| `--iou`    |       | IoU threshold for NMS                            | `0.45`         |
-| `--imgsz`  |       | Inference image size                             | `640`          |
-| `--half`   |       | Use FP16 half-precision inference                | `false`        |
-| `--save`   |       | Save annotated images to runs/detect/predict     | `false`        |
-| `--show`   |       | Display results in a window                      | `false`        |
+| Option     | Short | Description                                       | Default                                 |
+| ---------- | ----- | ------------------------------------------------- | --------------------------------------- |
+| `--model`  | `-m`  | Path to ONNX model file                           | `yolo11n.onnx`                          |
+| `--source` | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
+| `--conf`   |       | Confidence threshold                              | `0.25`                                  |
+| `--iou`    |       | IoU threshold for NMS                             | `0.45`                                  |
+| `--imgsz`  |       | Inference image size                              | `640`                                   |
+| `--half`   |       | Use FP16 half-precision inference                 | `false`                                 |
+| `--save`   |       | Save annotated images to runs/detect/predict      | `false`                                 |
+| `--show`   |       | Display results in a window                       | `false`                                 |
 
 **Source Options:**
 
-| Source Type | Example Input                   | Description                          |
-| ----------- | ------------------------------- | ------------------------------------ |
-| Image       | `image.jpg`                     | Single image file                    |
-| Directory   | `images/`                       | Directory of images                  |
-| Glob        | `images/*.jpg`                  | Glob pattern for images              |
-| Video       | `video.mp4`                     | Video file                           |
-| Webcam      | `0`,`1`                         | Webcam index (0 = default webcam)    |
-| URL         | `https://example.com/image.jpg` | Remote image URL                     |
+| Source Type | Example Input                   | Description                       |
+| ----------- | ------------------------------- | --------------------------------- |
+| Image       | `image.jpg`                     | Single image file                 |
+| Directory   | `images/`                       | Directory of images               |
+| Glob        | `images/*.jpg`                  | Glob pattern for images           |
+| Video       | `video.mp4`                     | Video file                        |
+| Webcam      | `0`,`1`                         | Webcam index (0 = default webcam) |
+| URL         | `https://example.com/image.jpg` | Remote image URL                  |
 
 ### As a Rust Library
 
