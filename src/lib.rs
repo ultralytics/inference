@@ -15,7 +15,7 @@
 //! - Support for all YOLO tasks (detection, segmentation, pose, classification, OBB)
 //! - Ultralytics-compatible Results API
 //! - Thread-safe model loading and inference
-//! - Multiple input sources (images, video, webcam, streams)
+//! - Multiple input sources (images, directories, glob, video, webcam, streams)
 //!
 //! ## Quick Start
 //!
