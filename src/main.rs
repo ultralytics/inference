@@ -535,7 +535,7 @@ Options:
     --iou           IoU threshold for NMS (default: 0.45)
     --imgsz         Inference image size (default: 640)
     --half          Use FP16 half-precision inference
-    --save          Save annotated images to runs/detect/predict
+    --save          Save annotated images to runs/<task>/predict
     --show          Display results in a window
 
 Examples:
