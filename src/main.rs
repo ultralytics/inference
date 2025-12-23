@@ -530,12 +530,12 @@ Commands:
 
 Options:
     --model, -m     Path to ONNX model file
-    --source, -s    Input source (image, video, webcam index, or URL)
+    --source, -s    Input source (image, directory, glob, video, webcam, or URL)
     --conf          Confidence threshold (default: 0.25)
     --iou           IoU threshold for NMS (default: 0.45)
     --imgsz         Inference image size (default: 640)
     --half          Use FP16 half-precision inference
-    --save          Save annotated images to runs/detect/predict
+    --save          Save annotated images to runs/<task>/predict
     --show          Display results in a window
 
 Examples:
