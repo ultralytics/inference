@@ -77,6 +77,7 @@ fn run_prediction(args: &[String]) {
     let mut imgsz: usize = 640;
     let mut save = false;
     let mut half = false;
+    let mut verbose = true;
     #[cfg(feature = "visualize")]
     let mut show = false;
 
@@ -149,6 +150,29 @@ fn run_prediction(args: &[String]) {
                     process::exit(1);
                 }
             }
+            "--verbose" => {
+                if i + 1 < args.len() {
+                    let next_arg = &args[i + 1];
+                    if let Ok(v) = next_arg.parse::<bool>() {
+                        verbose = v;
+                        i += 2;
+                    } else if next_arg.starts_with('-') {
+                        // Next arg looks like a flag, so --verbose is used as a flag (true)
+                        verbose = true;
+                        i += 1;
+                    } else {
+                        // Next arg is strictly not a bool and not a flag -> Error
+                        eprintln!(
+                            "Error: --verbose expects a boolean value (true/false) or no value, found: '{next_arg}'"
+                        );
+                        process::exit(1);
+                    }
+                } else {
+                    // End of args
+                    verbose = true;
+                    i += 1;
+                }
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 process::exit(1);
@@ -162,7 +186,11 @@ fn run_prediction(args: &[String]) {
     let model_path = if let Some(m) = model_path {
         m.clone()
     } else {
-        eprintln!("WARNING ⚠️ 'model' argument is missing. Using default 'model={DEFAULT_MODEL}'.");
+        if verbose {
+            eprintln!(
+                "WARNING ⚠️ 'model' argument is missing. Using default 'model={DEFAULT_MODEL}'."
+            );
+        }
         default_model
     };
 
@@ -192,10 +220,12 @@ fn run_prediction(args: &[String]) {
                 _ => inference::download::DEFAULT_IMAGES,
             };
 
-            eprintln!(
-                "WARNING ⚠️ 'source' argument is missing. Using default images: {}",
-                default_urls.join(", ")
-            );
+            if verbose {
+                eprintln!(
+                    "WARNING ⚠️ 'source' argument is missing. Using default images: {}",
+                    default_urls.join(", ")
+                );
+            }
 
             // Download images to current directory (skips if already exists)
             let downloaded_files = inference::download::download_images(default_urls);
@@ -306,30 +336,32 @@ fn run_prediction(args: &[String]) {
                 .total_frames
                 .map_or_else(|| "?".to_string(), |n| n.to_string());
 
-            if is_video {
-                // Assuming single video input for now as per CLI structure
-                // Use "video 1/1"
-                println!(
-                    "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
-                    meta.frame_idx + 1,
-                    total_frames_str,
-                    image_path,
-                    inference_shape.1,
-                    inference_shape.0,
-                    detection_summary,
-                    result.speed.inference.unwrap_or(0.0)
-                );
-            } else {
-                println!(
-                    "image {}/{} {}: {}x{} {}, {:.1}ms",
-                    meta.frame_idx + 1,
-                    total_frames_str,
-                    image_path,
-                    inference_shape.1,
-                    inference_shape.0,
-                    detection_summary,
-                    result.speed.inference.unwrap_or(0.0)
-                );
+            if verbose {
+                if is_video {
+                    // Assuming single video input for now as per CLI structure
+                    // Use "video 1/1"
+                    println!(
+                        "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
+                        meta.frame_idx + 1,
+                        total_frames_str,
+                        image_path,
+                        inference_shape.1,
+                        inference_shape.0,
+                        detection_summary,
+                        result.speed.inference.unwrap_or(0.0)
+                    );
+                } else {
+                    println!(
+                        "image {}/{} {}: {}x{} {}, {:.1}ms",
+                        meta.frame_idx + 1,
+                        total_frames_str,
+                        image_path,
+                        inference_shape.1,
+                        inference_shape.0,
+                        detection_summary,
+                        result.speed.inference.unwrap_or(0.0)
+                    );
+                }
             }
 
             // Save annotated image if --save is specified
@@ -406,15 +438,17 @@ fn run_prediction(args: &[String]) {
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
-    let num_results = all_results.len().max(1) as f64;
-    println!(
-        "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
-        total_preprocess / num_results,
-        total_inference / num_results,
-        total_postprocess / num_results,
-        last_inference_shape.0,
-        last_inference_shape.1
-    );
+    if verbose {
+        let num_results = all_results.len().max(1) as f64;
+        println!(
+            "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
+            total_preprocess / num_results,
+            total_inference / num_results,
+            total_postprocess / num_results,
+            last_inference_shape.0,
+            last_inference_shape.1
+        );
+    }
 
     // Print save directory if --save was used
     #[cfg(feature = "annotate")]
@@ -537,6 +571,7 @@ Options:
     --half          Use FP16 half-precision inference
     --save          Save annotated images to runs/<task>/predict
     --show          Display results in a window
+    --verbose       Show verbose output (default: true)
 
 Examples:
     inference predict --model yolo11n.onnx --source image.jpg
