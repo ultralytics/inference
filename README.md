@@ -105,7 +105,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `--iou`    |       | IoU threshold for NMS                             | `0.45`                                  |
 | `--imgsz`  |       | Inference image size                              | `640`                                   |
 | `--half`   |       | Use FP16 half-precision inference                 | `false`                                 |
-| `--save`   |       | Save annotated images to runs/detect/predict      | `false`                                 |
+| `--save`   |       | Save annotated images to runs/<task>/predict      | `false`                                 |
 | `--show`   |       | Display results in a window                       | `false`                                 |
 | `--verbose`|       | Show verbose output                               | `true`                                  |
 
