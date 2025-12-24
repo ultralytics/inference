@@ -107,6 +107,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `--half`   |       | Use FP16 half-precision inference                 | `false`                                 |
 | `--save`   |       | Save annotated images to runs/detect/predict      | `false`                                 |
 | `--show`   |       | Display results in a window                       | `false`                                 |
+| `--verbose`|       | Show verbose output                               | `true`                                  |
 
 **Source Options:**
 
