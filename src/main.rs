@@ -156,9 +156,17 @@ fn run_prediction(args: &[String]) {
                     if let Ok(v) = next_arg.parse::<bool>() {
                         verbose = v;
                         i += 2;
-                    } else {
+                    } else if next_arg.starts_with('-') {
+                        // Next arg looks like a flag, so --verbose is used as a flag (true)
                         verbose = true;
                         i += 1;
+                    } else {
+                        // Next arg is strictly not a bool and not a flag -> Error
+                        eprintln!(
+                            "Error: --verbose expects a boolean value (true/false) or no value, found: '{}'",
+                            next_arg
+                        );
+                        process::exit(1);
                     }
                 } else {
                     // End of args
