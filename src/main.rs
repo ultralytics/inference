@@ -163,8 +163,7 @@ fn run_prediction(args: &[String]) {
                     } else {
                         // Next arg is strictly not a bool and not a flag -> Error
                         eprintln!(
-                            "Error: --verbose expects a boolean value (true/false) or no value, found: '{}'",
-                            next_arg
+                            "Error: --verbose expects a boolean value (true/false) or no value, found: '{next_arg}'"
                         );
                         process::exit(1);
                     }
