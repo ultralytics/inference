@@ -1,4 +1,5 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 #
 # macOS Apple Silicon ffmpeg@7 for video support (video-rs crate)
 [target.aarch64-apple-darwin.env]
