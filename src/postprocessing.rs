@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{Array2, Array3, ArrayView2, s};
+use ndarray::{Array2, Array3, ArrayView2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -235,51 +235,61 @@ fn extract_detect_boxes(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
 ) -> Array2<f32> {
-    let num_predictions = output.nrows();
+    let _num_predictions = output.nrows();
     let mut candidates = Vec::new();
 
-    for i in 0..num_predictions {
-        // Get class scores (columns 4 onwards)
-        let class_scores = output.slice(s![i, 4..]);
+    // Iterate over rows efficiently
+    // output shape is (num_predictions, 4 + num_classes)
+    // We can iterate over raw elements if we are careful, but using outer_iter() is safer and still fast
 
-        // Find best class (treat NaN as lowest to avoid panic)
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+    // Pre-calculate scaling factors to avoid repeated struct access
+    let (scale_y, scale_x) = preprocess.scale;
+    let (pad_top, pad_left) = preprocess.padding;
+    let orig_shape = preprocess.orig_shape;
+    let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
 
-        // Skip low confidence detections
+    for row in output.outer_iter() {
+        // Row is [cx, cy, w, h, class_scores...]
+        // Optimization: Find best class score first without slicing if possible
+        // But for safety with ndarray, slice is okay. To optimize, use iterator.
+
+        let scores = row.slice(s![4..]);
+
+        // Find best class manually to avoid iterator overhead?
+        // Actually, iterator is compiled down well.
+        let (best_class, best_score) =
+            scores
+                .iter()
+                .enumerate()
+                .fold((0, 0.0f32), |(best_idx, best_val), (idx, &val)| {
+                    if val > best_val {
+                        (idx, val)
+                    } else {
+                        (best_idx, best_val)
+                    }
+                });
+
         if best_score < config.confidence_threshold {
             continue;
         }
 
-        // Extract box coordinates (xywh format from model)
-        let cx = output[[i, 0]];
-        let cy = output[[i, 1]];
-        let w = output[[i, 2]];
-        let h = output[[i, 3]];
+        let cx = row[0];
+        let cy = row[1];
+        let w = row[2];
+        let h = row[3];
 
-        // Convert xywh to xyxy
-        let x1 = cx - w / 2.0;
-        let y1 = cy - h / 2.0;
-        let x2 = cx + w / 2.0;
-        let y2 = cy + h / 2.0;
+        let x1 = (cx - w / 2.0 - pad_left) / scale_x;
+        let y1 = (cy - h / 2.0 - pad_top) / scale_y;
+        let x2 = (cx + w / 2.0 - pad_left) / scale_x;
+        let y2 = (cy + h / 2.0 - pad_top) / scale_y;
 
-        // Scale coordinates back to original image space
-        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+        // Clip (clamp)
+        let x1 = x1.clamp(0.0, max_w);
+        let y1 = y1.clamp(0.0, max_h);
+        let x2 = x2.clamp(0.0, max_w);
+        let y2 = y2.clamp(0.0, max_h);
 
-        // Clip to image bounds
-        let clipped = clip_coords(&scaled, preprocess.orig_shape);
-
-        // Store candidate: [x1, y1, x2, y2, conf, class]
-        candidates.push((
-            [clipped[0], clipped[1], clipped[2], clipped[3]],
-            best_score,
-            best_class,
-        ));
+        candidates.push(([x1, y1, x2, y2], best_score, best_class));
     }
 
     if candidates.is_empty() {
@@ -501,76 +511,84 @@ fn postprocess_segment(
     let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
     let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
 
-    // Process each mask sequentially (fastest for typical 1-10 masks)
+    // Initialize output array
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
-    let mut resizer = Resizer::new();
-    let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
-    for i in 0..num_kept {
-        let row = masks_flat.row(i);
+    // Process each mask in parallel using Rayon and ndarray::Zip
+    // This significantly speeds up post-processing when multiple masks are present
+    Zip::from(masks_data.outer_iter_mut())
+        .and(masks_flat.outer_iter())
+        .and(boxes_data.outer_iter())
+        .par_for_each(|mut mask_out, mask_flat, box_data| {
+            // Create a local resizer for each task (Resizer is not Sync)
+            let mut resizer = Resizer::new();
+            let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
-        // Sigmoid into a Vec<f32>
-        let f32_data: Vec<f32> = row.iter().map(|&val| 1.0 / (1.0 + (-val).exp())).collect();
+            // Sigmoid into a Vec<f32>
+            let f32_data: Vec<f32> = mask_flat
+                .iter()
+                .map(|&val| 1.0 / (1.0 + (-val).exp()))
+                .collect();
 
-        // Use bytemuck for efficient f32->bytes conversion (avoids per-element allocation)
-        let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+            // Use bytemuck for efficient f32->bytes conversion
+            let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
 
-        // Create source image (160x160) - handle potential errors gracefully
-        let src_image =
-            match Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32) {
+            // Create source image (160x160)
+            let src_image = match Image::from_vec_u8(
+                mw as u32,
+                mh as u32,
+                src_bytes.to_vec(),
+                PixelType::F32,
+            ) {
                 Ok(img) => img,
-                Err(_) => {
-                    // Skip this mask if creation fails
-                    continue;
-                }
+                Err(_) => return, // Skip if creation fails
             };
 
-        // Create dest image (orig_w x orig_h)
-        let mut dst_image = Image::new(ow, oh, PixelType::F32);
+            // Create dest image (orig_w x orig_h)
+            let mut dst_image = Image::new(ow, oh, PixelType::F32);
 
-        // Configure resize with crop - clamp to valid ranges to prevent panic
-        let safe_crop_x = f64::from(crop_x.max(0.0));
-        let safe_crop_y = f64::from(crop_y.max(0.0));
-        let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
-        let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
+            // Configure resize with crop
+            let safe_crop_x = f64::from(crop_x.max(0.0));
+            let safe_crop_y = f64::from(crop_y.max(0.0));
+            let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
+            let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
 
-        let options = ResizeOptions::new().resize_alg(resize_alg).crop(
-            safe_crop_x,
-            safe_crop_y,
-            safe_crop_w,
-            safe_crop_h,
-        );
+            let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+                safe_crop_x,
+                safe_crop_y,
+                safe_crop_w,
+                safe_crop_h,
+            );
 
-        // Handle resize errors gracefully
-        if resizer
-            .resize(&src_image, &mut dst_image, &options)
-            .is_err()
-        {
-            // Skip this mask if resize fails
-            continue;
-        }
+            // Handle resize errors gracefully
+            if resizer
+                .resize(&src_image, &mut dst_image, &options)
+                .is_err()
+            {
+                return;
+            }
 
-        // Get resized data as f32 slice (safe conversion via bytemuck)
-        let dst_bytes = dst_image.buffer();
-        let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
+            // Get resized data as f32 slice
+            let dst_bytes = dst_image.buffer();
+            let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
 
-        // Apply bbox cropping and store directly to output array
-        let x1 = boxes_data[[i, 0]].max(0.0).min(ow as f32);
-        let y1 = boxes_data[[i, 1]].max(0.0).min(oh as f32);
-        let x2 = boxes_data[[i, 2]].max(0.0).min(ow as f32);
-        let y2 = boxes_data[[i, 3]].max(0.0).min(oh as f32);
+            // Apply bbox cropping and store directly to output array
+            let x1 = box_data[0].max(0.0).min(ow as f32);
+            let y1 = box_data[1].max(0.0).min(oh as f32);
+            let x2 = box_data[2].max(0.0).min(ow as f32);
+            let y2 = box_data[3].max(0.0).min(oh as f32);
 
-        for y in 0..oh as usize {
-            for x in 0..ow as usize {
-                let val = dst_slice[y * ow as usize + x];
-                let x_f = x as f32;
-                let y_f = y as f32;
-                if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
-                    masks_data[[i, y, x]] = val;
+            for y in 0..oh as usize {
+                for x in 0..ow as usize {
+                    let val = dst_slice[y * ow as usize + x];
+                    let x_f = x as f32;
+                    let y_f = y as f32;
+                    if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
+                        mask_out[[y, x]] = val;
+                    }
                 }
             }
-        }
-    }
+        });
 
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
