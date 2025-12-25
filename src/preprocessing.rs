@@ -99,10 +99,8 @@ pub fn preprocess_image_with_precision(
     // Perform letterbox resize
     let letterboxed = letterbox_image(image, new_width, new_height, pad_left, pad_top, target_size);
 
-    // Convert to normalized NCHW tensor (always compute FP32 for postprocessing)
     let tensor = image_to_tensor(&letterboxed);
 
-    // Optionally compute FP16 tensor directly from image (avoiding FP32 round-trip)
     let tensor_f16 = if half {
         Some(image_to_tensor_f16(&letterboxed))
     } else {
@@ -121,16 +119,23 @@ pub fn preprocess_image_with_precision(
 
 /// Calculate letterbox parameters for resizing.
 ///
+/// Computes new dimensions and padding to fit the image within the target size while maintaining aspect ratio.
+///
 /// # Arguments
 ///
 /// * `orig_width` - Original image width.
 /// * `orig_height` - Original image height.
 /// * `target_size` - Target size as (height, width).
-/// * `stride` - Model stride for alignment.
+/// * `stride` - Model stride for alignment (unused in calculation but kept for API compatibility).
 ///
 /// # Returns
 ///
-/// Tuple of (`new_width`, `new_height`, `pad_left`, `pad_top`, (`scale_y`, `scale_x`)).
+/// Tuple containing:
+/// 1. `new_width`: Scaled width.
+/// 2. `new_height`: Scaled height.
+/// 3. `pad_left`: Left padding.
+/// 4. `pad_top`: Top padding.
+/// 5. `(scale_y, scale_x)`: Scale factors.
 fn calculate_letterbox_params(
     orig_width: u32,
     orig_height: u32,
@@ -145,8 +150,6 @@ fn calculate_letterbox_params(
     // Calculate scale to fit within target while maintaining aspect ratio
     let scale = (target_h / orig_h).min(target_w / orig_w);
 
-    // New dimensions after scaling
-    // New dimensions after scaling
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let new_w = (orig_w * scale).round() as u32;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -172,8 +175,21 @@ fn calculate_letterbox_params(
 }
 /// Apply letterbox transformation to an image.
 ///
-/// Resizes the image maintaining aspect ratio and adds padding.
+/// Resizes the image maintaining aspect ratio and adds padding usually to center it.
 /// Uses SIMD-accelerated resizing via `fast_image_resize`.
+///
+/// # Arguments
+///
+/// * `image` - Source dynamic image.
+/// * `new_width` - Target width after scaling (before padding).
+/// * `new_height` - Target height after scaling (before padding).
+/// * `pad_left` - Padding to add on the left.
+/// * `pad_top` - Padding to add on the top.
+/// * `target_size` - Final output dimensions (height, width).
+///
+/// # Returns
+///
+/// `RgbImage` padded and resized to `target_size`.
 fn letterbox_image(
     image: &DynamicImage,
     new_width: u32,
@@ -184,18 +200,14 @@ fn letterbox_image(
 ) -> RgbImage {
     use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
 
-    // Convert to RGB8
     let src_rgb = image.to_rgb8();
     let (src_w, src_h) = src_rgb.dimensions();
 
-    // Create source image for fast_image_resize
     let src_image = Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), PixelType::U8x3)
         .expect("Failed to create source image");
 
-    // Create destination image
     let mut dst_image = Image::new(new_width, new_height, PixelType::U8x3);
 
-    // Resize using SIMD-accelerated bilinear interpolation
     let mut resizer = Resizer::new();
     let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
         fast_image_resize::FilterType::Bilinear,
@@ -212,11 +224,9 @@ fn letterbox_image(
         Rgb(LETTERBOX_COLOR),
     );
 
-    // Create RgbImage from resized data
     let resized_rgb: RgbImage = ImageBuffer::from_raw(new_width, new_height, dst_image.into_vec())
         .expect("Failed to create resized image buffer");
 
-    // Copy resized image onto output
     image::imageops::overlay(
         &mut output,
         &resized_rgb,
@@ -241,14 +251,12 @@ fn image_to_tensor(image: &RgbImage) -> Array4<f32> {
     let (w, h) = (width as usize, height as usize);
     let pixels = image.as_raw();
 
-    // Pre-allocate tensor
     let mut tensor = Array4::zeros((1, 3, h, w));
 
     // Get mutable slices for each channel for faster access
     let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
     let (g_slice, b_slice) = rest.split_at_mut(h * w);
 
-    // Convert HWC interleaved RGB to CHW planar format
     for (i, chunk) in pixels.chunks_exact(3).enumerate() {
         r_slice[i] = f32::from(chunk[0]) / 255.0;
         g_slice[i] = f32::from(chunk[1]) / 255.0;
@@ -274,17 +282,14 @@ fn image_to_tensor_f16(image: &RgbImage) -> Array4<f16> {
     let (w, h) = (width as usize, height as usize);
     let pixels = image.as_raw();
 
-    // Pre-allocate tensor
     let mut tensor = Array4::from_elem((1, 3, h, w), f16::ZERO);
 
-    // Get mutable slices for each channel for faster access
     let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
     let (g_slice, b_slice) = rest.split_at_mut(h * w);
 
     // Precompute 1/255 as f16 for direct conversion
     let scale = f16::from_f32(1.0 / 255.0);
 
-    // Convert HWC interleaved RGB to CHW planar format directly to f16
     for (i, chunk) in pixels.chunks_exact(3).enumerate() {
         r_slice[i] = f16::from_f32(f32::from(chunk[0])) * scale;
         g_slice[i] = f16::from_f32(f32::from(chunk[1])) * scale;
@@ -332,7 +337,6 @@ pub fn image_to_array(image: &DynamicImage) -> Array3<u8> {
     let (width, height) = rgb.dimensions();
     let pixels = rgb.into_raw();
 
-    // Create array directly from raw pixels (already in HWC format)
     Array3::from_shape_vec((height as usize, width as usize, 3), pixels)
         .expect("Failed to create array from image pixels")
 }
@@ -436,6 +440,17 @@ pub fn preprocess_image_center_crop(
 ///
 /// Resizes the image such that the shortest side equals the target dimension,
 /// maintaining aspect ratio, then crops the center `target_size`.
+///
+/// # Arguments
+///
+/// * `image` - Source dynamic image.
+/// * `target_size` - Desired output dimensions (height, width).
+///
+/// # Returns
+///
+/// Tuple containing:
+/// 1. `cropped`: The processed `RgbImage`.
+/// 2. `scale`: Scale factors applied (same for x and y).
 #[allow(clippy::similar_names)]
 fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbImage, (f32, f32)) {
     use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
@@ -473,7 +488,7 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     let src_image = Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), PixelType::U8x3)
         .expect("Failed to create source image");
 
-    // Ensure dimensions are valid (>0)
+    // Valid dimensions check
     let safe_new_w = new_w.max(1);
     let safe_new_h = new_h.max(1);
 
@@ -503,7 +518,6 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let crop_y = bankers_round(crop_y_float) as u32;
 
-    // Perform center crop
     let cropped =
         image::imageops::crop_imm(&resized_rgb, crop_x, crop_y, target_w, target_h).to_image();
 
