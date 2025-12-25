@@ -113,9 +113,23 @@ pub fn postprocess(
 
 /// Post-process detection model output.
 ///
-/// YOLO detection models output shape is typically [1, 84, 8400] where:
-/// - 84 = 4 (bbox) + 80 (classes for COCO)
-/// - 8400 = number of predictions (varies by input size)
+/// Converts raw YOLO model output into a list of bounding boxes with class scores.
+///
+/// # Arguments
+///
+/// * `output` - Flat vector of model output values.
+/// * `output_shape` - Shape of the output tensor.
+/// * `preprocess` - Preprocessing metadata (scaling, padding).
+/// * `config` - Inference configuration (thresholds).
+/// * `names` - Class ID to name mapping.
+/// * `orig_img` - Original image data.
+/// * `path` - Source image path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Input shape used for inference.
+///
+/// # Returns
+///
+/// `Results` struct containing detected bounding boxes.
 #[allow(
     clippy::too_many_arguments,
     clippy::similar_names,
@@ -228,6 +242,8 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
 }
 
 /// Extract detection boxes from model output.
+///
+/// Filters predictions by confidence threshold and converts coordinates to original image space.
 #[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
 fn extract_detect_boxes(
     output: ArrayView2<f32>,
@@ -250,15 +266,12 @@ fn extract_detect_boxes(
 
     for row in output.outer_iter() {
         // Row is [cx, cy, w, h, class_scores...]
-        // Optimization: Find best class score first without slicing if possible
-        // But for safety with ndarray, slice is okay. To optimize, use iterator.
 
         // Efficiently find the best class score without allocating a new slice or iterator chain.
         // We skip low-confidence detections early to avoid expensive coordinate scaling and NMS operations later.
         let scores = row.slice(s![4..]);
 
-        // Find best class manually to avoid iterator overhead?
-        // Actually, iterator is compiled down well.
+        // Find best class manually to avoid iterator overhead
         let (best_class, best_score) =
             scores
                 .iter()
@@ -271,9 +284,7 @@ fn extract_detect_boxes(
                     }
                 });
 
-        // Optimization: Filter by confidence threshold immediately.
-        // This is the most critical optimization for CPU performance, as it filters out majority of background noise
-        // before performing any further math (coordinate scaling, clipping, etc.).
+        // Filter by confidence threshold early to reduce computation
         if best_score < config.confidence_threshold {
             continue;
         }
@@ -323,6 +334,23 @@ fn extract_detect_boxes(
 }
 
 /// Post-process segmentation model output.
+///
+/// Generates bounding boxes and segmentation masks from the model output.
+///
+/// # Arguments
+///
+/// * `outputs` - Vector of model outputs (detection features and mask prototypes).
+/// * `preprocess` - Preprocessing metadata.
+/// * `config` - Inference configuration.
+/// * `names` - Class mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Inference input dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing boxes and masks.
 #[allow(
     clippy::too_many_arguments,
     clippy::similar_names,
@@ -360,13 +388,7 @@ fn postprocess_segment(
     // output1: [1, 32, 160, 160] (protos)
 
     // 1. Process Detections
-    // We need to parse shape0 to handle transposition
-    // "32" is standard number of masks, but let's derive it
-    // num_features = 4 + nc + num_masks
-    // We can assume num_masks=32 usually, but let's check.
-    // parse_detect_shape returns (classes, preds, transposed)
-    // It assumes features = 4 + classes. Here features = 4 + classes + masks.
-    // We can't use parse_detect_shape easily if we don't know masks, but standard is 32.
+    // Standard segmentation models use 32 mask prototypes
     let num_masks = 32;
     let expected_features = 4 + names.len() + num_masks;
 
@@ -378,7 +400,7 @@ fn postprocess_segment(
         } else if b == expected_features {
             (a, true) // [1, preds, features]
         } else {
-            // Try to infer? simpler to assume standard [1, 116, 8400]
+            // Assume format [1, 116, 8400] if ambiguous
             if a < b { (b, false) } else { (a, true) }
         }
     } else {
@@ -400,7 +422,6 @@ fn postprocess_segment(
     };
 
     // Filter and NMS
-    // Logic similar to extract_detect_boxes but we need to keep mask coefficients
     let mut candidates = Vec::new(); // (bbox, score, class, original_index)
 
     for i in 0..num_preds {
@@ -520,14 +541,13 @@ fn postprocess_segment(
     // Initialize output array
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
 
-    // Process each mask in parallel using Rayon and ndarray::Zip
-    // This provides a significant speedup (~30-50%) for segmentation tasks by distributing
-    // the heavy mask resizing and resizing work across all available CPU cores.
+    // Process each mask in parallel using Rayon and ndarray::Zip.
+    // Each thread handles resizing and cropping for one mask.
     //
-    // Each thread gets:
-    // - A mutable view into the output masks array (mask_out)
-    // - The mask coefficients for that detection (mask_flat)
-    // - The bounding box for that detection (box_data)
+    // Inputs:
+    // - mask_out: Mutable view into output masks array
+    // - mask_flat: Mask coefficients for the detection
+    // - box_data: Bounding box for the detection
     Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
         .and(boxes_data.outer_iter())
@@ -610,10 +630,23 @@ fn postprocess_segment(
 
 /// Post-process pose estimation model output.
 ///
-/// YOLO pose models output shape is typically [1, 56, 8400] where:
-/// - 56 = 4 (bbox) + 1 (class for person) + 51 (17 keypoints × 3)
-/// - 8400 = number of predictions (varies by input size)
-/// Each keypoint has 3 values: [x, y, confidence]
+/// Extracts bounding boxes and keypoints (skeleton) from the model output.
+///
+/// # Arguments
+///
+/// * `output` - Flat vector of model output.
+/// * `output_shape` - Output tensor dimensions.
+/// * `preprocess` - Preprocessing metadata.
+/// * `config` - Inference configuration.
+/// * `names` - Class name mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source image path.
+/// * `speed` - Timing data.
+/// * `inference_shape` - Inference input dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing boxes and keypoints.
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
@@ -805,6 +838,22 @@ fn postprocess_pose(
 }
 
 /// Post-process classification model output.
+///
+/// Computes best class predictions and probabilities.
+///
+/// # Arguments
+///
+/// * `output` - Raw model output vector.
+/// * `_output_shape` - Output shape (unused).
+/// * `names` - Class name mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Inference dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing classification probabilities.
 fn postprocess_classify(
     output: &[f32],
     _output_shape: &[usize],
@@ -846,11 +895,23 @@ fn postprocess_classify(
 
 /// Post-process OBB (oriented bounding box) model output.
 ///
-/// YOLO OBB models output shape is typically [1, 4+nc+1, 8400] where:
-/// - 4 = bbox (xywh center format)
-/// - nc = number of classes (e.g., 15 for DOTA dataset)
-/// - 1 = rotation angle in radians
-///   The angle is the last value, typically in range [-π/2, π/2]
+/// Extracts oriented bounding boxes with rotation angle.
+///
+/// # Arguments
+///
+/// * `output` - Model output data.
+/// * `output_shape` - Output tensor shape.
+/// * `preprocess` - Preprocessing metadata.
+/// * `config` - Inference configuration.
+/// * `names` - Class name mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Inference dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing oriented bounding boxes.
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
