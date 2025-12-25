@@ -86,7 +86,7 @@ pub use metadata::ModelMetadata;
 
 // Re-export preprocessing utilities
 pub use preprocessing::{
-    preprocess_image, preprocess_image_with_precision, PreprocessResult, TensorData,
+    PreprocessResult, TensorData, preprocess_image, preprocess_image_with_precision,
 };
 
 /// Library version.

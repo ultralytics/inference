@@ -32,7 +32,7 @@ use inference::annotate::{annotate_image, find_next_run_dir};
 #[cfg(feature = "visualize")]
 use inference::visualizer::Viewer;
 
-use inference::{InferenceConfig, Results, YOLOModel, VERSION};
+use inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";

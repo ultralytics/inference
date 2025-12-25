@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Axis};
+use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
 /// Timing information for inference operations (in milliseconds).
 #[derive(Debug, Clone, Default)]

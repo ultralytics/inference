@@ -182,7 +182,7 @@ fn letterbox_image(
     pad_top: u32,
     target_size: (usize, usize),
 ) -> RgbImage {
-    use fast_image_resize::{images::Image, PixelType, ResizeAlg, ResizeOptions, Resizer};
+    use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
 
     // Convert to RGB8
     let src_rgb = image.to_rgb8();
@@ -438,7 +438,7 @@ pub fn preprocess_image_center_crop(
 /// maintaining aspect ratio, then crops the center `target_size`.
 #[allow(clippy::similar_names)]
 fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbImage, (f32, f32)) {
-    use fast_image_resize::{images::Image, PixelType, ResizeAlg, ResizeOptions, Resizer};
+    use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
 
     let (src_w, src_h) = image.dimensions();
     #[allow(clippy::cast_possible_truncation)]

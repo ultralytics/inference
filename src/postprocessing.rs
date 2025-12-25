@@ -9,10 +9,10 @@ use std::collections::HashMap;
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{s, Array2, Array3, ArrayView2, Zip};
+use ndarray::{Array2, Array3, ArrayView2, Zip, s};
 
 use crate::inference::InferenceConfig;
-use crate::preprocessing::{clip_coords, scale_coords, PreprocessResult};
+use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
 use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, Speed};
 use crate::task::Task;
 use crate::utils::nms_per_class;
