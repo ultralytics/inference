@@ -1,0 +1,8 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+#
+# macOS Apple Silicon ffmpeg@7 for video support (video-rs crate)
+[target.aarch64-apple-darwin.env]
+PKG_CONFIG_PATH = "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
+CPATH = "/opt/homebrew/opt/ffmpeg@7/include"
+LIBRARY_PATH = "/opt/homebrew/opt/ffmpeg@7/lib"
+BINDGEN_EXTRA_CLANG_ARGS = "-I/opt/homebrew/opt/ffmpeg@7/include"
