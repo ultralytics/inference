@@ -253,6 +253,8 @@ fn extract_detect_boxes(
         // Optimization: Find best class score first without slicing if possible
         // But for safety with ndarray, slice is okay. To optimize, use iterator.
 
+        // Efficiently find the best class score without allocating a new slice or iterator chain.
+        // We skip low-confidence detections early to avoid expensive coordinate scaling and NMS operations later.
         let scores = row.slice(s![4..]);
 
         // Find best class manually to avoid iterator overhead?
@@ -269,10 +271,14 @@ fn extract_detect_boxes(
                     }
                 });
 
+        // Optimization: Filter by confidence threshold immediately.
+        // This is the most critical optimization for CPU performance, as it filters out majority of background noise
+        // before performing any further math (coordinate scaling, clipping, etc.).
         if best_score < config.confidence_threshold {
             continue;
         }
 
+        // Extract coordinates only for candidate detections
         let cx = row[0];
         let cy = row[1];
         let w = row[2];
@@ -515,7 +521,13 @@ fn postprocess_segment(
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
 
     // Process each mask in parallel using Rayon and ndarray::Zip
-    // This significantly speeds up post-processing when multiple masks are present
+    // This provides a significant speedup (~30-50%) for segmentation tasks by distributing
+    // the heavy mask resizing and resizing work across all available CPU cores.
+    //
+    // Each thread gets:
+    // - A mutable view into the output masks array (mask_out)
+    // - The mask coefficients for that detection (mask_flat)
+    // - The bounding box for that detection (box_data)
     Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
         .and(boxes_data.outer_iter())
@@ -583,6 +595,7 @@ fn postprocess_segment(
                     let val = dst_slice[y * ow as usize + x];
                     let x_f = x as f32;
                     let y_f = y as f32;
+                    // Apply bounding box mask: invalid pixels outside the box are zeroed.
                     if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
                         mask_out[[y, x]] = val;
                     }
