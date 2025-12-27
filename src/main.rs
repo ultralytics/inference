@@ -33,6 +33,7 @@ use ultralytics_inference::annotate::{annotate_image, find_next_run_dir};
 use ultralytics_inference::visualizer::Viewer;
 
 use ultralytics_inference::{InferenceConfig, Results, VERSION, YOLOModel};
+use ultralytics_inference::utils::pluralize;
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
@@ -522,26 +523,6 @@ fn format_detection_summary(result: &Results) -> String {
     }
 }
 
-/// Simple pluralization for common COCO class names.
-fn pluralize(word: &str) -> String {
-    match word {
-        "person" => "persons".to_string(),
-        "bus" => "buses".to_string(),
-        "knife" => "knives".to_string(),
-        "mouse" => "mice".to_string(),
-        "sheep" => "sheep".to_string(),
-        "skis" => "skis".to_string(),
-        _ => {
-            if word.ends_with('s') || word.ends_with("ch") || word.ends_with("sh") {
-                format!("{word}es")
-            } else if word.ends_with('y') && !word.ends_with("ey") && !word.ends_with("ay") {
-                format!("{}ies", &word[..word.len() - 1])
-            } else {
-                format!("{word}s")
-            }
-        }
-    }
-}
 
 /// Print version information.
 fn print_version() {
