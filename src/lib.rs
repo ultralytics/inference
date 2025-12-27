@@ -17,7 +17,7 @@
 //!
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
-//! - **All YOLO Versions** - Supports YOLOv5, YOLOv8, YOLO11, and future versions
+//! - **All YOLO Versions** - Supports `YOLOv5`, `YOLOv8`, YOLO11, and future versions
 //! - **All Tasks** - Detection, segmentation, pose estimation, classification, and OBB
 //! - **Ultralytics API** - Results API matches the Python package for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
@@ -466,7 +466,8 @@ mod tests {
 
     #[test]
     fn test_version() {
-        assert!(!VERSION.is_empty());
+        // Version should be semver format like "0.0.5"
+        assert!(VERSION.contains('.'));
     }
 
     #[test]
