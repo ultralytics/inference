@@ -555,9 +555,9 @@ fn print_usage() {
 ==============================
 
 Usage:
-    inference predict --model <model_path> --source <source>
-    inference version
-    inference help
+    ultralytics-inference predict --model <model_path> --source <source>
+    ultralytics-inference version
+    ultralytics-inference help
 
 Commands:
     predict    Run inference on an image, video, or stream
@@ -576,10 +576,10 @@ Options:
     --verbose       Show verbose output (default: true)
 
 Examples:
-    inference predict --model yolo11n.onnx --source image.jpg
-    inference predict --model yolo11n.onnx --source video.mp4
-    inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    inference predict -m yolo11n.onnx -s assets/ --save --half
-    inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show"
+    ultralytics-inference predict --model yolo11n.onnx --source image.jpg
+    ultralytics-inference predict --model yolo11n.onnx --source video.mp4
+    ultralytics-inference predict --model yolo11n.onnx --source 0 --conf 0.5
+    ultralytics-inference predict -m yolo11n.onnx -s assets/ --save --half
+    ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show"
     );
 }
