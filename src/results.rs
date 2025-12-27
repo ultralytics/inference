@@ -22,6 +22,16 @@ pub struct Speed {
 
 impl Speed {
     /// Create a new Speed instance with all timings.
+    ///
+    /// # Arguments
+    ///
+    /// * `preprocess` - Time in milliseconds.
+    /// * `inference` - Time in milliseconds.
+    /// * `postprocess` - Time in milliseconds.
+    ///
+    /// # Returns
+    ///
+    /// * A new `Speed` instance.
     #[must_use]
     pub const fn new(preprocess: f64, inference: f64, postprocess: f64) -> Self {
         Self {
@@ -32,6 +42,10 @@ impl Speed {
     }
 
     /// Get total inference time.
+    ///
+    /// # Returns
+    ///
+    /// * Sum of preprocess, inference, and postprocess times in milliseconds.
     #[must_use]
     pub fn total(&self) -> f64 {
         self.preprocess.unwrap_or(0.0)
@@ -71,6 +85,18 @@ pub struct Results {
 
 impl Results {
     /// Create a new Results instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `orig_img` - Original image as HWC array.
+    /// * `path` - Path to the source image/video.
+    /// * `names` - Map of class IDs to class names.
+    /// * `speed` - Timing information.
+    /// * `inference_shape` - Shape of the inference tensor (height, width).
+    ///
+    /// # Returns
+    ///
+    /// * A new `Results` instance.
     #[must_use]
     pub fn new(
         orig_img: Array3<u8>,
@@ -99,6 +125,10 @@ impl Results {
     }
 
     /// Get the number of detections.
+    ///
+    /// # Returns
+    ///
+    /// * The count of detected objects, keyspoints, or masks.
     #[must_use]
     pub fn len(&self) -> usize {
         if let Some(ref boxes) = self.boxes {
@@ -120,24 +150,40 @@ impl Results {
     }
 
     /// Check if there are no detections.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if no objects were detected.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Get the original image shape (height, width).
+    ///
+    /// # Returns
+    ///
+    /// * Tuple of (height, width).
     #[must_use]
     pub const fn orig_shape(&self) -> (u32, u32) {
         self.orig_shape
     }
 
     /// Get the inference tensor shape (height, width) after letterboxing.
+    ///
+    /// # Returns
+    ///
+    /// * Tuple of (height, width).
     #[must_use]
     pub const fn inference_shape(&self) -> (u32, u32) {
         self.inference_shape
     }
 
     /// Generate a verbose log string describing the results.
+    ///
+    /// # Returns
+    ///
+    /// * A string summary of detections (e.g., "2 persons, 1 car, ").
     #[must_use]
     pub fn verbose(&self) -> String {
         if self.is_empty() {
@@ -187,6 +233,14 @@ impl Results {
     }
 
     /// Convert results to a list of dictionaries (summary format).
+    ///
+    /// # Arguments
+    ///
+    /// * `normalize` - Whether to normalize coordinates to [0, 1] range.
+    ///
+    /// # Returns
+    ///
+    /// * A vector of hashmaps representing the detections.
     #[must_use]
     pub fn summary(&self, normalize: bool) -> Vec<HashMap<String, SummaryValue>> {
         let mut results = Vec::new();
@@ -290,6 +344,10 @@ impl Boxes {
     ///
     /// * `data` - Array with shape (N, 6) or (N, 7) containing box data.
     /// * `orig_shape` - Original image shape (height, width).
+    ///
+    /// # Returns
+    ///
+    /// * A new `Boxes` instance.
     #[must_use]
     pub fn new(data: Array2<f32>, orig_shape: (u32, u32)) -> Self {
         let is_track = data.shape()[1] == 7;
@@ -301,36 +359,60 @@ impl Boxes {
     }
 
     /// Get the number of boxes.
+    ///
+    /// # Returns
+    ///
+    /// * The count of bounding boxes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.data.nrows()
     }
 
     /// Check if there are no boxes.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the boxes array is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
     /// Get boxes in xyxy format [x1, y1, x2, y2].
+    ///
+    /// # Returns
+    ///
+    /// * A view of the box coordinates.
     #[must_use]
     pub fn xyxy(&self) -> ArrayView2<'_, f32> {
         self.data.slice(s![.., 0..4])
     }
 
     /// Get confidence scores.
+    ///
+    /// # Returns
+    ///
+    /// * A view of confidence scores (0.0 to 1.0).
     #[must_use]
     pub fn conf(&self) -> ArrayView1<'_, f32> {
         self.data.slice(s![.., -2])
     }
 
     /// Get class IDs.
+    ///
+    /// # Returns
+    ///
+    /// * A view of class IDs.
     #[must_use]
     pub fn cls(&self) -> ArrayView1<'_, f32> {
         self.data.slice(s![.., -1])
     }
 
     /// Get tracking IDs (if available).
+    ///
+    /// # Returns
+    ///
+    /// * `Some` view of track IDs if this is a tracking result, otherwise `None`.
     #[must_use]
     pub fn id(&self) -> Option<ArrayView1<'_, f32>> {
         if self.is_track {
@@ -341,6 +423,10 @@ impl Boxes {
     }
 
     /// Get boxes in xywh format [`x_center`, `y_center`, width, height].
+    ///
+    /// # Returns
+    ///
+    /// * An owned array of boxes in xywh format.
     #[must_use]
     pub fn xywh(&self) -> Array2<f32> {
         let xyxy = self.xyxy();
@@ -363,6 +449,10 @@ impl Boxes {
     }
 
     /// Get boxes in xyxy format normalized by image size.
+    ///
+    /// # Returns
+    ///
+    /// * An owned array of normalized boxes [0.0-1.0].
     #[must_use]
     pub fn xyxyn(&self) -> Array2<f32> {
         let mut xyxyn = self.xyxy().to_owned();
@@ -380,6 +470,10 @@ impl Boxes {
     }
 
     /// Get boxes in xywh format normalized by image size.
+    ///
+    /// # Returns
+    ///
+    /// * An owned array of normalized boxes [0.0-1.0].
     #[must_use]
     pub fn xywhn(&self) -> Array2<f32> {
         let mut xywhn = self.xywh();
@@ -397,6 +491,10 @@ impl Boxes {
     }
 
     /// Check if tracking IDs are available.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the boxes contain tracking information.
     #[must_use]
     pub const fn is_track(&self) -> bool {
         self.is_track
@@ -416,18 +514,35 @@ pub struct Masks {
 
 impl Masks {
     /// Create a new Masks instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Raw mask data with shape (N, H, W).
+    /// * `orig_shape` - Original image shape (height, width).
+    ///
+    /// # Returns
+    ///
+    /// * A new `Masks` instance.
     #[must_use]
     pub const fn new(data: Array3<f32>, orig_shape: (u32, u32)) -> Self {
         Self { data, orig_shape }
     }
 
     /// Get the number of masks.
+    ///
+    /// # Returns
+    ///
+    /// * The count of masks.
     #[must_use]
     pub fn len(&self) -> usize {
         self.data.shape()[0]
     }
 
     /// Check if there are no masks.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the masks array is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
@@ -451,6 +566,15 @@ pub struct Keypoints {
 
 impl Keypoints {
     /// Create a new Keypoints instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Raw keypoint data.
+    /// * `orig_shape` - Original image shape.
+    ///
+    /// # Returns
+    ///
+    /// * A new `Keypoints` instance.
     #[must_use]
     pub fn new(data: Array3<f32>, orig_shape: (u32, u32)) -> Self {
         let has_visible = data.shape()[2] == 3;
@@ -462,24 +586,40 @@ impl Keypoints {
     }
 
     /// Get the number of detected objects with keypoints.
+    ///
+    /// # Returns
+    ///
+    /// * The count of poses.
     #[must_use]
     pub fn len(&self) -> usize {
         self.data.shape()[0]
     }
 
     /// Check if there are no keypoints.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if no keypoints were detected.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
     /// Get xy coordinates.
+    ///
+    /// # Returns
+    ///
+    /// * An owned array of keypoint coordinates.
     #[must_use]
     pub fn xy(&self) -> Array3<f32> {
         self.data.slice(s![.., .., 0..2]).to_owned()
     }
 
     /// Get normalized xy coordinates.
+    ///
+    /// # Returns
+    ///
+    /// * An owned array of normalized keypoint coordinates.
     #[must_use]
     pub fn xyn(&self) -> Array3<f32> {
         let mut xyn = self.xy();
@@ -499,6 +639,10 @@ impl Keypoints {
     }
 
     /// Get confidence values (if available).
+    ///
+    /// # Returns
+    ///
+    /// * `Some` array of confidences if available, otherwise `None`.
     #[must_use]
     pub fn conf(&self) -> Option<Array2<f32>> {
         if self.has_visible {
@@ -520,12 +664,24 @@ pub struct Probs {
 
 impl Probs {
     /// Create a new Probs instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Raw probability array.
+    ///
+    /// # Returns
+    ///
+    /// * A new `Probs` instance.
     #[must_use]
     pub const fn new(data: Array1<f32>) -> Self {
         Self { data }
     }
 
     /// Get the index of the top-1 class.
+    ///
+    /// # Returns
+    ///
+    /// * The class ID with the highest probability.
     ///
     /// # Panics
     ///
@@ -539,12 +695,24 @@ impl Probs {
             .map_or(0, |(i, _)| i)
     }
     /// Get the indices of the top-5 classes.
+    ///
+    /// # Returns
+    ///
+    /// * A vector of the top 5 class IDs sorted by probability.
     #[must_use]
     pub fn top5(&self) -> Vec<usize> {
         self.top_k(5)
     }
 
     /// Get the indices of the top-k classes.
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - The number of classes to return.
+    ///
+    /// # Returns
+    ///
+    /// * A vector of the top k class IDs sorted by probability.
     #[must_use]
     pub fn top_k(&self, k: usize) -> Vec<usize> {
         let mut indices: Vec<usize> = (0..self.data.len()).collect();
@@ -558,12 +726,20 @@ impl Probs {
     }
 
     /// Get the confidence of the top-1 class.
+    ///
+    /// # Returns
+    ///
+    /// * The probability of the top class.
     #[must_use]
     pub fn top1conf(&self) -> f32 {
         self.data[self.top1()]
     }
 
     /// Get the confidences of the top-5 classes.
+    ///
+    /// # Returns
+    ///
+    /// * A vector of the top 5 probabilities.
     #[must_use]
     pub fn top5conf(&self) -> Vec<f32> {
         self.top5().iter().map(|&i| self.data[i]).collect()
@@ -586,6 +762,15 @@ pub struct Obb {
 
 impl Obb {
     /// Create a new Obb instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Raw OBB data.
+    /// * `orig_shape` - Original image shape.
+    ///
+    /// # Returns
+    ///
+    /// * A new `Obb` instance.
     #[must_use]
     pub fn new(data: Array2<f32>, orig_shape: (u32, u32)) -> Self {
         let is_track = data.shape()[1] == 8;
@@ -597,36 +782,60 @@ impl Obb {
     }
 
     /// Get the number of OBBs.
+    ///
+    /// # Returns
+    ///
+    /// * The count of oriented bounding boxes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.data.nrows()
     }
 
     /// Check if there are no OBBs.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
     /// Get boxes in xywhr format [`x_center`, `y_center`, width, height, rotation].
+    ///
+    /// # Returns
+    ///
+    /// * A view of the box parameters.
     #[must_use]
     pub fn xywhr(&self) -> ArrayView2<'_, f32> {
         self.data.slice(s![.., 0..5])
     }
 
     /// Get confidence scores.
+    ///
+    /// # Returns
+    ///
+    /// * A view of confidence scores.
     #[must_use]
     pub fn conf(&self) -> ArrayView1<'_, f32> {
         self.data.slice(s![.., -2])
     }
 
     /// Get class IDs.
+    ///
+    /// # Returns
+    ///
+    /// * A view of class IDs.
     #[must_use]
     pub fn cls(&self) -> ArrayView1<'_, f32> {
         self.data.slice(s![.., -1])
     }
 
     /// Get tracking IDs (if available).
+    ///
+    /// # Returns
+    ///
+    /// * `Some` view of track IDs if available, otherwise `None`.
     #[must_use]
     pub fn id(&self) -> Option<ArrayView1<'_, f32>> {
         if self.is_track {
@@ -638,6 +847,10 @@ impl Obb {
 
     /// Get corner points for each OBB as (N, 4, 2) array.
     /// Returns the 4 corner points of each rotated bounding box.
+    ///
+    /// # Returns
+    ///
+    /// * An owned array of shape (N, 4, 2) containing corner coordinates.
     #[must_use]
     pub fn xyxyxyxy(&self) -> Array3<f32> {
         let n = self.len();
@@ -680,6 +893,10 @@ impl Obb {
 
     /// Get axis-aligned bounding box containing each OBB.
     /// Returns array of shape (N, 4) with [x1, y1, x2, y2] for each OBB.
+    ///
+    /// # Returns
+    ///
+    /// * An owned array of axis-aligned bounding boxes.
     #[must_use]
     pub fn xyxy(&self) -> Array2<f32> {
         let corners = self.xyxyxyxy();
