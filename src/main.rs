@@ -75,7 +75,7 @@ fn run_prediction(args: &[String]) {
     let mut source_path: Option<&String> = None;
     let mut conf_threshold = 0.25_f32;
     let mut iou_threshold = 0.45_f32;
-    let mut imgsz: usize = 640;
+    let mut imgsz: Option<usize> = None;
     let mut save = false;
     let mut half = false;
     let mut verbose = true;
@@ -144,8 +144,19 @@ fn run_prediction(args: &[String]) {
             }
             "--imgsz" => {
                 if i + 1 < args.len() {
-                    imgsz = args[i + 1].parse().unwrap_or(640);
-                    i += 2;
+                    match args[i + 1].parse::<usize>() {
+                        Ok(val) => {
+                            imgsz = Some(val);
+                            i += 2;
+                        }
+                        Err(_) => {
+                            eprintln!(
+                                "Error: --imgsz requires a positive integer, found '{}'",
+                                args[i + 1]
+                            );
+                            process::exit(1);
+                        }
+                    }
                 } else {
                     eprintln!("Error: --imgsz requires a value");
                     process::exit(1);
@@ -201,8 +212,10 @@ fn run_prediction(args: &[String]) {
         .with_iou(iou_threshold)
         .with_half(half);
 
-    // Apply imgsz (default 640)
-    config = config.with_imgsz(imgsz, imgsz);
+    // Apply imgsz if specified
+    if let Some(sz) = imgsz {
+        config = config.with_imgsz(sz, sz);
+    }
 
     let mut model = match YOLOModel::load_with_config(&model_path, config) {
         Ok(m) => m,
