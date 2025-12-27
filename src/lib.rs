@@ -348,6 +348,196 @@
 //!
 //! For native FFI bindings (C-compatible shared library), contact Ultralytics for enterprise licensing.
 //!
+//! ## REST API Server
+//!
+//! Build a high-performance inference API using Axum (or Actix-web, Rocket):
+//!
+//! ```toml
+//! # Cargo.toml
+//! [dependencies]
+//! ultralytics-inference = "0.0.5"
+//! axum = "0.7"
+//! tokio = { version = "1", features = ["full"] }
+//! serde = { version = "1", features = ["derive"] }
+//! serde_json = "1"
+//! base64 = "0.21"
+//! ```
+//!
+//! ```rust,ignore
+//! use axum::{
+//!     Router, Json,
+//!     extract::{Multipart, State},
+//!     routing::post,
+//!     http::StatusCode,
+//! };
+//! use serde::{Deserialize, Serialize};
+//! use std::sync::Arc;
+//! use tokio::sync::Mutex;
+//! use ultralytics_inference::YOLOModel;
+//!
+//! // Shared model state
+//! struct AppState {
+//!     model: Mutex<YOLOModel>,
+//! }
+//!
+//! #[derive(Serialize)]
+//! struct Detection {
+//!     class_id: usize,
+//!     class_name: String,
+//!     confidence: f32,
+//!     bbox: [f32; 4],  // x1, y1, x2, y2
+//! }
+//!
+//! #[derive(Serialize)]
+//! struct PredictResponse {
+//!     success: bool,
+//!     detections: Vec<Detection>,
+//!     inference_time_ms: f64,
+//! }
+//!
+//! // POST /predict - accepts multipart form with image file
+//! async fn predict(
+//!     State(state): State<Arc<AppState>>,
+//!     mut multipart: Multipart,
+//! ) -> Result<Json<PredictResponse>, StatusCode> {
+//!     // Extract image from multipart form
+//!     while let Some(field) = multipart.next_field().await.unwrap() {
+//!         if field.name() == Some("image") {
+//!             let data = field.bytes().await.unwrap();
+//!
+//!             // Save temp file and run inference
+//!             let temp_path = "/tmp/upload.jpg";
+//!             std::fs::write(temp_path, &data).unwrap();
+//!
+//!             let mut model = state.model.lock().await;
+//!             let results = model.predict(temp_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+//!
+//!             let mut detections = Vec::new();
+//!             if let Some(ref boxes) = results[0].boxes {
+//!                 for i in 0..boxes.len() {
+//!                     let cls = boxes.cls()[i] as usize;
+//!                     detections.push(Detection {
+//!                         class_id: cls,
+//!                         class_name: results[0].names.get(&cls).cloned().unwrap_or_default(),
+//!                         confidence: boxes.conf()[i],
+//!                         bbox: [
+//!                             boxes.xyxy()[[i, 0]],
+//!                             boxes.xyxy()[[i, 1]],
+//!                             boxes.xyxy()[[i, 2]],
+//!                             boxes.xyxy()[[i, 3]],
+//!                         ],
+//!                     });
+//!                 }
+//!             }
+//!
+//!             return Ok(Json(PredictResponse {
+//!                 success: true,
+//!                 detections,
+//!                 inference_time_ms: results[0].speed.inference.unwrap_or(0.0),
+//!             }));
+//!         }
+//!     }
+//!     Err(StatusCode::BAD_REQUEST)
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let model = YOLOModel::load("yolo11n.onnx").expect("Failed to load model");
+//!     let state = Arc::new(AppState { model: Mutex::new(model) });
+//!
+//!     let app = Router::new()
+//!         .route("/predict", post(predict))
+//!         .with_state(state);
+//!
+//!     println!("Server running on http://0.0.0.0:3000");
+//!     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+//!     axum::serve(listener, app).await.unwrap();
+//! }
+//! ```
+//!
+//! ### API Client Examples
+//!
+//! **curl:**
+//! ```bash
+//! # Upload image file
+//! curl -X POST http://localhost:3000/predict \
+//!   -F "image=@image.jpg" \
+//!   | jq
+//!
+//! # Response:
+//! # {
+//! #   "success": true,
+//! #   "detections": [
+//! #     {"class_id": 0, "class_name": "person", "confidence": 0.92, "bbox": [100, 50, 200, 300]},
+//! #     {"class_id": 2, "class_name": "car", "confidence": 0.87, "bbox": [300, 100, 500, 250]}
+//! #   ],
+//! #   "inference_time_ms": 23.5
+//! # }
+//! ```
+//!
+//! **Python requests:**
+//! ```python
+//! import requests
+//!
+//! def predict(image_path: str, server: str = "http://localhost:3000") -> dict:
+//!     """Send image to inference API and get detections."""
+//!     with open(image_path, "rb") as f:
+//!         response = requests.post(
+//!             f"{server}/predict",
+//!             files={"image": f}
+//!         )
+//!     response.raise_for_status()
+//!     return response.json()
+//!
+//! # Usage
+//! result = predict("image.jpg")
+//! print(f"Found {len(result['detections'])} objects")
+//! for det in result["detections"]:
+//!     print(f"  {det['class_name']}: {det['confidence']:.2f}")
+//! ```
+//!
+//! **Python async (aiohttp):**
+//! ```python
+//! import aiohttp
+//! import asyncio
+//!
+//! async def predict_async(image_path: str, server: str = "http://localhost:3000") -> dict:
+//!     async with aiohttp.ClientSession() as session:
+//!         with open(image_path, "rb") as f:
+//!             data = aiohttp.FormData()
+//!             data.add_field("image", f, filename="image.jpg")
+//!             async with session.post(f"{server}/predict", data=data) as resp:
+//!                 return await resp.json()
+//!
+//! # Batch processing
+//! async def batch_predict(image_paths: list[str]) -> list[dict]:
+//!     tasks = [predict_async(p) for p in image_paths]
+//!     return await asyncio.gather(*tasks)
+//!
+//! # Usage
+//! results = asyncio.run(batch_predict(["img1.jpg", "img2.jpg", "img3.jpg"]))
+//! ```
+//!
+//! **JavaScript fetch:**
+//! ```javascript
+//! async function predict(imageFile) {
+//!     const formData = new FormData();
+//!     formData.append('image', imageFile);
+//!
+//!     const response = await fetch('http://localhost:3000/predict', {
+//!         method: 'POST',
+//!         body: formData
+//!     });
+//!     return response.json();
+//! }
+//!
+//! // Browser usage with file input
+//! document.getElementById('imageInput').addEventListener('change', async (e) => {
+//!     const result = await predict(e.target.files[0]);
+//!     console.log('Detections:', result.detections);
+//! });
+//! ```
+//!
 //! ## Custom Configuration
 //!
 //! Use the builder pattern to customize inference settings:
