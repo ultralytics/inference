@@ -32,8 +32,9 @@ use ultralytics_inference::annotate::{annotate_image, find_next_run_dir};
 #[cfg(feature = "visualize")]
 use ultralytics_inference::visualizer::Viewer;
 
-use ultralytics_inference::{InferenceConfig, Results, VERSION, YOLOModel};
 use ultralytics_inference::utils::pluralize;
+use ultralytics_inference::{InferenceConfig, Results, VERSION, YOLOModel};
+
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
