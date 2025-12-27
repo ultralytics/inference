@@ -35,7 +35,6 @@ use ultralytics_inference::visualizer::Viewer;
 use ultralytics_inference::utils::pluralize;
 use ultralytics_inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
-
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
 
@@ -523,7 +522,6 @@ fn format_detection_summary(result: &Results) -> String {
         String::new()
     }
 }
-
 
 /// Print version information.
 fn print_version() {
