@@ -20,7 +20,7 @@
 //! - **All YOLO Versions** - Supports YOLOv5, YOLOv8, YOLO11, and future versions
 //! - **All Tasks** - Detection, segmentation, pose estimation, classification, and OBB
 //! - **Ultralytics API** - Results API matches the Python package for easy migration
-//! - **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more
+//! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
 //! - **Multiple Sources** - Images, directories, glob patterns, video, webcam, streams
 //!
 //! ## Installation
@@ -104,7 +104,7 @@
 //! | `--model` | `-m` | Path to ONNX model | `yolo11n.onnx` |
 //! | `--source` | `-s` | Input source | Sample images |
 //! | `--conf` | | Confidence threshold | `0.25` |
-//! | `--iou` | | IoU threshold for NMS | `0.45` |
+//! | `--iou` | | `IoU` threshold for NMS | `0.45` |
 //! | `--imgsz` | | Inference image size | `640` |
 //! | `--half` | | Use FP16 inference | `false` |
 //! | `--save` | | Save annotated images | `false` |
@@ -412,9 +412,9 @@
 //! | `visualize` | Real-time window display (default) |
 //! | `video` | Video file and stream support |
 //! | `cuda` | NVIDIA CUDA acceleration |
-//! | `tensorrt` | NVIDIA TensorRT optimization |
-//! | `coreml` | Apple CoreML (macOS/iOS) |
-//! | `openvino` | Intel OpenVINO |
+//! | `tensorrt` | NVIDIA `TensorRT` optimization |
+//! | `coreml` | Apple `CoreML` (macOS/iOS) |
+//! | `openvino` | Intel `OpenVINO` |
 //!
 //! ## License
 //!

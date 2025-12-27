@@ -216,7 +216,9 @@ fn run_prediction(args: &[String]) {
         || {
             // Select default images based on model task
             let default_urls = match model.task() {
-                ultralytics_inference::task::Task::Obb => &[ultralytics_inference::download::DEFAULT_OBB_IMAGE],
+                ultralytics_inference::task::Task::Obb => {
+                    &[ultralytics_inference::download::DEFAULT_OBB_IMAGE]
+                }
                 _ => ultralytics_inference::download::DEFAULT_IMAGES,
             };
 

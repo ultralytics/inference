@@ -224,3 +224,9 @@ target
 *.MP4
 *.AVI
 *.MOV
+
+# Font files
+*.ttf
+*.otf
+*.woff
+*.woff2
