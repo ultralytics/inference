@@ -144,18 +144,15 @@ fn run_prediction(args: &[String]) {
             }
             "--imgsz" => {
                 if i + 1 < args.len() {
-                    match args[i + 1].parse::<usize>() {
-                        Ok(val) => {
-                            imgsz = Some(val);
-                            i += 2;
-                        }
-                        Err(_) => {
-                            eprintln!(
-                                "Error: --imgsz requires a positive integer, found '{}'",
-                                args[i + 1]
-                            );
-                            process::exit(1);
-                        }
+                    if let Ok(val) = args[i + 1].parse::<usize>() {
+                        imgsz = Some(val);
+                        i += 2;
+                    } else {
+                        eprintln!(
+                            "Error: --imgsz requires a positive integer, found '{}'",
+                            args[i + 1]
+                        );
+                        process::exit(1);
                     }
                 } else {
                     eprintln!("Error: --imgsz requires a value");
