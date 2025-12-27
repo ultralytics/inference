@@ -3,7 +3,7 @@
 [package]
 name = "ultralytics-inference"
 version = "0.0.5"
-edition = "2025"
+edition = "2024"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
     "Onuralp Sezer <onuralp@ultralytics.com>",
