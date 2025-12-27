@@ -3,32 +3,42 @@
 //! Task definitions for YOLO models.
 //!
 //! This module defines the different tasks that YOLO models can perform,
-//! along with their associated configurations.
+//! along with their associated capabilities and string representations.
 
 use std::fmt;
 use std::str::FromStr;
 
 /// YOLO model task types.
 ///
-/// Each task type corresponds to a different type of computer vision problem
-/// that YOLO models can solve.
+/// Each task type corresponds to a different computer vision problem
+/// that YOLO models can solve. The task type determines the expected
+/// model outputs and post-processing steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Task {
-    /// Object detection - predicts bounding boxes and class labels.
+    /// Object detection.
+    /// Predicts bounding boxes and class labels for objects in an image.
     #[default]
     Detect,
-    /// Instance segmentation - predicts masks for each detected object.
+    /// Instance segmentation.
+    /// Predicts bounding boxes, class labels, and pixel-level masks for objects.
     Segment,
-    /// Pose estimation - predicts keypoints for detected objects (e.g., human pose).
+    /// Pose estimation.
+    /// Predicts bounding boxes and skeletal keypoints for objects (e.g., humans).
     Pose,
-    /// Image classification - predicts class probabilities for the entire image.
+    /// Image classification.
+    /// Predicts class probabilities for the entire image (no localization).
     Classify,
-    /// Oriented bounding box detection - predicts rotated bounding boxes.
+    /// Oriented bounding box detection (OBB).
+    /// Predicts rotated bounding boxes for objects, useful for aerial imagery etc.
     Obb,
 }
 
 impl Task {
-    /// Returns the string representation used in ONNX model metadata.
+    /// Get the string representation used in ONNX model metadata.
+    ///
+    /// # Returns
+    ///
+    /// * A static string slice representing the task (e.g., "detect", "segment").
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -40,31 +50,51 @@ impl Task {
         }
     }
 
-    /// Returns whether this task produces bounding boxes.
+    /// Check whether this task produces bounding boxes.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the task outputs bounding boxes (Detect, Segment, Pose, Obb).
     #[must_use]
     pub const fn has_boxes(&self) -> bool {
         matches!(self, Self::Detect | Self::Segment | Self::Pose | Self::Obb)
     }
 
-    /// Returns whether this task produces segmentation masks.
+    /// Check whether this task produces segmentation masks.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the task outputs masks (Segment).
     #[must_use]
     pub const fn has_masks(&self) -> bool {
         matches!(self, Self::Segment)
     }
 
-    /// Returns whether this task produces keypoints.
+    /// Check whether this task produces keypoints.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the task outputs keypoints (Pose).
     #[must_use]
     pub const fn has_keypoints(&self) -> bool {
         matches!(self, Self::Pose)
     }
 
-    /// Returns whether this task produces classification probabilities.
+    /// Check whether this task produces classification probabilities.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the task outputs global class probabilities (Classify).
     #[must_use]
     pub const fn has_probs(&self) -> bool {
         matches!(self, Self::Classify)
     }
 
-    /// Returns whether this task produces oriented bounding boxes.
+    /// Check whether this task produces oriented bounding boxes.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the task outputs rotated bounding boxes (Obb).
     #[must_use]
     pub const fn has_obb(&self) -> bool {
         matches!(self, Self::Obb)
