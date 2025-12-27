@@ -248,10 +248,11 @@ impl YOLOModel {
         } else {
             // Static input without metadata -> try to read from tensor shape
             // Typically [1, 3, H, W]
-            let shape = input_info
+            input_info
                 .and_then(|i| {
                     if let ValueType::Tensor { shape, .. } = i.dtype() {
                         if shape.len() == 4 && shape[2] > 0 && shape[3] > 0 {
+                            #[allow(clippy::cast_sign_loss)]
                             Some((shape[2] as usize, shape[3] as usize))
                         } else {
                             None
@@ -260,8 +261,7 @@ impl YOLOModel {
                         None
                     }
                 })
-                .unwrap_or((640, 640));
-            shape
+                .unwrap_or((640, 640))
         };
 
         // Update config with resolved values
