@@ -936,28 +936,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
 
 [[package]]
-name = "inference"
-version = "0.0.5"
-dependencies = [
- "ab_glyph",
- "bytemuck",
- "dirs",
- "fast_image_resize",
- "ffmpeg-next",
- "ffmpeg-sys-next",
- "half",
- "image",
- "imageproc",
- "jpeg-decoder",
- "minifb",
- "ndarray 0.17.1",
- "ort",
- "rayon",
- "ureq",
- "video-rs",
-]
-
-[[package]]
 name = "instant"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2281,6 +2259,28 @@ name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
+
+[[package]]
+name = "ultralytics-inference"
+version = "0.0.5"
+dependencies = [
+ "ab_glyph",
+ "bytemuck",
+ "dirs",
+ "fast_image_resize",
+ "ffmpeg-next",
+ "ffmpeg-sys-next",
+ "half",
+ "image",
+ "imageproc",
+ "jpeg-decoder",
+ "minifb",
+ "ndarray 0.17.1",
+ "ort",
+ "rayon",
+ "ureq",
+ "video-rs",
+]
 
 [[package]]
 name = "unicode-ident"

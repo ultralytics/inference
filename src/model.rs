@@ -36,7 +36,7 @@ use crate::task::Task;
 /// # Example
 ///
 /// ```no_run
-/// use inference::YOLOModel;
+/// use ultralytics_inference::YOLOModel;
 ///
 /// let mut model = YOLOModel::load("yolo11n.onnx").unwrap();
 /// let results = model.predict("image.jpg").unwrap();
@@ -83,10 +83,10 @@ impl YOLOModel {
     /// # Example
     ///
     /// ```no_run
-    /// use inference::YOLOModel;
+    /// use ultralytics_inference::YOLOModel;
     ///
     /// let model = YOLOModel::load("yolo11n.onnx")?;
-    /// # Ok::<(), inference::InferenceError>(())
+    /// # Ok::<(), ultralytics_inference::InferenceError>(())
     /// ```
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::load_with_config(path, InferenceConfig::default())

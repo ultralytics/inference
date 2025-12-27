@@ -15,7 +15,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 🔧 **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
-- 🖼️ **Multiple Sources** - Images, directories, glob patterns (video/webcam coming soon)
+- 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
 - 🪶 **Minimal Dependencies** - No PyTorch, no heavy ML frameworks - just 5 core crates
 
 ## 🚀 Quick Start
@@ -126,13 +126,13 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-inference = { git = "https://github.com/ultralytics/inference.git" }
+ultralytics-inference = { git = "https://github.com/ultralytics/inference.git" }
 ```
 
 **Basic Usage:**
 
 ```rust
-use inference::{YOLOModel, InferenceConfig};
+use ultralytics_inference::{YOLOModel, InferenceConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load model - metadata (classes, task, imgsz) is read automatically
@@ -161,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 **With Custom Configuration:**
 
 ```rust
-use inference::{YOLOModel, InferenceConfig};
+use ultralytics_inference::{YOLOModel, InferenceConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = InferenceConfig::new()
@@ -333,18 +333,19 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 
 ## 🔮 Roadmap
 
-- [x] Detection inference
-- [x] ONNX model metadata parsing
-- [x] Ultralytics-compatible Results API
-- [x] Directory/glob source support
-- [x] Segmentation post-processing
-- [x] Pose estimation post-processing
-- [x] Classification inference
-- [x] OBB (oriented bounding box) support
-- [x] Video file support
-- [x] Webcam/RTSP streaming
+### Completed
+- [x] Detection, Segmentation, Pose, Classification, OBB inference
+- [x] ONNX model metadata parsing (auto-detect classes, task, imgsz)
+- [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`)
+- [x] Multiple input sources (images, directories, globs, URLs)
+- [x] Video file support and webcam/RTSP streaming
+- [x] Image annotation and visualization
+- [x] FP16 half-precision inference
+
+### In Progress
 - [ ] Python bindings (PyO3)
-- [ ] Batch inference
+- [ ] Batch inference optimization
+- [ ] WebAssembly (WASM) support for browser inference
 
 ## 💡 Contributing
 

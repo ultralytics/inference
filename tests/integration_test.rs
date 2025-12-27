@@ -4,7 +4,7 @@
 
 //! Integration tests for the inference library
 
-use inference::{Boxes, InferenceConfig, Results, Speed};
+use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
 use ndarray::Array3;
 use std::collections::HashMap;
 

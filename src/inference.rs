@@ -13,7 +13,7 @@
 /// # Example
 ///
 /// ```rust
-/// use inference::InferenceConfig;
+/// use ultralytics_inference::InferenceConfig;
 ///
 /// let config = InferenceConfig {
 ///     confidence_threshold: 0.5,
