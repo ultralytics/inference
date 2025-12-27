@@ -39,6 +39,10 @@ pub enum Source {
 
 impl Source {
     /// Check if this source is a single image.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the source is an image type (file, buffer, array, URL).
     #[must_use]
     pub const fn is_image(&self) -> bool {
         matches!(
@@ -48,12 +52,20 @@ impl Source {
     }
 
     /// Check if this source is a video or stream.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the source is a video type (file, webcam, stream).
     #[must_use]
     pub const fn is_video(&self) -> bool {
         matches!(self, Self::Video(_) | Self::Webcam(_) | Self::Stream(_))
     }
 
     /// Check if this source is a directory or glob pattern.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the source represents a batch of images.
     #[must_use]
     pub const fn is_batch(&self) -> bool {
         matches!(
@@ -63,6 +75,10 @@ impl Source {
     }
 
     /// Get the path if this source has one.
+    ///
+    /// # Returns
+    ///
+    /// * `Some` path reference if applicable, otherwise `None`.
     #[must_use]
     pub fn path(&self) -> Option<&Path> {
         match self {
@@ -234,9 +250,17 @@ pub struct SourceIterator {
 impl SourceIterator {
     /// Create a new source iterator.
     ///
+    /// # Arguments
+    ///
+    /// * `source` - The input source to iterate over.
+    ///
+    /// # Returns
+    ///
+    /// * A new `SourceIterator` instance.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the source cannot be opened.
+    /// Returns an error if the source cannot be opened (e.g. directory not found).
     pub fn new(source: Source) -> Result<Self> {
         let image_paths = match &source {
             Source::Directory(path) => Self::collect_images_from_dir(path)?,
@@ -713,6 +737,18 @@ impl Iterator for SourceIterator {
 }
 
 /// Convert an HWC u8 array to a `DynamicImage`.
+///
+/// # Arguments
+///
+/// * `arr` - Input array with shape (H, W, 3).
+///
+/// # Returns
+///
+/// * A `DynamicImage` containing the image data.
+///
+/// # Errors
+///
+/// Returns an error if dimensions are invalid or conversion fails.
 fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
     let shape = arr.shape();
     let height = u32::try_from(shape[0])
