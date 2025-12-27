@@ -20,6 +20,16 @@ pub struct Viewer {
 impl Viewer {
     /// Create a new viewer window.
     ///
+    /// # Arguments
+    ///
+    /// * `title` - Title of the window.
+    /// * `width` - Window width in pixels.
+    /// * `height` - Window height in pixels.
+    ///
+    /// # Returns
+    ///
+    /// * A new `Viewer` instance.
+    ///
     /// # Errors
     ///
     /// Returns an error if the window creation fails.
@@ -49,6 +59,14 @@ impl Viewer {
     /// Update the window with a new image.
     ///
     /// The image is resized to fit the window if necessary.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The image to display.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the window is open and updated, `false` if closed or escape key pressed.
     ///
     /// # Errors
     ///
@@ -95,6 +113,14 @@ impl Viewer {
     }
 
     /// Wait for a specified duration while keeping the window responsive.
+    ///
+    /// # Arguments
+    ///
+    /// * `duration` - Time to wait.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if timeout reached, `false` if window closed or escape key pressed.
     ///
     /// # Errors
     ///
