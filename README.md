@@ -103,7 +103,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `--source`  | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
 | `--conf`    |       | Confidence threshold                              | `0.25`                                  |
 | `--iou`     |       | IoU threshold for NMS                             | `0.45`                                  |
-| `--imgsz`   |       | Inference image size                              | `640`                                   |
+| `--imgsz`   |       | Inference image size                              | `Model metadata`                        |
 | `--half`    |       | Use FP16 half-precision inference                 | `false`                                 |
 | `--save`    |       | Save annotated images to runs/<task>/predict      | `false`                                 |
 | `--show`    |       | Display results in a window                       | `false`                                 |
