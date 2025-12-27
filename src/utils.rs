@@ -131,6 +131,28 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
     keep
 }
 
+/// Simple pluralization for common COCO class names.
+#[must_use]
+pub fn pluralize(word: &str) -> String {
+    match word {
+        "person" => "persons".to_string(),
+        "bus" => "buses".to_string(),
+        "knife" => "knives".to_string(),
+        "mouse" => "mice".to_string(),
+        "sheep" => "sheep".to_string(),
+        "skis" => "skis".to_string(),
+        _ => {
+            if word.ends_with('s') || word.ends_with("ch") || word.ends_with("sh") {
+                format!("{word}es")
+            } else if word.ends_with('y') && !word.ends_with("ey") && !word.ends_with("ay") {
+                format!("{}ies", &word[..word.len() - 1])
+            } else {
+                format!("{word}s")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

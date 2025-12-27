@@ -17,12 +17,32 @@ impl Color {
     pub const BLACK: Self = Self(0, 0, 0);
 
     /// Create a new color from RGB values.
+    ///
+    /// # Arguments
+    ///
+    /// * `r` - Red component (0-255).
+    /// * `g` - Green component (0-255).
+    /// * `b` - Blue component (0-255).
+    ///
+    /// # Returns
+    ///
+    /// * A new `Color` instance.
     #[must_use]
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self(r, g, b)
     }
 
     /// Get a color from the predefined palette by index.
+    ///
+    /// This cycles through the standard Ultralytics color palette.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The index (e.g., class ID) to select a color for.
+    ///
+    /// # Returns
+    ///
+    /// * A `Color` from the palette.
     #[must_use]
     pub const fn from_index(index: usize) -> Self {
         let color = COLORS[index % COLORS.len()];
@@ -30,6 +50,16 @@ impl Color {
     }
 
     /// Get a color from the pose palette by index.
+    ///
+    /// This cycles through the pose-specific color palette.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The index (e.g., keypoint ID) to select a color for.
+    ///
+    /// # Returns
+    ///
+    /// * A `Color` from the pose palette.
     #[must_use]
     pub const fn from_pose_index(index: usize) -> Self {
         let color = POSE_COLORS[index % POSE_COLORS.len()];

@@ -208,3 +208,25 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Image files
+*.jpg
+*.png
+*.jpeg
+*.JPG
+*.PNG
+*.JPEG
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.MP4
+*.AVI
+*.MOV
+
+# Font files
+*.ttf
+*.otf
+*.woff
+*.woff2

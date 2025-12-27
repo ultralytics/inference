@@ -9,11 +9,13 @@
 //! # Usage
 //!
 //! ```bash
-//! inference predict --model yolo11n.onnx --source image.jpg
-//! inference predict --model yolo11n.onnx --source video.mp4
-//! inference predict --model yolo11n.onnx --source 0  # webcam
-//! inference version
-//! inference help
+//! ultralytics-inference predict --model yolo11n.onnx --source image.jpg
+//! ultralytics-inference predict --model yolo11n.onnx --source video.mp4
+//! ultralytics-inference predict --model yolo11n.onnx --source 0 --conf 0.5
+//! ultralytics-inference predict -m yolo11n.onnx -s assets/ --save --half
+//! ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show
+//! ultralytics-inference version
+//! ultralytics-inference help
 //! ```
 
 use std::collections::HashMap;
@@ -25,12 +27,13 @@ use std::process;
 use std::fs;
 
 #[cfg(feature = "annotate")]
-use inference::annotate::{annotate_image, find_next_run_dir};
+use ultralytics_inference::annotate::{annotate_image, find_next_run_dir};
 
 #[cfg(feature = "visualize")]
-use inference::visualizer::Viewer;
+use ultralytics_inference::visualizer::Viewer;
 
-use inference::{InferenceConfig, Results, VERSION, YOLOModel};
+use ultralytics_inference::utils::pluralize;
+use ultralytics_inference::{InferenceConfig, Results, VERSION, YOLOModel};
 
 /// Default model path when not specified.
 const DEFAULT_MODEL: &str = "yolo11n.onnx";
@@ -72,9 +75,10 @@ fn run_prediction(args: &[String]) {
     let mut source_path: Option<&String> = None;
     let mut conf_threshold = 0.25_f32;
     let mut iou_threshold = 0.45_f32;
-    let mut imgsz: Option<usize> = None;
+    let mut imgsz: usize = 640;
     let mut save = false;
     let mut half = false;
+    let mut verbose = true;
     #[cfg(feature = "visualize")]
     let mut show = false;
 
@@ -140,11 +144,34 @@ fn run_prediction(args: &[String]) {
             }
             "--imgsz" => {
                 if i + 1 < args.len() {
-                    imgsz = args[i + 1].parse().ok();
+                    imgsz = args[i + 1].parse().unwrap_or(640);
                     i += 2;
                 } else {
                     eprintln!("Error: --imgsz requires a value");
                     process::exit(1);
+                }
+            }
+            "--verbose" => {
+                if i + 1 < args.len() {
+                    let next_arg = &args[i + 1];
+                    if let Ok(v) = next_arg.parse::<bool>() {
+                        verbose = v;
+                        i += 2;
+                    } else if next_arg.starts_with('-') {
+                        // Next arg looks like a flag, so --verbose is used as a flag (true)
+                        verbose = true;
+                        i += 1;
+                    } else {
+                        // Next arg is strictly not a bool and not a flag -> Error
+                        eprintln!(
+                            "Error: --verbose expects a boolean value (true/false) or no value, found: '{next_arg}'"
+                        );
+                        process::exit(1);
+                    }
+                } else {
+                    // End of args
+                    verbose = true;
+                    i += 1;
                 }
             }
             _ => {
@@ -160,7 +187,11 @@ fn run_prediction(args: &[String]) {
     let model_path = if let Some(m) = model_path {
         m.clone()
     } else {
-        eprintln!("WARNING ⚠️ 'model' argument is missing. Using default 'model={DEFAULT_MODEL}'.");
+        if verbose {
+            eprintln!(
+                "WARNING ⚠️ 'model' argument is missing. Using default 'model={DEFAULT_MODEL}'."
+            );
+        }
         default_model
     };
 
@@ -170,10 +201,8 @@ fn run_prediction(args: &[String]) {
         .with_iou(iou_threshold)
         .with_half(half);
 
-    // Apply imgsz if specified
-    if let Some(size) = imgsz {
-        config = config.with_imgsz(size, size);
-    }
+    // Apply imgsz (default 640)
+    config = config.with_imgsz(imgsz, imgsz);
 
     let mut model = match YOLOModel::load_with_config(&model_path, config) {
         Ok(m) => m,
@@ -188,17 +217,21 @@ fn run_prediction(args: &[String]) {
         || {
             // Select default images based on model task
             let default_urls = match model.task() {
-                inference::task::Task::Obb => &[inference::download::DEFAULT_OBB_IMAGE],
-                _ => inference::download::DEFAULT_IMAGES,
+                ultralytics_inference::task::Task::Obb => {
+                    &[ultralytics_inference::download::DEFAULT_OBB_IMAGE]
+                }
+                _ => ultralytics_inference::download::DEFAULT_IMAGES,
             };
 
-            eprintln!(
-                "WARNING ⚠️ 'source' argument is missing. Using default images: {}",
-                default_urls.join(", ")
-            );
+            if verbose {
+                eprintln!(
+                    "WARNING ⚠️ 'source' argument is missing. Using default images: {}",
+                    default_urls.join(", ")
+                );
+            }
 
             // Download images to current directory (skips if already exists)
-            let downloaded_files = inference::download::download_images(default_urls);
+            let downloaded_files = ultralytics_inference::download::download_images(default_urls);
 
             if downloaded_files.is_empty() {
                 eprintln!("Error: Failed to download any images");
@@ -211,19 +244,19 @@ fn run_prediction(args: &[String]) {
                 .map(std::path::PathBuf::from)
                 .collect();
 
-            inference::source::Source::ImageList(paths)
+            ultralytics_inference::source::Source::ImageList(paths)
         },
-        |s| inference::source::Source::from(s.as_str()),
+        |s| ultralytics_inference::source::Source::from(s.as_str()),
     );
 
     #[cfg(feature = "annotate")]
     let save_dir = if save {
         let parent_dir = match model.task() {
-            inference::task::Task::Detect => "runs/detect",
-            inference::task::Task::Segment => "runs/segment",
-            inference::task::Task::Pose => "runs/pose",
-            inference::task::Task::Classify => "runs/classify",
-            inference::task::Task::Obb => "runs/obb",
+            ultralytics_inference::task::Task::Detect => "runs/detect",
+            ultralytics_inference::task::Task::Segment => "runs/segment",
+            ultralytics_inference::task::Task::Pose => "runs/pose",
+            ultralytics_inference::task::Task::Classify => "runs/classify",
+            ultralytics_inference::task::Task::Obb => "runs/obb",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         fs::create_dir_all(&dir).expect("Failed to create save directory");
@@ -254,7 +287,7 @@ fn run_prediction(args: &[String]) {
 
     // Source is already initialized above
     let is_video = source.is_video();
-    let source_iter = match inference::source::SourceIterator::new(source) {
+    let source_iter = match ultralytics_inference::source::SourceIterator::new(source) {
         Ok(iter) => iter,
         Err(e) => {
             eprintln!("Error initializing source: {e}");
@@ -306,30 +339,32 @@ fn run_prediction(args: &[String]) {
                 .total_frames
                 .map_or_else(|| "?".to_string(), |n| n.to_string());
 
-            if is_video {
-                // Assuming single video input for now as per CLI structure
-                // Use "video 1/1"
-                println!(
-                    "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
-                    meta.frame_idx + 1,
-                    total_frames_str,
-                    image_path,
-                    inference_shape.1,
-                    inference_shape.0,
-                    detection_summary,
-                    result.speed.inference.unwrap_or(0.0)
-                );
-            } else {
-                println!(
-                    "image {}/{} {}: {}x{} {}, {:.1}ms",
-                    meta.frame_idx + 1,
-                    total_frames_str,
-                    image_path,
-                    inference_shape.1,
-                    inference_shape.0,
-                    detection_summary,
-                    result.speed.inference.unwrap_or(0.0)
-                );
+            if verbose {
+                if is_video {
+                    // Assuming single video input for now as per CLI structure
+                    // Use "video 1/1"
+                    println!(
+                        "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
+                        meta.frame_idx + 1,
+                        total_frames_str,
+                        image_path,
+                        inference_shape.1,
+                        inference_shape.0,
+                        detection_summary,
+                        result.speed.inference.unwrap_or(0.0)
+                    );
+                } else {
+                    println!(
+                        "image {}/{} {}: {}x{} {}, {:.1}ms",
+                        meta.frame_idx + 1,
+                        total_frames_str,
+                        image_path,
+                        inference_shape.1,
+                        inference_shape.0,
+                        detection_summary,
+                        result.speed.inference.unwrap_or(0.0)
+                    );
+                }
             }
 
             // Save annotated image if --save is specified
@@ -406,15 +441,17 @@ fn run_prediction(args: &[String]) {
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
-    let num_results = all_results.len().max(1) as f64;
-    println!(
-        "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
-        total_preprocess / num_results,
-        total_inference / num_results,
-        total_postprocess / num_results,
-        last_inference_shape.0,
-        last_inference_shape.1
-    );
+    if verbose {
+        let num_results = all_results.len().max(1) as f64;
+        println!(
+            "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
+            total_preprocess / num_results,
+            total_inference / num_results,
+            total_postprocess / num_results,
+            last_inference_shape.0,
+            last_inference_shape.1
+        );
+    }
 
     // Print save directory if --save was used
     #[cfg(feature = "annotate")]
@@ -486,27 +523,6 @@ fn format_detection_summary(result: &Results) -> String {
     }
 }
 
-/// Simple pluralization for common COCO class names.
-fn pluralize(word: &str) -> String {
-    match word {
-        "person" => "persons".to_string(),
-        "bus" => "buses".to_string(),
-        "knife" => "knives".to_string(),
-        "mouse" => "mice".to_string(),
-        "sheep" => "sheep".to_string(),
-        "skis" => "skis".to_string(),
-        _ => {
-            if word.ends_with('s') || word.ends_with("ch") || word.ends_with("sh") {
-                format!("{word}es")
-            } else if word.ends_with('y') && !word.ends_with("ey") && !word.ends_with("ay") {
-                format!("{}ies", &word[..word.len() - 1])
-            } else {
-                format!("{word}s")
-            }
-        }
-    }
-}
-
 /// Print version information.
 fn print_version() {
     println!("Ultralytics Inference v{VERSION}");
@@ -519,9 +535,9 @@ fn print_usage() {
 ==============================
 
 Usage:
-    inference predict --model <model_path> --source <source>
-    inference version
-    inference help
+    ultralytics-inference predict --model <model_path> --source <source>
+    ultralytics-inference version
+    ultralytics-inference help
 
 Commands:
     predict    Run inference on an image, video, or stream
@@ -530,19 +546,20 @@ Commands:
 
 Options:
     --model, -m     Path to ONNX model file
-    --source, -s    Input source (image, video, webcam index, or URL)
+    --source, -s    Input source (image, directory, glob, video, webcam, or URL)
     --conf          Confidence threshold (default: 0.25)
     --iou           IoU threshold for NMS (default: 0.45)
     --imgsz         Inference image size (default: 640)
     --half          Use FP16 half-precision inference
-    --save          Save annotated images to runs/detect/predict
+    --save          Save annotated images to runs/<task>/predict
     --show          Display results in a window
+    --verbose       Show verbose output (default: true)
 
 Examples:
-    inference predict --model yolo11n.onnx --source image.jpg
-    inference predict --model yolo11n.onnx --source video.mp4
-    inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    inference predict -m yolo11n.onnx -s assets/ --save --half
-    inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show"
+    ultralytics-inference predict --model yolo11n.onnx --source image.jpg
+    ultralytics-inference predict --model yolo11n.onnx --source video.mp4
+    ultralytics-inference predict --model yolo11n.onnx --source 0 --conf 0.5
+    ultralytics-inference predict -m yolo11n.onnx -s assets/ --save --half
+    ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show"
     );
 }

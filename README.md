@@ -15,14 +15,14 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 🔧 **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
-- 🖼️ **Multiple Sources** - Images, directories, glob patterns (video/webcam coming soon)
+- 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
 - 🪶 **Minimal Dependencies** - No PyTorch, no heavy ML frameworks - just 5 core crates
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- [Rust 1.70+](https://rustup.rs/) (install via rustup)
+- [Rust 1.85+](https://rustup.rs/) (install via rustup, edition 2024 required)
 - A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo11n.pt format=onnx`)
 
 ### Installation
@@ -51,7 +51,7 @@ model.export(format="onnx")
 ### Run Inference
 
 ```bash
-# With defaults (auto-detects yolo11n.onnx and assets/ folder)
+# With defaults (auto-downloads model and sample images)
 cargo run --release -- predict
 
 # With explicit arguments
@@ -70,12 +70,12 @@ cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --show --
 ### Example Output
 
 ```
-WARNING ⚠️ 'source' argument is missing. Using default 'source=assets'.
+WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
 Ultralytics 0.0.4 🚀 Rust ONNX CPU
 YOLO11 summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 assets/bus.jpg: 810x1080 4 persons, 1 bus, 27.3ms
-image 2/2 assets/zidane.jpg: 1280x720 2 persons, 1 tie, 24.9ms
+image 1/2 bus.jpg: 810x1080 4 persons, 1 bus, 27.3ms
+image 2/2 zidane.jpg: 1280x720 2 persons, 1 tie, 24.9ms
 Speed: 9.4ms preprocess, 26.1ms inference, 0.8ms postprocess per image at shape (1, 3, 720, 1280)
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
@@ -97,16 +97,28 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option     | Short | Description                           | Default        |
-| ---------- | ----- | ------------------------------------- | -------------- |
-| `--model`  | `-m`  | Path to ONNX model file               | `yolo11n.onnx` |
-| `--source` | `-s`  | Input source (image, directory, glob) | `assets`       |
-| `--conf`   |       | Confidence threshold                  | `0.25`         |
-| `--iou`    |       | IoU threshold for NMS                 | `0.45`         |
-| `--imgsz`  |       | Inference image size                  | `None`         |
-| `--half`   |       | Use FP16 half-precision inference     | `false`        |
-| `--show`   |       | Visualize results in a window         | `false`        |
-| `--save`   |       | Save annotated images to runs/detect/ | `false`        |
+| Option      | Short | Description                                       | Default                                 |
+| ----------- | ----- | ------------------------------------------------- | --------------------------------------- |
+| `--model`   | `-m`  | Path to ONNX model file                           | `yolo11n.onnx`                          |
+| `--source`  | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
+| `--conf`    |       | Confidence threshold                              | `0.25`                                  |
+| `--iou`     |       | IoU threshold for NMS                             | `0.45`                                  |
+| `--imgsz`   |       | Inference image size                              | `640`                                   |
+| `--half`    |       | Use FP16 half-precision inference                 | `false`                                 |
+| `--save`    |       | Save annotated images to runs/<task>/predict      | `false`                                 |
+| `--show`    |       | Display results in a window                       | `false`                                 |
+| `--verbose` |       | Show verbose output                               | `true`                                  |
+
+**Source Options:**
+
+| Source Type | Example Input                   | Description                       |
+| ----------- | ------------------------------- | --------------------------------- |
+| Image       | `image.jpg`                     | Single image file                 |
+| Directory   | `images/`                       | Directory of images               |
+| Glob        | `images/*.jpg`                  | Glob pattern for images           |
+| Video       | `video.mp4`                     | Video file                        |
+| Webcam      | `0`,`1`                         | Webcam index (0 = default webcam) |
+| URL         | `https://example.com/image.jpg` | Remote image URL                  |
 
 ### As a Rust Library
 
@@ -114,13 +126,13 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-inference = { git = "https://github.com/ultralytics/inference.git" }
+ultralytics-inference = { git = "https://github.com/ultralytics/inference.git" }
 ```
 
 **Basic Usage:**
 
 ```rust
-use inference::{YOLOModel, InferenceConfig};
+use ultralytics_inference::{YOLOModel, InferenceConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load model - metadata (classes, task, imgsz) is read automatically
@@ -149,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 **With Custom Configuration:**
 
 ```rust
-use inference::{YOLOModel, InferenceConfig};
+use ultralytics_inference::{YOLOModel, InferenceConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = InferenceConfig::new()
@@ -321,18 +333,21 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 
 ## 🔮 Roadmap
 
-- [x] Detection inference
-- [x] ONNX model metadata parsing
-- [x] Ultralytics-compatible Results API
-- [x] Directory/glob source support
-- [x] Segmentation post-processing
-- [x] Pose estimation post-processing
-- [x] Classification inference
-- [x] OBB (oriented bounding box) support
-- [x] Video file support
-- [x] Webcam/RTSP streaming
+### Completed
+
+- [x] Detection, Segmentation, Pose, Classification, OBB inference
+- [x] ONNX model metadata parsing (auto-detect classes, task, imgsz)
+- [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`)
+- [x] Multiple input sources (images, directories, globs, URLs)
+- [x] Video file support and webcam/RTSP streaming
+- [x] Image annotation and visualization
+- [x] FP16 half-precision inference
+
+### In Progress
+
 - [ ] Python bindings (PyO3)
-- [ ] Batch inference
+- [ ] Batch inference optimization
+- [ ] WebAssembly (WASM) support for browser inference
 
 ## 💡 Contributing
 

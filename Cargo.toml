@@ -1,8 +1,8 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 [package]
-name = "inference"
-version = "0.0.4"
+name = "ultralytics-inference"
+version = "0.0.5"
 edition = "2024"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
@@ -11,9 +11,16 @@ authors = [
 description = "Ultralytics YOLO inference library and CLI for Rust"
 license = "AGPL-3.0"
 repository = "https://github.com/ultralytics/inference"
+documentation = "https://docs.rs/ultralytics-inference"
+homepage = "https://www.ultralytics.com"
 readme = "README.md"
 keywords = ["yolo", "ultralytics", "inference", "computer-vision", "ml"]
 categories = ["computer-vision", "science", "command-line-interface", "wasm"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin"]
 
 [lints.rust]
 unsafe_code = "warn"
@@ -26,11 +33,11 @@ nursery = "warn"
 cargo = "warn"
 
 [lib]
-name = "inference"
+name = "ultralytics_inference"
 path = "src/lib.rs"
 
 [[bin]]
-name = "inference"
+name = "ultralytics-inference"
 path = "src/main.rs"
 
 [dependencies]

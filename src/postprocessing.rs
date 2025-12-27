@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{Array2, Array3, ArrayView2, s};
+use ndarray::{Array2, Array3, ArrayView2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -113,9 +113,23 @@ pub fn postprocess(
 
 /// Post-process detection model output.
 ///
-/// YOLO detection models output shape is typically [1, 84, 8400] where:
-/// - 84 = 4 (bbox) + 80 (classes for COCO)
-/// - 8400 = number of predictions (varies by input size)
+/// Converts raw YOLO model output into a list of bounding boxes with class scores.
+///
+/// # Arguments
+///
+/// * `output` - Flat vector of model output values.
+/// * `output_shape` - Shape of the output tensor.
+/// * `preprocess` - Preprocessing metadata (scaling, padding).
+/// * `config` - Inference configuration (thresholds).
+/// * `names` - Class ID to name mapping.
+/// * `orig_img` - Original image data.
+/// * `path` - Source image path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Input shape used for inference.
+///
+/// # Returns
+///
+/// `Results` struct containing detected bounding boxes.
 #[allow(
     clippy::too_many_arguments,
     clippy::similar_names,
@@ -228,6 +242,8 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
 }
 
 /// Extract detection boxes from model output.
+///
+/// Filters predictions by confidence threshold and converts coordinates to original image space.
 #[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
 fn extract_detect_boxes(
     output: ArrayView2<f32>,
@@ -235,51 +251,62 @@ fn extract_detect_boxes(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
 ) -> Array2<f32> {
-    let num_predictions = output.nrows();
+    let _num_predictions = output.nrows();
     let mut candidates = Vec::new();
 
-    for i in 0..num_predictions {
-        // Get class scores (columns 4 onwards)
-        let class_scores = output.slice(s![i, 4..]);
+    // Iterate over rows efficiently
+    // output shape is (num_predictions, 4 + num_classes)
+    // We can iterate over raw elements if we are careful, but using outer_iter() is safer and still fast
 
-        // Find best class (treat NaN as lowest to avoid panic)
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+    // Pre-calculate scaling factors to avoid repeated struct access
+    let (scale_y, scale_x) = preprocess.scale;
+    let (pad_top, pad_left) = preprocess.padding;
+    let orig_shape = preprocess.orig_shape;
+    let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
 
-        // Skip low confidence detections
+    for row in output.outer_iter() {
+        // Row is [cx, cy, w, h, class_scores...]
+
+        // Efficiently find the best class score without allocating a new slice or iterator chain.
+        // We skip low-confidence detections early to avoid expensive coordinate scaling and NMS operations later.
+        let scores = row.slice(s![4..]);
+
+        // Find best class manually to avoid iterator overhead
+        let (best_class, best_score) =
+            scores
+                .iter()
+                .enumerate()
+                .fold((0, 0.0f32), |(best_idx, best_val), (idx, &val)| {
+                    if val > best_val {
+                        (idx, val)
+                    } else {
+                        (best_idx, best_val)
+                    }
+                });
+
+        // Filter by confidence threshold early to reduce computation
         if best_score < config.confidence_threshold {
             continue;
         }
 
-        // Extract box coordinates (xywh format from model)
-        let cx = output[[i, 0]];
-        let cy = output[[i, 1]];
-        let w = output[[i, 2]];
-        let h = output[[i, 3]];
+        // Extract coordinates only for candidate detections
+        let cx = row[0];
+        let cy = row[1];
+        let w = row[2];
+        let h = row[3];
 
-        // Convert xywh to xyxy
-        let x1 = cx - w / 2.0;
-        let y1 = cy - h / 2.0;
-        let x2 = cx + w / 2.0;
-        let y2 = cy + h / 2.0;
+        let x1 = (cx - w / 2.0 - pad_left) / scale_x;
+        let y1 = (cy - h / 2.0 - pad_top) / scale_y;
+        let x2 = (cx + w / 2.0 - pad_left) / scale_x;
+        let y2 = (cy + h / 2.0 - pad_top) / scale_y;
 
-        // Scale coordinates back to original image space
-        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+        // Clip (clamp)
+        let x1 = x1.clamp(0.0, max_w);
+        let y1 = y1.clamp(0.0, max_h);
+        let x2 = x2.clamp(0.0, max_w);
+        let y2 = y2.clamp(0.0, max_h);
 
-        // Clip to image bounds
-        let clipped = clip_coords(&scaled, preprocess.orig_shape);
-
-        // Store candidate: [x1, y1, x2, y2, conf, class]
-        candidates.push((
-            [clipped[0], clipped[1], clipped[2], clipped[3]],
-            best_score,
-            best_class,
-        ));
+        candidates.push(([x1, y1, x2, y2], best_score, best_class));
     }
 
     if candidates.is_empty() {
@@ -307,6 +334,23 @@ fn extract_detect_boxes(
 }
 
 /// Post-process segmentation model output.
+///
+/// Generates bounding boxes and segmentation masks from the model output.
+///
+/// # Arguments
+///
+/// * `outputs` - Vector of model outputs (detection features and mask prototypes).
+/// * `preprocess` - Preprocessing metadata.
+/// * `config` - Inference configuration.
+/// * `names` - Class mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Inference input dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing boxes and masks.
 #[allow(
     clippy::too_many_arguments,
     clippy::similar_names,
@@ -344,13 +388,7 @@ fn postprocess_segment(
     // output1: [1, 32, 160, 160] (protos)
 
     // 1. Process Detections
-    // We need to parse shape0 to handle transposition
-    // "32" is standard number of masks, but let's derive it
-    // num_features = 4 + nc + num_masks
-    // We can assume num_masks=32 usually, but let's check.
-    // parse_detect_shape returns (classes, preds, transposed)
-    // It assumes features = 4 + classes. Here features = 4 + classes + masks.
-    // We can't use parse_detect_shape easily if we don't know masks, but standard is 32.
+    // Standard segmentation models use 32 mask prototypes
     let num_masks = 32;
     let expected_features = 4 + names.len() + num_masks;
 
@@ -362,7 +400,7 @@ fn postprocess_segment(
         } else if b == expected_features {
             (a, true) // [1, preds, features]
         } else {
-            // Try to infer? simpler to assume standard [1, 116, 8400]
+            // Assume format [1, 116, 8400] if ambiguous
             if a < b { (b, false) } else { (a, true) }
         }
     } else {
@@ -384,7 +422,6 @@ fn postprocess_segment(
     };
 
     // Filter and NMS
-    // Logic similar to extract_detect_boxes but we need to keep mask coefficients
     let mut candidates = Vec::new(); // (bbox, score, class, original_index)
 
     for i in 0..num_preds {
@@ -501,76 +538,90 @@ fn postprocess_segment(
     let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
     let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
 
-    // Process each mask sequentially (fastest for typical 1-10 masks)
+    // Initialize output array
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
-    let mut resizer = Resizer::new();
-    let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
-    for i in 0..num_kept {
-        let row = masks_flat.row(i);
+    // Process each mask in parallel using Rayon and ndarray::Zip.
+    // Each thread handles resizing and cropping for one mask.
+    //
+    // Inputs:
+    // - mask_out: Mutable view into output masks array
+    // - mask_flat: Mask coefficients for the detection
+    // - box_data: Bounding box for the detection
+    Zip::from(masks_data.outer_iter_mut())
+        .and(masks_flat.outer_iter())
+        .and(boxes_data.outer_iter())
+        .par_for_each(|mut mask_out, mask_flat, box_data| {
+            // Create a local resizer for each task (Resizer is not Sync)
+            let mut resizer = Resizer::new();
+            let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
-        // Sigmoid into a Vec<f32>
-        let f32_data: Vec<f32> = row.iter().map(|&val| 1.0 / (1.0 + (-val).exp())).collect();
+            // Sigmoid into a Vec<f32>
+            let f32_data: Vec<f32> = mask_flat
+                .iter()
+                .map(|&val| 1.0 / (1.0 + (-val).exp()))
+                .collect();
 
-        // Use bytemuck for efficient f32->bytes conversion (avoids per-element allocation)
-        let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+            // Use bytemuck for efficient f32->bytes conversion
+            let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
 
-        // Create source image (160x160) - handle potential errors gracefully
-        let src_image =
-            match Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32) {
+            // Create source image (160x160)
+            let src_image = match Image::from_vec_u8(
+                mw as u32,
+                mh as u32,
+                src_bytes.to_vec(),
+                PixelType::F32,
+            ) {
                 Ok(img) => img,
-                Err(_) => {
-                    // Skip this mask if creation fails
-                    continue;
-                }
+                Err(_) => return, // Skip if creation fails
             };
 
-        // Create dest image (orig_w x orig_h)
-        let mut dst_image = Image::new(ow, oh, PixelType::F32);
+            // Create dest image (orig_w x orig_h)
+            let mut dst_image = Image::new(ow, oh, PixelType::F32);
 
-        // Configure resize with crop - clamp to valid ranges to prevent panic
-        let safe_crop_x = f64::from(crop_x.max(0.0));
-        let safe_crop_y = f64::from(crop_y.max(0.0));
-        let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
-        let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
+            // Configure resize with crop
+            let safe_crop_x = f64::from(crop_x.max(0.0));
+            let safe_crop_y = f64::from(crop_y.max(0.0));
+            let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
+            let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
 
-        let options = ResizeOptions::new().resize_alg(resize_alg).crop(
-            safe_crop_x,
-            safe_crop_y,
-            safe_crop_w,
-            safe_crop_h,
-        );
+            let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+                safe_crop_x,
+                safe_crop_y,
+                safe_crop_w,
+                safe_crop_h,
+            );
 
-        // Handle resize errors gracefully
-        if resizer
-            .resize(&src_image, &mut dst_image, &options)
-            .is_err()
-        {
-            // Skip this mask if resize fails
-            continue;
-        }
+            // Handle resize errors gracefully
+            if resizer
+                .resize(&src_image, &mut dst_image, &options)
+                .is_err()
+            {
+                return;
+            }
 
-        // Get resized data as f32 slice (safe conversion via bytemuck)
-        let dst_bytes = dst_image.buffer();
-        let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
+            // Get resized data as f32 slice
+            let dst_bytes = dst_image.buffer();
+            let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
 
-        // Apply bbox cropping and store directly to output array
-        let x1 = boxes_data[[i, 0]].max(0.0).min(ow as f32);
-        let y1 = boxes_data[[i, 1]].max(0.0).min(oh as f32);
-        let x2 = boxes_data[[i, 2]].max(0.0).min(ow as f32);
-        let y2 = boxes_data[[i, 3]].max(0.0).min(oh as f32);
+            // Apply bbox cropping and store directly to output array
+            let x1 = box_data[0].max(0.0).min(ow as f32);
+            let y1 = box_data[1].max(0.0).min(oh as f32);
+            let x2 = box_data[2].max(0.0).min(ow as f32);
+            let y2 = box_data[3].max(0.0).min(oh as f32);
 
-        for y in 0..oh as usize {
-            for x in 0..ow as usize {
-                let val = dst_slice[y * ow as usize + x];
-                let x_f = x as f32;
-                let y_f = y as f32;
-                if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
-                    masks_data[[i, y, x]] = val;
+            for y in 0..oh as usize {
+                for x in 0..ow as usize {
+                    let val = dst_slice[y * ow as usize + x];
+                    let x_f = x as f32;
+                    let y_f = y as f32;
+                    // Apply bounding box mask: invalid pixels outside the box are zeroed.
+                    if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
+                        mask_out[[y, x]] = val;
+                    }
                 }
             }
-        }
-    }
+        });
 
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
@@ -579,10 +630,23 @@ fn postprocess_segment(
 
 /// Post-process pose estimation model output.
 ///
-/// YOLO pose models output shape is typically [1, 56, 8400] where:
-/// - 56 = 4 (bbox) + 1 (class for person) + 51 (17 keypoints × 3)
-/// - 8400 = number of predictions (varies by input size)
-/// Each keypoint has 3 values: [x, y, confidence]
+/// Extracts bounding boxes and keypoints (skeleton) from the model output.
+///
+/// # Arguments
+///
+/// * `output` - Flat vector of model output.
+/// * `output_shape` - Output tensor dimensions.
+/// * `preprocess` - Preprocessing metadata.
+/// * `config` - Inference configuration.
+/// * `names` - Class name mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source image path.
+/// * `speed` - Timing data.
+/// * `inference_shape` - Inference input dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing boxes and keypoints.
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
@@ -774,6 +838,22 @@ fn postprocess_pose(
 }
 
 /// Post-process classification model output.
+///
+/// Computes best class predictions and probabilities.
+///
+/// # Arguments
+///
+/// * `output` - Raw model output vector.
+/// * `_output_shape` - Output shape (unused).
+/// * `names` - Class name mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Inference dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing classification probabilities.
 fn postprocess_classify(
     output: &[f32],
     _output_shape: &[usize],
@@ -815,11 +895,23 @@ fn postprocess_classify(
 
 /// Post-process OBB (oriented bounding box) model output.
 ///
-/// YOLO OBB models output shape is typically [1, 4+nc+1, 8400] where:
-/// - 4 = bbox (xywh center format)
-/// - nc = number of classes (e.g., 15 for DOTA dataset)
-/// - 1 = rotation angle in radians
-///   The angle is the last value, typically in range [-π/2, π/2]
+/// Extracts oriented bounding boxes with rotation angle.
+///
+/// # Arguments
+///
+/// * `output` - Model output data.
+/// * `output_shape` - Output tensor shape.
+/// * `preprocess` - Preprocessing metadata.
+/// * `config` - Inference configuration.
+/// * `names` - Class name mapping.
+/// * `orig_img` - Original image.
+/// * `path` - Source path.
+/// * `speed` - Timing metrics.
+/// * `inference_shape` - Inference dimensions.
+///
+/// # Returns
+///
+/// `Results` struct containing oriented bounding boxes.
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
