@@ -27,7 +27,7 @@ pub struct InferenceConfig {
     /// Confidence threshold for detections (0.0 to 1.0).
     /// Detections with confidence scores lower than this value will be discarded.
     pub confidence_threshold: f32,
-    /// Intersection over Union (IoU) threshold for Non-Maximum Suppression (NMS) (0.0 to 1.0).
+    /// Intersection over Union (`IoU`) threshold for Non-Maximum Suppression (NMS) (0.0 to 1.0).
     /// Used to merge overlapping boxes. Lower values filter more duplicates.
     pub iou_threshold: f32,
     /// Maximum number of detections to return per image.
@@ -86,14 +86,14 @@ impl InferenceConfig {
         self
     }
 
-    /// Set the IoU threshold for Non-Maximum Suppression (NMS).
+    /// Set the `IoU` threshold for Non-Maximum Suppression (NMS).
     ///
     /// NMS suppresses overlapping bounding boxes. This threshold determines how much overlap
     /// is allowed before boxes are considered duplicates.
     ///
     /// # Arguments
     ///
-    /// * `threshold` - The IoU threshold (0.0 to 1.0).
+    /// * `threshold` - The `IoU` threshold (0.0 to 1.0).
     ///
     /// # Returns
     ///
