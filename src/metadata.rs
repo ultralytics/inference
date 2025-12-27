@@ -51,6 +51,10 @@ impl ModelMetadata {
     ///
     /// * `metadata_map` - The custom metadata from the ONNX model session.
     ///
+    /// # Returns
+    ///
+    /// * A new `ModelMetadata` instance.
+    ///
     /// # Errors
     ///
     /// Returns an error if the metadata is missing or malformed.
@@ -78,6 +82,10 @@ impl ModelMetadata {
     /// # Arguments
     ///
     /// * `yaml_str` - The YAML-formatted metadata string.
+    ///
+    /// # Returns
+    ///
+    /// * A new `ModelMetadata` instance.
     ///
     /// # Errors
     ///
@@ -290,12 +298,24 @@ impl ModelMetadata {
     }
 
     /// Get the number of classes in this model.
+    ///
+    /// # Returns
+    ///
+    /// * The count of classes.
     #[must_use]
     pub fn num_classes(&self) -> usize {
         self.names.len()
     }
 
     /// Get a class name by ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The numeric identifier for the class.
+    ///
+    /// # Returns
+    ///
+    /// * `Some` class name if found, otherwise `None`.
     #[must_use]
     pub fn class_name(&self, class_id: usize) -> Option<&str> {
         self.names.get(&class_id).map(String::as_str)
