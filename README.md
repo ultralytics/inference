@@ -334,6 +334,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 ## 🔮 Roadmap
 
 ### Completed
+
 - [x] Detection, Segmentation, Pose, Classification, OBB inference
 - [x] ONNX model metadata parsing (auto-detect classes, task, imgsz)
 - [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`)
@@ -343,6 +344,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] FP16 half-precision inference
 
 ### In Progress
+
 - [ ] Python bindings (PyO3)
 - [ ] Batch inference optimization
 - [ ] WebAssembly (WASM) support for browser inference
