@@ -670,6 +670,15 @@ impl YOLOModel {
     }
 
     /// Get the model metadata.
+    ///
+    /// Example:
+    ///
+    /// ```no_run
+    /// use ultralytics_inference::YOLOModel;
+    /// let mut model = YOLOModel::load("yolo11n.onnx")?;
+    /// println!("Model name: {}", model.metadata().model_name());
+    /// # Ok::<(), ultralytics_inference::InferenceError>(())
+    /// ```
     #[must_use]
     pub const fn metadata(&self) -> &ModelMetadata {
         &self.metadata

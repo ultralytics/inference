@@ -323,7 +323,7 @@ impl ModelMetadata {
     /// Extract the model name from the description.
     ///
     /// E.g. "Ultralytics `YOLO11n` model..." -> "`YOLO11n`"
-    /// Returns "YOLO" if extraction fails.
+    /// Returns `YOLO` if extraction fails.
     #[must_use]
     pub fn model_name(&self) -> String {
         // Description format: "Ultralytics <MODEL> model..."
