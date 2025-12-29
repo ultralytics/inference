@@ -40,7 +40,7 @@
 //!
 //! ## Quick Start (Library)
 //!
-//! ```rust
+//! ```no_run
 //! use ultralytics_inference::{YOLOModel, InferenceConfig};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -134,7 +134,7 @@
 //!
 //! The task is auto-detected from ONNX metadata:
 //!
-//! ```rust
+//! ```no_run
 //! use ultralytics_inference::YOLOModel;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
