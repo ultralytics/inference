@@ -138,3 +138,5 @@ all = ["annotate", "video"]
 opt-level = 3
 lto = true
 codegen-units = 1
+panic = "abort"
+strip = true
