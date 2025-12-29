@@ -14,19 +14,19 @@ pub enum Device {
     Cuda(usize),
     /// MPS (Metal Performance Shaders) for Apple Silicon (macOS).
     Mps,
-    /// CoreML (Apple Core Machine Learning).
+    /// `CoreML` (Apple Core Machine Learning).
     CoreMl,
-    /// DirectML (Direct Machine Learning) for Windows.
+    /// `DirectML` (Direct Machine Learning) for Windows.
     /// The argument specifies the device index.
     DirectMl(usize),
-    /// OpenVINO (Open Visual Inference and Neural Network Optimization) for Intel hardware.
+    /// `OpenVINO` (Open Visual Inference and Neural Network Optimization) for Intel hardware.
     OpenVino,
     /// XNNPACK (optimized floating-point neural network inference operators) for CPU.
     Xnnpack,
-    /// TensorRT (NVIDIA TensorRT) for high-performance deep learning inference.
+    /// `TensorRT` (NVIDIA `TensorRT`) for high-performance deep learning inference.
     /// The argument specifies the device index.
     TensorRt(usize),
-    /// ROCm (Radeon Open Compute) for AMD GPUs.
+    /// `ROCm` (Radeon Open Compute) for AMD GPUs.
     /// The argument specifies the device index.
     Rocm(usize),
 }
@@ -50,6 +50,7 @@ impl fmt::Display for Device {
 impl FromStr for Device {
     type Err = String;
 
+    #[allow(clippy::option_if_let_else)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_lowercase();
         match s.as_str() {
@@ -58,23 +59,26 @@ impl FromStr for Device {
             "coreml" => Ok(Self::CoreMl),
             "openvino" => Ok(Self::OpenVino),
             "xnnpack" => Ok(Self::Xnnpack),
-            _ => {
-                if let Some(rest) = s.strip_prefix("cuda") {
+            _ => s.strip_prefix("cuda").map_or_else(
+                || {
+                    if let Some(rest) = s.strip_prefix("directml") {
+                        let index = parse_device_index(rest).unwrap_or(0);
+                        Ok(Self::DirectMl(index))
+                    } else if let Some(rest) = s.strip_prefix("tensorrt") {
+                        let index = parse_device_index(rest).unwrap_or(0);
+                        Ok(Self::TensorRt(index))
+                    } else if let Some(rest) = s.strip_prefix("rocm") {
+                        let index = parse_device_index(rest).unwrap_or(0);
+                        Ok(Self::Rocm(index))
+                    } else {
+                        Err(format!("Unknown device: {s}"))
+                    }
+                },
+                |rest| {
                     let index = parse_device_index(rest).unwrap_or(0);
                     Ok(Self::Cuda(index))
-                } else if let Some(rest) = s.strip_prefix("directml") {
-                    let index = parse_device_index(rest).unwrap_or(0);
-                    Ok(Self::DirectMl(index))
-                } else if let Some(rest) = s.strip_prefix("tensorrt") {
-                    let index = parse_device_index(rest).unwrap_or(0);
-                    Ok(Self::TensorRt(index))
-                } else if let Some(rest) = s.strip_prefix("rocm") {
-                    let index = parse_device_index(rest).unwrap_or(0);
-                    Ok(Self::Rocm(index))
-                } else {
-                    Err(format!("Unknown device: {s}"))
-                }
-            }
+                },
+            ),
         }
     }
 }
@@ -85,11 +89,8 @@ fn parse_device_index(s: &str) -> Option<usize> {
         return None;
     }
     // Handle ":0", ":1" etc.
-    if let Some(index_str) = s.strip_prefix(':') {
-        index_str.parse::<usize>().ok()
-    } else {
-        None
-    }
+    s.strip_prefix(':')
+        .and_then(|index_str| index_str.parse::<usize>().ok())
 }
 
 #[cfg(test)]

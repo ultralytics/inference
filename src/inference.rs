@@ -206,7 +206,7 @@ impl InferenceConfig {
     ///
     /// * The modified `InferenceConfig`.
     #[must_use]
-    pub fn with_device(mut self, device: crate::Device) -> Self {
+    pub const fn with_device(mut self, device: crate::Device) -> Self {
         self.device = Some(device);
         self
     }

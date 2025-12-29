@@ -492,6 +492,7 @@ impl YOLOModel {
     }
 
     /// Returns the execution provider used for inference.
+    #[must_use]
     pub fn execution_provider(&self) -> &str {
         &self.execution_provider
     }
