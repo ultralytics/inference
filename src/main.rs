@@ -288,7 +288,8 @@ fn run_prediction(args: &[String]) {
 
     let imgsz = model.imgsz();
     println!(
-        "YOLO11 summary: {} classes, imgsz=({}, {})",
+        "{} summary: {} classes, imgsz=({}, {})",
+        model.metadata().model_name(),
         model.num_classes(),
         imgsz.0,
         imgsz.1
