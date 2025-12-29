@@ -79,6 +79,7 @@ fn run_prediction(args: &[String]) {
     let mut save = false;
     let mut half = false;
     let mut verbose = true;
+    let mut device: Option<ultralytics_inference::Device> = None;
     #[cfg(feature = "visualize")]
     let mut show = false;
 
@@ -182,6 +183,23 @@ fn run_prediction(args: &[String]) {
                     i += 1;
                 }
             }
+            "--device" => {
+                if i + 1 < args.len() {
+                    match args[i + 1].parse() {
+                        Ok(d) => {
+                            device = Some(d);
+                            i += 2;
+                        }
+                        Err(e) => {
+                            eprintln!("Error: Invalid device '{}': {}", args[i + 1], e);
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("Error: --device requires a value");
+                    process::exit(1);
+                }
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 process::exit(1);
@@ -212,6 +230,11 @@ fn run_prediction(args: &[String]) {
     // Apply imgsz if specified
     if let Some(sz) = imgsz {
         config = config.with_imgsz(sz, sz);
+    }
+
+    // Apply device if specified
+    if let Some(d) = &device {
+        config = config.with_device(d.clone());
     }
 
     let mut model = match YOLOModel::load_with_config(&model_path, config) {
@@ -284,7 +307,26 @@ fn run_prediction(args: &[String]) {
 
     let is_half = model.metadata().half || half;
     let precision = if is_half { "FP16" } else { "FP32" };
-    println!("Ultralytics {VERSION} 🚀 Rust ONNX {precision} CPU");
+    let device_str = {
+        let provider = model.execution_provider();
+        if provider.contains("CoreML") {
+            "MPS".to_string()
+        } else if provider.contains("CUDA") {
+            "CUDA".to_string()
+        } else if provider.contains("TensorRT") {
+            "TensorRT".to_string()
+        } else if provider.contains("DirectML") {
+            "DirectML".to_string()
+        } else if provider.contains("ROCm") {
+            "ROCm".to_string()
+        } else if provider.contains("OpenVINO") {
+            "OpenVINO".to_string()
+        } else {
+            "CPU".to_string()
+        }
+    };
+    println!("Ultralytics {VERSION} 🚀 Rust ONNX {precision} {device_str}");
+    println!("Using ONNX Runtime {}", model.execution_provider());
 
     let imgsz = model.imgsz();
     println!(
@@ -591,6 +633,7 @@ Commands:
 Options:
     --model, -m     Path to ONNX model file
     --source, -s    Input source (image, directory, glob, video, webcam, or URL)
+    --device        Device to use (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, etc.)
     --conf          Confidence threshold (default: 0.25)
     --iou           IoU threshold for NMS (default: 0.45)
     --imgsz         Inference image size (default: 640)
@@ -604,6 +647,7 @@ Examples:
     ultralytics-inference predict --model yolo11n.onnx --source video.mp4
     ultralytics-inference predict --model yolo11n.onnx --source 0 --conf 0.5
     ultralytics-inference predict -m yolo11n.onnx -s assets/ --save --half
-    ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show"
+    ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show
+    ultralytics-inference predict --model yolo11n.onnx --source image.jpg --device mps"
     );
 }
