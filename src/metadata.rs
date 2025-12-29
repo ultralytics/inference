@@ -319,6 +319,20 @@ impl ModelMetadata {
     pub fn class_name(&self, class_id: usize) -> Option<&str> {
         self.names.get(&class_id).map(String::as_str)
     }
+
+    /// Extract the model name from the description.
+    ///
+    /// E.g. "Ultralytics `YOLO11n` model..." -> "`YOLO11n`"
+    /// Returns "YOLO" if extraction fails.
+    #[must_use]
+    pub fn model_name(&self) -> String {
+        // Description format: "Ultralytics <MODEL> model..."
+        self.description
+            .split_whitespace()
+            .find(|&word| word.to_lowercase().starts_with("yolo"))
+            .unwrap_or("YOLO")
+            .to_string()
+    }
 }
 
 impl Default for ModelMetadata {
