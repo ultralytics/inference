@@ -15,7 +15,7 @@ use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
 use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, Speed};
 use crate::task::Task;
-use crate::utils::nms_per_class;
+use crate::utils::{nms_per_class, nms_rotated_per_class};
 
 /// Post-process raw model output based on task type.
 ///
@@ -1012,8 +1012,8 @@ fn postprocess_obb(
         let scaled_cy = scaled[1];
 
         // Scale width and height (note: don't apply padding, just scale)
-        let scaled_w = w / preprocess.scale.0;
-        let scaled_h = h / preprocess.scale.1;
+        let scaled_w = w / preprocess.scale.1;
+        let scaled_h = h / preprocess.scale.0;
 
         // Clip center to image bounds
         let (oh, ow) = preprocess.orig_shape;
@@ -1034,26 +1034,8 @@ fn postprocess_obb(
         return results;
     }
 
-    // Apply NMS using axis-aligned bounding boxes (approximation)
-    // Convert xywhr to xyxy for NMS purposes
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(xywhr, score, class)| {
-            let cx = xywhr[0];
-            let cy = xywhr[1];
-            let w = xywhr[2];
-            let h = xywhr[3];
-            // Use max dimension for axis-aligned approximation
-            let max_dim = w.max(h);
-            let x1 = cx - max_dim / 2.0;
-            let y1 = cy - max_dim / 2.0;
-            let x2 = cx + max_dim / 2.0;
-            let y2 = cy + max_dim / 2.0;
-            ([x1, y1, x2, y2], *score, *class)
-        })
-        .collect();
-
-    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
+    // Apply Rotated NMS for precise suppression
+    let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold);
     let num_kept = keep_indices.len().min(config.max_detections);
 
     // Build output array: [cx, cy, w, h, rotation, conf, cls]

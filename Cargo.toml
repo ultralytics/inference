@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
@@ -20,7 +20,11 @@ categories = ["computer-vision", "science", "command-line-interface", "wasm"]
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
 
 [lints.rust]
 unsafe_code = "warn"

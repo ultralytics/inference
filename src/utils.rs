@@ -32,6 +32,73 @@ pub fn calculate_iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
     }
 }
 
+/// Calculate parameters for the covariance matrix of an oriented bounding box
+fn get_covariance_params(w: f32, h: f32, angle: f32) -> (f32, f32, f32) {
+    let a = w.powi(2) / 12.0;
+    let b = h.powi(2) / 12.0;
+
+    let cos = angle.cos();
+    let sin = angle.sin();
+    let cos2 = cos.powi(2);
+    let sin2 = sin.powi(2);
+
+    let a_val = a * cos2 + b * sin2;
+    let b_val = a * sin2 + b * cos2;
+    let c_val = (a - b) * cos * sin;
+
+    (a_val, b_val, c_val)
+}
+
+/// Calculate `ProbIoU` (Probabilistic `IoU`) between two oriented bounding boxes
+///
+/// This metric uses the Hellinger distance between 2D Gaussian distributions
+/// to estimate the `IoU` of rotated bounding boxes. It is used in Ultralytics
+/// OBB models for NMS.
+///
+/// # Arguments
+///
+/// * `box1` - [cx, cy, w, h, angle]
+/// * `box2` - [cx, cy, w, h, angle]
+#[must_use]
+pub fn calculate_probiou(box1: &[f32; 5], box2: &[f32; 5]) -> f32 {
+    let eps = 1e-7;
+
+    let x1 = box1[0];
+    let y1 = box1[1];
+    let w1 = box1[2];
+    let h1 = box1[3];
+    let r1 = box1[4];
+
+    let x2 = box2[0];
+    let y2 = box2[1];
+    let w2 = box2[2];
+    let h2 = box2[3];
+    let r2 = box2[4];
+
+    let (a1, b1, c1) = get_covariance_params(w1, h1, r1);
+    let (a2, b2, c2) = get_covariance_params(w2, h2, r2);
+
+    let t1 = ((a1 + a2).mul_add((y1 - y2).powi(2), (b1 + b2) * (x1 - x2).powi(2))
+        / (a1 + a2).mul_add(b1 + b2, -(c1 + c2).powi(2) + eps))
+        * 0.25;
+
+    let t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2))
+        / (a1 + a2).mul_add(b1 + b2, -(c1 + c2).powi(2) + eps))
+        * 0.5;
+
+    let t3_num = (a1 + a2).mul_add(b1 + b2, -(c1 + c2).powi(2));
+    let t3_den = 4.0f32.mul_add(
+        ((a1.mul_add(b1, -c1.powi(2))).max(0.0) * (a2.mul_add(b2, -c2.powi(2))).max(0.0)).sqrt(),
+        eps,
+    );
+    let t3 = (t3_num / t3_den + eps).ln() * 0.5;
+
+    let bd = (t1 + t2 + t3).clamp(eps, 100.0);
+    let hd = (1.0 - (-bd).exp() + eps).sqrt();
+
+    1.0 - hd
+}
+
 /// Non-Maximum Suppression (NMS) for filtering overlapping detections
 ///
 /// # Arguments
@@ -123,6 +190,49 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
                     if iou > iou_threshold {
                         suppressed[j] = true;
                     }
+                }
+            }
+        }
+    }
+
+    keep
+}
+
+/// Rotated Per-class Non-Maximum Suppression (NMS) using `ProbIoU`
+///
+/// # Arguments
+///
+/// * `boxes` - Vector of rotated bounding boxes: [cx, cy, w, h, angle], score, `class_id`
+/// * `iou_threshold` - `IoU` threshold
+/// # Panics
+///
+/// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
+#[must_use]
+pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f32) -> Vec<usize> {
+    if boxes.is_empty() {
+        return vec![];
+    }
+
+    // Sort by score (descending)
+    let mut indices: Vec<usize> = (0..boxes.len()).collect();
+    indices.sort_by(|&a, &b| boxes[b].1.partial_cmp(&boxes[a].1).unwrap());
+
+    let mut keep = vec![];
+    let mut suppressed = vec![false; boxes.len()];
+
+    for &i in &indices {
+        if suppressed[i] {
+            continue;
+        }
+        keep.push(i);
+
+        let class_i = boxes[i].2;
+
+        for &j in &indices {
+            if !suppressed[j] && i != j && boxes[j].2 == class_i {
+                let iou = calculate_probiou(&boxes[i].0, &boxes[j].0);
+                if iou > iou_threshold {
+                    suppressed[j] = true;
                 }
             }
         }

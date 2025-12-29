@@ -493,6 +493,39 @@ fn format_detection_summary(result: &Results) -> String {
             let class_id = cls[i] as usize;
             *counts.entry(class_id).or_insert(0) += 1;
         }
+        // Sort by class ID for consistent output
+        let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
+        sorted_counts.sort_by_key(|(class_id, _)| *class_id);
+
+        // Format each class count
+        let parts: Vec<String> = sorted_counts
+            .iter()
+            .map(|(class_id, count)| {
+                let class_name = result.names.get(class_id).map_or("object", String::as_str);
+                // Pluralize if count > 1
+                let name = if *count > 1 {
+                    pluralize(class_name)
+                } else {
+                    class_name.to_string()
+                };
+                format!("{count} {name}")
+            })
+            .collect();
+
+        parts.join(", ")
+    } else if let Some(ref obb) = result.obb {
+        if obb.is_empty() {
+            return String::new();
+        }
+
+        // Count detections per class
+        let cls = obb.cls();
+        let mut counts: HashMap<usize, usize> = HashMap::new();
+
+        for i in 0..obb.len() {
+            let class_id = cls[i] as usize;
+            *counts.entry(class_id).or_insert(0) += 1;
+        }
 
         // Sort by class ID for consistent output
         let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();

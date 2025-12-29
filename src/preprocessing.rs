@@ -210,7 +210,7 @@ fn letterbox_image(
 
     let mut resizer = Resizer::new();
     let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
-        fast_image_resize::FilterType::Bilinear,
+        fast_image_resize::FilterType::Lanczos3,
     ));
     resizer
         .resize(&src_image, &mut dst_image, Some(&options))
