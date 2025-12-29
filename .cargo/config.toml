@@ -7,6 +7,3 @@ PKG_CONFIG_PATH = "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
 CPATH = "/opt/homebrew/opt/ffmpeg@7/include"
 LIBRARY_PATH = "/opt/homebrew/opt/ffmpeg@7/lib"
 BINDGEN_EXTRA_CLANG_ARGS = "-I/opt/homebrew/opt/ffmpeg@7/include"
-
-[build]
-rustflags = ["-C", "target-cpu=native"]
