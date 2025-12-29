@@ -134,6 +134,13 @@ all = ["annotate", "video"]
 [dev-dependencies]
 # Testing dependencies
 
+[profile.dev]
+opt-level = 0
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = true
