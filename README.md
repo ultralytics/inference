@@ -201,13 +201,13 @@ use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Select a device (e.g., CUDA, MPS, CPU)
     let device = Device::Cuda(0);
-    
+
     // Configure the model to use this device
     let config = InferenceConfig::new().with_device(device);
-    
+
     let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
     let results = model.predict("image.jpg")?;
-    
+
     Ok(())
 }
 ```
