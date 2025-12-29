@@ -55,6 +55,9 @@ fn get_covariance_params(w: f32, h: f32, angle: f32) -> (f32, f32, f32) {
 /// to estimate the `IoU` of rotated bounding boxes. It is used in Ultralytics
 /// OBB models for NMS.
 ///
+/// It provides a differentiable and robust overlap metric for oriented boxes
+/// where standard Polygon `IoU` can be unstable or computationally expensive.
+///
 /// # Arguments
 ///
 /// * `box1` - [cx, cy, w, h, angle]
@@ -199,6 +202,10 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
 }
 
 /// Rotated Per-class Non-Maximum Suppression (NMS) using `ProbIoU`
+///
+/// This function performs NMS specifically for Oriented Bounding Boxes (OBB).
+/// Instead of standard `IoU`, it uses `ProbIoU` (Hellinger distance) to determine overlap,
+/// which correctly handles the rotation angle of the boxes.
 ///
 /// # Arguments
 ///

@@ -1034,7 +1034,9 @@ fn postprocess_obb(
         return results;
     }
 
-    // Apply Rotated NMS for precise suppression
+    // Apply Rotated NMS for precise suppression using ProbIoU (Hellinger distance).
+    // This ensures that overlapping rotated boxes are correctly filtered based on their
+    // actual geometric overlap, which standard axis-aligned IoU cannot handle.
     let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold);
     let num_kept = keep_indices.len().min(config.max_detections);
 
