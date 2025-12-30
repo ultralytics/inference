@@ -11,8 +11,9 @@
 /// This struct is used to customize the behavior of the inference engine.
 /// It uses a builder pattern for convenient construction.
 ///
-/// # Example
+/// # Examples
 ///
+/// Basic configuration:
 /// ```rust
 /// use ultralytics_inference::InferenceConfig;
 ///
@@ -21,6 +22,15 @@
 ///     .with_iou(0.45)
 ///     .with_max_detections(100)
 ///     .with_imgsz(640, 640);
+/// ```
+///
+/// With specific hardware device:
+/// ```rust
+/// use ultralytics_inference::{InferenceConfig, Device};
+///
+/// let config = InferenceConfig::new()
+///     .with_confidence(0.5)
+///     .with_device(Device::Cuda(0));
 /// ```
 #[derive(Debug, Clone)]
 pub struct InferenceConfig {
@@ -43,6 +53,9 @@ pub struct InferenceConfig {
     /// This can improve performance on compatible hardware (e.g., GPUs) but may
     /// result in slight precision loss.
     pub half: bool,
+    /// Hardware device to use for inference.
+    /// If `None`, the best available device will be automatically selected.
+    pub device: Option<crate::Device>,
 }
 
 impl Default for InferenceConfig {
@@ -54,6 +67,7 @@ impl Default for InferenceConfig {
             imgsz: None,
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
             half: false,
+            device: None,
         }
     }
 }
@@ -170,6 +184,30 @@ impl InferenceConfig {
     #[must_use]
     pub const fn with_half(mut self, half: bool) -> Self {
         self.half = half;
+        self
+    }
+
+    /// Set the hardware device for inference.
+    ///
+    /// # Arguments
+    ///
+    /// * `device` - The device to use (e.g., CPU, CUDA, MPS).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use ultralytics_inference::{InferenceConfig, Device};
+    ///
+    /// let config = InferenceConfig::new()
+    ///     .with_device(Device::Mps); // Use Apple Metal Performance Shaders
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_device(mut self, device: crate::Device) -> Self {
+        self.device = Some(device);
         self
     }
 }

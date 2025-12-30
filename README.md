@@ -101,6 +101,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | ----------- | ----- | ------------------------------------------------- | --------------------------------------- |
 | `--model`   | `-m`  | Path to ONNX model file                           | `yolo11n.onnx`                          |
 | `--source`  | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
+| `--device`  |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
 | `--conf`    |       | Confidence threshold                              | `0.25`                                  |
 | `--iou`     |       | IoU threshold for NMS                             | `0.45`                                  |
 | `--imgsz`   |       | Inference image size                              | `Model metadata`                        |
@@ -189,6 +190,25 @@ if let Some(ref boxes) = result.boxes {
     // Confidence scores and class IDs
     let conf = boxes.conf();      // Confidence scores
     let cls = boxes.cls();        // Class IDs
+}
+```
+
+**Selecting a Device:**
+
+```rust
+use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Select a device (e.g., CUDA, MPS, CPU)
+    let device = Device::Cuda(0);
+
+    // Configure the model to use this device
+    let config = InferenceConfig::new().with_device(device);
+
+    let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
+    let results = model.predict("image.jpg")?;
+
+    Ok(())
 }
 ```
 
