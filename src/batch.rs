@@ -145,9 +145,9 @@ mod tests {
             .unwrap_or_else(|_| DynamicImage::new_rgb8(640, 640))
     }
 
-    /// Test that BatchProcessor correctly buffers images until batch_size is reached.
+    /// Test that `BatchProcessor` correctly buffers images until `batch_size` is reached.
     ///
-    /// Note: The default yolo11n.onnx only supports batch=1, so when we use batch_size=2,
+    /// Note: The default yolo11n.onnx only supports batch=1, so when we use `batch_size=2`,
     /// the batch inference will fail and fall back to single-image inference.
     /// This test still validates the buffering and callback behavior.
     #[test]
@@ -217,9 +217,9 @@ mod tests {
         assert_eq!(*callback_count.borrow(), 0);
     }
 
-    /// Test frame_count accumulation across batches.
+    /// Test `frame_count` accumulation across batches.
     ///
-    /// Note: Uses batch_size=1 to avoid triggering fallback (since default model is batch=1).
+    /// Note: Uses `batch_size=1` to avoid triggering fallback (since default model is batch=1).
     #[test]
     #[ignore = "requires yolo11n.onnx model file - run with --include-ignored"]
     fn test_batch_processor_frame_count() {
@@ -228,7 +228,7 @@ mod tests {
         let offsets = Rc::new(RefCell::new(Vec::new()));
         let offsets_clone = Rc::clone(&offsets);
 
-        // Use batch_size=1 to work with default model (which only supports batch=1)
+        // Use `batch_size=1` to work with default model (which only supports batch=1)
         let mut processor = BatchProcessor::new(
             &mut model,
             1,

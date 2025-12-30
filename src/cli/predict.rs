@@ -197,7 +197,7 @@ pub fn run_prediction(args: &PredictArgs) {
              images: &[image::DynamicImage],
              paths: &[String],
              metas: &[crate::source::SourceMeta],
-             frame_offset: usize| {
+             _frame_offset: usize| {
                 for (idx, results) in batch_results.into_iter().enumerate() {
                     let meta = &metas[idx];
                     let image_path = &paths[idx];
