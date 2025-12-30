@@ -319,7 +319,6 @@ pub fn run_prediction(args: &PredictArgs) {
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
-    // Print speed summary with inference tensor shape (after letterboxing)
     let num_results = all_results.len().max(1) as f64;
     verbose!(
         "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
