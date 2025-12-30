@@ -244,6 +244,7 @@
 // Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
+pub mod batch;
 pub mod cli;
 pub mod device;
 pub mod download;
