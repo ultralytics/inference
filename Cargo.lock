@@ -591,7 +591,7 @@ dependencies = [
  "lebe",
  "miniz_oxide",
  "rayon-core",
- "smallvec 1.15.1",
+ "smallvec",
  "zune-inflate",
 ]
 
@@ -922,7 +922,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.15.1",
+ "smallvec",
  "zerovec",
 ]
 
@@ -974,7 +974,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de"
 dependencies = [
  "idna_adapter",
- "smallvec 1.15.1",
+ "smallvec",
  "utf8_iter",
 ]
 
@@ -1599,12 +1599,12 @@ dependencies = [
 [[package]]
 name = "ort"
 version = "2.0.0-rc.10"
-source = "git+https://github.com/pykeio/ort.git#45d6a267b57c8b24ce49b75811e57ffced7ceebc"
+source = "git+https://github.com/pykeio/ort.git#52537fe0ce6d318c83528303f2f689e413212a03"
 dependencies = [
  "half",
  "ndarray 0.17.1",
  "ort-sys",
- "smallvec 2.0.0-alpha.12",
+ "smallvec",
  "tracing",
  "ureq",
 ]
@@ -1612,7 +1612,7 @@ dependencies = [
 [[package]]
 name = "ort-sys"
 version = "2.0.0-rc.10"
-source = "git+https://github.com/pykeio/ort.git#45d6a267b57c8b24ce49b75811e57ffced7ceebc"
+source = "git+https://github.com/pykeio/ort.git#52537fe0ce6d318c83528303f2f689e413212a03"
 dependencies = [
  "glob",
  "hmac-sha256",
@@ -2233,12 +2233,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
-name = "smallvec"
-version = "2.0.0-alpha.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef784004ca8777809dcdad6ac37629f0a97caee4c685fcea805278d81dd8b857"
-
-[[package]]
 name = "socks"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2622,7 +2616,7 @@ checksum = "8691f134d584a33a6606d9d717b95c4fa20065605f798a3f350d78dced02a902"
 dependencies = [
  "nix",
  "once_cell",
- "smallvec 1.15.1",
+ "smallvec",
  "wayland-sys",
 ]
 
