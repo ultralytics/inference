@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::process;
-use std::time::Duration;
 
 #[cfg(feature = "annotate")]
 use std::fs;
