@@ -57,6 +57,8 @@ pub struct YOLOModel {
     warmed_up: bool,
     /// Whether model expects FP16 input.
     fp16_input: bool,
+    /// Execution provider used for inference
+    execution_provider: String,
 }
 
 #[allow(
@@ -129,43 +131,137 @@ impl YOLOModel {
             InferenceError::ModelLoadError(format!("Failed to create session builder: {e}"))
         })?;
 
-        // Register execution providers based on features
+        // Register execution providers based on features and device config
         #[allow(unused_mut)]
         let mut eps: Vec<ort::execution_providers::ExecutionProviderDispatch> = Vec::new();
+        let mut provider_name = "CPUExecutionProvider";
 
-        #[cfg(feature = "coreml")]
-        {
-            eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
-        }
+        if let Some(device) = &config.device {
+            // User requested specific device
+            match device {
+                crate::Device::Cpu => {
+                    // No specific provider needed, will fall back to CPU
+                    provider_name = "CPUExecutionProvider";
+                }
+                #[cfg(feature = "cuda")]
+                crate::Device::Cuda(i) => {
+                    eps.push(
+                        ort::execution_providers::CUDAExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "CUDAExecutionProvider";
+                }
+                #[cfg(feature = "coreml")]
+                crate::Device::CoreMl | crate::Device::Mps => {
+                    // Map both CoreML and MPS to CoreMLExecutionProvider
+                    eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
+                    provider_name = "CoreMLExecutionProvider";
+                }
+                #[cfg(feature = "tensorrt")]
+                crate::Device::TensorRt(i) => {
+                    eps.push(
+                        ort::execution_providers::TensorRTExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "TensorRTExecutionProvider";
+                }
+                #[cfg(feature = "rocm")]
+                crate::Device::Rocm(i) => {
+                    eps.push(
+                        ort::execution_providers::ROCmExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "ROCmExecutionProvider";
+                }
+                #[cfg(feature = "directml")]
+                crate::Device::DirectMl(i) => {
+                    eps.push(
+                        ort::execution_providers::DirectMLExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "DirectMLExecutionProvider";
+                }
+                #[cfg(feature = "openvino")]
+                crate::Device::OpenVino => {
+                    eps.push(
+                        ort::execution_providers::OpenVINOExecutionProvider::default().build(),
+                    );
+                    provider_name = "OpenVINOExecutionProvider";
+                }
+                #[cfg(feature = "xnnpack")]
+                crate::Device::Xnnpack => {
+                    eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+                    provider_name = "XNNPACKExecutionProvider";
+                }
+                // Handle cases where feature is disabled but enum variant exists
+                #[allow(unreachable_patterns)]
+                _ => {
+                    eprintln!(
+                        "\x1b[33mWARNING ⚠️ Device '{device}' requested but feature not enabled or supported. Falling back to available providers.\x1b[0m"
+                    );
+                }
+            }
+        } else {
+            // Default: Register all available providers in preference order
+            provider_name = "CPUExecutionProvider";
 
-        #[cfg(feature = "cuda")]
-        {
-            eps.push(ort::execution_providers::CUDAExecutionProvider::default().build());
-        }
+            #[cfg(feature = "tensorrt")]
+            {
+                eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
+                provider_name = "TensorRTExecutionProvider";
+            }
 
-        #[cfg(feature = "tensorrt")]
-        {
-            eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
-        }
+            #[cfg(feature = "cuda")]
+            {
+                eps.push(ort::execution_providers::CUDAExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "CUDAExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "rocm")]
-        {
-            eps.push(ort::execution_providers::ROCmExecutionProvider::default().build());
-        }
+            #[cfg(feature = "coreml")]
+            {
+                eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "CoreMLExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "directml")]
-        {
-            eps.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
-        }
+            #[cfg(feature = "rocm")]
+            {
+                eps.push(ort::execution_providers::ROCmExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "ROCmExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "openvino")]
-        {
-            eps.push(ort::execution_providers::OpenVINOExecutionProvider::default().build());
-        }
+            #[cfg(feature = "directml")]
+            {
+                eps.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "DirectMLExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "xnnpack")]
-        {
-            eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+            #[cfg(feature = "openvino")]
+            {
+                eps.push(ort::execution_providers::OpenVINOExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "OpenVINOExecutionProvider";
+                }
+            }
+
+            #[cfg(feature = "xnnpack")]
+            {
+                eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "XNNPACKExecutionProvider";
+                }
+            }
         }
 
         if !eps.is_empty() {
@@ -208,6 +304,17 @@ impl YOLOModel {
             )
         });
 
+        // Check for dynamic input dimensions
+        // Dimensions are typically [-1, 3, -1, -1] for dynamic batch/height/width
+        // ort 2.0 returns Option<i64> (None means dynamic/unknown)
+        let is_dynamic = input_info.is_some_and(|i| {
+            if let ValueType::Tensor { shape, .. } = i.dtype() {
+                shape.iter().any(|d| *d == -1 || *d == 0)
+            } else {
+                false
+            }
+        });
+
         // Use FP16 input if model tensor type requires it
         let fp16_input = model_input_fp16;
 
@@ -217,13 +324,52 @@ impl YOLOModel {
             .map(|o| o.name().to_string())
             .collect();
 
-        // Update config with model metadata if not overridden
-        // Sync half flag with model's half metadata (for display purposes)
+        // Resolve image size
+        // Priority:
+        // 1. User config
+        // 2. Model metadata
+        // 3. Dynamic default (1024 for OBB, 640 for others)
+        // 4. Static input shape
+        // 5. Hard default (640)
+        let resolved_imgsz = if let Some(sz) = config.imgsz {
+            sz
+        } else if let Some(sz) = metadata.imgsz {
+            sz
+        } else if is_dynamic {
+            // Dynamic input without metadata -> apply robust defaults
+            match metadata.task {
+                Task::Obb => (1024, 1024),
+                _ => (640, 640),
+            }
+        } else {
+            // Static input without metadata -> try to read from tensor shape
+            // Typically [1, 3, H, W]
+            input_info
+                .and_then(|i| {
+                    if let ValueType::Tensor { shape, .. } = i.dtype() {
+                        if shape.len() == 4 && shape[2] > 0 && shape[3] > 0 {
+                            #[allow(clippy::cast_sign_loss)]
+                            Some((shape[2] as usize, shape[3] as usize))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or((640, 640))
+        };
+
+        // Update config with resolved values
         let config = InferenceConfig {
-            imgsz: config.imgsz.or(Some(metadata.imgsz)),
+            imgsz: Some(resolved_imgsz),
             half: config.half || metadata.half, // Use half if user requested OR model was exported with half
             ..config
         };
+
+        // Ensure metadata reflects the resolved size
+        let mut metadata = metadata;
+        metadata.imgsz = Some(resolved_imgsz);
 
         let mut model = Self {
             session,
@@ -233,6 +379,7 @@ impl YOLOModel {
             config,
             warmed_up: false,
             fp16_input,
+            execution_provider: provider_name.to_string(),
         };
 
         // Warmup inference to trigger JIT compilation and memory allocation
@@ -253,7 +400,11 @@ impl YOLOModel {
             return Ok(());
         }
 
-        let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);
+        let target_size = self
+            .config
+            .imgsz
+            .or(self.metadata.imgsz)
+            .unwrap_or((640, 640));
 
         // Sanity check to prevent huge allocations from invalid imgsz
         if target_size.0 > Self::MAX_IMGSZ || target_size.1 > Self::MAX_IMGSZ {
@@ -340,6 +491,12 @@ impl YOLOModel {
         ModelMetadata::from_onnx_metadata(&metadata_map)
     }
 
+    /// Returns the execution provider used for inference.
+    #[must_use]
+    pub fn execution_provider(&self) -> &str {
+        &self.execution_provider
+    }
+
     /// Run inference on an image file.
     ///
     /// # Arguments
@@ -379,7 +536,11 @@ impl YOLOModel {
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
         // Get target size from config or metadata
-        let target_size = self.config.imgsz.unwrap_or(self.metadata.imgsz);
+        let target_size = self
+            .config
+            .imgsz
+            .or(self.metadata.imgsz)
+            .unwrap_or((640, 640));
 
         // Preprocess - generate FP16 tensor if model expects FP16 input
         let start_preprocess = Instant::now();
@@ -595,8 +756,8 @@ impl YOLOModel {
 
     /// Get the model's input size.
     #[must_use]
-    pub const fn imgsz(&self) -> (usize, usize) {
-        self.metadata.imgsz
+    pub fn imgsz(&self) -> (usize, usize) {
+        self.metadata.imgsz.unwrap_or((640, 640))
     }
 
     /// Get the model's stride.
@@ -612,6 +773,15 @@ impl YOLOModel {
     }
 
     /// Get the model metadata.
+    ///
+    /// Example:
+    ///
+    /// ```no_run
+    /// use ultralytics_inference::YOLOModel;
+    /// let mut model = YOLOModel::load("yolo11n.onnx")?;
+    /// println!("Model name: {}", model.metadata().model_name());
+    /// # Ok::<(), ultralytics_inference::InferenceError>(())
+    /// ```
     #[must_use]
     pub const fn metadata(&self) -> &ModelMetadata {
         &self.metadata

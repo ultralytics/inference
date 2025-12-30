@@ -210,7 +210,10 @@ fn letterbox_image(
 
     let mut resizer = Resizer::new();
     let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
-        fast_image_resize::FilterType::Bilinear,
+        // Use Lanczos3 for high-quality resizing. This is critical for OBB tasks where
+        // preserving small features (like harbors in DOTA8) is essential for detection.
+        // It matches the default behavior of Ultralytics Python preprocessing.
+        fast_image_resize::FilterType::Lanczos3,
     ));
     resizer
         .resize(&src_image, &mut dst_image, Some(&options))

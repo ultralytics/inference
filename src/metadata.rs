@@ -35,7 +35,7 @@ pub struct ModelMetadata {
     /// Batch size the model was exported with.
     pub batch: usize,
     /// Input image size as (height, width).
-    pub imgsz: (usize, usize),
+    pub imgsz: Option<(usize, usize)>,
     /// Number of input channels (typically 3 for RGB).
     pub channels: usize,
     /// Whether the model uses FP16 (half precision).
@@ -171,7 +171,7 @@ impl ModelMetadata {
 
     /// Parse the imgsz field which can be a YAML list.
     #[allow(clippy::unnecessary_wraps)]
-    fn parse_imgsz(yaml_str: &str, imgsz_line: &str) -> Result<(usize, usize)> {
+    fn parse_imgsz(yaml_str: &str, imgsz_line: &str) -> Result<Option<(usize, usize)>> {
         // Check if imgsz is on a single line like "imgsz: [640, 640]"
         if let Some(bracket_start) = imgsz_line.find('[')
             && let Some(bracket_end) = imgsz_line.find(']')
@@ -181,7 +181,7 @@ impl ModelMetadata {
                 .filter_map(|s| s.trim().parse().ok())
                 .collect();
             if values.len() >= 2 {
-                return Ok((values[0], values[1]));
+                return Ok(Some((values[0], values[1])));
             }
         }
 
@@ -210,10 +210,9 @@ impl ModelMetadata {
         }
 
         if imgsz_values.len() >= 2 {
-            Ok((imgsz_values[0], imgsz_values[1]))
+            Ok(Some((imgsz_values[0], imgsz_values[1])))
         } else {
-            // Default to 640x640
-            Ok((640, 640))
+            Ok(None)
         }
     }
 
@@ -320,6 +319,20 @@ impl ModelMetadata {
     pub fn class_name(&self, class_id: usize) -> Option<&str> {
         self.names.get(&class_id).map(String::as_str)
     }
+
+    /// Extract the model name from the description.
+    ///
+    /// E.g. "Ultralytics `YOLO11n` model..." -> "`YOLO11n`"
+    /// Returns `YOLO` if extraction fails.
+    #[must_use]
+    pub fn model_name(&self) -> String {
+        // Description format: "Ultralytics <MODEL> model..."
+        self.description
+            .split_whitespace()
+            .find(|&word| word.to_lowercase().starts_with("yolo"))
+            .unwrap_or("YOLO")
+            .to_string()
+    }
 }
 
 impl Default for ModelMetadata {
@@ -334,7 +347,7 @@ impl Default for ModelMetadata {
             task: Task::Detect,
             stride: 32,
             batch: 1,
-            imgsz: (640, 640),
+            imgsz: None,
             channels: 3,
             half: false,
             names: HashMap::new(),
@@ -374,7 +387,7 @@ channels: 3
         assert_eq!(metadata.task, Task::Detect);
         assert_eq!(metadata.stride, 32);
         assert_eq!(metadata.batch, 1);
-        assert_eq!(metadata.imgsz, (640, 640));
+        assert_eq!(metadata.imgsz, Some((640, 640)));
         assert_eq!(metadata.channels, 3);
         assert_eq!(metadata.num_classes(), 4);
         assert_eq!(metadata.class_name(0), Some("person"));
@@ -387,7 +400,7 @@ channels: 3
     fn test_parse_inline_imgsz() {
         let yaml = "task: detect\nimgsz: [640, 640]\nstride: 32";
         let metadata = ModelMetadata::from_yaml_str(yaml).unwrap();
-        assert_eq!(metadata.imgsz, (640, 640));
+        assert_eq!(metadata.imgsz, Some((640, 640)));
     }
 
     #[test]
@@ -395,6 +408,6 @@ channels: 3
         let metadata = ModelMetadata::default();
         assert_eq!(metadata.task, Task::Detect);
         assert_eq!(metadata.stride, 32);
-        assert_eq!(metadata.imgsz, (640, 640));
+        assert_eq!(metadata.imgsz, None);
     }
 }

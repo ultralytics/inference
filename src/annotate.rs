@@ -283,6 +283,14 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
 fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
+    // Calculate dynamic scale factor based on image size (reference 640x640)
+    let max_dim = width.max(height) as f32;
+    let scale_factor = (max_dim / 640.0).max(1.0);
+
+    // Scale thickness and font size
+    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
+
     if let Some(ref boxes) = result.boxes {
         let xyxy = boxes.xyxy();
         let conf = boxes.conf();
@@ -346,6 +354,9 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             }
         }
 
+        // Keep track of occupied label areas to avoid overlap
+        let mut labels_rects: Vec<Rect> = Vec::new();
+
         // Draw boxes and labels
         for i in 0..boxes.len() {
             let class_id = cls[i] as usize;
@@ -375,7 +386,6 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             let color = get_class_color(class_id);
 
             // Draw box
-            let thickness = 3;
             for t in 0..thickness {
                 let tx1 = (x1 + t).min(x2);
                 let ty1 = (y1 + t).min(y2);
@@ -392,7 +402,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             let label = format!(" {class_name} {confidence:.2} ");
 
             if let Some(ref f) = font {
-                let scale = PxScale::from(24.0);
+                let scale = PxScale::from(font_scale);
                 let scaled_font = f.as_scaled(scale);
                 let mut text_w = 0.0;
                 for c in label.chars() {
@@ -401,21 +411,120 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
                 let text_w = text_w.ceil() as i32;
                 let text_h = scale.y.ceil() as i32;
 
-                let text_y = if y1 > text_h { y1 - text_h } else { y1 };
-                let text_x = x1;
+                // Smart label placement
+                // Default: above the box
+                let mut text_x = x1;
+                let mut text_y = y1 - text_h;
+
+                // If label is out of image (top), move inside
+                if text_y < 0 {
+                    text_y = y1;
+                }
+
+                // If label is out of image (left), move right
+                if text_x < 0 {
+                    text_x = 0;
+                }
+
+                // If label is out of image (right), move left
+                if text_x + text_w >= width as i32 {
+                    text_x = width as i32 - text_w - 1;
+                }
+
+                // Check bounds one last time (bottom)
+                if text_y + text_h >= height as i32 {
+                    text_y = height as i32 - text_h - 1;
+                }
+
+                // Overlap avoidance
+                // Check against existing labels. If overlap, move down.
+                let mut attempts = 0;
+                let max_attempts = 10;
+                let mut current_rect =
+                    Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+
+                'placement: while attempts < max_attempts {
+                    let mut is_overlapping = false;
+                    for existing in &labels_rects {
+                        // Simple intersection check
+                        if rect_intersect(&current_rect, existing) {
+                            is_overlapping = true;
+                            break;
+                        }
+                    }
+
+                    if !is_overlapping {
+                        break 'placement;
+                    }
+
+                    // Move down
+                    text_y += text_h; // stack below
+
+                    // Check bounds again
+                    if text_y + text_h >= height as i32 {
+                        // Reached bottom, maybe try moving right?
+                        // For now just stop here or loop around?
+                        // Let's try moving x a bit and resetting y
+                        text_y = y1 - text_h;
+                        if text_y < 0 {
+                            text_y = y1;
+                        }
+                        text_x += 10; // Shift right slightly
+                        if text_x + text_w >= width as i32 {
+                            // Screen full, just give up and draw wherever
+                            break 'placement;
+                        }
+                    }
+
+                    current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+                    attempts += 1;
+                }
+
+                // Add to occupied list
+                labels_rects.push(current_rect);
 
                 if text_x >= 0
                     && text_y >= 0
                     && text_x + text_w < width as i32
                     && text_y + text_h < height as i32
                 {
-                    let rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-                    draw_filled_rect_mut(img, rect, color);
-                    draw_text_mut(img, Rgb([255, 255, 255]), text_x, text_y, scale, f, &label);
+                    draw_filled_rect_mut(img, current_rect, color);
+                    let text_color = get_text_color(color);
+                    draw_text_mut(img, text_color, text_x, text_y, scale, f, &label);
                 }
             }
         }
     }
+}
+
+/// Calculate appropriate text color (black or white) based on background luminance
+fn get_text_color(bg: Rgb<u8>) -> Rgb<u8> {
+    let r = f32::from(bg.0[0]);
+    let g = f32::from(bg.0[1]);
+    let b = f32::from(bg.0[2]);
+
+    // Calculate luminance (standard formula)
+    let luminance = 0.114_f32.mul_add(b, 0.299_f32.mul_add(r, 0.587 * g));
+
+    // Threshold usually around 128-186. Using 150 for better safety on mid-tones.
+    if luminance > 150.0 {
+        Rgb([0, 0, 0]) // Black text for light backgrounds
+    } else {
+        Rgb([255, 255, 255]) // White text for dark backgrounds
+    }
+}
+fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
+    let r1_left = r1.left();
+    let r1_right = r1.right();
+    let r1_top = r1.top();
+    let r1_bottom = r1.bottom();
+
+    let r2_left = r2.left();
+    let r2_right = r2.right();
+    let r2_top = r2.top();
+    let r2_bottom = r2.bottom();
+
+    !(r2_left >= r1_right || r2_right <= r1_left || r2_top >= r1_bottom || r2_bottom <= r1_top)
 }
 
 /// Draw pose estimation results (skeleton and keypoints)
@@ -465,6 +574,14 @@ fn draw_pose(
 ) {
     let (width, height) = img.dimensions();
 
+    // Calculate dynamic scale factor based on image size (reference 640x640)
+    let max_dim = width.max(height) as f32;
+    let scale_factor = (max_dim / 640.0).max(1.0);
+
+    // Scale thickness and radius
+    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    let radius = (3.0 * scale_factor).round() as i32;
+
     if let Some(ref keypoints) = result.keypoints {
         // Use provided parameters or defaults
         let skeleton = skeleton.unwrap_or(&SKELETON);
@@ -491,7 +608,7 @@ fn draw_pose(
                 if conf1 > 0.5 && conf2 > 0.5 {
                     let color_idx = limb_colors[limb_idx % limb_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
-                    draw_line_segment(img, x1, y1, x2, y2, color, 2);
+                    draw_line_segment(img, x1, y1, x2, y2, color, thickness);
                 }
             }
 
@@ -503,7 +620,7 @@ fn draw_pose(
                 if conf > 0.5 && x >= 0.0 && y >= 0.0 && x < width as f32 && y < height as f32 {
                     let color_idx = kpt_colors[kpt_idx % kpt_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
-                    draw_filled_circle(img, x as i32, y as i32, 5, color);
+                    draw_filled_circle(img, x as i32, y as i32, radius, color);
                 }
             }
         }
@@ -521,10 +638,21 @@ fn draw_pose(
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
+    // Calculate dynamic scale factor based on image size (reference 640x640)
+    let max_dim = width.max(height) as f32;
+    let scale_factor = (max_dim / 640.0).max(1.0);
+
+    // Scale thickness and font size
+    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
+
     if let Some(ref obb) = result.obb {
         let corners = obb.xyxyxyxy();
         let conf = obb.conf();
         let cls = obb.cls();
+
+        // Keep track of occupied label areas to avoid overlap
+        let mut labels_rects: Vec<Rect> = Vec::new();
 
         for i in 0..obb.len() {
             let class_id = cls[i] as usize;
@@ -536,14 +664,14 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
                 let y1 = corners[[i, j, 1]];
                 let x2 = corners[[i, next_j, 0]];
                 let y2 = corners[[i, next_j, 1]];
-                draw_line_segment(img, x1, y1, x2, y2, color, 3);
+                draw_line_segment(img, x1, y1, x2, y2, color, thickness);
             }
 
             let class_name = result.names.get(&class_id).map_or("object", String::as_str);
             let label = format!(" {} {:.2} ", class_name, conf[i]);
 
             if let Some(ref f) = font {
-                let scale = PxScale::from(24.0);
+                let scale = PxScale::from(font_scale);
                 let scaled_font = f.as_scaled(scale);
                 let mut text_w = 0.0;
                 for c in label.chars() {
@@ -552,17 +680,75 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
                 let text_w = text_w.ceil() as i32;
                 let text_h = scale.y.ceil() as i32;
 
-                let text_x = corners[[i, 0, 0]] as i32;
-                let text_y = (corners[[i, 0, 1]] as i32 - text_h).max(0);
+                // Smart label placement
+                // Default: at the first corner (usually top-left-ish)
+                let mut text_x = corners[[i, 0, 0]] as i32;
+                let mut text_y = (corners[[i, 0, 1]] as i32 - text_h).max(0);
+
+                // If label is out of image (left), move right
+                if text_x < 0 {
+                    text_x = 0;
+                }
+
+                // If label is out of image (right), move left
+                if text_x + text_w >= width as i32 {
+                    text_x = width as i32 - text_w - 1;
+                }
+
+                // Check bounds one last time (bottom)
+                if text_y + text_h >= height as i32 {
+                    text_y = height as i32 - text_h - 1;
+                }
+
+                // Overlap avoidance
+                // Check against existing labels. If overlap, move down.
+                let mut attempts = 0;
+                let max_attempts = 10;
+                let mut current_rect =
+                    Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+
+                'placement: while attempts < max_attempts {
+                    let mut is_overlapping = false;
+                    for existing in &labels_rects {
+                        // Simple intersection check
+                        if rect_intersect(&current_rect, existing) {
+                            is_overlapping = true;
+                            break;
+                        }
+                    }
+
+                    if !is_overlapping {
+                        break 'placement;
+                    }
+
+                    // Move down
+                    text_y += text_h; // stack below
+
+                    // Check bounds again
+                    if text_y + text_h >= height as i32 {
+                        // Reached bottom, try resetting y and moving x
+                        text_y = (corners[[i, 0, 1]] as i32 - text_h).max(0);
+                        text_x += 10; // Shift right
+                        if text_x + text_w >= width as i32 {
+                            break 'placement;
+                        }
+                    }
+
+                    current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+                    attempts += 1;
+                }
+
+                // Add to occupied list
+                labels_rects.push(current_rect);
 
                 if text_x >= 0
                     && text_y >= 0
                     && text_x + text_w < width as i32
                     && text_y + text_h < height as i32
                 {
-                    let rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-                    draw_filled_rect_mut(img, rect, color);
-                    draw_text_mut(img, Rgb([255, 255, 255]), text_x, text_y, scale, f, &label);
+                    draw_filled_rect_mut(img, current_rect, color);
+                    let text_color = get_text_color(color);
+                    draw_text_mut(img, text_color, text_x, text_y, scale, f, &label);
                 }
             }
         }
