@@ -63,6 +63,10 @@ pub struct PredictArgs {
     #[arg(long)]
     pub imgsz: Option<usize>,
 
+    /// Batch size for inference
+    #[arg(long, default_value_t = 1)]
+    pub batch: usize,
+
     /// Use FP16 half-precision inference
     #[arg(long, default_value_t = false)]
     pub half: bool,
