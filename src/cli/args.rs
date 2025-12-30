@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 use crate::download::DEFAULT_MODEL;
 use clap::{Args, Parser, Subcommand};
 

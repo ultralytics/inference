@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::process;
