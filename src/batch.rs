@@ -22,7 +22,7 @@ use image::DynamicImage;
 ///     let mut model = YOLOModel::load("yolo11n.onnx")?;
 ///     let batch_size = 4;
 ///     
-///     let mut processor = BatchProcessor::new(&mut model, batch_size, |results, images, paths, metas, offset| {
+///     let mut processor = BatchProcessor::new(&mut model, batch_size, |results, images, paths, metas| {
 ///         println!("Processed batch of {} images", results.len());
 ///     });
 ///     
@@ -35,7 +35,7 @@ use image::DynamicImage;
 /// ```
 pub struct BatchProcessor<'a, F>
 where
-    F: FnMut(Vec<Vec<Results>>, &[DynamicImage], &[String], &[SourceMeta], usize),
+    F: FnMut(Vec<Vec<Results>>, &[DynamicImage], &[String], &[SourceMeta]),
 {
     model: &'a mut YOLOModel,
     batch_size: usize,
@@ -43,12 +43,11 @@ where
     paths: Vec<String>,
     metas: Vec<SourceMeta>,
     callback: F,
-    frame_count: usize,
 }
 
 impl<'a, F> BatchProcessor<'a, F>
 where
-    F: FnMut(Vec<Vec<Results>>, &[DynamicImage], &[String], &[SourceMeta], usize),
+    F: FnMut(Vec<Vec<Results>>, &[DynamicImage], &[String], &[SourceMeta]),
 {
     /// Create a new `BatchProcessor`.
     ///
@@ -65,7 +64,6 @@ where
             paths: Vec::with_capacity(batch_size),
             metas: Vec::with_capacity(batch_size),
             callback,
-            frame_count: 0,
         }
     }
 
@@ -95,15 +93,8 @@ where
         }
 
         let batch_results = self.run_inference();
-        (self.callback)(
-            batch_results,
-            &self.images,
-            &self.paths,
-            &self.metas,
-            self.frame_count,
-        );
+        (self.callback)(batch_results, &self.images, &self.paths, &self.metas);
 
-        self.frame_count += self.images.len();
         self.images.clear();
         self.paths.clear();
         self.metas.clear();
@@ -158,13 +149,10 @@ mod tests {
         let callback_count = Rc::new(RefCell::new(0));
         let callback_count_clone = Rc::clone(&callback_count);
 
-        let mut processor = BatchProcessor::new(
-            &mut model,
-            2,
-            move |_results, _images, _paths, _metas, _offset| {
+        let mut processor =
+            BatchProcessor::new(&mut model, 2, move |_results, _images, _paths, _metas| {
                 *callback_count_clone.borrow_mut() += 1;
-            },
-        );
+            });
 
         // Load real test images
         let img1 = load_test_image();
@@ -204,38 +192,32 @@ mod tests {
         let callback_count = Rc::new(RefCell::new(0));
         let callback_count_clone = Rc::clone(&callback_count);
 
-        let mut processor = BatchProcessor::new(
-            &mut model,
-            2,
-            move |_results, _images, _paths, _metas, _offset| {
+        let mut processor =
+            BatchProcessor::new(&mut model, 2, move |_results, _images, _paths, _metas| {
                 *callback_count_clone.borrow_mut() += 1;
-            },
-        );
+            });
 
         // Flush without adding anything should not call callback
         processor.flush();
         assert_eq!(*callback_count.borrow(), 0);
     }
 
-    /// Test `frame_count` accumulation across batches.
+    /// Test that callback is invoked correct number of times.
     ///
-    /// Note: Uses `batch_size=1` to avoid triggering fallback (since default model is batch=1).
+    /// Note: Uses `batch_size=1` to work with default model (which only supports batch=1).
     #[test]
     #[ignore = "requires yolo11n.onnx model file - run with --include-ignored"]
-    fn test_batch_processor_frame_count() {
+    fn test_batch_processor_callback_count() {
         let mut model = YOLOModel::load("yolo11n.onnx").expect("Model should load");
 
-        let offsets = Rc::new(RefCell::new(Vec::new()));
-        let offsets_clone = Rc::clone(&offsets);
+        let count = Rc::new(RefCell::new(0));
+        let count_clone = Rc::clone(&count);
 
         // Use `batch_size=1` to work with default model (which only supports batch=1)
-        let mut processor = BatchProcessor::new(
-            &mut model,
-            1,
-            move |_results, _images, _paths, _metas, offset| {
-                offsets_clone.borrow_mut().push(offset);
-            },
-        );
+        let mut processor =
+            BatchProcessor::new(&mut model, 1, move |_results, _images, _paths, _metas| {
+                *count_clone.borrow_mut() += 1;
+            });
 
         let meta = SourceMeta {
             path: "test.jpg".to_string(),
@@ -252,10 +234,6 @@ mod tests {
         processor.flush();
 
         // Should have 3 callbacks (one per image since batch_size=1)
-        let offsets = offsets.borrow();
-        assert_eq!(offsets.len(), 3);
-        assert_eq!(offsets[0], 0); // First batch starts at 0
-        assert_eq!(offsets[1], 1); // Second batch starts at 1
-        assert_eq!(offsets[2], 2); // Third batch starts at 2
+        assert_eq!(*count.borrow(), 3);
     }
 }

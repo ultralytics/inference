@@ -196,8 +196,7 @@ pub fn run_prediction(args: &PredictArgs) {
             |batch_results: Vec<Vec<Results>>,
              images: &[image::DynamicImage],
              paths: &[String],
-             metas: &[crate::source::SourceMeta],
-             _frame_offset: usize| {
+             metas: &[crate::source::SourceMeta]| {
                 for (idx, results) in batch_results.into_iter().enumerate() {
                     let meta = &metas[idx];
                     let image_path = &paths[idx];
@@ -280,14 +279,8 @@ pub fn run_prediction(args: &PredictArgs) {
                                     image::imageops::FilterType::Triangle,
                                 );
 
-                                if v.update(&resized).is_ok() {
-                                    if is_video {
-                                        if frame_offset == 0 {
-                                            let _ = v.wait(Duration::from_millis(200));
-                                        }
-                                    } else {
-                                        let _ = v.wait(Duration::from_millis(200));
-                                    }
+                                if v.update(&resized).is_ok() && !is_video {
+                                    let _ = v.wait(Duration::from_millis(200));
                                 }
                             }
                         }
