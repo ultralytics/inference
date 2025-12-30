@@ -29,6 +29,12 @@ fn test_inference_config_builder() {
 }
 
 #[test]
+fn test_inference_config_batch() {
+    let config = InferenceConfig::new().with_batch(32);
+    assert_eq!(config.batch, Some(32));
+}
+
+#[test]
 fn test_boxes_creation() {
     // Create boxes data: [x1, y1, x2, y2, conf, cls]
     let data = ndarray::array![
