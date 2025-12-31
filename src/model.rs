@@ -973,7 +973,7 @@ mod tests {
             assert_eq!(model.model_path(), ""); // Placeholder returns empty string
 
             // Test Debug impl
-            let debug_str = format!("{:?}", model);
+            let debug_str = format!("{model:?}");
             assert!(debug_str.contains("YOLOModel"));
             assert!(debug_str.contains("task"));
             assert!(debug_str.contains("num_classes"));
