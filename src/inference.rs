@@ -46,8 +46,8 @@ pub struct InferenceConfig {
     /// Explicit input image size (height, width).
     /// If `None`, the model's metadata will be used to determine input size.
     pub imgsz: Option<(usize, usize)>,
-    /// explicit batch size for inference.
-    /// If `None`, defaults to 1.
+    /// Batch size for inference when using [`BatchProcessor`](crate::batch::BatchProcessor).
+    /// If `None`, defaults to 1 (single-image inference).
     pub batch: Option<usize>,
     /// Number of intra-op threads for ONNX Runtime.
     /// Setting this to `0` allows ONNX Runtime to choose the optimal number.

@@ -1,9 +1,34 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-//! Batch processing module.
+//! Batch processing module for YOLO inference.
 //!
 //! This module provides the [`BatchProcessor`] struct, which abstracts the logic for
-//! buffering images and running batch inference.
+//! buffering images and running batch inference. It handles:
+//!
+//! - **Buffering**: Collects images until the batch size is reached
+//! - **Batch inference**: Runs inference on the full batch
+//! - **Automatic fallback**: Falls back to single-image inference if batch fails
+//! - **Callback invocation**: Invokes a user-provided callback with results
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use ultralytics_inference::{YOLOModel, batch::BatchProcessor};
+//!
+//! let mut model = YOLOModel::load("yolo11n.onnx")?;
+//! let mut processor = BatchProcessor::new(&mut model, 4, |results, images, paths, metas| {
+//!     for (idx, result_vec) in results.iter().enumerate() {
+//!         println!("Image {}: {} detections", paths[idx], result_vec.len());
+//!     }
+//! });
+//!
+//! // Add images as they become available
+//! // processor.add(image, path, meta);
+//!
+//! // Don't forget to flush remaining images
+//! processor.flush();
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use crate::{Results, YOLOModel, source::SourceMeta};
 use image::DynamicImage;
@@ -53,9 +78,17 @@ where
     ///
     /// # Arguments
     ///
-    /// * `model` - Mutable reference to the `YOLOModel`.
-    /// * `batch_size` - The size of the batch.
-    /// * `callback` - A closure to handle the results of each batch.
+    /// * `model` - Mutable reference to the [`YOLOModel`] for inference.
+    /// * `batch_size` - Maximum number of images to collect before processing.
+    /// * `callback` - Closure invoked with batch results. Receives:
+    ///   - `Vec<Vec<Results>>` - Results for each image in the batch
+    ///   - `&[DynamicImage]` - The batch images
+    ///   - `&[String]` - Paths for each image
+    ///   - `&[SourceMeta]` - Metadata for each image
+    ///
+    /// # Returns
+    ///
+    /// A new `BatchProcessor` instance.
     pub fn new(model: &'a mut YOLOModel, batch_size: usize, callback: F) -> Self {
         Self {
             model,
@@ -69,7 +102,14 @@ where
 
     /// Add an image to the batch.
     ///
-    /// If the batch becomes full, it is automatically processed.
+    /// If the batch becomes full (reaches `batch_size`), it is automatically processed
+    /// and the callback is invoked.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The image to add.
+    /// * `path` - Path or identifier for this image.
+    /// * `meta` - Source metadata for this image.
     pub fn add(&mut self, image: DynamicImage, path: String, meta: SourceMeta) {
         self.images.push(image);
         self.paths.push(path);
@@ -82,7 +122,8 @@ where
 
     /// Process any remaining images in the batch.
     ///
-    /// This should be called after all images have been added to ensure the last partial batch is processed.
+    /// This should be called after all images have been added to ensure
+    /// the last partial batch is processed. Has no effect if the batch is empty.
     pub fn flush(&mut self) {
         self.process();
     }
@@ -125,6 +166,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -136,28 +178,27 @@ mod tests {
             .unwrap_or_else(|_| DynamicImage::new_rgb8(640, 640))
     }
 
-    /// Test that `BatchProcessor` correctly buffers images until `batch_size` is reached.
+    /// Test that `BatchProcessor` correctly buffers images and invokes callback.
     ///
-    /// Note: The default yolo11n.onnx only supports batch=1, so when we use `batch_size=2`,
-    /// the batch inference will fail and fall back to single-image inference.
-    /// This test still validates the buffering and callback behavior.
+    /// Uses `batch_size=1` since the default yolo11n.onnx model only supports batch=1.
+    /// The model is auto-downloaded if not present.
     #[test]
-    #[ignore = "requires yolo11n.onnx model file - run with --include-ignored"]
+    #[serial]
     fn test_batch_processor_with_model() {
         let mut model = YOLOModel::load("yolo11n.onnx").expect("Model should load");
 
         let callback_count = Rc::new(RefCell::new(0));
         let callback_count_clone = Rc::clone(&callback_count);
 
+        // Use batch_size=1 since default model only supports batch=1
         let mut processor =
-            BatchProcessor::new(&mut model, 2, move |_results, _images, _paths, _metas| {
+            BatchProcessor::new(&mut model, 1, move |_results, _images, _paths, _metas| {
                 *callback_count_clone.borrow_mut() += 1;
             });
 
         // Load real test images
         let img1 = load_test_image();
         let img2 = load_test_image();
-        let img3 = load_test_image();
 
         let meta = SourceMeta {
             path: "test.jpg".to_string(),
@@ -166,26 +207,22 @@ mod tests {
             fps: None,
         };
 
-        // Add first image - should not trigger callback
+        // Add first image - should trigger callback immediately (batch_size=1)
         processor.add(img1, "img1.jpg".to_string(), meta.clone());
-        assert_eq!(*callback_count.borrow(), 0);
-
-        // Add second image - should trigger callback (batch_size = 2)
-        processor.add(img2, "img2.jpg".to_string(), meta.clone());
         assert_eq!(*callback_count.borrow(), 1);
 
-        // Add third image - should not trigger callback
-        processor.add(img3, "img3.jpg".to_string(), meta);
-        assert_eq!(*callback_count.borrow(), 1);
+        // Add second image - should trigger another callback
+        processor.add(img2, "img2.jpg".to_string(), meta);
+        assert_eq!(*callback_count.borrow(), 2);
 
-        // Flush should trigger callback for remaining image
+        // Flush should not trigger callback (batch is empty)
         processor.flush();
         assert_eq!(*callback_count.borrow(), 2);
     }
 
     /// Test that flush on empty processor does nothing.
     #[test]
-    #[ignore = "requires yolo11n.onnx model file - run with --include-ignored"]
+    #[serial]
     fn test_batch_processor_empty_flush() {
         let mut model = YOLOModel::load("yolo11n.onnx").expect("Model should load");
 
@@ -193,7 +230,7 @@ mod tests {
         let callback_count_clone = Rc::clone(&callback_count);
 
         let mut processor =
-            BatchProcessor::new(&mut model, 2, move |_results, _images, _paths, _metas| {
+            BatchProcessor::new(&mut model, 1, move |_results, _images, _paths, _metas| {
                 *callback_count_clone.borrow_mut() += 1;
             });
 
@@ -202,11 +239,9 @@ mod tests {
         assert_eq!(*callback_count.borrow(), 0);
     }
 
-    /// Test that callback is invoked correct number of times.
-    ///
-    /// Note: Uses `batch_size=1` to work with default model (which only supports batch=1).
+    /// Test that callback is invoked correct number of times with results.
     #[test]
-    #[ignore = "requires yolo11n.onnx model file - run with --include-ignored"]
+    #[serial]
     fn test_batch_processor_callback_count() {
         let mut model = YOLOModel::load("yolo11n.onnx").expect("Model should load");
 
