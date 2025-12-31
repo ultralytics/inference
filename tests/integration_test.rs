@@ -6,7 +6,31 @@
 
 use ndarray::Array3;
 use std::collections::HashMap;
+use ultralytics_inference::cli::args::PredictArgs;
+use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
+
+#[test]
+fn test_run_prediction_e2e() {
+    // Basic E2E test for run_prediction
+    // This ensures the main CLI entry point runs without panicking on valid input
+    let args = PredictArgs {
+        model: "yolo11n.onnx".to_string(),
+        source: None, // Will use default images and download them
+        conf: 0.25,
+        iou: 0.45,
+        imgsz: Some(640),
+        batch: 1,
+        half: false,
+        save: false,
+        show: false,
+        device: None,
+        verbose: true,
+    };
+
+    // This should run successfully (download model/images and predict)
+    run_prediction(&args);
+}
 
 #[test]
 fn test_inference_config_creation() {

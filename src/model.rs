@@ -929,6 +929,8 @@ impl std::fmt::Debug for YOLOModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_model_not_found() {
@@ -938,5 +940,43 @@ mod tests {
             result.unwrap_err(),
             InferenceError::ModelLoadError(_)
         ));
+    }
+
+    #[test]
+    fn test_model_load_invalid_file() {
+        // Create a temporary file with garbage data
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "garbage").unwrap();
+        let path = file.path();
+
+        let result = YOLOModel::load(path);
+        // ONNX Runtime should fail to load this
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_model_accessors_with_dummy() {
+        // Since we can't easily mock YOLOModel (it wraps internal ORT session),
+        // we can at least test specific public methods if we had a valid model.
+        // But for getters, we need an instance.
+        // We can use the auto-downloaded yolo11n.onnx if available,
+        // but unit tests should be hermetic if possible.
+        // However, we rely on yolo11n.onnx for other tests.
+
+        // Only run if model exists or can be downloaded
+        if let Ok(model) = YOLOModel::load("yolo11n.onnx") {
+            assert_eq!(model.task(), Task::Detect);
+            assert!(model.num_classes() > 0);
+            assert_eq!(model.stride(), 32);
+            assert_eq!(model.imgsz(), (640, 640)); // Default for yolo11n
+            assert!(!model.names().is_empty());
+            assert_eq!(model.model_path(), ""); // Placeholder returns empty string
+
+            // Test Debug impl
+            let debug_str = format!("{:?}", model);
+            assert!(debug_str.contains("YOLOModel"));
+            assert!(debug_str.contains("task"));
+            assert!(debug_str.contains("num_classes"));
+        }
     }
 }
