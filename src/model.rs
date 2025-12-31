@@ -57,6 +57,8 @@ pub struct YOLOModel {
     warmed_up: bool,
     /// Whether model expects FP16 input.
     fp16_input: bool,
+    /// Execution provider used for inference
+    execution_provider: String,
 }
 
 #[allow(
@@ -129,43 +131,137 @@ impl YOLOModel {
             InferenceError::ModelLoadError(format!("Failed to create session builder: {e}"))
         })?;
 
-        // Register execution providers based on features
+        // Register execution providers based on features and device config
         #[allow(unused_mut)]
         let mut eps: Vec<ort::execution_providers::ExecutionProviderDispatch> = Vec::new();
+        let mut provider_name = "CPUExecutionProvider";
 
-        #[cfg(feature = "coreml")]
-        {
-            eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
-        }
+        if let Some(device) = &config.device {
+            // User requested specific device
+            match device {
+                crate::Device::Cpu => {
+                    // No specific provider needed, will fall back to CPU
+                    provider_name = "CPUExecutionProvider";
+                }
+                #[cfg(feature = "cuda")]
+                crate::Device::Cuda(i) => {
+                    eps.push(
+                        ort::execution_providers::CUDAExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "CUDAExecutionProvider";
+                }
+                #[cfg(feature = "coreml")]
+                crate::Device::CoreMl | crate::Device::Mps => {
+                    // Map both CoreML and MPS to CoreMLExecutionProvider
+                    eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
+                    provider_name = "CoreMLExecutionProvider";
+                }
+                #[cfg(feature = "tensorrt")]
+                crate::Device::TensorRt(i) => {
+                    eps.push(
+                        ort::execution_providers::TensorRTExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "TensorRTExecutionProvider";
+                }
+                #[cfg(feature = "rocm")]
+                crate::Device::Rocm(i) => {
+                    eps.push(
+                        ort::execution_providers::ROCmExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "ROCmExecutionProvider";
+                }
+                #[cfg(feature = "directml")]
+                crate::Device::DirectMl(i) => {
+                    eps.push(
+                        ort::execution_providers::DirectMLExecutionProvider::default()
+                            .with_device_id(*i as i32)
+                            .build(),
+                    );
+                    provider_name = "DirectMLExecutionProvider";
+                }
+                #[cfg(feature = "openvino")]
+                crate::Device::OpenVino => {
+                    eps.push(
+                        ort::execution_providers::OpenVINOExecutionProvider::default().build(),
+                    );
+                    provider_name = "OpenVINOExecutionProvider";
+                }
+                #[cfg(feature = "xnnpack")]
+                crate::Device::Xnnpack => {
+                    eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+                    provider_name = "XNNPACKExecutionProvider";
+                }
+                // Handle cases where feature is disabled but enum variant exists
+                #[allow(unreachable_patterns)]
+                _ => {
+                    eprintln!(
+                        "\x1b[33mWARNING ⚠️ Device '{device}' requested but feature not enabled or supported. Falling back to available providers.\x1b[0m"
+                    );
+                }
+            }
+        } else {
+            // Default: Register all available providers in preference order
+            provider_name = "CPUExecutionProvider";
 
-        #[cfg(feature = "cuda")]
-        {
-            eps.push(ort::execution_providers::CUDAExecutionProvider::default().build());
-        }
+            #[cfg(feature = "tensorrt")]
+            {
+                eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
+                provider_name = "TensorRTExecutionProvider";
+            }
 
-        #[cfg(feature = "tensorrt")]
-        {
-            eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
-        }
+            #[cfg(feature = "cuda")]
+            {
+                eps.push(ort::execution_providers::CUDAExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "CUDAExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "rocm")]
-        {
-            eps.push(ort::execution_providers::ROCmExecutionProvider::default().build());
-        }
+            #[cfg(feature = "coreml")]
+            {
+                eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "CoreMLExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "directml")]
-        {
-            eps.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
-        }
+            #[cfg(feature = "rocm")]
+            {
+                eps.push(ort::execution_providers::ROCmExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "ROCmExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "openvino")]
-        {
-            eps.push(ort::execution_providers::OpenVINOExecutionProvider::default().build());
-        }
+            #[cfg(feature = "directml")]
+            {
+                eps.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "DirectMLExecutionProvider";
+                }
+            }
 
-        #[cfg(feature = "xnnpack")]
-        {
-            eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+            #[cfg(feature = "openvino")]
+            {
+                eps.push(ort::execution_providers::OpenVINOExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "OpenVINOExecutionProvider";
+                }
+            }
+
+            #[cfg(feature = "xnnpack")]
+            {
+                eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+                if provider_name == "CPUExecutionProvider" {
+                    provider_name = "XNNPACKExecutionProvider";
+                }
+            }
         }
 
         if !eps.is_empty() {
@@ -283,6 +379,7 @@ impl YOLOModel {
             config,
             warmed_up: false,
             fp16_input,
+            execution_provider: provider_name.to_string(),
         };
 
         // Warmup inference to trigger JIT compilation and memory allocation
@@ -392,6 +489,12 @@ impl YOLOModel {
         }
 
         ModelMetadata::from_onnx_metadata(&metadata_map)
+    }
+
+    /// Returns the execution provider used for inference.
+    #[must_use]
+    pub fn execution_provider(&self) -> &str {
+        &self.execution_provider
     }
 
     /// Run inference on an image file.

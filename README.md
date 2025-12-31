@@ -7,6 +7,15 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
+[![codecov](https://codecov.io/gh/ultralytics/inference/graph/badge.svg?token=AVE5n6yvnf)](https://codecov.io/gh/ultralytics/inference)
+[![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
+[![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)](https://blog.rust-lang.org/)
+
+<!-- Enable After <releasing to Crates.io -->
+<!-- [![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
+[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference)](https://docs.rs/ultralytics-inference)
+![Crates.io Total Downloads](https://img.shields.io/crates/d/ultralytics-inference)
+-->
 
 ## ✨ Features
 
@@ -101,6 +110,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | ----------- | ----- | ------------------------------------------------- | --------------------------------------- |
 | `--model`   | `-m`  | Path to ONNX model file                           | `yolo11n.onnx`                          |
 | `--source`  | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
+| `--device`  |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
 | `--conf`    |       | Confidence threshold                              | `0.25`                                  |
 | `--iou`     |       | IoU threshold for NMS                             | `0.45`                                  |
 | `--imgsz`   |       | Inference image size                              | `Model metadata`                        |
@@ -189,6 +199,25 @@ if let Some(ref boxes) = result.boxes {
     // Confidence scores and class IDs
     let conf = boxes.conf();      // Confidence scores
     let cls = boxes.cls();        // Class IDs
+}
+```
+
+**Selecting a Device:**
+
+```rust
+use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Select a device (e.g., CUDA, MPS, CPU)
+    let device = Device::Cuda(0);
+
+    // Configure the model to use this device
+    let config = InferenceConfig::new().with_device(device);
+
+    let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
+    let results = model.predict("image.jpg")?;
+
+    Ok(())
 }
 ```
 
