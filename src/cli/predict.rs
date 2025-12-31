@@ -421,3 +421,202 @@ fn format_detection_summary(result: &Results) -> String {
         String::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::results::{Boxes, Obb, Probs, Results, Speed};
+    use ndarray::{Array2, Array3};
+    use std::collections::HashMap;
+
+    fn create_names() -> HashMap<usize, String> {
+        let mut names = HashMap::new();
+        names.insert(0, "person".to_string());
+        names.insert(1, "car".to_string());
+        names.insert(2, "bus".to_string());
+        names.insert(5, "bicycle".to_string());
+        names
+    }
+
+    fn create_dummy_image() -> Array3<u8> {
+        Array3::zeros((100, 100, 3))
+    }
+
+    /// Test `format_detection_summary` with boxes - single detection.
+    #[test]
+    fn test_format_summary_single_box() {
+        // Boxes data: [x1, y1, x2, y2, conf, cls] - 6 columns
+        let data =
+            Array2::from_shape_vec((1, 6), vec![10.0, 10.0, 100.0, 100.0, 0.95, 0.0]).unwrap();
+        let boxes = Boxes::new(data, (100, 100));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "1 person");
+    }
+
+    /// Test `format_detection_summary` with boxes - multiple classes.
+    #[test]
+    fn test_format_summary_multiple_boxes() {
+        // 3 boxes: 2 persons (class 0), 1 bus (class 2)
+        let data = Array2::from_shape_vec(
+            (3, 6),
+            vec![
+                10.0, 10.0, 100.0, 100.0, 0.95, 0.0, // person
+                20.0, 20.0, 200.0, 200.0, 0.90, 0.0, // person
+                30.0, 30.0, 300.0, 300.0, 0.85, 2.0, // bus
+            ],
+        )
+        .unwrap();
+        let boxes = Boxes::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "2 persons, 1 bus");
+    }
+
+    /// Test `format_detection_summary` with empty boxes.
+    #[test]
+    fn test_format_summary_empty_boxes() {
+        let data = Array2::from_shape_vec((0, 6), vec![]).unwrap();
+        let boxes = Boxes::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert!(summary.is_empty());
+    }
+
+    /// Test `format_detection_summary` with OBB detections.
+    #[test]
+    fn test_format_summary_obb() {
+        // OBB data: [x, y, w, h, rotation, conf, cls] - 7 columns
+        let data = Array2::from_shape_vec(
+            (2, 7),
+            vec![
+                50.0, 50.0, 100.0, 50.0, 0.5, 0.9, 1.0, // car
+                150.0, 150.0, 80.0, 40.0, 0.3, 0.8, 1.0, // car
+            ],
+        )
+        .unwrap();
+        let obb = Obb::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.obb = Some(obb);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "2 cars");
+    }
+
+    /// Test `format_detection_summary` with empty OBB.
+    #[test]
+    fn test_format_summary_empty_obb() {
+        let data = Array2::from_shape_vec((0, 7), vec![]).unwrap();
+        let obb = Obb::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.obb = Some(obb);
+
+        let summary = format_detection_summary(&result);
+        assert!(summary.is_empty());
+    }
+
+    /// Test `format_detection_summary` with classification probs.
+    #[test]
+    fn test_format_summary_probs() {
+        let data = ndarray::Array1::from_vec(vec![0.1, 0.7, 0.15, 0.03, 0.02]);
+        let probs = Probs::new(data);
+
+        let mut names = HashMap::new();
+        names.insert(0, "cat".to_string());
+        names.insert(1, "dog".to_string());
+        names.insert(2, "bird".to_string());
+        names.insert(3, "fish".to_string());
+        names.insert(4, "hamster".to_string());
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            names,
+            Speed::default(),
+            (224, 224),
+        );
+        result.probs = Some(probs);
+
+        let summary = format_detection_summary(&result);
+        // Top5 should include dog (0.7)
+        assert!(summary.contains("dog"));
+        assert!(summary.contains("0.70"));
+    }
+
+    /// Test `format_detection_summary` with no results (empty result).
+    #[test]
+    fn test_format_summary_no_results() {
+        let result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+
+        let summary = format_detection_summary(&result);
+        assert!(summary.is_empty());
+    }
+
+    /// Test `format_detection_summary` with unknown class (uses "object" fallback).
+    #[test]
+    fn test_format_summary_unknown_class() {
+        // Class 99 doesn't exist in names
+        let data =
+            Array2::from_shape_vec((1, 6), vec![10.0, 10.0, 100.0, 100.0, 0.95, 99.0]).unwrap();
+        let boxes = Boxes::new(data, (100, 100));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "1 object");
+    }
+}
