@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 //! Example script demonstrating how to save predictions from the library.
 //!
 //! This example covers:
