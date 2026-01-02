@@ -18,6 +18,7 @@ use crate::visualizer::Viewer;
 use crate::utils::pluralize;
 use crate::{InferenceConfig, Results, VERSION, YOLOModel};
 
+use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
 use crate::{error, verbose, warn};
 
@@ -40,6 +41,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let save = args.save;
     let half = args.half;
     let verbose = args.verbose;
+    let batch_size = args.batch as usize;
     let device: Option<crate::Device> = args
         .device
         .as_ref()
@@ -54,7 +56,8 @@ pub fn run_prediction(args: &PredictArgs) {
     let mut config = InferenceConfig::new()
         .with_confidence(conf_threshold)
         .with_iou(iou_threshold)
-        .with_half(half);
+        .with_half(half)
+        .with_batch(batch_size);
 
     // Apply imgsz if specified
     if let Some(sz) = imgsz {
@@ -167,7 +170,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
     // Source is already initialized above
     let is_video = source.is_video();
-    let source_iter = match crate::source::SourceIterator::new(source) {
+    let iter = match crate::source::SourceIterator::new(source) {
         Ok(iter) => iter,
         Err(e) => {
             error!("Error initializing source: {e}");
@@ -185,137 +188,123 @@ pub fn run_prediction(args: &PredictArgs) {
     #[cfg(feature = "visualize")]
     let mut viewer: Option<Viewer> = None;
 
-    #[cfg(feature = "visualize")]
-    let mut frame_count = 0;
-    for item in source_iter {
-        let (img, meta) = match item {
-            Ok(val) => val,
-            Err(e) => {
-                error!("Error reading source: {e}");
-                continue;
-            }
-        };
-
-        let image_path = meta.path;
-        let results = match model.predict_image(&img, image_path.clone()) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Error processing {image_path}: {e}");
-                continue;
-            }
-        };
-
-        for result in results {
-            // Build detection summary
-            let detection_summary = format_detection_summary(&result);
-
-            // Get image dimensions from result
-            // let orig_shape = result.orig_shape();
-            let inference_shape = result.inference_shape();
-            last_inference_shape = (inference_shape.0 as usize, inference_shape.1 as usize);
-
-            // Format total frames for display
-            let total_frames_str = meta
-                .total_frames
-                .map_or_else(|| "?".to_string(), |n| n.to_string());
-
-            if is_video {
-                // Assuming single video input for now as per CLI structure
-                // Use "video 1/1"
-                verbose!(
-                    "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
-                    meta.frame_idx + 1,
-                    total_frames_str,
-                    image_path,
-                    inference_shape.1,
-                    inference_shape.0,
-                    detection_summary,
-                    result.speed.inference.unwrap_or(0.0)
-                );
-            } else {
-                verbose!(
-                    "image {}/{} {}: {}x{} {}, {:.1}ms",
-                    meta.frame_idx + 1,
-                    total_frames_str,
-                    image_path,
-                    inference_shape.1,
-                    inference_shape.0,
-                    detection_summary,
-                    result.speed.inference.unwrap_or(0.0)
-                );
-            }
-
-            // Save annotated image if --save is specified
-            #[cfg(feature = "annotate")]
-            if let Some(ref dir) = save_dir {
-                let annotated = annotate_image(&img, &result, None);
-                let filename = Path::new(&image_path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy();
-                let save_path = format!("{dir}/{filename}");
-                if let Err(e) = annotated.save(&save_path) {
-                    error!("Error saving {save_path}: {e}");
-                }
-            }
-
-            // Show result in viewer if enabled
-            #[cfg(feature = "visualize")]
-            if show {
-                // Use inference shape for viewer dimensions
-                let view_width = inference_shape.1 as usize;
-                let view_height = inference_shape.0 as usize;
-
-                // If viewer exists but dimensions don't match, drop it to recreate
-                if let Some(ref v) = viewer
-                    && (v.width != view_width || v.height != view_height)
+    // Use BatchProcessor for centralized batch management
+    {
+        let mut batch_processor = BatchProcessor::new(
+            &mut model,
+            batch_size,
+            |batch_results: Vec<Vec<Results>>,
+             images: &[image::DynamicImage],
+             paths: &[String],
+             metas: &[crate::source::SourceMeta]| {
+                for (results, (meta, (image_path, img))) in batch_results
+                    .into_iter()
+                    .zip(metas.iter().zip(paths.iter().zip(images.iter())))
                 {
-                    viewer = None;
-                }
+                    for result in results {
+                        // Build detection summary
+                        let detection_summary = format_detection_summary(&result);
 
-                // Initialize viewer lazily with inference dimensions
-                if viewer.is_none() {
-                    viewer = Some(
-                        Viewer::new("Ultralytics Inference", view_width, view_height).unwrap(),
-                    );
-                }
+                        // Get image dimensions from result
+                        let inference_shape = result.inference_shape();
+                        last_inference_shape =
+                            (inference_shape.0 as usize, inference_shape.1 as usize);
 
-                if let Some(ref mut v) = viewer {
-                    let annotated = annotate_image(&img, &result, None);
-                    // Resize annotated image to inference dimensions
-                    let resized = annotated.resize_exact(
-                        view_width as u32,
-                        view_height as u32,
-                        image::imageops::FilterType::Triangle,
-                    );
+                        // Format total frames for display
+                        let total_frames_str = meta
+                            .total_frames
+                            .map_or_else(|| "?".to_string(), |n| n.to_string());
 
-                    // Update viewer
-                    if v.update(&resized).is_ok() {
-                        // Add delay logic based on source type
                         if is_video {
-                            // 200ms delay for initial start of video
-                            if frame_count == 0 {
-                                let _ = v.wait(Duration::from_millis(200));
-                            }
+                            verbose!(
+                                "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
+                                meta.frame_idx + 1,
+                                total_frames_str,
+                                image_path,
+                                inference_shape.1,
+                                inference_shape.0,
+                                detection_summary,
+                                result.speed.inference.unwrap_or(0.0)
+                            );
                         } else {
-                            // 500ms delay for images (single or directory)
-                            let _ = v.wait(Duration::from_millis(200));
+                            verbose!(
+                                "image {}/{} {}: {}x{} {}, {:.1}ms",
+                                meta.frame_idx + 1,
+                                total_frames_str,
+                                image_path,
+                                inference_shape.1,
+                                inference_shape.0,
+                                detection_summary,
+                                result.speed.inference.unwrap_or(0.0)
+                            );
                         }
+
+                        #[cfg(feature = "annotate")]
+                        if let Some(ref dir) = save_dir {
+                            let annotated = annotate_image(img, &result, None);
+                            let filename = Path::new(&image_path)
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy();
+                            let save_path = format!("{dir}/{filename}");
+                            if let Err(e) = annotated.save(&save_path) {
+                                error!("Error saving {save_path}: {e}");
+                            }
+                        }
+
+                        #[cfg(feature = "visualize")]
+                        if show {
+                            let view_width = inference_shape.1 as usize;
+                            let view_height = inference_shape.0 as usize;
+
+                            if let Some(ref v) = viewer
+                                && (v.width != view_width || v.height != view_height)
+                            {
+                                viewer = None;
+                            }
+
+                            if viewer.is_none() {
+                                viewer = Some(
+                                    Viewer::new("Ultralytics Inference", view_width, view_height)
+                                        .unwrap(),
+                                );
+                            }
+
+                            if let Some(ref mut v) = viewer {
+                                let annotated = annotate_image(img, &result, None);
+                                let resized = annotated.resize_exact(
+                                    view_width as u32,
+                                    view_height as u32,
+                                    image::imageops::FilterType::Triangle,
+                                );
+
+                                if v.update(&resized).is_ok() && !is_video {
+                                    let _ = v.wait(Duration::from_millis(200));
+                                }
+                            }
+                        }
+
+                        total_preprocess += result.speed.preprocess.unwrap_or(0.0);
+                        total_inference += result.speed.inference.unwrap_or(0.0);
+                        total_postprocess += result.speed.postprocess.unwrap_or(0.0);
+
+                        all_results.push((image_path.clone(), result));
                     }
                 }
-            }
+            },
+        );
 
-            // Accumulate timings
-            total_preprocess += result.speed.preprocess.unwrap_or(0.0);
-            total_inference += result.speed.inference.unwrap_or(0.0);
-            total_postprocess += result.speed.postprocess.unwrap_or(0.0);
-
-            all_results.push((image_path.clone(), result));
+        for item in iter {
+            let (img, meta) = match item {
+                Ok(val) => val,
+                Err(e) => {
+                    error!("Error reading source: {e}");
+                    continue;
+                }
+            };
+            batch_processor.add(img, meta.path.clone(), meta);
         }
-        #[cfg(feature = "visualize")]
-        {
-            frame_count += 1;
-        }
+        batch_processor.flush();
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
@@ -429,5 +418,204 @@ fn format_detection_summary(result: &Results) -> String {
         }
     } else {
         String::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::results::{Boxes, Obb, Probs, Results, Speed};
+    use ndarray::{Array2, Array3};
+    use std::collections::HashMap;
+
+    fn create_names() -> HashMap<usize, String> {
+        let mut names = HashMap::new();
+        names.insert(0, "person".to_string());
+        names.insert(1, "car".to_string());
+        names.insert(2, "bus".to_string());
+        names.insert(5, "bicycle".to_string());
+        names
+    }
+
+    fn create_dummy_image() -> Array3<u8> {
+        Array3::zeros((100, 100, 3))
+    }
+
+    /// Test `format_detection_summary` with boxes - single detection.
+    #[test]
+    fn test_format_summary_single_box() {
+        // Boxes data: [x1, y1, x2, y2, conf, cls] - 6 columns
+        let data =
+            Array2::from_shape_vec((1, 6), vec![10.0, 10.0, 100.0, 100.0, 0.95, 0.0]).unwrap();
+        let boxes = Boxes::new(data, (100, 100));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "1 person");
+    }
+
+    /// Test `format_detection_summary` with boxes - multiple classes.
+    #[test]
+    fn test_format_summary_multiple_boxes() {
+        // 3 boxes: 2 persons (class 0), 1 bus (class 2)
+        let data = Array2::from_shape_vec(
+            (3, 6),
+            vec![
+                10.0, 10.0, 100.0, 100.0, 0.95, 0.0, // person
+                20.0, 20.0, 200.0, 200.0, 0.90, 0.0, // person
+                30.0, 30.0, 300.0, 300.0, 0.85, 2.0, // bus
+            ],
+        )
+        .unwrap();
+        let boxes = Boxes::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "2 persons, 1 bus");
+    }
+
+    /// Test `format_detection_summary` with empty boxes.
+    #[test]
+    fn test_format_summary_empty_boxes() {
+        let data = Array2::from_shape_vec((0, 6), vec![]).unwrap();
+        let boxes = Boxes::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert!(summary.is_empty());
+    }
+
+    /// Test `format_detection_summary` with OBB detections.
+    #[test]
+    fn test_format_summary_obb() {
+        // OBB data: [x, y, w, h, rotation, conf, cls] - 7 columns
+        let data = Array2::from_shape_vec(
+            (2, 7),
+            vec![
+                50.0, 50.0, 100.0, 50.0, 0.5, 0.9, 1.0, // car
+                150.0, 150.0, 80.0, 40.0, 0.3, 0.8, 1.0, // car
+            ],
+        )
+        .unwrap();
+        let obb = Obb::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.obb = Some(obb);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "2 cars");
+    }
+
+    /// Test `format_detection_summary` with empty OBB.
+    #[test]
+    fn test_format_summary_empty_obb() {
+        let data = Array2::from_shape_vec((0, 7), vec![]).unwrap();
+        let obb = Obb::new(data, (640, 640));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.obb = Some(obb);
+
+        let summary = format_detection_summary(&result);
+        assert!(summary.is_empty());
+    }
+
+    /// Test `format_detection_summary` with classification probs.
+    #[test]
+    fn test_format_summary_probs() {
+        let data = ndarray::Array1::from_vec(vec![0.1, 0.7, 0.15, 0.03, 0.02]);
+        let probs = Probs::new(data);
+
+        let mut names = HashMap::new();
+        names.insert(0, "cat".to_string());
+        names.insert(1, "dog".to_string());
+        names.insert(2, "bird".to_string());
+        names.insert(3, "fish".to_string());
+        names.insert(4, "hamster".to_string());
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            names,
+            Speed::default(),
+            (224, 224),
+        );
+        result.probs = Some(probs);
+
+        let summary = format_detection_summary(&result);
+        // Top5 should include dog (0.7)
+        assert!(summary.contains("dog"));
+        assert!(summary.contains("0.70"));
+    }
+
+    /// Test `format_detection_summary` with no results (empty result).
+    #[test]
+    fn test_format_summary_no_results() {
+        let result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+
+        let summary = format_detection_summary(&result);
+        assert!(summary.is_empty());
+    }
+
+    /// Test `format_detection_summary` with unknown class (uses "object" fallback).
+    #[test]
+    fn test_format_summary_unknown_class() {
+        // Class 99 doesn't exist in names
+        let data =
+            Array2::from_shape_vec((1, 6), vec![10.0, 10.0, 100.0, 100.0, 0.95, 99.0]).unwrap();
+        let boxes = Boxes::new(data, (100, 100));
+
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.boxes = Some(boxes);
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "1 object");
     }
 }

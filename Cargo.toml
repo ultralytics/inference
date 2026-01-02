@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2024"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
@@ -138,6 +138,8 @@ all = ["annotate", "video"]
 
 [dev-dependencies]
 # Testing dependencies
+serial_test = "3"
+tempfile = "3"
 
 [profile.dev]
 opt-level = 0

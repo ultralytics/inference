@@ -46,6 +46,9 @@ pub struct InferenceConfig {
     /// Explicit input image size (height, width).
     /// If `None`, the model's metadata will be used to determine input size.
     pub imgsz: Option<(usize, usize)>,
+    /// Batch size for inference when using [`BatchProcessor`](crate::batch::BatchProcessor).
+    /// If `None`, defaults to 1 (single-image inference).
+    pub batch: Option<usize>,
     /// Number of intra-op threads for ONNX Runtime.
     /// Setting this to `0` allows ONNX Runtime to choose the optimal number.
     pub num_threads: usize,
@@ -65,6 +68,7 @@ impl Default for InferenceConfig {
             iou_threshold: 0.45,
             max_detections: 300,
             imgsz: None,
+            batch: None,
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
             half: false,
             device: None,
@@ -81,6 +85,21 @@ impl InferenceConfig {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the batch size.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch` - The batch size.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_batch(mut self, batch: usize) -> Self {
+        self.batch = Some(batch);
+        self
     }
 
     /// Set the confidence threshold.
