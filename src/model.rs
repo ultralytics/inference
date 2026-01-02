@@ -679,8 +679,7 @@ impl YOLOModel {
 
                 if start >= total_elements || end > total_elements {
                     return Err(InferenceError::InferenceError(format!(
-                        "Index out of bounds slicing output data: range {}..{} with length {}",
-                        start, end, total_elements
+                        "Index out of bounds slicing output data: range {start}..{end} with length {total_elements}"
                     )));
                 }
                 let img_data = data[start..end].to_vec();
