@@ -41,7 +41,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let save = args.save;
     let half = args.half;
     let verbose = args.verbose;
-    let batch_size = args.batch;
+    let batch_size = args.batch as usize;
     let device: Option<crate::Device> = args
         .device
         .as_ref()
@@ -197,11 +197,10 @@ pub fn run_prediction(args: &PredictArgs) {
              images: &[image::DynamicImage],
              paths: &[String],
              metas: &[crate::source::SourceMeta]| {
-                for (idx, results) in batch_results.into_iter().enumerate() {
-                    let meta = &metas[idx];
-                    let image_path = &paths[idx];
-                    let img = &images[idx];
-
+                for (results, (meta, (image_path, img))) in batch_results
+                    .into_iter()
+                    .zip(metas.iter().zip(paths.iter().zip(images.iter())))
+                {
                     for result in results {
                         // Build detection summary
                         let detection_summary = format_detection_summary(&result);
