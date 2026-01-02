@@ -677,11 +677,13 @@ impl YOLOModel {
                 let start = i * elements_per_img;
                 let end = start + elements_per_img;
 
-                let img_data = if start < total_elements && end <= total_elements {
-                    data[start..end].to_vec()
-                } else {
-                    Vec::new()
-                };
+                if start >= total_elements || end > total_elements {
+                    return Err(InferenceError::InferenceError(format!(
+                        "Index out of bounds slicing output data: range {}..{} with length {}",
+                        start, end, total_elements
+                    )));
+                }
+                let img_data = data[start..end].to_vec();
 
                 // Adjust shape for single image: [1, ...]
                 let mut img_shape = shape.clone();
