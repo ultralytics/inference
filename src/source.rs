@@ -245,6 +245,8 @@ pub struct SourceIterator {
     total_frames: Option<usize>,
     #[cfg(feature = "video")]
     webcam_init_failed: bool,
+    #[cfg(feature = "video")]
+    video_init_failed: bool,
 }
 
 impl SourceIterator {
@@ -285,6 +287,8 @@ impl SourceIterator {
             total_frames: None,
             #[cfg(feature = "video")]
             webcam_init_failed: false,
+            #[cfg(feature = "video")]
+            video_init_failed: false,
         })
     }
 
@@ -614,6 +618,10 @@ impl SourceIterator {
 
         // Initialize decoder if needed (Video/Stream)
         if self.decoder.is_none() {
+            if self.video_init_failed {
+                return None;
+            }
+
             let path_str = match &self.source {
                 Source::Video(p) => Some(p.to_string_lossy().to_string()),
                 Source::Stream(s) => Some(s.clone()),
@@ -641,14 +649,12 @@ impl SourceIterator {
                         self.decoder = Some(d);
                     }
                     Err(e) => {
-                        // Debug: print error to stderr
-                        eprintln!("Debug: Decode failed: {e}");
+                        self.video_init_failed = true;
                         return Some(Err(InferenceError::VideoError(format!(
                             "Failed to create decoder: {e}"
                         ))));
                     }
                 }
-                // Note: Decoder initialized.
             }
         }
 
@@ -674,10 +680,7 @@ impl SourceIterator {
                         Err(e) => Some(Err(e)),
                     }
                 }
-                Err(e) => {
-                    eprintln!("Debug: Decode failed: {e}");
-                    None
-                }
+                Err(_e) => None,
             }
         } else {
             None

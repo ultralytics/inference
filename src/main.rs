@@ -21,8 +21,8 @@
 use clap::Parser;
 
 use ultralytics_inference::cli::args::{Cli, Commands};
-use ultralytics_inference::cli::logging::set_verbose;
 use ultralytics_inference::cli::predict::run_prediction;
+use ultralytics_inference::logging::set_verbose;
 
 /// Entry point for the Ultralytics YOLO Inference CLI.
 fn main() {

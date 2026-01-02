@@ -27,6 +27,7 @@ use crate::preprocessing::{
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;
+use crate::warn;
 
 /// YOLO model for inference.
 ///
@@ -200,8 +201,8 @@ impl YOLOModel {
                 // Handle cases where feature is disabled but enum variant exists
                 #[allow(unreachable_patterns)]
                 _ => {
-                    eprintln!(
-                        "\x1b[33mWARNING ⚠️ Device '{device}' requested but feature not enabled or supported. Falling back to available providers.\x1b[0m"
+                    warn!(
+                        "Device '{device}' requested but feature not enabled or supported. Falling back to available providers."
                     );
                 }
             }
