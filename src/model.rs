@@ -740,24 +740,82 @@ impl YOLOModel {
     /// Vector of Results.
     pub fn predict_array(&mut self, image: &Array3<u8>, path: String) -> Result<Vec<Results>> {
         // Convert array to DynamicImage
-        let shape = image.shape();
-        let (height, width) = (shape[0] as u32, shape[1] as u32);
+        let dynamic_img = crate::utils::array_to_image(image)?;
+        self.predict_image(&dynamic_img, path)
+    }
 
-        let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
-        for y in 0..height as usize {
-            for x in 0..width as usize {
-                rgb_data.push(image[[y, x, 0]]);
-                rgb_data.push(image[[y, x, 1]]);
-                rgb_data.push(image[[y, x, 2]]);
+    /// Process a source and save results if requested.
+    ///
+    /// This method is gated by the "annotate" feature.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The input source.
+    /// * `save` - Whether to save results.
+    /// * `save_dir` - Directory to save results.
+    ///
+    /// # Returns
+    ///
+    /// * Vector of `SourceMeta` and Results pairs.
+    #[cfg(feature = "annotate")]
+    #[allow(clippy::too_many_lines)]
+    pub fn predict_source(
+        &mut self,
+        source: crate::source::Source,
+        save: bool,
+        save_dir: Option<&Path>,
+    ) -> Result<Vec<(crate::source::SourceMeta, Results)>> {
+        use crate::annotate::annotate_image;
+
+        let is_video = source.is_video();
+        #[cfg(not(feature = "video"))]
+        if is_video {
+            return Err(InferenceError::FeatureNotEnabled(
+                "Video support requires 'video' feature".to_string(),
+            ));
+        }
+
+        let iterator = crate::source::SourceIterator::new(source)?;
+        let mut results_vec = Vec::new();
+
+        // Initialize ResultSaver if saving is enabled
+        let mut result_saver = if save {
+            if let Some(d) = save_dir {
+                Some(crate::io::SaveResults::new(
+                    d.to_path_buf(),
+                    self.config.save_frames,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        for frame_result in iterator {
+            let (img, meta) = frame_result?;
+
+            // Run inference
+            let results = self.predict_image(&img, meta.path.clone())?;
+
+            // Take the first result (since we process one frame at a time)
+            if let Some(result) = results.clone().into_iter().next() {
+                // Save logic
+                if let Some(saver) = &mut result_saver {
+                    let annotated = annotate_image(&img, &result, None);
+                    saver.save(is_video, &meta, &annotated)?;
+                }
+
+                results_vec.push((meta, result));
             }
         }
 
-        let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
-            InferenceError::ImageError("Failed to create image buffer".to_string())
-        })?;
+        // Finish saver
+        if let Some(saver) = result_saver {
+            saver.finish()?;
+        }
 
-        let dynamic_img = DynamicImage::ImageRgb8(img_buffer);
-        self.predict_image(&dynamic_img, path)
+        Ok(results_vec)
     }
 
     /// Run the ONNX model inference with FP32 input.

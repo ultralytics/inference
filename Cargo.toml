@@ -141,6 +141,7 @@ all = ["annotate", "video"]
 serial_test = "3"
 tempfile = "3"
 
+
 [profile.dev]
 opt-level = 0
 split-debuginfo = "unpacked"

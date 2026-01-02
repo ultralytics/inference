@@ -270,6 +270,47 @@ pub fn pluralize(word: &str) -> String {
     }
 }
 
+use image::DynamicImage;
+use ndarray::Array3;
+
+use crate::error::{InferenceError, Result};
+
+/// Convert an HWC u8 array to a `DynamicImage`.
+///
+/// # Arguments
+///
+/// * `arr` - Input array with shape (H, W, 3).
+///
+/// # Returns
+///
+/// * A `DynamicImage` containing the image data.
+///
+/// # Errors
+///
+/// Returns an error if dimensions are invalid or conversion fails.
+pub fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
+    let shape = arr.shape();
+    let height = u32::try_from(shape[0])
+        .map_err(|_| InferenceError::ImageError("Image height exceeds u32::MAX".to_string()))?;
+    let width = u32::try_from(shape[1])
+        .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
+
+    let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            rgb_data.push(arr[[y, x, 0]]);
+            rgb_data.push(arr[[y, x, 1]]);
+            rgb_data.push(arr[[y, x, 2]]);
+        }
+    }
+
+    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+        InferenceError::ImageError("Failed to create image from array".to_string())
+    })?;
+
+    Ok(DynamicImage::ImageRgb8(img_buffer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

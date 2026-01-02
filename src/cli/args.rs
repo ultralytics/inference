@@ -75,6 +75,10 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = false)]
     pub save: bool,
 
+    /// Save individual frames for video input (instead of video file)
+    #[arg(long, default_value_t = false)]
+    pub save_frames: bool,
+
     /// Display results in a window
     #[arg(long, default_value_t = false)]
     pub show: bool,

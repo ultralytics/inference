@@ -1,7 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 use std::collections::HashMap;
-use std::path::Path;
+
 use std::process;
 #[cfg(feature = "visualize")]
 use std::time::Duration;
@@ -14,9 +14,6 @@ use crate::annotate::{annotate_image, find_next_run_dir};
 
 #[cfg(feature = "visualize")]
 use crate::visualizer::Viewer;
-
-#[cfg(feature = "video")]
-use video_rs::{Encoder, encode::Settings};
 
 use crate::utils::pluralize;
 use crate::{InferenceConfig, Results, VERSION, YOLOModel};
@@ -42,6 +39,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let iou_threshold = args.iou;
     let imgsz = args.imgsz;
     let save = args.save;
+    let save_frames = args.save_frames;
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
@@ -60,7 +58,8 @@ pub fn run_prediction(args: &PredictArgs) {
         .with_confidence(conf_threshold)
         .with_iou(iou_threshold)
         .with_half(half)
-        .with_batch(batch_size);
+        .with_batch(batch_size)
+        .with_save_frames(save_frames);
 
     // Apply imgsz if specified
     if let Some(sz) = imgsz {
@@ -126,7 +125,7 @@ pub fn run_prediction(args: &PredictArgs) {
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         fs::create_dir_all(&dir).expect("Failed to create save directory");
-        Some(dir)
+        Some(std::path::PathBuf::from(dir))
     } else {
         None
     };
@@ -199,8 +198,13 @@ pub fn run_prediction(args: &PredictArgs) {
     #[cfg(feature = "visualize")]
     let mut viewer: Option<Viewer> = None;
 
-    #[cfg(feature = "video")]
-    let mut video_encoder: Option<Encoder> = None;
+    // Initialize ResultSaver if saving is enabled
+    #[cfg(feature = "annotate")]
+    let mut result_saver = save_dir
+        .as_ref()
+        .map(|d| crate::io::SaveResults::new(d.clone(), save_frames));
+    #[cfg(not(feature = "annotate"))]
+    let mut result_saver: Option<crate::io::SaveResults> = None;
 
     // Use BatchProcessor for centralized batch management
     {
@@ -254,88 +258,13 @@ pub fn run_prediction(args: &PredictArgs) {
                         }
 
                         #[cfg(feature = "annotate")]
-                        if let Some(ref dir) = save_dir {
+                        if save_dir.is_some() {
                             let annotated = annotate_image(img, &result, None);
 
-                            #[cfg(feature = "video")]
-                            if is_video {
-                                if video_encoder.is_none() {
-                                    let filename = Path::new(&image_path)
-                                        .file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy();
-
-                                    // Change extension to .mp4 for video output
-                                    let output_name = Path::new(&filename.as_ref())
-                                        .with_extension("mp4")
-                                        .file_name()
-                                        .unwrap()
-                                        .to_string_lossy()
-                                        .to_string();
-
-                                    let save_path = format!("{dir}/{output_name}");
-                                    let width = annotated.width();
-                                    let height = annotated.height();
-
-                                    let settings = Settings::preset_h264_yuv420p(
-                                        width as usize,
-                                        height as usize,
-                                        false,
-                                    );
-
-                                    match Encoder::new(Path::new(&save_path), settings) {
-                                        Ok(encoder) => {
-                                            video_encoder = Some(encoder);
-                                            verbose!("Saving video to {save_path}");
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to create video encoder: {e}");
-                                        }
-                                    }
-                                }
-
-                                if let Some(encoder) = &mut video_encoder {
-                                    let width = annotated.width() as usize;
-                                    let height = annotated.height() as usize;
-                                    let raw = annotated.to_rgb8().into_raw();
-
-                                    if let Ok(frame) = ndarray_0_16::Array3::from_shape_vec(
-                                        (height, width, 3),
-                                        raw,
-                                    ) {
-                                        // Calculate total seconds manually to use simpler API
-                                        let seconds = (meta.frame_idx as f64)
-                                            / f64::from(meta.fps.unwrap_or(30.0));
-                                        let time = video_rs::Time::from_secs_f64(seconds);
-                                        if let Err(e) = encoder.encode(&frame, time) {
-                                            error!(
-                                                "Failed to encode frame {}: {e}",
-                                                meta.frame_idx
-                                            );
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Save individual image
-                                let filename = Path::new(&image_path)
-                                    .file_name()
-                                    .unwrap_or_default()
-                                    .to_string_lossy();
-                                let save_path = format!("{dir}/{filename}");
-                                if let Err(e) = annotated.save(&save_path) {
-                                    error!("Error saving {save_path}: {e}");
-                                }
-                            }
-
-                            #[cfg(not(feature = "video"))]
-                            if !is_video {
-                                let filename = Path::new(&image_path)
-                                    .file_name()
-                                    .unwrap_or_default()
-                                    .to_string_lossy();
-                                let save_path = format!("{dir}/{filename}");
-                                if let Err(e) = annotated.save(&save_path) {
-                                    error!("Error saving {save_path}: {e}");
+                            #[allow(clippy::collapsible_if)]
+                            if let Some(saver) = &mut result_saver {
+                                if let Err(e) = saver.save(is_video, meta, &annotated) {
+                                    error!("Failed to save result: {e}");
                                 }
                             }
                         }
@@ -393,12 +322,12 @@ pub fn run_prediction(args: &PredictArgs) {
             batch_processor.add(img, meta.path.clone(), meta);
         }
         batch_processor.flush();
+    }
 
-        #[cfg(feature = "video")]
-        if let Some(mut encoder) = video_encoder.take()
-            && let Err(e) = encoder.finish()
-        {
-            error!("Failed to finish video encoding: {e}");
+    #[allow(clippy::collapsible_if)]
+    if let Some(saver) = result_saver {
+        if let Err(e) = saver.finish() {
+            error!("Failed to finish saving: {e}");
         }
     }
 
@@ -416,7 +345,7 @@ pub fn run_prediction(args: &PredictArgs) {
     // Print save directory if --save was used
     #[cfg(feature = "annotate")]
     if let Some(ref dir) = save_dir {
-        verbose!("Results saved to {dir}");
+        verbose!("Results saved to {}", dir.display());
     }
 
     // Print footer

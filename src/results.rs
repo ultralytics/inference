@@ -307,6 +307,24 @@ impl Results {
 
         results
     }
+
+    /// Save the annotated result to a file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to save the image to.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image cannot be saved or if the format is unsupported.
+    #[cfg(feature = "annotate")]
+    pub fn save<P: AsRef<std::path::Path>>(&self, path: P) -> crate::error::Result<()> {
+        let img = crate::utils::array_to_image(&self.orig_img)?;
+        let annotated = crate::annotate::annotate_image(&img, self, None);
+        annotated
+            .save(path)
+            .map_err(|e| crate::error::InferenceError::ImageError(e.to_string()))
+    }
 }
 
 /// Values that can appear in a summary dictionary.
