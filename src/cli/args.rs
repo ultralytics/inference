@@ -15,6 +15,7 @@ use clap::{Args, Parser, Subcommand};
     --imgsz <IMGSZ>        Inference image size
     --half                 Use FP16 half-precision inference
     --save                 Save annotated images to runs/<task>/predict
+    --save-frames          Save individual frames for video input (instead of video file)
     --show                 Display results in a window
     --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, xnnpack)
     --verbose              Show verbose output
@@ -22,6 +23,7 @@ use clap::{Args, Parser, Subcommand};
 Examples:
     ultralytics-inference predict --model yolo11n.onnx --source image.jpg
     ultralytics-inference predict --model yolo11n.onnx --source video.mp4
+    ultralytics-inference predict --model yolo11n.onnx --source video.mp4 --save-frames
     ultralytics-inference predict --model yolo11n.onnx --source 0 --conf 0.5
     ultralytics-inference predict -m yolo11n.onnx -s assets/ --save --half
     ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show
@@ -72,8 +74,12 @@ pub struct PredictArgs {
     pub half: bool,
 
     /// Save annotated images to runs/<task>/predict
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub save: bool,
+
+    /// Save individual frames for video input (instead of video file)
+    #[arg(long, default_value_t = false)]
+    pub save_frames: bool,
 
     /// Display results in a window
     #[arg(long, default_value_t = false)]

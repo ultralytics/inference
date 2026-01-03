@@ -2487,6 +2487,7 @@ dependencies = [
  "imageproc",
  "jpeg-decoder",
  "minifb",
+ "ndarray 0.16.1",
  "ndarray 0.17.1",
  "ort",
  "rayon",

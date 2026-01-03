@@ -23,6 +23,7 @@ fn test_run_prediction_e2e() {
         batch: 1,
         half: false,
         save: false,
+        save_frames: false,
         show: false,
         device: None,
         verbose: true,

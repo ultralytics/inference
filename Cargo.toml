@@ -84,7 +84,7 @@ ab_glyph = { version = "^0.2", optional = true }
 # Optional - Video support
 ffmpeg-next = { version = "^7.1.0", optional = true }
 ffmpeg-sys-next = { version = "^7.1.3", optional = true }
-
+ndarray_0_16 = { package = "ndarray", version = "0.16", optional = true }
 
 [features]
 default = ["annotate", "visualize"]
@@ -93,7 +93,7 @@ default = ["annotate", "visualize"]
 visualize = ["minifb"]
 
 # Video support
-video = ["video-rs", "ffmpeg-next", "ffmpeg-sys-next"]
+video = ["video-rs", "ffmpeg-next", "ffmpeg-sys-next", "ndarray_0_16"]
 
 # Image annotation support (for --save feature in CLI)
 annotate = ["imageproc", "ab_glyph"]
@@ -140,6 +140,7 @@ all = ["annotate", "video"]
 # Testing dependencies
 serial_test = "3"
 tempfile = "3"
+
 
 [profile.dev]
 opt-level = 0

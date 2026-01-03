@@ -19,7 +19,9 @@ pub enum InferenceError {
     /// Invalid configuration provided.
     ConfigError(String),
     /// IO error (file not found, permission denied, etc.).
-    IoError(std::io::Error),
+    IoError(String),
+    /// Wrapped `std::io::Error`
+    Io(std::io::Error),
     /// Error parsing model metadata.
     MetadataError(String),
     /// Post-processing error.
@@ -39,7 +41,8 @@ impl fmt::Display for InferenceError {
             Self::InferenceError(msg) => write!(f, "Inference error: {msg}"),
             Self::ImageError(msg) => write!(f, "Image error: {msg}"),
             Self::ConfigError(msg) => write!(f, "Config error: {msg}"),
-            Self::IoError(err) => write!(f, "IO error: {err}"),
+            Self::IoError(msg) => write!(f, "IO error: {msg}"),
+            Self::Io(err) => write!(f, "IO error: {err}"),
             Self::MetadataError(msg) => write!(f, "Metadata error: {msg}"),
             Self::PostProcessingError(msg) => write!(f, "Post-processing error: {msg}"),
             Self::VisualizerError(msg) => write!(f, "Visualizer error: {msg}"),
@@ -52,7 +55,7 @@ impl fmt::Display for InferenceError {
 impl std::error::Error for InferenceError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::IoError(err) => Some(err),
+            Self::Io(err) => Some(err),
             _ => None,
         }
     }
@@ -60,7 +63,7 @@ impl std::error::Error for InferenceError {
 
 impl From<std::io::Error> for InferenceError {
     fn from(err: std::io::Error) -> Self {
-        Self::IoError(err)
+        Self::Io(err)
     }
 }
 
@@ -73,6 +76,7 @@ impl From<image::ImageError> for InferenceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     #[test]
     fn test_error_display() {
@@ -81,5 +85,29 @@ mod tests {
 
         let err = InferenceError::InferenceError("test".to_string());
         assert_eq!(err.to_string(), "Inference error: test");
+    }
+
+    #[test]
+    fn test_error_conversions() {
+        let io_err = io::Error::new(io::ErrorKind::NotFound, "file not found");
+        let err: InferenceError = io_err.into();
+        assert!(matches!(err, InferenceError::Io(_)));
+        assert_eq!(err.to_string(), "IO error: file not found");
+
+        let img_err = image::ImageError::Parameter(image::error::ParameterError::from_kind(
+            image::error::ParameterErrorKind::DimensionMismatch,
+        ));
+        let err: InferenceError = img_err.into();
+        assert!(matches!(err, InferenceError::ImageError(_)));
+    }
+
+    #[test]
+    fn test_error_source() {
+        let io_err = io::Error::new(io::ErrorKind::NotFound, "source test");
+        let err = InferenceError::Io(io_err);
+        assert!(std::error::Error::source(&err).is_some());
+
+        let err = InferenceError::ModelLoadError("test".to_string());
+        assert!(std::error::Error::source(&err).is_none());
     }
 }

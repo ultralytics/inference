@@ -1,7 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 use std::collections::HashMap;
-use std::path::Path;
+
 use std::process;
 #[cfg(feature = "visualize")]
 use std::time::Duration;
@@ -39,6 +39,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let iou_threshold = args.iou;
     let imgsz = args.imgsz;
     let save = args.save;
+    let save_frames = args.save_frames;
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
@@ -57,7 +58,8 @@ pub fn run_prediction(args: &PredictArgs) {
         .with_confidence(conf_threshold)
         .with_iou(iou_threshold)
         .with_half(half)
-        .with_batch(batch_size);
+        .with_batch(batch_size)
+        .with_save_frames(save_frames);
 
     // Apply imgsz if specified
     if let Some(sz) = imgsz {
@@ -123,7 +125,7 @@ pub fn run_prediction(args: &PredictArgs) {
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         fs::create_dir_all(&dir).expect("Failed to create save directory");
-        Some(dir)
+        Some(std::path::PathBuf::from(dir))
     } else {
         None
     };
@@ -170,6 +172,14 @@ pub fn run_prediction(args: &PredictArgs) {
 
     // Source is already initialized above
     let is_video = source.is_video();
+    #[cfg(not(feature = "video"))]
+    if is_video {
+        warn!(
+            "Video source detected but 'video' feature is not enabled. Please compile with '--features video'"
+        );
+        process::exit(1);
+    }
+
     let iter = match crate::source::SourceIterator::new(source) {
         Ok(iter) => iter,
         Err(e) => {
@@ -187,6 +197,14 @@ pub fn run_prediction(args: &PredictArgs) {
 
     #[cfg(feature = "visualize")]
     let mut viewer: Option<Viewer> = None;
+
+    // Initialize ResultSaver if saving is enabled
+    #[cfg(feature = "annotate")]
+    let mut result_saver = save_dir
+        .as_ref()
+        .map(|d| crate::io::SaveResults::new(d.clone(), save_frames));
+    #[cfg(not(feature = "annotate"))]
+    let mut result_saver: Option<crate::io::SaveResults> = None;
 
     // Use BatchProcessor for centralized batch management
     {
@@ -240,15 +258,14 @@ pub fn run_prediction(args: &PredictArgs) {
                         }
 
                         #[cfg(feature = "annotate")]
-                        if let Some(ref dir) = save_dir {
+                        if save_dir.is_some() {
                             let annotated = annotate_image(img, &result, None);
-                            let filename = Path::new(&image_path)
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy();
-                            let save_path = format!("{dir}/{filename}");
-                            if let Err(e) = annotated.save(&save_path) {
-                                error!("Error saving {save_path}: {e}");
+
+                            #[allow(clippy::collapsible_if)]
+                            if let Some(saver) = &mut result_saver {
+                                if let Err(e) = saver.save(is_video, meta, &annotated) {
+                                    error!("Failed to save result: {e}");
+                                }
                             }
                         }
 
@@ -299,12 +316,19 @@ pub fn run_prediction(args: &PredictArgs) {
                 Ok(val) => val,
                 Err(e) => {
                     error!("Error reading source: {e}");
-                    continue;
+                    break;
                 }
             };
             batch_processor.add(img, meta.path.clone(), meta);
         }
         batch_processor.flush();
+    }
+
+    #[allow(clippy::collapsible_if)]
+    if let Some(saver) = result_saver {
+        if let Err(e) = saver.finish() {
+            error!("Failed to finish saving: {e}");
+        }
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
@@ -321,7 +345,7 @@ pub fn run_prediction(args: &PredictArgs) {
     // Print save directory if --save was used
     #[cfg(feature = "annotate")]
     if let Some(ref dir) = save_dir {
-        verbose!("Results saved to {dir}");
+        verbose!("Results saved to {}", dir.display());
     }
 
     // Print footer

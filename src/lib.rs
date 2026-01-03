@@ -250,6 +250,9 @@ pub mod device;
 pub mod download;
 pub mod error;
 pub mod inference;
+pub mod io;
+
+pub mod logging;
 pub mod metadata;
 pub mod model;
 pub mod postprocessing;
