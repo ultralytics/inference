@@ -1010,13 +1010,7 @@ mod tests {
         let orig_img = Array3::zeros((100, 100, 3));
 
         // Empty results
-        let results = Results::new(
-            orig_img,
-            "test.jpg".to_string(),
-            names,
-            speed,
-            (640, 640),
-        );
+        let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
         assert!(results.is_empty());
         // Verify empty output format
         // verbose() returns "(no detections), " string if empty and probs is none
