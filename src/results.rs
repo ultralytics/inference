@@ -307,6 +307,24 @@ impl Results {
 
         results
     }
+
+    /// Save the annotated result to a file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to save the image to.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image cannot be saved or if the format is unsupported.
+    #[cfg(feature = "annotate")]
+    pub fn save<P: AsRef<std::path::Path>>(&self, path: P) -> crate::error::Result<()> {
+        let img = crate::utils::array_to_image(&self.orig_img)?;
+        let annotated = crate::annotate::annotate_image(&img, self, None);
+        annotated
+            .save(path)
+            .map_err(|e| crate::error::InferenceError::ImageError(e.to_string()))
+    }
 }
 
 /// Values that can appear in a summary dictionary.
@@ -984,5 +1002,20 @@ mod tests {
     fn test_speed() {
         let speed = Speed::new(10.0, 20.0, 5.0);
         assert!((speed.total() - 35.0).abs() < 1e-6);
+    }
+    #[test]
+    fn test_results_verbose() {
+        let names = HashMap::from([(0, "person".to_string())]);
+        let speed = Speed::default();
+        let orig_img = Array3::zeros((100, 100, 3));
+
+        // Empty results
+        let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
+        assert!(results.is_empty());
+        // Verify empty output format
+        // verbose() returns "(no detections), " string if empty and probs is none
+        // We need to match that exactly or just assert it's empty-ish?
+        // implementation: return "(no detections), ".to_string();
+        assert_eq!(results.verbose(), "(no detections), ");
     }
 }

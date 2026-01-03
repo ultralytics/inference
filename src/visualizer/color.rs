@@ -114,3 +114,45 @@ pub const POSE_COLORS: [[u8; 3]; 20] = [
     [255, 0, 0],     // #ff0000
     [255, 255, 255], // #ffffff
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_color_constants() {
+        assert_eq!(Color::RED, Color(255, 0, 0));
+        assert_eq!(Color::GREEN, Color(0, 255, 0));
+        assert_eq!(Color::BLUE, Color(0, 0, 255));
+        assert_eq!(Color::WHITE, Color(255, 255, 255));
+        assert_eq!(Color::BLACK, Color(0, 0, 0));
+    }
+
+    #[test]
+    fn test_color_new() {
+        let c = Color::new(10, 20, 30);
+        assert_eq!(c.0, 10);
+        assert_eq!(c.1, 20);
+        assert_eq!(c.2, 30);
+    }
+
+    #[test]
+    fn test_from_index() {
+        // Test first color
+        let c1 = Color::from_index(0);
+        assert_eq!(c1, Color(4, 42, 255));
+
+        // Test wrapping
+        let c2 = Color::from_index(COLORS.len());
+        assert_eq!(c2, Color(4, 42, 255));
+    }
+
+    #[test]
+    fn test_from_pose_index() {
+        let c1 = Color::from_pose_index(0);
+        assert_eq!(c1, Color(255, 128, 0));
+
+        let c2 = Color::from_pose_index(POSE_COLORS.len());
+        assert_eq!(c2, Color(255, 128, 0));
+    }
+}

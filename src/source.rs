@@ -245,6 +245,8 @@ pub struct SourceIterator {
     total_frames: Option<usize>,
     #[cfg(feature = "video")]
     webcam_init_failed: bool,
+    #[cfg(feature = "video")]
+    video_init_failed: bool,
 }
 
 impl SourceIterator {
@@ -285,6 +287,8 @@ impl SourceIterator {
             total_frames: None,
             #[cfg(feature = "video")]
             webcam_init_failed: false,
+            #[cfg(feature = "video")]
+            video_init_failed: false,
         })
     }
 
@@ -298,7 +302,7 @@ impl SourceIterator {
         }
 
         let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map_err(InferenceError::IoError)?
+            .map_err(|e| InferenceError::IoError(e.to_string()))?
             .filter_map(std::result::Result::ok)
             .map(|entry| entry.path())
             .filter(|path| Self::is_image_file(path))
@@ -336,7 +340,7 @@ impl SourceIterator {
             }
 
             let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-                .map_err(InferenceError::IoError)?
+                .map_err(|e| InferenceError::IoError(e.to_string()))?
                 .filter_map(std::result::Result::ok)
                 .map(|entry| entry.path())
                 .filter(|path| {
@@ -614,6 +618,10 @@ impl SourceIterator {
 
         // Initialize decoder if needed (Video/Stream)
         if self.decoder.is_none() {
+            if self.video_init_failed {
+                return None;
+            }
+
             let path_str = match &self.source {
                 Source::Video(p) => Some(p.to_string_lossy().to_string()),
                 Source::Stream(s) => Some(s.clone()),
@@ -641,14 +649,12 @@ impl SourceIterator {
                         self.decoder = Some(d);
                     }
                     Err(e) => {
-                        // Debug: print error to stderr
-                        eprintln!("Debug: Decode failed: {e}");
+                        self.video_init_failed = true;
                         return Some(Err(InferenceError::VideoError(format!(
                             "Failed to create decoder: {e}"
                         ))));
                     }
                 }
-                // Note: Decoder initialized.
             }
         }
 
@@ -674,10 +680,7 @@ impl SourceIterator {
                         Err(e) => Some(Err(e)),
                     }
                 }
-                Err(e) => {
-                    eprintln!("Debug: Decode failed: {e}");
-                    None
-                }
+                Err(_e) => None,
             }
         } else {
             None
@@ -723,7 +726,7 @@ impl Iterator for SourceIterator {
                     self.current_frame = 1;
                     let meta = SourceMeta::default();
                     // Convert array to image
-                    match array_to_image(arr) {
+                    match crate::utils::array_to_image(arr) {
                         Ok(img) => Some(Ok((img, meta))),
                         Err(e) => Some(Err(e)),
                     }
@@ -734,42 +737,6 @@ impl Iterator for SourceIterator {
             Source::Video(_) | Source::Webcam(_) | Source::Stream(_) => self.next_video_frame(),
         }
     }
-}
-
-/// Convert an HWC u8 array to a `DynamicImage`.
-///
-/// # Arguments
-///
-/// * `arr` - Input array with shape (H, W, 3).
-///
-/// # Returns
-///
-/// * A `DynamicImage` containing the image data.
-///
-/// # Errors
-///
-/// Returns an error if dimensions are invalid or conversion fails.
-fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
-    let shape = arr.shape();
-    let height = u32::try_from(shape[0])
-        .map_err(|_| InferenceError::ImageError("Image height exceeds u32::MAX".to_string()))?;
-    let width = u32::try_from(shape[1])
-        .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
-
-    let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
-    for y in 0..height as usize {
-        for x in 0..width as usize {
-            rgb_data.push(arr[[y, x, 0]]);
-            rgb_data.push(arr[[y, x, 1]]);
-            rgb_data.push(arr[[y, x, 2]]);
-        }
-    }
-
-    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
-        InferenceError::ImageError("Failed to create image from array".to_string())
-    })?;
-
-    Ok(DynamicImage::ImageRgb8(img_buffer))
 }
 
 #[cfg(feature = "video")]
