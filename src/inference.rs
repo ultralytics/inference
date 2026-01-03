@@ -58,9 +58,10 @@ pub struct InferenceConfig {
     pub half: bool,
     /// Hardware device to use for inference.
     /// If `None`, the best available device will be automatically selected.
-    /// Hardware device to use for inference.
-    /// If `None`, the best available device will be automatically selected.
     pub device: Option<crate::Device>,
+    /// Whether to save annotated results.
+    /// Defaults to `true`.
+    pub save: bool,
     /// Whether to save individual frames instead of a video file when input is video.
     /// Defaults to `false` (save as video).
     pub save_frames: bool,
@@ -77,6 +78,7 @@ impl Default for InferenceConfig {
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
             half: false,
             device: None,
+            save: true,
             save_frames: false,
         }
     }
@@ -233,6 +235,21 @@ impl InferenceConfig {
     #[must_use]
     pub const fn with_device(mut self, device: crate::Device) -> Self {
         self.device = Some(device);
+        self
+    }
+
+    /// Set whether to save annotated results.
+    ///
+    /// # Arguments
+    ///
+    /// * `save` - `true` to save results, `false` to skip saving.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_save(mut self, save: bool) -> Self {
+        self.save = save;
         self
     }
 

@@ -747,12 +747,12 @@ impl YOLOModel {
     /// Process a source and save results if requested.
     ///
     /// This method is gated by the "annotate" feature.
+    /// Uses `config.save` to determine whether to save annotated results.
     ///
     /// # Arguments
     ///
     /// * `source` - The input source.
-    /// * `save` - Whether to save results.
-    /// * `save_dir` - Directory to save results.
+    /// * `save_dir` - Directory to save results (required if saving).
     ///
     /// # Returns
     ///
@@ -762,7 +762,6 @@ impl YOLOModel {
     pub fn predict_source(
         &mut self,
         source: crate::source::Source,
-        save: bool,
         save_dir: Option<&Path>,
     ) -> Result<Vec<(crate::source::SourceMeta, Results)>> {
         use crate::annotate::annotate_image;
@@ -778,8 +777,8 @@ impl YOLOModel {
         let iterator = crate::source::SourceIterator::new(source)?;
         let mut results_vec = Vec::new();
 
-        // Initialize ResultSaver if saving is enabled
-        let mut result_saver = if save {
+        // Initialize ResultSaver if saving is enabled (config.save defaults to true)
+        let mut result_saver = if self.config.save {
             if let Some(d) = save_dir {
                 Some(crate::io::SaveResults::new(
                     d.to_path_buf(),

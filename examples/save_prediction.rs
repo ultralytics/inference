@@ -19,8 +19,8 @@ fn main() -> Result<()> {
     if Path::new(image_path).exists() {
         println!("Processing {image_path}...");
         // predict_source handles loading, inference, annotation, and saving
-        // This will save "bus.jpg" to the current directory (annotated)
-        model.predict_source(Source::from(image_path), true, Some(Path::new(".")))?;
+        // save=true by default in config, so it will save annotated results
+        model.predict_source(Source::from(image_path), Some(Path::new(".")))?;
         println!("Saved annotated image to ./bus.jpg");
     } else {
         println!("Skipping image test: '{image_path}' not found.");
@@ -31,18 +31,18 @@ fn main() -> Result<()> {
     // The library handles frame iteration, annotation, and video encoding.
 
     // Use local video file
-    let video_path = "people.mp4";
+    let video_path = "video.mp4";
     if Path::new(video_path).exists() {
         println!("\nProcessing video: {video_path}");
 
         // Create output directory
         std::fs::create_dir_all("runs")?;
 
-        // Run inference and save video
-        // This will create 'runs/people.mp4'
-        model.predict_source(Source::from(video_path), true, Some(Path::new("runs")))?;
+        // Run inference and save video (save=true by default)
+        // This will create 'runs/video.mp4'
+        model.predict_source(Source::from(video_path), Some(Path::new("runs")))?;
 
-        println!("Saved output video to runs/people.mp4");
+        println!("Saved output video to runs/video.mp4");
     } else {
         println!("Skipping video test: '{video_path}' not found.");
     }
