@@ -111,19 +111,19 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option              | Short | Description                                               | Default                                 |
-| ------------------- | ----- | --------------------------------------------------------- | --------------------------------------- |
-| `--model`           | `-m`  | Path to ONNX model file                                   | `yolo11n.onnx`                          |
-| `--source`          | `-s`  | Input source (image, video, webcam index, or URL)         | `Task dependent Ultralytics URL assets` |
-| `--device`          |       | Device to use (cpu, cuda:0, mps, coreml, etc.)            | `cpu`                                   |
-| `--conf`            |       | Confidence threshold                                      | `0.25`                                  |
-| `--iou`             |       | IoU threshold for NMS                                     | `0.45`                                  |
-| `--imgsz`           |       | Inference image size                                      | `Model metadata`                        |
-| `--half`            |       | Use FP16 half-precision inference                         | `false`                                 |
-| `--save`            |       | Save annotated results to runs/<task>/predict             | `true`                                  |
-| `--save-frames`     |       | Save individual frames for video                          | `false`                                 |
-| `--show`            |       | Display results in a window                               | `false`                                 |
-| `--verbose`         |       | Show verbose output                                       | `true`                                  |
+| Option          | Short | Description                                       | Default                                 |
+| --------------- | ----- | ------------------------------------------------- | --------------------------------------- |
+| `--model`       | `-m`  | Path to ONNX model file                           | `yolo11n.onnx`                          |
+| `--source`      | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
+| `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
+| `--conf`        |       | Confidence threshold                              | `0.25`                                  |
+| `--iou`         |       | IoU threshold for NMS                             | `0.45`                                  |
+| `--imgsz`       |       | Inference image size                              | `Model metadata`                        |
+| `--half`        |       | Use FP16 half-precision inference                 | `false`                                 |
+| `--save`        |       | Save annotated results to runs/<task>/predict     | `true`                                  |
+| `--save-frames` |       | Save individual frames for video                  | `false`                                 |
+| `--show`        |       | Display results in a window                       | `false`                                 |
+| `--verbose`     |       | Show verbose output                               | `true`                                  |
 
 **Source Options:**
 
