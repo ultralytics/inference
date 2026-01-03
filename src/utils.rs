@@ -259,9 +259,17 @@ pub fn pluralize(word: &str) -> String {
         "sheep" => "sheep".to_string(),
         "skis" => "skis".to_string(),
         _ => {
-            if word.ends_with('s') || word.ends_with("ch") || word.ends_with("sh") {
+            if word.ends_with('s')
+                || word.ends_with('x')
+                || word.ends_with("ch")
+                || word.ends_with("sh")
+            {
                 format!("{word}es")
-            } else if word.ends_with('y') && !word.ends_with("ey") && !word.ends_with("ay") {
+            } else if word.ends_with('y')
+                && !word.ends_with("ey")
+                && !word.ends_with("ay")
+                && !word.ends_with("oy")
+            {
                 format!("{}ies", &word[..word.len() - 1])
             } else {
                 format!("{word}s")
@@ -359,5 +367,47 @@ mod tests {
         let keep = nms_per_class(&boxes, 0.5);
         assert_eq!(keep.len(), 1);
         assert!(keep.contains(&0)); // Keep higher score box
+    }
+    #[test]
+    fn test_pluralize() {
+        assert_eq!(pluralize("person"), "persons");
+        assert_eq!(pluralize("bus"), "buses");
+        assert_eq!(pluralize("match"), "matches");
+        assert_eq!(pluralize("box"), "boxes"); // box -> boxs (default rule?) wait, box ends with x, default logic:
+        // logic: ends_with 's', 'ch', 'sh' -> es.
+        // 'box' does NOT end with s/ch/sh. So 'boxs'?
+        // The implementation assumes 'x' is not handled specially?
+        // Let's check impl:
+        // } else if word.ends_with('y') && !word.ends_with("ey") && !word.ends_with("ay") {
+        //     format!("{}ies", &word[..word.len() - 1])
+        // } else {
+        //     format!("{word}s")
+        // }
+        // So 'box' -> 'boxs'. Correct relative to implementation, though technically wrong English.
+        // Let's test standard cases supported.
+        assert_eq!(pluralize("car"), "cars");
+        assert_eq!(pluralize("baby"), "babies");
+        assert_eq!(pluralize("toy"), "toys"); // ends with y but 'oy' -> toys
+    }
+
+    #[test]
+    fn test_array_to_image() {
+        let data = vec![255, 0, 0, 0, 255, 0]; // 2 pixels: Red, Green
+        let arr = Array3::from_shape_vec((1, 2, 3), data).unwrap();
+        let img = array_to_image(&arr).unwrap();
+
+        assert_eq!(img.width(), 2);
+        assert_eq!(img.height(), 1);
+
+        let rgb = img.to_rgb8();
+        let p1 = rgb.get_pixel(0, 0);
+        assert_eq!(p1[0], 255);
+        assert_eq!(p1[1], 0);
+        assert_eq!(p1[2], 0);
+
+        let p2 = rgb.get_pixel(1, 0);
+        assert_eq!(p2[0], 0);
+        assert_eq!(p2[1], 255);
+        assert_eq!(p2[2], 0);
     }
 }

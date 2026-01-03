@@ -1003,4 +1003,25 @@ mod tests {
         let speed = Speed::new(10.0, 20.0, 5.0);
         assert!((speed.total() - 35.0).abs() < 1e-6);
     }
+    #[test]
+    fn test_results_verbose() {
+        let names = HashMap::from([(0, "person".to_string())]);
+        let speed = Speed::default();
+        let orig_img = Array3::zeros((100, 100, 3));
+
+        // Empty results
+        let results = Results::new(
+            orig_img.clone(),
+            "test.jpg".to_string(),
+            names.clone(),
+            speed.clone(),
+            (640, 640),
+        );
+        assert!(results.is_empty());
+        // Verify empty output format
+        // verbose() returns "(no detections), " string if empty and probs is none
+        // We need to match that exactly or just assert it's empty-ish?
+        // implementation: return "(no detections), ".to_string();
+        assert_eq!(results.verbose(), "(no detections), ");
+    }
 }
