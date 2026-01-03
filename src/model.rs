@@ -799,7 +799,7 @@ impl YOLOModel {
             let results = self.predict_image(&img, meta.path.clone())?;
 
             // Take the first result (since we process one frame at a time)
-            if let Some(result) = results.clone().into_iter().next() {
+            if let Some(result) = results.into_iter().next() {
                 // Save logic
                 if let Some(saver) = &mut result_saver {
                     let annotated = annotate_image(&img, &result, None);

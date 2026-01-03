@@ -8,6 +8,28 @@ use video_rs::{Encoder, Time, encode::Settings as EncoderSettings};
 use crate::error::{InferenceError, Result};
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "video")]
+use std::sync::Once;
+
+#[cfg(feature = "video")]
+static INIT: Once = Once::new();
+
+/// Initialize global video logging configuration.
+///
+/// ensuring `video-rs` is initialized and `FFmpeg` logs are silenced
+/// (only errors are shown). safe to call multiple times.
+pub fn init_logging() {
+    #[cfg(feature = "video")]
+    INIT.call_once(|| {
+        if let Err(e) = video_rs::init() {
+            eprintln!("Failed to initialize video-rs: {e}");
+        }
+
+        #[cfg(feature = "ffmpeg-next")]
+        ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Error);
+    });
+}
+
 /// A wrapper around `video-rs` encoder to simplify video saving.
 #[cfg(feature = "video")]
 pub struct VideoWriter {
@@ -139,6 +161,10 @@ impl SaveResults {
     /// * `save_frames` - If true, force saving individual frames even for video sources.
     #[must_use]
     pub const fn new(save_dir: PathBuf, save_frames: bool) -> Self {
+        // Ensure logging is initialized
+        // Note: init_logging handles Once internally
+        // We can't call it here because new is const fn
+        // We will call it in save() lazily
         Self {
             save_dir,
             #[allow(unused)]
@@ -168,6 +194,8 @@ impl SaveResults {
         meta: &crate::source::SourceMeta,
         annotated: &image::DynamicImage,
     ) -> Result<()> {
+        init_logging();
+
         #[cfg(feature = "video")]
         let save_as_video = is_video && !self.save_frames;
         #[cfg(not(feature = "video"))]

@@ -26,6 +26,8 @@ use ultralytics_inference::logging::set_verbose;
 
 /// Entry point for the Ultralytics YOLO Inference CLI.
 fn main() {
+    ultralytics_inference::io::init_logging();
+
     let cli = Cli::parse();
 
     match &cli.command {
