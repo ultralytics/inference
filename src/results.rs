@@ -1011,10 +1011,10 @@ mod tests {
 
         // Empty results
         let results = Results::new(
-            orig_img.clone(),
+            orig_img,
             "test.jpg".to_string(),
-            names.clone(),
-            speed.clone(),
+            names,
+            speed,
             (640, 640),
         );
         assert!(results.is_empty());
