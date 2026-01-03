@@ -18,7 +18,7 @@ static INIT: Once = Once::new();
 ///
 /// ensuring `video-rs` is initialized and `FFmpeg` logs are silenced
 /// (only errors are shown). safe to call multiple times.
-pub const fn init_logging() {
+pub fn init_logging() {
     #[cfg(feature = "video")]
     INIT.call_once(|| {
         if let Err(e) = video_rs::init() {
@@ -160,11 +160,9 @@ impl SaveResults {
     /// * `save_dir` - Directory to save results.
     /// * `save_frames` - If true, force saving individual frames even for video sources.
     #[must_use]
-    pub const fn new(save_dir: PathBuf, save_frames: bool) -> Self {
-        // Ensure logging is initialized
-        // Note: init_logging handles Once internally
-        // We can't call it here because new is const fn
-        // We will call it in save() lazily
+    pub fn new(save_dir: PathBuf, save_frames: bool) -> Self {
+        init_logging();
+
         Self {
             save_dir,
             #[allow(unused)]
