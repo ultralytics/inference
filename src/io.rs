@@ -18,7 +18,7 @@ static INIT: Once = Once::new();
 ///
 /// ensuring `video-rs` is initialized and `FFmpeg` logs are silenced
 /// (only errors are shown). safe to call multiple times.
-pub fn init_logging() {
+pub const fn init_logging() {
     #[cfg(feature = "video")]
     INIT.call_once(|| {
         if let Err(e) = video_rs::init() {
