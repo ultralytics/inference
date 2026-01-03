@@ -18,6 +18,7 @@ static INIT: Once = Once::new();
 ///
 /// ensuring `video-rs` is initialized and `FFmpeg` logs are silenced
 /// (only errors are shown). safe to call multiple times.
+#[allow(clippy::missing_const_for_fn)]
 pub fn init_logging() {
     #[cfg(feature = "video")]
     INIT.call_once(|| {
