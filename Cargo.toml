@@ -78,7 +78,7 @@ minifb = { version = "^0.28.0", optional = true }
 video-rs = { version = "^0.10.5", features = ["ndarray"], optional = true }
 
 # Optional - Image annotation (for --save feature)
-imageproc = { version = "^0.25", optional = true }
+imageproc = { version = "^0.26", optional = true }
 ab_glyph = { version = "^0.2", optional = true }
 
 # Optional - Video support
