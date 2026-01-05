@@ -166,8 +166,28 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
     let total_size = content_length.unwrap_or(0);
 
-    // Create temp file for atomic download (same directory for atomic rename)
-    let temp_path = dest.with_extension("part");
+    // Create unique temp file for atomic download to prevent race conditions
+    // Format: <filename>.part.<pid>.<timestamp_nanos>
+    let unique_suffix = format!(
+        ".{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+    );
+    let mut temp_path = dest
+        .file_name()
+        .map_or_else(|| PathBuf::from("download"), PathBuf::from)
+        .into_os_string();
+    temp_path.push(".part");
+    temp_path.push(unique_suffix);
+
+    // Create temp path in the same directory as dest to ensure atomic rename works
+    let temp_path = dest
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(temp_path);
 
     // Clean up any existing partial download
     let _ = fs::remove_file(&temp_path);
