@@ -166,7 +166,6 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
     let total_size = content_length.unwrap_or(0);
 
-    // Create temp file for atomic download (same directory for atomic rename)
     // Create unique temp file for atomic download to prevent race conditions
     // Format: <filename>.part.<pid>.<timestamp_nanos>
     let unique_suffix = format!(
