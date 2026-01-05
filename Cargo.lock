@@ -1608,7 +1608,7 @@ dependencies = [
 [[package]]
 name = "ort"
 version = "2.0.0-rc.10"
-source = "git+https://github.com/pykeio/ort.git#52537fe0ce6d318c83528303f2f689e413212a03"
+source = "git+https://github.com/pykeio/ort.git#2de34065983a5c034f5afcc072b23b99479f465b"
 dependencies = [
  "half",
  "ndarray 0.17.1",
@@ -1621,7 +1621,7 @@ dependencies = [
 [[package]]
 name = "ort-sys"
 version = "2.0.0-rc.10"
-source = "git+https://github.com/pykeio/ort.git#52537fe0ce6d318c83528303f2f689e413212a03"
+source = "git+https://github.com/pykeio/ort.git#2de34065983a5c034f5afcc072b23b99479f465b"
 dependencies = [
  "glob",
  "hmac-sha256",
