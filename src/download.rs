@@ -179,8 +179,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
     );
     let mut temp_path = dest
         .file_name()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("download"))
+        .map_or_else(|| PathBuf::from("download"), PathBuf::from)
         .into_os_string();
     temp_path.push(".part");
     temp_path.push(unique_suffix);
