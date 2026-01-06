@@ -59,6 +59,7 @@ pub fn run_prediction(args: &PredictArgs) {
         .with_iou(iou_threshold)
         .with_half(half)
         .with_batch(batch_size)
+        .with_max_det(args.max_det)
         .with_save_frames(save_frames);
 
     // Apply imgsz if specified

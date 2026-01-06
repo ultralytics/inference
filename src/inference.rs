@@ -20,7 +20,7 @@
 /// let config = InferenceConfig::new()
 ///     .with_confidence(0.5)
 ///     .with_iou(0.45)
-///     .with_max_detections(100)
+///     .with_max_det(100)
 ///     .with_imgsz(640, 640);
 /// ```
 ///
@@ -42,7 +42,7 @@ pub struct InferenceConfig {
     pub iou_threshold: f32,
     /// Maximum number of detections to return per image.
     /// The top-k detections sorted by confidence will be returned.
-    pub max_detections: usize,
+    pub max_det: usize,
     /// Explicit input image size (height, width).
     /// If `None`, the model's metadata will be used to determine input size.
     pub imgsz: Option<(usize, usize)>,
@@ -72,7 +72,7 @@ impl Default for InferenceConfig {
         Self {
             confidence_threshold: 0.25,
             iou_threshold: 0.45,
-            max_detections: 300,
+            max_det: 300,
             imgsz: None,
             batch: None,
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
@@ -157,8 +157,8 @@ impl InferenceConfig {
     ///
     /// * The modified `InferenceConfig`.
     #[must_use]
-    pub const fn with_max_detections(mut self, max: usize) -> Self {
-        self.max_detections = max;
+    pub const fn with_max_det(mut self, max: usize) -> Self {
+        self.max_det = max;
         self
     }
 
@@ -278,7 +278,7 @@ mod tests {
         let config = InferenceConfig::default();
         assert!((config.confidence_threshold - 0.25).abs() < f32::EPSILON);
         assert!((config.iou_threshold - 0.45).abs() < f32::EPSILON);
-        assert_eq!(config.max_detections, 300);
+        assert_eq!(config.max_det, 300);
     }
 
     #[test]
@@ -286,13 +286,13 @@ mod tests {
         let config = InferenceConfig::new()
             .with_confidence(0.5)
             .with_iou(0.6)
-            .with_max_detections(100)
+            .with_max_det(100)
             .with_imgsz(640, 640)
             .with_threads(8);
 
         assert!((config.confidence_threshold - 0.5).abs() < f32::EPSILON);
         assert!((config.iou_threshold - 0.6).abs() < f32::EPSILON);
-        assert_eq!(config.max_detections, 100);
+        assert_eq!(config.max_det, 100);
         assert_eq!(config.imgsz, Some((640, 640)));
         assert_eq!(config.num_threads, 8);
     }
