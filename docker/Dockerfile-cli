@@ -1,0 +1,63 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+FROM ubuntu:questing-20251029 AS builder
+
+WORKDIR /usr/src/app
+
+# Install build dependencies + Rust (minimal set)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install latest stable Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Copy the entire project
+COPY . .
+
+# Build the CLI
+# - release mode
+# - no default features (disables video/GUI)
+# - enable annotate + xnnpack (for saving output and CPU optimization)
+RUN cargo build --release --bin ultralytics-inference --no-default-features --features annotate,xnnpack
+
+# Runtime stage - Ubuntu 25.10 (rootless)
+FROM ubuntu:questing-20251029
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    libssl3t64 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN groupadd --gid 65532 inference \
+    && useradd --uid 65532 --gid inference --shell /bin/bash --create-home inference
+
+WORKDIR /app
+
+# Copy the binary
+COPY --from=builder /usr/src/app/target/release/ultralytics-inference /usr/local/bin/ultralytics-inference
+
+# Copy ONNX Runtime shared libraries
+COPY --from=builder /usr/src/app/target/release/libonnxruntime*.so* /usr/lib/
+
+# Download default model
+RUN curl -L -o /app/yolo11n.onnx https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.onnx
+
+# Set ownership and switch to non-root user
+RUN chown -R inference:inference /app
+USER inference
+
+# Set working directory for the user
+WORKDIR /app
+
+# Set the entrypoint
+ENTRYPOINT ["ultralytics-inference"]

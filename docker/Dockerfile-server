@@ -1,0 +1,65 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+FROM ubuntu:questing-20251029 AS builder
+
+# Install build dependencies + Rust (image-only)
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libclang-dev \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install latest stable Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /usr/src/app
+
+# Copy the entire workspace
+COPY . .
+
+# Move to server directory and build
+WORKDIR /usr/src/app/docker/server
+
+# Build the server (image-only: annotate + xnnpack)
+RUN cargo build --release
+
+# Runtime stage - Ubuntu 25.10
+FROM ubuntu:questing-20251029
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    libssl3t64 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security (using high UID/GID to avoid conflicts)
+RUN groupadd --gid 65532 inference \
+    && useradd --uid 65532 --gid inference --shell /bin/bash --create-home inference
+
+WORKDIR /app
+
+# Copy the server binary
+COPY --from=builder /usr/src/app/docker/server/target/release/ultralytics-inference-server /usr/local/bin/ultralytics-inference-server
+
+# Copy ONNX Runtime shared libraries
+COPY --from=builder /usr/src/app/docker/server/target/release/libonnxruntime*.so* /usr/lib/
+
+# Download default model
+RUN curl -L -o /app/yolo11n.onnx https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.onnx
+
+# Set ownership and switch to non-root user
+RUN chown -R inference:inference /app
+USER inference
+
+# Set working directory
+WORKDIR /app
+
+# Expose the port (3000 as per main.rs)
+EXPOSE 3000
+
+CMD ["ultralytics-inference-server"]
