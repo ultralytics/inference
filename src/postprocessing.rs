@@ -317,7 +317,7 @@ fn extract_detect_boxes(
     let keep_indices = nms_per_class(&candidates, config.iou_threshold);
 
     // Build output array with kept detections
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
     let mut result = Array2::zeros((num_kept, 6));
 
     for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
@@ -468,7 +468,7 @@ fn postprocess_segment(
         .collect();
 
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // 2. Extract Box Results
     let mut boxes_data = Array2::zeros((num_kept, 6));
@@ -804,7 +804,7 @@ fn postprocess_pose(
         .map(|(bbox, score, class, _)| (*bbox, *score, *class))
         .collect();
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // Build output arrays
     let mut boxes_data = Array2::zeros((num_kept, 6));
@@ -1038,7 +1038,7 @@ fn postprocess_obb(
     // This ensures that overlapping rotated boxes are correctly filtered based on their
     // actual geometric overlap, which standard axis-aligned IoU cannot handle.
     let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // Build output array: [cx, cy, w, h, rotation, conf, cls]
     let mut obb_data = Array2::zeros((num_kept, 7));

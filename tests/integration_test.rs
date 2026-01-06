@@ -20,6 +20,7 @@ fn test_run_prediction_e2e() {
         conf: 0.25,
         iou: 0.45,
         imgsz: Some(640),
+        max_det: 300,
         batch: 1,
         half: false,
         save: false,
@@ -38,7 +39,7 @@ fn test_inference_config_creation() {
     let config = InferenceConfig::default();
     assert_eq!(config.confidence_threshold, 0.25);
     assert_eq!(config.iou_threshold, 0.45);
-    assert_eq!(config.max_detections, 300);
+    assert_eq!(config.max_det, 300);
 }
 
 #[test]
@@ -46,11 +47,11 @@ fn test_inference_config_builder() {
     let config = InferenceConfig::new()
         .with_confidence(0.5)
         .with_iou(0.7)
-        .with_max_detections(100);
+        .with_max_det(100);
 
     assert_eq!(config.confidence_threshold, 0.5);
     assert_eq!(config.iou_threshold, 0.7);
-    assert_eq!(config.max_detections, 100);
+    assert_eq!(config.max_det, 100);
 }
 
 #[test]

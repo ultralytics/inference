@@ -61,6 +61,10 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = 0.45)]
     pub iou: f32,
 
+    /// Maximum number of detections
+    #[arg(long, default_value_t = 300)]
+    pub max_det: usize,
+
     /// Inference image size
     #[arg(long)]
     pub imgsz: Option<usize>,
@@ -112,6 +116,7 @@ mod tests {
                 assert_eq!(predict_args.model, "yolo11n.onnx");
                 assert!((predict_args.conf - 0.25).abs() < f32::EPSILON);
                 assert!((predict_args.iou - 0.45).abs() < f32::EPSILON);
+                assert_eq!(predict_args.max_det, 300);
                 assert!(!predict_args.half);
                 assert!(predict_args.verbose);
                 assert!(predict_args.source.is_none());
