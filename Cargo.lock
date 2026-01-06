@@ -2491,6 +2491,8 @@ dependencies = [
  "ndarray 0.17.1",
  "ort",
  "rayon",
+ "serde",
+ "serde_json",
  "serial_test",
  "tempfile",
  "ureq",

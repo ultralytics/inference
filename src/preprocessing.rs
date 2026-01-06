@@ -117,6 +117,56 @@ pub fn preprocess_image_with_precision(
     }
 }
 
+/// Calculate target size for rectangular inference mode.
+///
+/// Adjusts `target_size` such that the image's aspect ratio is preserved,
+/// and both dimensions are multiples of `stride`.
+///
+/// # Arguments
+///
+/// * `orig_width` - Original image width.
+/// * `orig_height` - Original image height.
+/// * `target_size` - Base target size (e.g. 640x640).
+/// * `stride` - Model stride for alignment.
+///
+/// # Returns
+///
+/// Adjusted target size as (height, width).
+#[must_use]
+pub fn calculate_rect_size(
+    orig_width: u32,
+    orig_height: u32,
+    target_size: (usize, usize),
+    stride: u32,
+) -> (usize, usize) {
+    let (target_h, target_w) = target_size;
+
+    #[allow(clippy::cast_precision_loss)]
+    let orig_h = orig_height as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let orig_w = orig_width as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let target_h_f = target_h as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let target_w_f = target_w as f32;
+
+    // Calculate scale to fit within target while maintaining aspect ratio
+    let scale = (target_h_f / orig_h).min(target_w_f / orig_w);
+
+    // New dimensions after scaling
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let new_h = (orig_h * scale).round() as usize;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let new_w = (orig_w * scale).round() as usize;
+
+    // Round up to nearest multiple of stride
+    let stride = stride as usize;
+    let rect_h = ((new_h + stride - 1) / stride) * stride;
+    let rect_w = ((new_w + stride - 1) / stride) * stride;
+
+    (rect_h, rect_w)
+}
+
 /// Calculate letterbox parameters for resizing.
 ///
 /// Computes new dimensions and padding to fit the image within the target size while maintaining aspect ratio.
@@ -198,26 +248,10 @@ fn letterbox_image(
     pad_top: u32,
     target_size: (usize, usize),
 ) -> RgbImage {
-    use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
-
     let src_rgb = image.to_rgb8();
-    let (src_w, src_h) = src_rgb.dimensions();
 
-    let src_image = Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), PixelType::U8x3)
-        .expect("Failed to create source image");
-
-    let mut dst_image = Image::new(new_width, new_height, PixelType::U8x3);
-
-    let mut resizer = Resizer::new();
-    let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
-        // Use Lanczos3 for high-quality resizing. This is critical for OBB tasks where
-        // preserving small features (like harbors in DOTA8) is essential for detection.
-        // It matches the default behavior of Ultralytics Python preprocessing.
-        fast_image_resize::FilterType::Lanczos3,
-    ));
-    resizer
-        .resize(&src_image, &mut dst_image, Some(&options))
-        .expect("Failed to resize image");
+    // Use OpenCV-compatible bilinear resize for exact Python parity
+    let resized_rgb = opencv_bilinear_resize(&src_rgb, new_width, new_height);
 
     // Create output image with letterbox color
     #[allow(clippy::cast_possible_truncation)]
@@ -227,9 +261,6 @@ fn letterbox_image(
         Rgb(LETTERBOX_COLOR),
     );
 
-    let resized_rgb: RgbImage = ImageBuffer::from_raw(new_width, new_height, dst_image.into_vec())
-        .expect("Failed to create resized image buffer");
-
     image::imageops::overlay(
         &mut output,
         &resized_rgb,
@@ -238,6 +269,80 @@ fn letterbox_image(
     );
 
     output
+}
+
+/// OpenCV-compatible bilinear resize.
+///
+/// Implements the exact same coordinate mapping and interpolation as OpenCV's
+/// cv2.resize with INTER_LINEAR to achieve pixel-perfect parity with Python.
+///
+/// OpenCV uses reverse mapping: for each destination pixel (dx, dy), compute
+/// source coordinates (sx, sy) = (dx * src_w/dst_w, dy * src_h/dst_h) and
+/// bilinearly interpolate from the 4 surrounding source pixels.
+fn opencv_bilinear_resize(src: &RgbImage, dst_width: u32, dst_height: u32) -> RgbImage {
+    let (src_w, src_h) = src.dimensions();
+    let src_w_f = src_w as f64;
+    let src_h_f = src_h as f64;
+    let dst_w_f = dst_width as f64;
+    let dst_h_f = dst_height as f64;
+
+    // Scale factors (src / dst)
+    let scale_x = src_w_f / dst_w_f;
+    let scale_y = src_h_f / dst_h_f;
+
+    let mut dst = RgbImage::new(dst_width, dst_height);
+
+    for dy in 0..dst_height {
+        for dx in 0..dst_width {
+            // OpenCV coordinate mapping: map destination pixel center to source
+            // OpenCV uses (dx + 0.5) * scale - 0.5 for proper center alignment
+            let sx = (f64::from(dx) + 0.5) * scale_x - 0.5;
+            let sy = (f64::from(dy) + 0.5) * scale_y - 0.5;
+
+            // Get the 4 surrounding pixel coordinates
+            let x0 = sx.floor() as i32;
+            let y0 = sy.floor() as i32;
+            let x1 = x0 + 1;
+            let y1 = y0 + 1;
+
+            // Fractional parts for interpolation weights
+            let fx = sx - f64::from(x0);
+            let fy = sy - f64::from(y0);
+
+            // Clamp coordinates to valid range
+            let x0c = x0.clamp(0, (src_w - 1) as i32) as u32;
+            let y0c = y0.clamp(0, (src_h - 1) as i32) as u32;
+            let x1c = x1.clamp(0, (src_w - 1) as i32) as u32;
+            let y1c = y1.clamp(0, (src_h - 1) as i32) as u32;
+
+            // Get the 4 surrounding pixels
+            let p00 = src.get_pixel(x0c, y0c);
+            let p10 = src.get_pixel(x1c, y0c);
+            let p01 = src.get_pixel(x0c, y1c);
+            let p11 = src.get_pixel(x1c, y1c);
+
+            // Bilinear interpolation weights
+            let w00 = (1.0 - fx) * (1.0 - fy);
+            let w10 = fx * (1.0 - fy);
+            let w01 = (1.0 - fx) * fy;
+            let w11 = fx * fy;
+
+            // Interpolate each channel
+            let mut result = [0u8; 3];
+            for c in 0..3 {
+                let v = w00 * f64::from(p00[c])
+                    + w10 * f64::from(p10[c])
+                    + w01 * f64::from(p01[c])
+                    + w11 * f64::from(p11[c]);
+                // Round to nearest integer (OpenCV uses round-half-to-even, but round is close enough)
+                result[c] = v.round().clamp(0.0, 255.0) as u8;
+            }
+
+            dst.put_pixel(dx, dy, Rgb(result));
+        }
+    }
+
+    dst
 }
 
 /// Convert an RGB image to a normalized NCHW tensor (FP32).

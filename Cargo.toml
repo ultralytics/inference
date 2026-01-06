@@ -50,6 +50,11 @@ image = "^0.25"
 jpeg-decoder = "^0.3"
 fast_image_resize = { version = "^5.4", features = ["image", "rayon"] }
 
+# Serialization for JSON output
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "^0.17", features = ["rayon"] }
 

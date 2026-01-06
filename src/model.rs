@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use half::f16;
-use image::DynamicImage;
+use image::{DynamicImage, GenericImageView};
 use ndarray::Array3;
 use ort::session::Session;
 use ort::tensor::TensorElementType;
@@ -23,7 +23,8 @@ use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
-    image_to_array, preprocess_image_center_crop, preprocess_image_with_precision,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop,
+    preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;
@@ -60,6 +61,8 @@ pub struct YOLOModel {
     fp16_input: bool,
     /// Execution provider used for inference
     execution_provider: String,
+    /// Whether the model accepts dynamic input shapes.
+    is_dynamic: bool,
 }
 
 #[allow(
@@ -266,9 +269,16 @@ impl YOLOModel {
         }
 
         if !eps.is_empty() {
+            crate::info!(
+                "Registering {} execution providers (primary: {})",
+                eps.len(),
+                provider_name
+            );
             session_builder = session_builder.with_execution_providers(eps).map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}"))
             })?;
+        } else {
+            crate::warn!("No execution providers registered (falling back to simple CPU)");
         }
 
         let session = session_builder
@@ -381,6 +391,7 @@ impl YOLOModel {
             warmed_up: false,
             fp16_input,
             execution_provider: provider_name.to_string(),
+            is_dynamic,
         };
 
         // Warmup inference to trigger JIT compilation and memory allocation
@@ -589,18 +600,60 @@ impl YOLOModel {
             .or(self.metadata.imgsz)
             .unwrap_or((640, 640));
 
+        // Check if target_size is divisible by stride (one-time warning logic per batch call)
+        // We only warn if the configured size itself is not divisible.
+        // If rect adjusts it, that's expected.
+        let stride = self.metadata.stride as usize;
+        if target_size.0 % stride != 0 || target_size.1 % stride != 0 {
+            warn!(
+                "WARNING ⚠️ imgsz=[{:?}] must be multiple of max stride {}, updating to [{}, {}]",
+                target_size,
+                stride,
+                (target_size.0 as f32 / stride as f32).ceil() as usize * stride,
+                (target_size.1 as f32 / stride as f32).ceil() as usize * stride
+            );
+        }
+
         // Preprocess all images
         let start_preprocess = Instant::now();
         let mut preprocessed_results = Vec::with_capacity(images.len());
 
+        // Check if we can use rect inference
+        // 1. Enabled in config
+        // 2. Model supports dynamic shapes
+        // 3. Batch is homogeneous (all images have same dimensions) or batch size is 1
+        let use_rect = self.config.rect && self.is_dynamic;
+        let uniform_shape = if images.len() > 1 {
+            let first_dims = images[0].dimensions();
+            images.iter().all(|img| img.dimensions() == first_dims)
+        } else {
+            true
+        };
+        let actual_rect = use_rect && uniform_shape;
+
+        // Warn if rect requested but disabled due to mixed batch
+        if self.config.rect && !uniform_shape {
+            warn!(
+                "Batch contains images of different sizes. Rectangular inference disabled for this batch (falling back to square padding)."
+            );
+        }
+
         // We will stack tensors later
         for image in images {
+            // Determine target size for this image
+            let current_target_size = if actual_rect {
+                let (w, h) = image.dimensions();
+                calculate_rect_size(w, h, target_size, self.metadata.stride)
+            } else {
+                target_size
+            };
+
             let res = if self.metadata.task == Task::Classify {
-                preprocess_image_center_crop(image, target_size, self.fp16_input)
+                preprocess_image_center_crop(image, current_target_size, self.fp16_input)
             } else {
                 preprocess_image_with_precision(
                     image,
-                    target_size,
+                    current_target_size,
                     self.metadata.stride,
                     self.fp16_input,
                 )
@@ -623,6 +676,7 @@ impl YOLOModel {
                         .view(),
                 );
             }
+
             // Concatenate along batch dimension (axis 0)
             let batch_tensor = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
                 InferenceError::InferenceError(format!("Failed to concatenate FP16 tensors: {e}"))

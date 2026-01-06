@@ -17,10 +17,24 @@ use crate::visualizer::Viewer;
 
 use crate::utils::pluralize;
 use crate::{InferenceConfig, Results, VERSION, YOLOModel};
+use image::GenericImageView;
+use serde::Serialize;
+use std::fs::File;
+use std::io::Write;
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
 use crate::{error, verbose, warn};
+
+/// Serializable detection output for debugging/comparison with Python.
+#[derive(Serialize)]
+struct JsonDetection {
+    frame_idx: usize,
+    path: String,
+    boxes: Vec<[f32; 6]>,
+    orig_shape: (u32, u32),
+    inference_shape: (u32, u32),
+}
 
 /// Run YOLO model inference.
 #[allow(
@@ -43,6 +57,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
+    let save_json = args.save_json.clone();
     let device: Option<crate::Device> = args
         .device
         .as_ref()
@@ -59,7 +74,8 @@ pub fn run_prediction(args: &PredictArgs) {
         .with_iou(iou_threshold)
         .with_half(half)
         .with_batch(batch_size)
-        .with_save_frames(save_frames);
+        .with_save_frames(save_frames)
+        .with_rect(args.rect);
 
     // Apply imgsz if specified
     if let Some(sz) = imgsz {
@@ -180,19 +196,12 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     }
 
-    let iter = match crate::source::SourceIterator::new(source) {
-        Ok(iter) => iter,
-        Err(e) => {
-            error!("Error initializing source: {e}");
-            process::exit(1);
-        }
-    };
-
     // Process each image/frame
     let mut all_results: Vec<(String, Results)> = Vec::new();
     let mut total_preprocess = 0.0;
     let mut total_inference = 0.0;
     let mut total_postprocess = 0.0;
+    let mut json_results: Option<Vec<JsonDetection>> = save_json.as_ref().map(|_| Vec::new());
     let mut last_inference_shape = (0, 0);
 
     #[cfg(feature = "visualize")]
@@ -205,6 +214,29 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| crate::io::SaveResults::new(d.clone(), save_frames));
     #[cfg(not(feature = "annotate"))]
     let mut result_saver: Option<crate::io::SaveResults> = None;
+
+    // Create a bounded channel for pipelined processing
+    // Buffer size 2x batch size ensures we can decode the next batch while processing current one
+    let channel_capacity = batch_size * 2;
+    let (sender, receiver) = std::sync::mpsc::sync_channel(channel_capacity);
+
+    // Spawn producer thread for frame decoding
+    let source_clone = source.clone();
+    std::thread::spawn(move || {
+        let iter = match crate::source::SourceIterator::new(source_clone) {
+            Ok(iter) => iter,
+            Err(e) => {
+                error!("Error initializing source in thread: {e}");
+                return;
+            }
+        };
+
+        for item in iter {
+            if sender.send(item).is_err() {
+                break; // Receiver dropped, stop decoding
+            }
+        }
+    });
 
     // Use BatchProcessor for centralized batch management
     {
@@ -228,6 +260,25 @@ pub fn run_prediction(args: &PredictArgs) {
                         last_inference_shape =
                             (inference_shape.0 as usize, inference_shape.1 as usize);
 
+                        if let Some(ref mut frames) = json_results {
+                            let mut boxes_json = Vec::new();
+                            if let Some(ref boxes) = result.boxes {
+                                for row in boxes.data.rows() {
+                                    boxes_json.push([
+                                        row[0], row[1], row[2], row[3], row[4], row[5],
+                                    ]);
+                                }
+                            }
+
+                            frames.push(JsonDetection {
+                                frame_idx: meta.frame_idx,
+                                path: image_path.clone(),
+                                boxes: boxes_json,
+                                orig_shape: result.orig_shape,
+                                inference_shape,
+                            });
+                        }
+
                         // Format total frames for display
                         let total_frames_str = meta
                             .total_frames
@@ -239,8 +290,8 @@ pub fn run_prediction(args: &PredictArgs) {
                                 meta.frame_idx + 1,
                                 total_frames_str,
                                 image_path,
-                                inference_shape.1,
                                 inference_shape.0,
+                                inference_shape.1,
                                 detection_summary,
                                 result.speed.inference.unwrap_or(0.0)
                             );
@@ -250,8 +301,8 @@ pub fn run_prediction(args: &PredictArgs) {
                                 meta.frame_idx + 1,
                                 total_frames_str,
                                 image_path,
-                                inference_shape.1,
                                 inference_shape.0,
+                                inference_shape.1,
                                 detection_summary,
                                 result.speed.inference.unwrap_or(0.0)
                             );
@@ -271,8 +322,9 @@ pub fn run_prediction(args: &PredictArgs) {
 
                         #[cfg(feature = "visualize")]
                         if show {
-                            let view_width = inference_shape.1 as usize;
-                            let view_height = inference_shape.0 as usize;
+                            let (orig_w, orig_h) = img.dimensions();
+                            let view_width = orig_w as usize;
+                            let view_height = orig_h as usize;
 
                             if let Some(ref v) = viewer
                                 && (v.width != view_width || v.height != view_height)
@@ -289,14 +341,13 @@ pub fn run_prediction(args: &PredictArgs) {
 
                             if let Some(ref mut v) = viewer {
                                 let annotated = annotate_image(img, &result, None);
-                                let resized = annotated.resize_exact(
-                                    view_width as u32,
-                                    view_height as u32,
-                                    image::imageops::FilterType::Triangle,
-                                );
 
-                                if v.update(&resized).is_ok() && !is_video {
-                                    let _ = v.wait(Duration::from_millis(200));
+                                if v.update(&annotated).is_ok() {
+                                    // Main thread is blocking on channel, so visualizer wait is less critical
+                                    // but we keep a small wait to allow window events processing
+                                    if !is_video {
+                                        let _ = v.wait(Duration::from_millis(200));
+                                    }
                                 }
                             }
                         }
@@ -304,14 +355,14 @@ pub fn run_prediction(args: &PredictArgs) {
                         total_preprocess += result.speed.preprocess.unwrap_or(0.0);
                         total_inference += result.speed.inference.unwrap_or(0.0);
                         total_postprocess += result.speed.postprocess.unwrap_or(0.0);
-
                         all_results.push((image_path.clone(), result));
                     }
                 }
             },
         );
 
-        for item in iter {
+        // Main thread: consume frames from channel and run inference
+        for item in receiver {
             let (img, meta) = match item {
                 Ok(val) => val,
                 Err(e) => {
@@ -319,7 +370,8 @@ pub fn run_prediction(args: &PredictArgs) {
                     break;
                 }
             };
-            batch_processor.add(img, meta.path.clone(), meta);
+            let debug_path = format!("{}::{}", meta.path, meta.frame_idx);
+            batch_processor.add(img, debug_path, meta);
         }
         batch_processor.flush();
     }
@@ -331,13 +383,31 @@ pub fn run_prediction(args: &PredictArgs) {
         }
     }
 
+    if let (Some(path), Some(frames)) = (save_json.as_ref(), json_results.take()) {
+        match File::create(path) {
+            Ok(mut file) => {
+                if let Err(e) = serde_json::to_writer_pretty(&mut file, &frames) {
+                    error!("Failed to write JSON results: {e}");
+                } else if let Err(e) = file.flush() {
+                    error!("Failed to flush JSON results: {e}");
+                } else {
+                    verbose!("Raw detections saved to {path}");
+                }
+            }
+            Err(e) => {
+                error!("Failed to create JSON file {path}: {e}");
+            }
+        }
+    }
+
     // Print speed summary with inference tensor shape (after letterboxing)
     let num_results = all_results.len().max(1) as f64;
     verbose!(
-        "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
+        "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape ({}, 3, {}, {})",
         total_preprocess / num_results,
         total_inference / num_results,
         total_postprocess / num_results,
+        batch_size,
         last_inference_shape.0,
         last_inference_shape.1
     );

@@ -65,6 +65,9 @@ pub struct InferenceConfig {
     /// Whether to save individual frames instead of a video file when input is video.
     /// Defaults to `false` (save as video).
     pub save_frames: bool,
+    /// Whether to use minimal padding (rectangular inference).
+    /// Defaults to `true` to match Ultralytics Python.
+    pub rect: bool,
 }
 
 impl Default for InferenceConfig {
@@ -80,6 +83,7 @@ impl Default for InferenceConfig {
             device: None,
             save: true,
             save_frames: false,
+            rect: true,
         }
     }
 }
@@ -265,6 +269,21 @@ impl InferenceConfig {
     #[must_use]
     pub const fn with_save_frames(mut self, save_frames: bool) -> Self {
         self.save_frames = save_frames;
+        self
+    }
+
+    /// Set whether to use minimal padding (rectangular inference).
+    ///
+    /// # Arguments
+    ///
+    /// * `rect` - `true` to enable, `false` to disable.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_rect(mut self, rect: bool) -> Self {
+        self.rect = rect;
         self
     }
 }

@@ -25,8 +25,12 @@ use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::logging::set_verbose;
 
 /// Entry point for the Ultralytics YOLO Inference CLI.
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     ultralytics_inference::io::init_logging();
+
+    // Initialize ONNX Runtime with verbose logging to debug execution provider issues
+    #[cfg(debug_assertions)]
+    let _ = ort::init().commit();
 
     let cli = Cli::parse();
 
@@ -36,4 +40,5 @@ fn main() {
             run_prediction(args);
         }
     }
+    Ok(())
 }

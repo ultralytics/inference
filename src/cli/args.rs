@@ -58,12 +58,20 @@ pub struct PredictArgs {
     pub conf: f32,
 
     /// `IoU` threshold for NMS
-    #[arg(long, default_value_t = 0.45)]
+    #[arg(long, default_value_t = 0.7)]
     pub iou: f32,
 
     /// Inference image size
     #[arg(long)]
     pub imgsz: Option<usize>,
+
+    /// Enable minimal padding (rectangular inference)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub rect: bool,
+
+    /// Save raw detections to a JSON file for debugging/comparison
+    #[arg(long)]
+    pub save_json: Option<String>,
 
     /// Batch size for inference
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
@@ -111,7 +119,8 @@ mod tests {
             Commands::Predict(predict_args) => {
                 assert_eq!(predict_args.model, "yolo11n.onnx");
                 assert!((predict_args.conf - 0.25).abs() < f32::EPSILON);
-                assert!((predict_args.iou - 0.45).abs() < f32::EPSILON);
+                assert!((predict_args.iou - 0.7).abs() < f32::EPSILON);
+                assert!(predict_args.rect);
                 assert!(!predict_args.half);
                 assert!(predict_args.verbose);
                 assert!(predict_args.source.is_none());

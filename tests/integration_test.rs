@@ -27,6 +27,7 @@ fn test_run_prediction_e2e() {
         show: false,
         device: None,
         verbose: true,
+        rect: false,
     };
 
     // This should run successfully (download model/images and predict)
