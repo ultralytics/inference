@@ -382,17 +382,31 @@ pub fn download_image(url: &str) -> Result<String> {
     let filename = url.rsplit('/').next().unwrap_or("image.jpg");
     let dest_path = Path::new(filename);
 
+    // Get absolute path for display consistency with Python
+    let abs_path = dest_path
+        .canonicalize()
+        .or_else(|_| std::env::current_dir().map(|p| p.join(filename)))
+        .map_or_else(
+            |_| filename.to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
+
     // Skip download if file already exists
     if dest_path.exists() {
-        eprintln!("Image already exists: {filename}");
-        return Ok(filename.to_string());
+        return Ok(abs_path);
     }
 
     eprintln!("Downloading {url}...");
 
     download_file(url, dest_path)?;
 
-    Ok(filename.to_string())
+    // Get absolute path after download
+    let abs_path = dest_path.canonicalize().map_or_else(
+        |_| filename.to_string(),
+        |p| p.to_string_lossy().to_string(),
+    );
+
+    Ok(abs_path)
 }
 
 /// Download multiple images from URLs to the current directory.

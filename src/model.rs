@@ -282,9 +282,8 @@ impl YOLOModel {
             session_builder = session_builder.with_execution_providers(eps).map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}"))
             })?;
-        } else {
-            crate::warn!("No execution providers registered (falling back to simple CPU)");
         }
+        // CPU is the default - no warning needed when no accelerators are registered
 
         let session = session_builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)

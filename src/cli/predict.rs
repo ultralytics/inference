@@ -52,9 +52,14 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| d.parse().expect("Invalid device"));
     #[cfg(feature = "visualize")]
     let show = args.show;
-
     // Use defaults with warnings if not specified
-    // Clap handles default model path, so model_path is always set.
+    // Warn if using default model (like Python does)
+    if model_path == crate::download::DEFAULT_MODEL && verbose {
+        warn!(
+            "'model' argument is missing. Using default '--model={}'.",
+            crate::download::DEFAULT_MODEL
+        );
+    }
 
     // Load model first so we can determine appropriate default source based on task
     let mut config = InferenceConfig::new()
@@ -339,8 +344,7 @@ pub fn run_prediction(args: &PredictArgs) {
                     break;
                 }
             };
-            let debug_path = format!("{}::{}", meta.path, meta.frame_idx);
-            batch_processor.add(img, debug_path, meta);
+            batch_processor.add(img, meta.path.clone(), meta);
         }
         batch_processor.flush();
     }
