@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = InferenceConfig::new()
         .with_confidence(0.5)
         .with_iou(0.45)
-        .with_max_det(100);
+        .with_max_det(300);
 
     let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
     let results = model.predict("image.jpg")?;
