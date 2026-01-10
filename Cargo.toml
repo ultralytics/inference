@@ -50,6 +50,14 @@ image = "^0.25"
 jpeg-decoder = "^0.3"
 fast_image_resize = { version = "^5.4", features = ["image", "rayon"] }
 
+# SIMD for fast preprocessing
+wide = "0.7"
+
+# LRU cache for preprocessing LUT
+lru = "0.12"
+
+
+
 # Serialization for JSON output
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -156,7 +164,7 @@ opt-level = 3
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true

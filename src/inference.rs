@@ -33,6 +33,7 @@
 ///     .with_device(Device::Cuda(0));
 /// ```
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct InferenceConfig {
     /// Confidence threshold for detections (0.0 to 1.0).
     /// Detections with confidence scores lower than this value will be discarded.

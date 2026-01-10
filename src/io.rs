@@ -20,15 +20,6 @@ static INIT: Once = Once::new();
 /// (only errors are shown). safe to call multiple times.
 #[allow(clippy::missing_const_for_fn)]
 pub fn init_logging() {
-    #[cfg(debug_assertions)]
-    {
-        static TRACING_INIT: std::sync::Once = std::sync::Once::new();
-        TRACING_INIT.call_once(|| {
-            tracing_subscriber::fmt()
-                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-                .init();
-        });
-    }
     #[cfg(feature = "video")]
     INIT.call_once(|| {
         if let Err(e) = video_rs::init() {

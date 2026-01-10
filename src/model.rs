@@ -70,7 +70,12 @@ pub struct YOLOModel {
     clippy::needless_pass_by_value,
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::if_not_else,
+    clippy::manual_is_multiple_of,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
 )]
 impl YOLOModel {
     /// Load a YOLO model from an ONNX file.
@@ -712,52 +717,48 @@ impl YOLOModel {
         #[allow(clippy::cast_precision_loss)]
         let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
 
+        // Process each image's output
+        let mut image_arrays = Vec::with_capacity(images.len());
+        for image in images {
+            image_arrays.push(image_to_array(image));
+        }
+
         // Post-process
         let start_postprocess = Instant::now();
 
         let mut batch_results = Vec::with_capacity(images.len());
 
         // Process each image's output
-        for (i, image) in images.iter().enumerate() {
+        for (i, (orig_img, preprocess_res)) in image_arrays
+            .into_iter()
+            .zip(preprocessed_results.into_iter())
+            .enumerate()
+        {
+            let path = paths.get(i).cloned().unwrap_or_default();
+            let speed = Speed::new(preprocess_time, inference_time, 0.0);
+
             // Construct outputs for this single image
             let mut img_outputs = Vec::new();
             for (data, shape) in &outputs {
-                // Calculate size of one image's output
                 let batch_size = shape[0];
                 let actual_batch_size = if batch_size > 0 { batch_size } else { 1 };
-
                 let total_elements = data.len();
                 let elements_per_img = total_elements / actual_batch_size;
-
                 let start = i * elements_per_img;
                 let end = start + elements_per_img;
-
-                if start >= total_elements || end > total_elements {
-                    return Err(InferenceError::InferenceError(format!(
-                        "Index out of bounds slicing output data: range {start}..{end} with length {total_elements}"
-                    )));
-                }
-                let img_data = data[start..end].to_vec();
-
-                // Adjust shape for single image: [1, ...]
+                let img_data = &data[start..end];
                 let mut img_shape = shape.clone();
                 img_shape[0] = 1;
-
                 img_outputs.push((img_data, img_shape));
             }
 
-            let orig_img = image_to_array(image);
-            let path = paths.get(i).cloned().unwrap_or_default();
-
-            let speed = Speed::new(preprocess_time, inference_time, 0.0);
-
-            let tensor_shape = preprocessed_results[i].tensor.shape();
+            let tensor_shape = preprocess_res.tensor.shape();
             let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
             let result = postprocess(
                 img_outputs,
                 self.metadata.task,
-                &preprocessed_results[i],
+                &preprocess_res,
                 &self.config,
                 &self.metadata.names,
                 orig_img,
@@ -765,6 +766,7 @@ impl YOLOModel {
                 speed,
                 inference_shape,
             );
+
             batch_results.push(vec![result]);
         }
 

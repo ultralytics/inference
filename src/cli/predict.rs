@@ -18,23 +18,10 @@ use crate::visualizer::Viewer;
 use crate::utils::pluralize;
 use crate::{InferenceConfig, Results, VERSION, YOLOModel};
 use image::GenericImageView;
-use serde::Serialize;
-use std::fs::File;
-use std::io::Write;
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
 use crate::{error, verbose, warn};
-
-/// Serializable detection output for debugging/comparison with Python.
-#[derive(Serialize)]
-struct JsonDetection {
-    frame_idx: usize,
-    path: String,
-    boxes: Vec<[f32; 6]>,
-    orig_shape: (u32, u32),
-    inference_shape: (u32, u32),
-}
 
 /// Run YOLO model inference.
 #[allow(
@@ -43,7 +30,8 @@ struct JsonDetection {
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::missing_panics_doc
+    clippy::missing_panics_doc,
+    clippy::redundant_clone
 )]
 pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments
@@ -57,7 +45,6 @@ pub fn run_prediction(args: &PredictArgs) {
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
-    let save_json = args.save_json.clone();
     let device: Option<crate::Device> = args
         .device
         .as_ref()
@@ -201,7 +188,6 @@ pub fn run_prediction(args: &PredictArgs) {
     let mut total_preprocess = 0.0;
     let mut total_inference = 0.0;
     let mut total_postprocess = 0.0;
-    let mut json_results: Option<Vec<JsonDetection>> = save_json.as_ref().map(|_| Vec::new());
     let mut last_inference_shape = (0, 0);
 
     #[cfg(feature = "visualize")]
@@ -259,25 +245,6 @@ pub fn run_prediction(args: &PredictArgs) {
                         let inference_shape = result.inference_shape();
                         last_inference_shape =
                             (inference_shape.0 as usize, inference_shape.1 as usize);
-
-                        if let Some(ref mut frames) = json_results {
-                            let mut boxes_json = Vec::new();
-                            if let Some(ref boxes) = result.boxes {
-                                for row in boxes.data.rows() {
-                                    boxes_json.push([
-                                        row[0], row[1], row[2], row[3], row[4], row[5],
-                                    ]);
-                                }
-                            }
-
-                            frames.push(JsonDetection {
-                                frame_idx: meta.frame_idx,
-                                path: image_path.clone(),
-                                boxes: boxes_json,
-                                orig_shape: result.orig_shape,
-                                inference_shape,
-                            });
-                        }
 
                         // Format total frames for display
                         let total_frames_str = meta
@@ -380,23 +347,6 @@ pub fn run_prediction(args: &PredictArgs) {
     if let Some(saver) = result_saver {
         if let Err(e) = saver.finish() {
             error!("Failed to finish saving: {e}");
-        }
-    }
-
-    if let (Some(path), Some(frames)) = (save_json.as_ref(), json_results.take()) {
-        match File::create(path) {
-            Ok(mut file) => {
-                if let Err(e) = serde_json::to_writer_pretty(&mut file, &frames) {
-                    error!("Failed to write JSON results: {e}");
-                } else if let Err(e) = file.flush() {
-                    error!("Failed to flush JSON results: {e}");
-                } else {
-                    verbose!("Raw detections saved to {path}");
-                }
-            }
-            Err(e) => {
-                error!("Failed to create JSON file {path}: {e}");
-            }
         }
     }
 

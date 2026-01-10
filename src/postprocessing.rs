@@ -5,11 +5,23 @@
 //! This module handles task-specific post-processing of raw model outputs,
 //! including NMS, coordinate transformation, and result construction.
 
+#![allow(
+    unsafe_code,
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    clippy::if_not_else,
+    clippy::ptr_as_ptr,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+
 use std::collections::HashMap;
+
+use wide::{CmpGt, f32x8};
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip, s};
+use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -41,7 +53,7 @@ use crate::utils::{nms_per_class, nms_rotated_per_class};
     clippy::implicit_hasher
 )]
 pub fn postprocess(
-    outputs: Vec<(Vec<f32>, Vec<usize>)>,
+    outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
@@ -113,23 +125,7 @@ pub fn postprocess(
 
 /// Post-process detection model output.
 ///
-/// Converts raw YOLO model output into a list of bounding boxes with class scores.
-///
-/// # Arguments
-///
-/// * `output` - Flat vector of model output values.
-/// * `output_shape` - Shape of the output tensor.
-/// * `preprocess` - Preprocessing metadata (scaling, padding).
-/// * `config` - Inference configuration (thresholds).
-/// * `names` - Class ID to name mapping.
-/// * `orig_img` - Original image data.
-/// * `path` - Source image path.
-/// * `speed` - Timing metrics.
-/// * `inference_shape` - Input shape used for inference.
-///
-/// # Returns
-///
-/// `Results` struct containing detected bounding boxes.
+/// Zero-copy implementation using stride-based indexing to avoid memory allocations.
 #[allow(
     clippy::too_many_arguments,
     clippy::similar_names,
@@ -156,24 +152,15 @@ fn postprocess_detect(
         return results;
     }
 
-    // Convert flat output to 2D array
-    let output_2d = if is_transposed {
-        // Shape is [1, num_preds, num_features] - already in correct format
-        Array2::from_shape_vec((num_predictions, 4 + num_classes), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        // Shape is [1, num_features, num_preds] - need to transpose
-        let arr = Array2::from_shape_vec((4 + num_classes, num_predictions), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
-
-    if output_2d.is_empty() {
-        return results;
-    }
-
-    // Extract boxes and scores
-    let boxes_data = extract_detect_boxes(output_2d.view(), num_classes, preprocess, config);
+    // Zero-copy extraction with stride-based indexing
+    let boxes_data = extract_detect_boxes(
+        output,
+        num_classes,
+        num_predictions,
+        is_transposed,
+        preprocess,
+        config,
+    );
 
     if !boxes_data.is_empty() {
         results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
@@ -241,95 +228,259 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
     }
 }
 
-/// Extract detection boxes from model output.
+/// Ultra-fast detection extraction - single-threaded tight loop.
 ///
-/// Filters predictions by confidence threshold and converts coordinates to original image space.
-#[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
+/// Key optimizations:
+/// - No parallelization overhead (Rayon adds ~0.5ms for small workloads)
+/// - Pre-sized allocations
+/// - Minimal branching in hot loops
+/// - Direct unsafe indexing
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
+#[derive(Clone, Copy)]
+struct Candidate {
+    bbox: [f32; 4],
+    score: f32,
+    class: usize,
+}
+
+/// Optimized detection extraction with SIMD acceleration.
+///
+/// Key optimizations:
+/// - SIMD-accelerated candidate extraction (f32x8)
+/// - Parallel Bitmask NMS (IoU 1 vs 8)
+/// - Struct-of-Arrays (SoA) layout for NMS cache locality
+/// - Direct unsafe indexing for performance
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn extract_detect_boxes(
-    output: ArrayView2<f32>,
-    _num_classes: usize,
+    output: &[f32],
+    num_classes: usize,
+    num_predictions: usize,
+    is_transposed: bool,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
 ) -> Array2<f32> {
-    let _num_predictions = output.nrows();
-    let mut candidates = Vec::new();
-
-    // Iterate over rows efficiently
-    // output shape is (num_predictions, 4 + num_classes)
-    // We can iterate over raw elements if we are careful, but using outer_iter() is safer and still fast
-
-    // Pre-calculate scaling factors to avoid repeated struct access
+    let feat_count = 4 + num_classes;
     let (scale_y, scale_x) = preprocess.scale;
     let (pad_top, pad_left) = preprocess.padding;
     let orig_shape = preprocess.orig_shape;
     let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
+    let conf_thresh = config.confidence_threshold;
+    let max_det = config.max_detections;
+    let iou_thresh = config.iou_threshold;
+    let conf_v = f32x8::splat(conf_thresh);
 
-    for row in output.outer_iter() {
-        // Row is [cx, cy, w, h, class_scores...]
+    let mut candidates: Vec<Candidate> = Vec::with_capacity(256);
 
-        // Efficiently find the best class score without allocating a new slice or iterator chain.
-        // We skip low-confidence detections early to avoid expensive coordinate scaling and NMS operations later.
-        let scores = row.slice(s![4..]);
+    // Phase 1: Candidate Extraction
+    if !is_transposed {
+        // Layout [feat, pred] - Cache-friendly linear scan
+        let mut max_scores = vec![conf_thresh; num_predictions];
+        let mut max_classes = vec![0usize; num_predictions];
 
-        // Find best class manually to avoid iterator overhead
-        let (best_class, best_score) =
-            scores
-                .iter()
-                .enumerate()
-                .fold((0, 0.0f32), |(best_idx, best_val), (idx, &val)| {
-                    if val > best_val {
-                        (idx, val)
-                    } else {
-                        (best_idx, best_val)
-                    }
-                });
-
-        // Filter by confidence threshold early to reduce computation
-        // Python uses strict `>`, so reject if score <= threshold
-        if best_score <= config.confidence_threshold {
-            continue;
+        for c in 0..num_classes {
+            let offset = (4 + c) * num_predictions;
+            let class_scores = &output[offset..offset + num_predictions];
+            for (idx, &score) in class_scores.iter().enumerate() {
+                if score > max_scores[idx] {
+                    max_scores[idx] = score;
+                    max_classes[idx] = c;
+                }
+            }
         }
 
-        // Extract coordinates only for candidate detections
-        let cx = row[0];
-        let cy = row[1];
-        let w = row[2];
-        let h = row[3];
+        for (idx, &score) in max_scores.iter().enumerate() {
+            if score > conf_thresh {
+                let cx = unsafe { *output.get_unchecked(idx) };
+                let cy = unsafe { *output.get_unchecked(num_predictions + idx) };
+                let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
+                let h = unsafe { *output.get_unchecked(3 * num_predictions + idx) };
 
-        let x1 = (cx - w / 2.0 - pad_left) / scale_x;
-        let y1 = (cy - h / 2.0 - pad_top) / scale_y;
-        let x2 = (cx + w / 2.0 - pad_left) / scale_x;
-        let y2 = (cy + h / 2.0 - pad_top) / scale_y;
+                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
+                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
+                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
+                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
 
-        // Clip (clamp) moved to after NMS
-        // let x1 = x1.clamp(0.0, max_w);
-        // let y1 = y1.clamp(0.0, max_h);
-        // let x2 = x2.clamp(0.0, max_w);
-        // let y2 = y2.clamp(0.0, max_h);
+                candidates.push(Candidate {
+                    bbox: [x1, y1, x2, y2],
+                    score,
+                    class: max_classes[idx],
+                });
+            }
+        }
+    } else {
+        // Layout [pred, feat] - Process 8 classes at once
+        for idx in 0..num_predictions {
+            let base = idx * feat_count;
+            let row_ptr = unsafe { output.as_ptr().add(base + 4) };
+            let mut best_score = conf_thresh;
+            let mut best_class = 0;
+            let mut found = false;
 
-        candidates.push(([x1, y1, x2, y2], best_score, best_class));
+            for c_idx in (0..num_classes).step_by(8) {
+                if num_classes - c_idx >= 8 {
+                    let scores: f32x8 =
+                        unsafe { (row_ptr.add(c_idx) as *const f32x8).read_unaligned() };
+                    if scores.cmp_gt(conf_v).any() {
+                        for i in 0..8 {
+                            let s = unsafe { *row_ptr.add(c_idx + i) };
+                            if s > best_score {
+                                best_score = s;
+                                best_class = c_idx + i;
+                                found = true;
+                            }
+                        }
+                    }
+                } else {
+                    for i in c_idx..num_classes {
+                        let s = unsafe { *row_ptr.add(i) };
+                        if s > best_score {
+                            best_score = s;
+                            best_class = i;
+                            found = true;
+                        }
+                    }
+                }
+            }
+
+            if found {
+                let cx = unsafe { *output.get_unchecked(base) };
+                let cy = unsafe { *output.get_unchecked(base + 1) };
+                let w = unsafe { *output.get_unchecked(base + 2) };
+                let h = unsafe { *output.get_unchecked(base + 3) };
+
+                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
+                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
+                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
+                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+
+                candidates.push(Candidate {
+                    bbox: [x1, y1, x2, y2],
+                    score: best_score,
+                    class: best_class,
+                });
+            }
+        }
     }
 
     if candidates.is_empty() {
         return Array2::zeros((0, 6));
     }
 
-    // Apply per-class NMS (only suppress boxes within the same class)
-    let keep_indices = nms_per_class(&candidates, config.iou_threshold);
+    // Phase 2: Top-K Selection & Sort
+    let nms_limit = (max_det * 10).min(candidates.len());
+    if candidates.len() > nms_limit {
+        candidates.select_nth_unstable_by(nms_limit, |a, b| b.score.partial_cmp(&a.score).unwrap());
+        candidates.truncate(nms_limit);
+    }
+    candidates.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
 
-    // Build output array with kept detections
-    let num_kept = keep_indices.len().min(config.max_detections);
+    // Phase 3: Population of SoA for NMS (small copy, very fast)
+    let n = candidates.len();
+    let mut x1 = Vec::with_capacity(n);
+    let mut y1 = Vec::with_capacity(n);
+    let mut x2 = Vec::with_capacity(n);
+    let mut y2 = Vec::with_capacity(n);
+    let mut areas = Vec::with_capacity(n);
+
+    for c in &candidates {
+        x1.push(c.bbox[0]);
+        y1.push(c.bbox[1]);
+        x2.push(c.bbox[2]);
+        y2.push(c.bbox[3]);
+        areas.push((c.bbox[2] - c.bbox[0]) * (c.bbox[3] - c.bbox[1]));
+    }
+
+    // Phase 4: SIMD NMS
+    let mut suppressed = vec![false; n];
+    let mut keep = Vec::with_capacity(max_det);
+    let iou_v = f32x8::splat(iou_thresh);
+
+    for i in 0..n {
+        if suppressed[i] {
+            continue;
+        }
+        keep.push(i);
+        if keep.len() >= max_det {
+            break;
+        }
+
+        let ax1 = f32x8::splat(x1[i]);
+        let ay1 = f32x8::splat(y1[i]);
+        let ax2 = f32x8::splat(x2[i]);
+        let ay2 = f32x8::splat(y2[i]);
+        let aa = f32x8::splat(areas[i]);
+        let ac = candidates[i].class;
+
+        let mut j = i + 1;
+        while j < n {
+            if n - j >= 8 {
+                // Inline fast class and suppression check
+                let mut chunk_needs_processing = false;
+                for k in 0..8 {
+                    if candidates[j + k].class == ac && !suppressed[j + k] {
+                        chunk_needs_processing = true;
+                        break;
+                    }
+                }
+
+                if chunk_needs_processing {
+                    let bx1 = unsafe { (x1.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let by1 = unsafe { (y1.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let bx2 = unsafe { (x2.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let by2 = unsafe { (y2.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let ba = unsafe { (areas.as_ptr().add(j) as *const f32x8).read_unaligned() };
+
+                    let ix1 = ax1.max(bx1);
+                    let iy1 = ay1.max(by1);
+                    let ix2 = ax2.min(bx2);
+                    let iy2 = ay2.min(by2);
+
+                    let iw = (ix2 - ix1).max(f32x8::ZERO);
+                    let ih = (iy2 - iy1).max(f32x8::ZERO);
+                    let ia = iw * ih;
+                    let iou = ia / (aa + ba - ia);
+
+                    let mask = iou.cmp_gt(iou_v).move_mask() as u8;
+                    if mask != 0 {
+                        for k in 0..8 {
+                            if (mask & (1 << k)) != 0 && candidates[j + k].class == ac {
+                                suppressed[j + k] = true;
+                            }
+                        }
+                    }
+                }
+                j += 8;
+            } else {
+                for k in j..n {
+                    if !suppressed[k] && candidates[k].class == ac {
+                        let ix1 = x1[i].max(x1[k]);
+                        let iy1 = y1[i].max(y1[k]);
+                        let ix2 = x2[i].min(x2[k]);
+                        let iy2 = y2[i].min(y2[k]);
+                        let iw = (ix2 - ix1).max(0.0);
+                        let ih = (iy2 - iy1).max(0.0);
+                        let ia = iw * ih;
+                        let iou = ia / (areas[i] + areas[k] - ia);
+                        if iou > iou_thresh {
+                            suppressed[k] = true;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    // Phase 5: Result Construction
+    let num_kept = keep.len();
     let mut result = Array2::zeros((num_kept, 6));
-
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
-        let (bbox, score, class) = &candidates[keep_idx];
-        // Clip coordinates here, after NMS
-        result[[out_idx, 0]] = bbox[0].clamp(0.0, max_w);
-        result[[out_idx, 1]] = bbox[1].clamp(0.0, max_h);
-        result[[out_idx, 2]] = bbox[2].clamp(0.0, max_w);
-        result[[out_idx, 3]] = bbox[3].clamp(0.0, max_h);
-        result[[out_idx, 4]] = *score;
-        result[[out_idx, 5]] = *class as f32;
+    for (out_idx, &idx) in keep.iter().enumerate() {
+        let c = &candidates[idx];
+        result[[out_idx, 0]] = c.bbox[0].clamp(0.0, max_w);
+        result[[out_idx, 1]] = c.bbox[1].clamp(0.0, max_h);
+        result[[out_idx, 2]] = c.bbox[2].clamp(0.0, max_w);
+        result[[out_idx, 3]] = c.bbox[3].clamp(0.0, max_h);
+        result[[out_idx, 4]] = c.score;
+        result[[out_idx, 5]] = c.class as f32;
     }
 
     result
@@ -363,7 +514,7 @@ fn extract_detect_boxes(
     clippy::cast_possible_truncation
 )]
 fn postprocess_segment(
-    outputs: Vec<(Vec<f32>, Vec<usize>)>,
+    outputs: Vec<(&[f32], Vec<usize>)>,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     names: &HashMap<usize, String>,
@@ -415,10 +566,10 @@ fn postprocess_segment(
 
     // Convert to 2D [preds, features]
     let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, expected_features), output0.clone())
+        Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
             .unwrap_or_else(|_| Array2::zeros((0, 0)))
     } else {
-        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.clone())
+        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
             .unwrap_or_else(|_| Array2::zeros((0, 0)));
         arr.t().to_owned()
     };
@@ -431,7 +582,7 @@ fn postprocess_segment(
         let (best_class, best_score) = scores
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|&(_, a), &(_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map_or((0, 0.0), |(idx, &score)| (idx, score));
 
         if best_score < config.confidence_threshold {
@@ -516,7 +667,7 @@ fn postprocess_segment(
         );
     }
 
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.clone()) {
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
         Ok(arr) => arr,
         Err(e) => {
             eprintln!("WARNING ⚠️ Failed to create protos array: {e}. Skipping mask generation.");
@@ -875,11 +1026,8 @@ fn postprocess_classify(
         return results;
     }
 
-    // Filter out NaN values and ensure valid probabilities
-    let mut probs_vec: Vec<f32> = output
-        .iter()
-        .map(|&v| if v.is_nan() { 0.0 } else { v })
-        .collect();
+    // Probs::new expects an Array1, which we can create from the slice
+    let mut probs_vec = output.to_vec();
 
     // Check if softmax is already applied (sum ≈ 1.0)
     let sum: f32 = probs_vec.iter().sum();

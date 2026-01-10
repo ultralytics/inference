@@ -69,10 +69,6 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub rect: bool,
 
-    /// Save raw detections to a JSON file for debugging/comparison
-    #[arg(long)]
-    pub save_json: Option<String>,
-
     /// Batch size for inference
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub batch: u32,
