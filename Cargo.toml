@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2024"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
@@ -56,13 +56,6 @@ wide = "0.7"
 # LRU cache for preprocessing LUT
 lru = "0.12"
 
-
-
-# Serialization for JSON output
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "^0.17", features = ["rayon"] }
 
@@ -87,6 +80,7 @@ bytemuck = { version = "^1.21", features = ["derive"] }
 clap = { version = "4.5.54", features = ["derive"] }
 colored = "3.0.0"
 
+# Optional - Visualization and Video support
 minifb = { version = "^0.28.0", optional = true }
 video-rs = { version = "^0.10.5", features = ["ndarray"], optional = true }
 

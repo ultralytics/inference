@@ -2632,7 +2632,7 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "ultralytics-inference"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -2652,8 +2652,6 @@ dependencies = [
  "ndarray 0.17.1",
  "ort",
  "rayon",
- "serde",
- "serde_json",
  "serial_test",
  "tempfile",
  "ureq",
