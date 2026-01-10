@@ -390,14 +390,12 @@ fn extract_detect_boxes(
         areas.push((c.bbox[2] - c.bbox[0]) * (c.bbox[3] - c.bbox[1]));
     }
 
-
     let mut suppressed = vec![false; n];
     let mut keep = Vec::with_capacity(max_det);
     let iou_v = f32x8::splat(iou_thresh);
     // Build output array with kept detections
     // let num_kept = keep_indices.len().min(config.max_det);
     // let mut result = Array2::zeros((num_kept, 6));
-
 
     for i in 0..n {
         if suppressed[i] {
