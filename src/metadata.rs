@@ -91,7 +91,6 @@ impl ModelMetadata {
     ///
     /// Returns an error if the YAML is malformed or missing required fields.
     pub fn from_yaml_str(yaml_str: &str) -> Result<Self> {
-        // Parse YAML manually to avoid serde_yaml dependency complexity
         let mut metadata = Self::default();
 
         for line in yaml_str.lines() {

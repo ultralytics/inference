@@ -5,12 +5,70 @@
 //! This module handles all image preprocessing operations needed before
 //! running YOLO model inference, including resizing, padding, and normalization.
 
+#![allow(
+    unsafe_code,
+    clippy::similar_names,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::wildcard_imports,
+    clippy::ptr_as_ptr,
+    clippy::cast_lossless,
+    clippy::single_match_else,
+    clippy::suboptimal_flops,
+    clippy::manual_div_ceil
+)]
+
+use std::cell::RefCell;
+use std::num::NonZeroUsize;
+
 use half::f16;
-use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
+use image::{DynamicImage, GenericImageView, RgbImage};
+use lru::LruCache;
 use ndarray::{Array3, Array4};
+
+// ================================================================================================
+// Constants
+// ================================================================================================
 
 /// Default letterbox padding color (gray).
 pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
+
+/// Fixed-point scale factor for integer bilinear interpolation (2^11 = 2048).
+const SCALE_BITS: i32 = 11;
+const SCALE_INT: i32 = 1 << SCALE_BITS;
+
+/// Normalized letterbox padding color (114/255 ≈ 0.447).
+const LETTERBOX_NORM: f32 = 114.0 / 255.0;
+
+/// Reciprocal of 255 for normalization.
+const INV_255: f32 = 1.0 / 255.0;
+
+/// Maximum LRU cache size for X coordinate LUTs.
+const LUT_CACHE_SIZE: usize = 8;
+
+// ================================================================================================
+// Type Aliases
+// ================================================================================================
+
+type XLutEntry = (usize, usize, i32, i32);
+type XLutKey = (u32, u32);
+
+// ================================================================================================
+// Thread-Local State
+// ================================================================================================
+
+thread_local! {
+    static X_LUT_CACHE: RefCell<LruCache<XLutKey, Vec<XLutEntry>>> =
+        RefCell::new(LruCache::new(NonZeroUsize::new(LUT_CACHE_SIZE).unwrap()));
+}
+
+// ================================================================================================
+// Types
+// ================================================================================================
 
 /// Tensor data that can be either FP32 or FP16.
 #[derive(Debug, Clone)]
@@ -96,13 +154,37 @@ pub fn preprocess_image_with_precision(
     let (new_width, new_height, pad_left, pad_top, scale) =
         calculate_letterbox_params(orig_width, orig_height, target_size, stride);
 
-    // Perform letterbox resize
-    let letterboxed = letterbox_image(image, new_width, new_height, pad_left, pad_top, target_size);
-
-    let tensor = image_to_tensor(&letterboxed);
+    // Zero-copy path: avoid to_rgb8() allocation when possible
+    let tensor = match image {
+        // Fast path: already RGB8, use bytes directly without copy
+        DynamicImage::ImageRgb8(rgb) => fused_zerocopy_preprocess(
+            rgb.as_raw(),
+            orig_width,
+            orig_height,
+            target_size,
+            pad_top,
+            pad_left,
+            new_width,
+            new_height,
+        ),
+        // Fallback: convert to RGB8 (allocates)
+        _ => {
+            let src_rgb = image.to_rgb8();
+            fused_zerocopy_preprocess(
+                src_rgb.as_raw(),
+                orig_width,
+                orig_height,
+                target_size,
+                pad_top,
+                pad_left,
+                new_width,
+                new_height,
+            )
+        }
+    };
 
     let tensor_f16 = if half {
-        Some(image_to_tensor_f16(&letterboxed))
+        Some(tensor_f32_to_f16(&tensor))
     } else {
         None
     };
@@ -115,6 +197,279 @@ pub fn preprocess_image_with_precision(
         #[allow(clippy::cast_precision_loss)]
         padding: (pad_top as f32, pad_left as f32),
     }
+}
+
+// ================================================================================================
+// Public API Functions
+// ================================================================================================
+
+/// Get or compute the X coordinate LUT for bilinear interpolation.
+fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Vec<XLutEntry> {
+    let key = (src_w, dst_w);
+
+    X_LUT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+
+        if let Some(lut) = cache.get(&key) {
+            return lut.clone();
+        }
+
+        let scale_x = src_w as f32 / dst_w as f32;
+        let src_w_max = (src_w - 1) as i32;
+
+        let lut: Vec<XLutEntry> = (0..dst_w)
+            .map(|dx| {
+                let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
+                let x0 = sx.floor() as i32;
+                let fx = ((sx - x0 as f32) * SCALE_INT as f32) as i32;
+                let x0c = x0.clamp(0, src_w_max) as usize * 3;
+                let x1c = (x0 + 1).clamp(0, src_w_max) as usize * 3;
+                (x0c, x1c, SCALE_INT - fx, fx)
+            })
+            .collect();
+
+        cache.put(key, lut.clone());
+        lut
+    })
+}
+
+/// Zero-copy fused preprocessing for maximum performance.
+///
+/// Combines bilinear resize, letterbox padding, and NCHW normalization
+/// in a single memory pass with parallel row processing.
+fn fused_zerocopy_preprocess(
+    src_raw: &[u8],
+    src_w: u32,
+    src_h: u32,
+    target_size: (usize, usize),
+    pad_top: u32,
+    pad_left: u32,
+    new_width: u32,
+    new_height: u32,
+) -> Array4<f32> {
+    use rayon::prelude::*;
+    use std::mem::MaybeUninit;
+    use std::sync::atomic::{AtomicPtr, Ordering};
+    use wide::f32x4;
+
+    let (dst_h, dst_w) = target_size;
+    let channel_size = dst_h * dst_w;
+    let src_stride = (src_w * 3) as usize;
+
+    // ALLOCATE UNINITIALIZED: Saves ~0.2ms by not zeroing memory
+    let mut tensor: Array4<MaybeUninit<f32>> = Array4::uninit((1, 3, dst_h, dst_w));
+    let out_ptr = tensor.as_mut_ptr() as *mut f32;
+
+    // Use AtomicPtr for thread-safe pointer sharing (each thread writes to disjoint rows)
+    let atomic_ptr = AtomicPtr::new(out_ptr);
+
+    let x_lut = get_or_compute_x_lut(src_w, new_width);
+    let scale_y = src_h as f32 / new_height as f32;
+    let src_h_max = (src_h - 1) as i32;
+    let inv_255_vec = f32x4::splat(INV_255);
+
+    let pad_top_usize = pad_top as usize;
+    let pad_left_usize = pad_left as usize;
+    let new_height_usize = new_height as usize;
+    let new_width_usize = new_width as usize;
+
+    // Parallel row processing with raw pointers (no bounds checks)
+    (0..dst_h).into_par_iter().for_each(|dy| {
+        let data_ptr = atomic_ptr.load(Ordering::Relaxed);
+        unsafe {
+            // Calculate row pointers for R, G, B channels
+
+            let r_row = data_ptr.add(dy * dst_w);
+            let g_row = data_ptr.add(channel_size + dy * dst_w);
+            let b_row = data_ptr.add(2 * channel_size + dy * dst_w);
+
+            // Vertical padding (top/bottom rows)
+            if dy < pad_top_usize || dy >= pad_top_usize + new_height_usize {
+                for dx in 0..dst_w {
+                    *r_row.add(dx) = LETTERBOX_NORM;
+                    *g_row.add(dx) = LETTERBOX_NORM;
+                    *b_row.add(dx) = LETTERBOX_NORM;
+                }
+                return;
+            }
+
+            // Image row calculations
+            let img_dy = dy - pad_top_usize;
+            let sy = ((img_dy as f32 + 0.5) * scale_y - 0.5).max(0.0);
+            let y0 = sy.floor() as i32;
+            let fy = ((sy - y0 as f32) * SCALE_INT as f32) as i32;
+            let fy_inv = SCALE_INT - fy;
+
+            let y0c = y0.clamp(0, src_h_max) as usize;
+            let y1c = (y0 + 1).clamp(0, src_h_max) as usize;
+            let row0_off = y0c * src_stride;
+            let row1_off = y1c * src_stride;
+
+            // Left padding
+            for dx in 0..pad_left_usize {
+                *r_row.add(dx) = LETTERBOX_NORM;
+                *g_row.add(dx) = LETTERBOX_NORM;
+                *b_row.add(dx) = LETTERBOX_NORM;
+            }
+
+            // Inner image - SIMD loop (4 pixels at a time)
+            let mut img_dx = 0usize;
+            let src_ptr = src_raw.as_ptr();
+
+            while img_dx + 4 <= new_width_usize {
+                let mut r_vals = [0.0f32; 4];
+                let mut g_vals = [0.0f32; 4];
+                let mut b_vals = [0.0f32; 4];
+
+                for i in 0..4 {
+                    let (x0_off, x1_off, fx_inv, fx) = *x_lut.get_unchecked(img_dx + i);
+                    let w00 = (fx_inv * fy_inv) >> SCALE_BITS;
+                    let w10 = (fx * fy_inv) >> SCALE_BITS;
+                    let w01 = (fx_inv * fy) >> SCALE_BITS;
+                    let w11 = (fx * fy) >> SCALE_BITS;
+
+                    let p00 = src_ptr.add(row0_off + x0_off);
+                    let p10 = src_ptr.add(row0_off + x1_off);
+                    let p01 = src_ptr.add(row1_off + x0_off);
+                    let p11 = src_ptr.add(row1_off + x1_off);
+
+                    r_vals[i] = ((*p00 as i32 * w00
+                        + *p10 as i32 * w10
+                        + *p01 as i32 * w01
+                        + *p11 as i32 * w11)
+                        >> SCALE_BITS) as f32;
+                    g_vals[i] = ((*p00.add(1) as i32 * w00
+                        + *p10.add(1) as i32 * w10
+                        + *p01.add(1) as i32 * w01
+                        + *p11.add(1) as i32 * w11)
+                        >> SCALE_BITS) as f32;
+                    b_vals[i] = ((*p00.add(2) as i32 * w00
+                        + *p10.add(2) as i32 * w10
+                        + *p01.add(2) as i32 * w01
+                        + *p11.add(2) as i32 * w11)
+                        >> SCALE_BITS) as f32;
+                }
+
+                // SIMD normalize
+                let r_simd = f32x4::new(r_vals) * inv_255_vec;
+                let g_simd = f32x4::new(g_vals) * inv_255_vec;
+                let b_simd = f32x4::new(b_vals) * inv_255_vec;
+
+                let out_x = pad_left_usize + img_dx;
+                let r_arr: [f32; 4] = r_simd.into();
+                let g_arr: [f32; 4] = g_simd.into();
+                let b_arr: [f32; 4] = b_simd.into();
+
+                // Direct raw pointer writes (no bounds checks)
+                std::ptr::copy_nonoverlapping(r_arr.as_ptr(), r_row.add(out_x), 4);
+                std::ptr::copy_nonoverlapping(g_arr.as_ptr(), g_row.add(out_x), 4);
+                std::ptr::copy_nonoverlapping(b_arr.as_ptr(), b_row.add(out_x), 4);
+
+                img_dx += 4;
+            }
+
+            // Scalar tail
+            while img_dx < new_width_usize {
+                let (x0_off, x1_off, fx_inv, fx) = *x_lut.get_unchecked(img_dx);
+                let w00 = (fx_inv * fy_inv) >> SCALE_BITS;
+                let w10 = (fx * fy_inv) >> SCALE_BITS;
+                let w01 = (fx_inv * fy) >> SCALE_BITS;
+                let w11 = (fx * fy) >> SCALE_BITS;
+
+                let p00 = src_ptr.add(row0_off + x0_off);
+                let p10 = src_ptr.add(row0_off + x1_off);
+                let p01 = src_ptr.add(row1_off + x0_off);
+                let p11 = src_ptr.add(row1_off + x1_off);
+
+                let out_x = pad_left_usize + img_dx;
+                *r_row.add(out_x) = ((*p00 as i32 * w00
+                    + *p10 as i32 * w10
+                    + *p01 as i32 * w01
+                    + *p11 as i32 * w11)
+                    >> SCALE_BITS) as f32
+                    * INV_255;
+                *g_row.add(out_x) = ((*p00.add(1) as i32 * w00
+                    + *p10.add(1) as i32 * w10
+                    + *p01.add(1) as i32 * w01
+                    + *p11.add(1) as i32 * w11)
+                    >> SCALE_BITS) as f32
+                    * INV_255;
+                *b_row.add(out_x) = ((*p00.add(2) as i32 * w00
+                    + *p10.add(2) as i32 * w10
+                    + *p01.add(2) as i32 * w01
+                    + *p11.add(2) as i32 * w11)
+                    >> SCALE_BITS) as f32
+                    * INV_255;
+
+                img_dx += 1;
+            }
+
+            // Right padding
+            for dx in (pad_left_usize + new_width_usize)..dst_w {
+                *r_row.add(dx) = LETTERBOX_NORM;
+                *g_row.add(dx) = LETTERBOX_NORM;
+                *b_row.add(dx) = LETTERBOX_NORM;
+            }
+        }
+    });
+
+    // SAFETY: All elements have been initialized
+    unsafe { tensor.assume_init() }
+}
+
+/// Convert f32 tensor to f16 tensor.
+fn tensor_f32_to_f16(tensor: &Array4<f32>) -> Array4<half::f16> {
+    tensor.mapv(half::f16::from_f32)
+}
+
+/// Calculate target size for rectangular inference mode.
+///
+/// Adjusts `target_size` such that the image's aspect ratio is preserved,
+/// and both dimensions are multiples of `stride`.
+///
+/// # Arguments
+///
+/// * `orig_width` - Original image width.
+/// * `orig_height` - Original image height.
+/// * `target_size` - Base target size (e.g. 640x640).
+/// * `stride` - Model stride for alignment.
+///
+/// # Returns
+///
+/// Adjusted target size as (height, width).
+#[must_use]
+pub fn calculate_rect_size(
+    orig_width: u32,
+    orig_height: u32,
+    target_size: (usize, usize),
+    stride: u32,
+) -> (usize, usize) {
+    let (target_h, target_w) = target_size;
+
+    #[allow(clippy::cast_precision_loss)]
+    let orig_h = orig_height as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let orig_w = orig_width as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let target_h_f = target_h as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let target_w_f = target_w as f32;
+
+    // Calculate scale to fit within target while maintaining aspect ratio
+    let scale = (target_h_f / orig_h).min(target_w_f / orig_w);
+
+    // New dimensions after scaling
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let new_h = (orig_h * scale).round() as usize;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let new_w = (orig_w * scale).round() as usize;
+
+    // Round up to nearest multiple of stride
+    let stride = stride as usize;
+    let rect_h = ((new_h + stride - 1) / stride) * stride;
+    let rect_w = ((new_w + stride - 1) / stride) * stride;
+
+    (rect_h, rect_w)
 }
 
 /// Calculate letterbox parameters for resizing.
@@ -172,72 +527,6 @@ fn calculate_letterbox_params(
     let scale_y = new_h as f32 / orig_h;
 
     (new_w, new_h, pad_left, pad_top, (scale_y, scale_x))
-}
-/// Apply letterbox transformation to an image.
-///
-/// Resizes the image maintaining aspect ratio and adds padding usually to center it.
-/// Uses SIMD-accelerated resizing via `fast_image_resize`.
-///
-/// # Arguments
-///
-/// * `image` - Source dynamic image.
-/// * `new_width` - Target width after scaling (before padding).
-/// * `new_height` - Target height after scaling (before padding).
-/// * `pad_left` - Padding to add on the left.
-/// * `pad_top` - Padding to add on the top.
-/// * `target_size` - Final output dimensions (height, width).
-///
-/// # Returns
-///
-/// `RgbImage` padded and resized to `target_size`.
-fn letterbox_image(
-    image: &DynamicImage,
-    new_width: u32,
-    new_height: u32,
-    pad_left: u32,
-    pad_top: u32,
-    target_size: (usize, usize),
-) -> RgbImage {
-    use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
-
-    let src_rgb = image.to_rgb8();
-    let (src_w, src_h) = src_rgb.dimensions();
-
-    let src_image = Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), PixelType::U8x3)
-        .expect("Failed to create source image");
-
-    let mut dst_image = Image::new(new_width, new_height, PixelType::U8x3);
-
-    let mut resizer = Resizer::new();
-    let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
-        // Use Lanczos3 for high-quality resizing. This is critical for OBB tasks where
-        // preserving small features (like harbors in DOTA8) is essential for detection.
-        // It matches the default behavior of Ultralytics Python preprocessing.
-        fast_image_resize::FilterType::Lanczos3,
-    ));
-    resizer
-        .resize(&src_image, &mut dst_image, Some(&options))
-        .expect("Failed to resize image");
-
-    // Create output image with letterbox color
-    #[allow(clippy::cast_possible_truncation)]
-    let mut output: RgbImage = ImageBuffer::from_pixel(
-        target_size.1 as u32,
-        target_size.0 as u32,
-        Rgb(LETTERBOX_COLOR),
-    );
-
-    let resized_rgb: RgbImage = ImageBuffer::from_raw(new_width, new_height, dst_image.into_vec())
-        .expect("Failed to create resized image buffer");
-
-    image::imageops::overlay(
-        &mut output,
-        &resized_rgb,
-        i64::from(pad_left),
-        i64::from(pad_top),
-    );
-
-    output
 }
 
 /// Convert an RGB image to a normalized NCHW tensor (FP32).

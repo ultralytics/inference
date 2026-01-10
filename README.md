@@ -77,20 +77,26 @@ cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --show --
 
 # Save individual frames for video input
 cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --save-frames
+
+# Rectangular inference
+cargo run --release -- predict --model yolo11n.onnx --source image.jpg --rect
 ```
 
 ### Example Output
 
 ```
+# ultralytics-inference predict
+
+WARNING ⚠️ 'model' argument is missing. Using default 'model=yolo11n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics 0.0.7 🚀 Rust ONNX FP32 CPU
+Ultralytics 0.0.8 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO11n summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 bus.jpg: 640x640 3 persons, 1 bus, 57.3ms
-image 2/2 zidane.jpg: 640x640 2 persons, 1 tie, 52.9ms
-Speed: 75.8ms preprocess, 55.1ms inference, 19.9ms postprocess per image at shape (1, 3, 640, 640)
-Results saved to runs/detect/predict53
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 640x480 4 persons, 1 bus, 36.4ms
+image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
+Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 384, 640)
+Results saved to runs/detect/predict1
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
 
@@ -117,8 +123,11 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `--source`      | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
 | `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
 | `--conf`        |       | Confidence threshold                              | `0.25`                                  |
-| `--iou`         |       | IoU threshold for NMS                             | `0.45`                                  |
+| `--iou`         |       | IoU threshold for NMS                             | `0.7`                                   |
+| `--max-det`     |       | Maximum number of detections                      | `300`                                   |
 | `--imgsz`       |       | Inference image size                              | `Model metadata`                        |
+| `--rect`        |       | Enable rectangular inference (minimal padding)    | `true`                                  |
+| `--batch`       |       | Batch size for inference                          | `1`                                     |
 | `--half`        |       | Use FP16 half-precision inference                 | `false`                                 |
 | `--save`        |       | Save annotated results to runs/<task>/predict     | `true`                                  |
 | `--save-frames` |       | Save individual frames for video                  | `false`                                 |
@@ -183,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = InferenceConfig::new()
         .with_confidence(0.5)
         .with_iou(0.45)
-        .with_max_det(100);
+        .with_max_det(300);
 
     let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
     let results = model.predict("image.jpg")?;
@@ -236,16 +245,25 @@ inference/
 │   ├── main.rs             # CLI application
 │   ├── model.rs            # YOLOModel - ONNX session and inference
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb
-│   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize)
-│   ├── postprocessing.rs   # Detection post-processing (NMS, decode)
+│   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize, SIMD)
+│   ├── postprocessing.rs   # Detection post-processing (NMS, decode, SIMD)
 │   ├── metadata.rs         # ONNX model metadata parsing
-│   ├── source.rs           # Input source handling
-│   ├── task.rs             # Task enum (Detect, Segment, Pose, etc.)
+│   ├── source.rs           # Input source handling (images, video, webcam)
+│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb)
 │   ├── inference.rs        # InferenceConfig
+│   ├── batch.rs            # Batch processing pipeline
+│   ├── device.rs           # Device enum (CPU, CUDA, MPS, CoreML, etc.)
 │   ├── download.rs         # Model and asset downloading
-│   ├── visualizer/         # Visualization tools (Viewer)
+│   ├── annotate.rs         # Image annotation (bounding boxes, masks, keypoints)
+│   ├── io.rs               # Result saving (images, videos)
+│   ├── logging.rs          # Logging macros
 │   ├── error.rs            # Error types
-│   └── utils.rs            # Utility functions (NMS, IoU)
+│   ├── utils.rs            # Utility functions (NMS, IoU)
+│   ├── cli/                # CLI module
+│   │   ├── mod.rs          # CLI module exports
+│   │   ├── args.rs         # CLI argument parsing
+│   │   └── predict.rs      # Predict command implementation
+│   └── visualizer/         # Real-time visualization (minifb)
 ├── tests/
 │   └── integration_test.rs # Integration tests
 ├── assets/                 # Test images
@@ -300,13 +318,16 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 
 ### Core Dependencies (always included)
 
-| Crate               | Purpose                 |
-| ------------------- | ----------------------- |
-| `ort`               | ONNX Runtime bindings   |
-| `ndarray`           | N-dimensional arrays    |
-| `image`             | Image loading/decoding  |
-| `fast_image_resize` | SIMD-optimized resizing |
-| `half`              | FP16 support            |
+| Crate               | Purpose                         |
+| ------------------- | ------------------------------- |
+| `ort`               | ONNX Runtime bindings           |
+| `ndarray`           | N-dimensional arrays            |
+| `image`             | Image loading/decoding          |
+| `jpeg-decoder`      | JPEG decoding                   |
+| `fast_image_resize` | SIMD-optimized resizing         |
+| `half`              | FP16 support                    |
+| `lru`               | LRU cache for preprocessing LUT |
+| `wide`              | SIMD for fast preprocessing     |
 
 ### Optional Dependencies (for `--save` feature)
 
@@ -372,16 +393,18 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 
 - [x] Detection, Segmentation, Pose, Classification, OBB inference
 - [x] ONNX model metadata parsing (auto-detect classes, task, imgsz)
+- [x] Hardware acceleration support (CUDA, TensorRT, CoreML, OpenVINO, XNNPACK)
 - [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`)
 - [x] Multiple input sources (images, directories, globs, URLs)
 - [x] Video file support and webcam/RTSP streaming
 - [x] Image annotation and visualization
 - [x] FP16 half-precision inference
+- [x] Batch inference support
+- [x] Rectangular inference support and optimization
 
 ### In Progress
 
 - [ ] Python bindings (PyO3)
-- [ ] Batch inference optimization
 - [ ] WebAssembly (WASM) support for browser inference
 
 ## 💡 Contributing

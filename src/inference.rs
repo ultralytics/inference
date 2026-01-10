@@ -20,7 +20,7 @@
 /// let config = InferenceConfig::new()
 ///     .with_confidence(0.5)
 ///     .with_iou(0.45)
-///     .with_max_det(100)
+///     .with_max_det(300)
 ///     .with_imgsz(640, 640);
 /// ```
 ///
@@ -33,6 +33,7 @@
 ///     .with_device(Device::Cuda(0));
 /// ```
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct InferenceConfig {
     /// Confidence threshold for detections (0.0 to 1.0).
     /// Detections with confidence scores lower than this value will be discarded.
@@ -65,6 +66,9 @@ pub struct InferenceConfig {
     /// Whether to save individual frames instead of a video file when input is video.
     /// Defaults to `false` (save as video).
     pub save_frames: bool,
+    /// Whether to use minimal padding (rectangular inference).
+    /// Defaults to `true` to match Ultralytics Python.
+    pub rect: bool,
 }
 
 impl Default for InferenceConfig {
@@ -80,6 +84,7 @@ impl Default for InferenceConfig {
             device: None,
             save: true,
             save_frames: false,
+            rect: true,
         }
     }
 }
@@ -267,6 +272,21 @@ impl InferenceConfig {
         self.save_frames = save_frames;
         self
     }
+
+    /// Set whether to use minimal padding (rectangular inference).
+    ///
+    /// # Arguments
+    ///
+    /// * `rect` - `true` to enable, `false` to disable.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_rect(mut self, rect: bool) -> Self {
+        self.rect = rect;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -286,13 +306,13 @@ mod tests {
         let config = InferenceConfig::new()
             .with_confidence(0.5)
             .with_iou(0.6)
-            .with_max_det(100)
+            .with_max_det(300)
             .with_imgsz(640, 640)
             .with_threads(8);
 
         assert!((config.confidence_threshold - 0.5).abs() < f32::EPSILON);
         assert!((config.iou_threshold - 0.6).abs() < f32::EPSILON);
-        assert_eq!(config.max_det, 100);
+        assert_eq!(config.max_det, 300);
         assert_eq!(config.imgsz, Some((640, 640)));
         assert_eq!(config.num_threads, 8);
     }

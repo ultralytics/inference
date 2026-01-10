@@ -7,3 +7,10 @@ PKG_CONFIG_PATH = "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
 CPATH = "/opt/homebrew/opt/ffmpeg@7/include"
 LIBRARY_PATH = "/opt/homebrew/opt/ffmpeg@7/lib"
 BINDGEN_EXTRA_CLANG_ARGS = "-I/opt/homebrew/opt/ffmpeg@7/include"
+
+#
+# Linux: Configure RPATH to find shared libraries in the executable's directory
+# This allows the binary to correspond to libonnxruntime*.so in the same folder
+# without needing LD_LIBRARY_PATH set manually.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
