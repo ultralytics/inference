@@ -20,7 +20,7 @@
 /// let config = InferenceConfig::new()
 ///     .with_confidence(0.5)
 ///     .with_iou(0.45)
-///     .with_max_det(100)
+///     .with_max_det(300)
 ///     .with_imgsz(640, 640);
 /// ```
 ///
@@ -306,13 +306,13 @@ mod tests {
         let config = InferenceConfig::new()
             .with_confidence(0.5)
             .with_iou(0.6)
-            .with_max_det(100)
+            .with_max_det(300)
             .with_imgsz(640, 640)
             .with_threads(8);
 
         assert!((config.confidence_threshold - 0.5).abs() < f32::EPSILON);
         assert!((config.iou_threshold - 0.6).abs() < f32::EPSILON);
-        assert_eq!(config.max_det, 100);
+        assert_eq!(config.max_det, 300);
         assert_eq!(config.imgsz, Some((640, 640)));
         assert_eq!(config.num_threads, 8);
     }
