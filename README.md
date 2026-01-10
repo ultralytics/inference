@@ -269,7 +269,6 @@ inference/
 ├── assets/                 # Test images
 │   ├── bus.jpg
 │   └── zidane.jpg
-│   └── zidane.jpg
 ├── Cargo.toml              # Rust dependencies and features
 ├── LICENSE                 # AGPL-3.0 License
 └── README.md               # This file
