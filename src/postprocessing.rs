@@ -366,7 +366,7 @@ fn extract_detect_boxes(
         return Array2::zeros((0, 6));
     }
 
-    // Phase 2: Top-K Selection & Sort
+    // Top-K Selection & Sort
     let nms_limit = (max_det * 10).min(candidates.len());
     if candidates.len() > nms_limit {
         candidates.select_nth_unstable_by(nms_limit, |a, b| b.score.partial_cmp(&a.score).unwrap());
@@ -374,7 +374,7 @@ fn extract_detect_boxes(
     }
     candidates.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
 
-    // Phase 3: Population of SoA for NMS (small copy, very fast)
+    // Population of SoA for NMS (small copy, very fast)
     let n = candidates.len();
     let mut x1 = Vec::with_capacity(n);
     let mut y1 = Vec::with_capacity(n);
@@ -390,10 +390,14 @@ fn extract_detect_boxes(
         areas.push((c.bbox[2] - c.bbox[0]) * (c.bbox[3] - c.bbox[1]));
     }
 
-    // Phase 4: SIMD NMS
+
     let mut suppressed = vec![false; n];
     let mut keep = Vec::with_capacity(max_det);
     let iou_v = f32x8::splat(iou_thresh);
+    // Build output array with kept detections
+    // let num_kept = keep_indices.len().min(config.max_det);
+    // let mut result = Array2::zeros((num_kept, 6));
+
 
     for i in 0..n {
         if suppressed[i] {
@@ -470,7 +474,7 @@ fn extract_detect_boxes(
             }
         }
     }
-    // Phase 5: Result Construction
+    // Result Construction
     let num_kept = keep.len();
     let mut result = Array2::zeros((num_kept, 6));
     for (out_idx, &idx) in keep.iter().enumerate() {
@@ -621,7 +625,7 @@ fn postprocess_segment(
         .collect();
 
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // 2. Extract Box Results
     let mut boxes_data = Array2::zeros((num_kept, 6));
@@ -961,7 +965,7 @@ fn postprocess_pose(
         .map(|(bbox, score, class, _)| (*bbox, *score, *class))
         .collect();
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // Build output arrays
     let mut boxes_data = Array2::zeros((num_kept, 6));
@@ -1192,7 +1196,7 @@ fn postprocess_obb(
     // This ensures that overlapping rotated boxes are correctly filtered based on their
     // actual geometric overlap, which standard axis-aligned IoU cannot handle.
     let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // Build output array: [cx, cy, w, h, rotation, conf, cls]
     let mut obb_data = Array2::zeros((num_kept, 7));
