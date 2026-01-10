@@ -319,17 +319,16 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 
 ### Core Dependencies (always included)
 
-| Crate               | Purpose                 |
-| ------------------- | ----------------------- |
-| `ort`               | ONNX Runtime bindings   |
-| `ndarray`           | N-dimensional arrays    |
-| `image`             | Image loading/decoding  |
-| `jpeg-decoder`      | JPEG decoding           |
-| `fast_image_resize` | SIMD-optimized resizing |
-| `half`              | FP16 support            |
+| Crate               | Purpose                         |
+| ------------------- | ------------------------------- |
+| `ort`               | ONNX Runtime bindings           |
+| `ndarray`           | N-dimensional arrays            |
+| `image`             | Image loading/decoding          |
+| `jpeg-decoder`      | JPEG decoding                   |
+| `fast_image_resize` | SIMD-optimized resizing         |
+| `half`              | FP16 support                    |
 | `lru`               | LRU cache for preprocessing LUT |
-| `wide`              | SIMD for fast preprocessing |
-
+| `wide`              | SIMD for fast preprocessing     |
 
 ### Optional Dependencies (for `--save` feature)
 
