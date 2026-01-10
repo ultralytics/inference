@@ -62,8 +62,8 @@ pub fn run_prediction(args: &PredictArgs) {
         .with_half(half)
         .with_batch(batch_size)
         .with_save_frames(save_frames)
-        .with_rect(args.rect);
-        .with_max_det(args.max_det)
+        .with_rect(args.rect)
+        .with_max_det(args.max_det);
 
     // Apply imgsz if specified
     if let Some(sz) = imgsz {
