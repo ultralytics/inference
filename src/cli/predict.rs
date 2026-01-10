@@ -14,10 +14,11 @@ use crate::annotate::{annotate_image, find_next_run_dir};
 
 #[cfg(feature = "visualize")]
 use crate::visualizer::Viewer;
+#[cfg(feature = "visualize")]
+use image::GenericImageView;
 
 use crate::utils::pluralize;
 use crate::{InferenceConfig, Results, VERSION, YOLOModel};
-use image::GenericImageView;
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
