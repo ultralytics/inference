@@ -265,13 +265,13 @@ fn extract_detect_boxes(
     let orig_shape = preprocess.orig_shape;
     let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
     let conf_thresh = config.confidence_threshold;
-    let max_det = config.max_detections;
+    let max_det = config.max_det;
     let iou_thresh = config.iou_threshold;
     let conf_v = f32x8::splat(conf_thresh);
 
     let mut candidates: Vec<Candidate> = Vec::with_capacity(256);
 
-    // Phase 1: Candidate Extraction
+    // Candidate Extraction
     if !is_transposed {
         // Layout [feat, pred] - Cache-friendly linear scan
         let mut max_scores = vec![conf_thresh; num_predictions];
