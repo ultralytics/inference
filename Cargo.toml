@@ -54,7 +54,7 @@ fast_image_resize = { version = "^5.5", features = ["image", "rayon"] }
 ndarray = { version = "^0.17", features = ["rayon"] }
 
 # ONNX Runtime 1.23 - using latest from GitHub for best performance
-ort = { git = "https://github.com/pykeio/ort.git", default-features = false, features = [
+ort = { git = "https://github.com/pykeio/ort.git", rev = "2de34065983a5c034f5afcc072b23b99479f465b", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",
