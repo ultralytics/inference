@@ -11,23 +11,27 @@ use clap::{Args, Parser, Subcommand};
     --model, -m <MODEL>    Path to ONNX model file [default: yolo11n.onnx]
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
-    --iou <IOU>            IoU threshold for NMS [default: 0.45]
+    --iou <IOU>            IoU threshold for NMS [default: 0.7]
+    --max-det <MAX_DET>    Maximum number of detections [default: 300]
     --imgsz <IMGSZ>        Inference image size
+    --rect                 Enable rectangular inference (minimal padding) [default: true]
+    --batch <BATCH>        Batch size for inference [default: 1]
     --half                 Use FP16 half-precision inference
-    --save                 Save annotated images to runs/<task>/predict
+    --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --show                 Display results in a window
-    --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, xnnpack)
-    --verbose              Show verbose output
+    --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)
+    --verbose              Show verbose output [default: true]
 
 Examples:
+    ultralytics-inference predict
     ultralytics-inference predict --model yolo11n.onnx --source image.jpg
-    ultralytics-inference predict --model yolo11n.onnx --source video.mp4
-    ultralytics-inference predict --model yolo11n.onnx --source video.mp4 --save-frames
-    ultralytics-inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    ultralytics-inference predict -m yolo11n.onnx -s assets/ --save --half
-    ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show
-    ultralytics-inference predict --model yolo11n.onnx --source image.jpg --device mps"#)]
+    ultralytics-inference predict --source video.mp4 --rect
+    ultralytics-inference predict --source video.mp4 --save-frames
+    ultralytics-inference predict --source 0 --conf 0.5 --show
+    ultralytics-inference predict --source assets/ --save --half
+    ultralytics-inference predict --source image.jpg --device cuda:0
+    ultralytics-inference predict --source image.jpg --device mps"#)]
 pub struct Cli {
     #[command(subcommand)]
     /// Subcommand to execute.
@@ -58,7 +62,7 @@ pub struct PredictArgs {
     pub conf: f32,
 
     /// `IoU` threshold for NMS
-    #[arg(long, default_value_t = 0.45)]
+    #[arg(long, default_value_t = 0.7)]
     pub iou: f32,
 
     /// Maximum number of detections
@@ -69,6 +73,10 @@ pub struct PredictArgs {
     #[arg(long)]
     pub imgsz: Option<usize>,
 
+    /// Enable minimal padding (rectangular inference)
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
+    pub rect: bool,
+
     /// Batch size for inference
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub batch: u32,
@@ -78,7 +86,7 @@ pub struct PredictArgs {
     pub half: bool,
 
     /// Save annotated images to runs/<task>/predict
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub save: bool,
 
     /// Save individual frames for video input (instead of video file)
@@ -115,7 +123,8 @@ mod tests {
             Commands::Predict(predict_args) => {
                 assert_eq!(predict_args.model, "yolo11n.onnx");
                 assert!((predict_args.conf - 0.25).abs() < f32::EPSILON);
-                assert!((predict_args.iou - 0.45).abs() < f32::EPSILON);
+                assert!((predict_args.iou - 0.7).abs() < f32::EPSILON);
+                assert!(predict_args.rect);
                 assert_eq!(predict_args.max_det, 300);
                 assert!(!predict_args.half);
                 assert!(predict_args.verbose);

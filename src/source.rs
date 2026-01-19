@@ -740,7 +740,6 @@ impl Iterator for SourceIterator {
 }
 
 #[cfg(feature = "video")]
-/// Convert a `video_rs` Frame (ndarray 0.16) to `DynamicImage`.
 fn video_frame_to_image(arr: &video_rs::Frame) -> Result<DynamicImage> {
     let shape = arr.shape();
     let height = u32::try_from(shape[0])
@@ -748,14 +747,14 @@ fn video_frame_to_image(arr: &video_rs::Frame) -> Result<DynamicImage> {
     let width = u32::try_from(shape[1])
         .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
 
-    let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
-    for y in 0..height as usize {
-        for x in 0..width as usize {
-            rgb_data.push(arr[[y, x, 0]]);
-            rgb_data.push(arr[[y, x, 1]]);
-            rgb_data.push(arr[[y, x, 2]]);
-        }
-    }
+    // video_rs::Frame is an ndarray::Array3<u8> with shape (H, W, 3) and standard layout (C-contiguous).
+    // We can directly copy the raw data.
+    let rgb_data = arr
+        .as_slice()
+        .ok_or_else(|| {
+            InferenceError::ImageError("Failed to get raw slice from video frame".to_string())
+        })?
+        .to_vec();
 
     let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
         InferenceError::ImageError("Failed to create image from video frame".to_string())
