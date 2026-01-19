@@ -54,7 +54,7 @@ fast_image_resize = { version = "^5.5", features = ["image", "rayon"] }
 wide = "0.7"
 
 # LRU cache for preprocessing LUT
-lru = "0.12"
+lru = "0.16"
 
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "^0.17", features = ["rayon"] }
