@@ -247,7 +247,6 @@ impl SaveResults {
                     .unwrap_or_default()
                     .to_string_lossy();
                 let frames_dir = self.save_dir.join(format!("{video_stem}_frames"));
-                // Frame index is 1-based for consistency with Python API
                 let frame_num = meta.frame_idx + 1;
                 let filename = format!("{video_stem}_{frame_num}.jpg");
                 (frames_dir, filename)
