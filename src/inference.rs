@@ -74,22 +74,37 @@ pub struct InferenceConfig {
 impl Default for InferenceConfig {
     fn default() -> Self {
         Self {
-            confidence_threshold: 0.25,
-            iou_threshold: 0.45,
-            max_det: 300,
+            confidence_threshold: Self::DEFAULT_CONF,
+            iou_threshold: Self::DEFAULT_IOU,
+            max_det: Self::DEFAULT_MAX_DET,
             imgsz: None,
             batch: None,
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
-            half: false,
+            half: Self::DEFAULT_HALF,
             device: None,
-            save: true,
-            save_frames: false,
-            rect: true,
+            save: Self::DEFAULT_SAVE,
+            save_frames: Self::DEFAULT_SAVE_FRAMES,
+            rect: Self::DEFAULT_RECT,
         }
     }
 }
 
 impl InferenceConfig {
+    /// Default confidence threshold (0.0 to 1.0).
+    pub const DEFAULT_CONF: f32 = 0.25;
+    /// Default `IoU` threshold for NMS (0.0 to 1.0).
+    pub const DEFAULT_IOU: f32 = 0.7;
+    /// Default maximum number of detections per image.
+    pub const DEFAULT_MAX_DET: usize = 300;
+    /// Default for FP16 half-precision inference.
+    pub const DEFAULT_HALF: bool = false;
+    /// Default for saving annotated results.
+    pub const DEFAULT_SAVE: bool = true;
+    /// Default for saving individual frames (vs video).
+    pub const DEFAULT_SAVE_FRAMES: bool = false;
+    /// Default for rectangular (minimal padding) inference.
+    pub const DEFAULT_RECT: bool = true;
+
     /// Create a new configuration with default values.
     ///
     /// # Returns
@@ -296,8 +311,8 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = InferenceConfig::default();
-        assert!((config.confidence_threshold - 0.25).abs() < f32::EPSILON);
-        assert!((config.iou_threshold - 0.45).abs() < f32::EPSILON);
+        assert!((config.confidence_threshold - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
+        assert!((config.iou_threshold - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
         assert_eq!(config.max_det, 300);
     }
 

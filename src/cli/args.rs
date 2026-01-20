@@ -1,5 +1,6 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+use crate::InferenceConfig;
 use crate::download::DEFAULT_MODEL;
 use clap::{Args, Parser, Subcommand};
 
@@ -58,15 +59,15 @@ pub struct PredictArgs {
     pub source: Option<String>,
 
     /// Confidence threshold
-    #[arg(long, default_value_t = 0.25)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_CONF)]
     pub conf: f32,
 
     /// `IoU` threshold for NMS
-    #[arg(long, default_value_t = 0.7)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_IOU)]
     pub iou: f32,
 
     /// Maximum number of detections
-    #[arg(long, default_value_t = 300)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_MAX_DET)]
     pub max_det: usize,
 
     /// Inference image size
@@ -74,7 +75,7 @@ pub struct PredictArgs {
     pub imgsz: Option<usize>,
 
     /// Enable minimal padding (rectangular inference)
-    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_RECT, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub rect: bool,
 
     /// Batch size for inference
@@ -82,15 +83,15 @@ pub struct PredictArgs {
     pub batch: u32,
 
     /// Use FP16 half-precision inference
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_HALF)]
     pub half: bool,
 
     /// Save annotated images to runs/<task>/predict
-    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub save: bool,
 
     /// Save individual frames for video input (instead of video file)
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE_FRAMES)]
     pub save_frames: bool,
 
     /// Display results in a window
@@ -122,8 +123,8 @@ mod tests {
         match args.command {
             Commands::Predict(predict_args) => {
                 assert_eq!(predict_args.model, "yolo11n.onnx");
-                assert!((predict_args.conf - 0.25).abs() < f32::EPSILON);
-                assert!((predict_args.iou - 0.7).abs() < f32::EPSILON);
+                assert!((predict_args.conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
+                assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
                 assert!(predict_args.rect);
                 assert_eq!(predict_args.max_det, 300);
                 assert!(!predict_args.half);

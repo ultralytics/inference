@@ -378,94 +378,62 @@ pub fn run_prediction(args: &PredictArgs) {
     verbose!("💡 Learn more at https://docs.ultralytics.com/modes/predict");
 }
 
+/// Count detections per class and format as summary string (e.g., "4 persons, 1 bus").
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn format_class_counts(
+    cls: &ndarray::ArrayView1<'_, f32>,
+    count: usize,
+    names: &HashMap<usize, String>,
+) -> String {
+    if count == 0 {
+        return String::new();
+    }
+
+    // Count detections per class
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for i in 0..count {
+        let class_id = cls[i] as usize;
+        *counts.entry(class_id).or_insert(0) += 1;
+    }
+
+    // Sort by class ID for consistent output
+    let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
+    sorted_counts.sort_by_key(|(class_id, _)| *class_id);
+
+    // Format each class count with pluralization
+    let parts: Vec<String> = sorted_counts
+        .iter()
+        .map(|(class_id, count)| {
+            let class_name = names.get(class_id).map_or("object", String::as_str);
+            let name = if *count > 1 {
+                pluralize(class_name)
+            } else {
+                class_name.to_string()
+            };
+            format!("{count} {name}")
+        })
+        .collect();
+
+    parts.join(", ")
+}
+
 /// Format detection summary like "4 persons, 1 bus".
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::option_if_let_else
-)]
+#[allow(clippy::option_if_let_else)]
 fn format_detection_summary(result: &Results) -> String {
     if let Some(ref boxes) = result.boxes {
-        if boxes.is_empty() {
-            return String::new();
-        }
-
-        // Count detections per class
-        let cls = boxes.cls();
-        let mut counts: HashMap<usize, usize> = HashMap::new();
-
-        for i in 0..boxes.len() {
-            let class_id = cls[i] as usize;
-            *counts.entry(class_id).or_insert(0) += 1;
-        }
-        // Sort by class ID for consistent output
-        let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
-        sorted_counts.sort_by_key(|(class_id, _)| *class_id);
-
-        // Format each class count
-        let parts: Vec<String> = sorted_counts
-            .iter()
-            .map(|(class_id, count)| {
-                let class_name = result.names.get(class_id).map_or("object", String::as_str);
-                // Pluralize if count > 1
-                let name = if *count > 1 {
-                    pluralize(class_name)
-                } else {
-                    class_name.to_string()
-                };
-                format!("{count} {name}")
-            })
-            .collect();
-
-        parts.join(", ")
+        format_class_counts(&boxes.cls(), boxes.len(), &result.names)
     } else if let Some(ref obb) = result.obb {
-        if obb.is_empty() {
-            return String::new();
-        }
-
-        // Count detections per class
-        let cls = obb.cls();
-        let mut counts: HashMap<usize, usize> = HashMap::new();
-
-        for i in 0..obb.len() {
-            let class_id = cls[i] as usize;
-            *counts.entry(class_id).or_insert(0) += 1;
-        }
-
-        // Sort by class ID for consistent output
-        let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
-        sorted_counts.sort_by_key(|(class_id, _)| *class_id);
-
-        // Format each class count
-        let parts: Vec<String> = sorted_counts
+        format_class_counts(&obb.cls(), obb.len(), &result.names)
+    } else if let Some(ref probs) = result.probs {
+        let top5 = probs.top5();
+        let parts: Vec<String> = top5
             .iter()
-            .map(|(class_id, count)| {
-                let class_name = result.names.get(class_id).map_or("object", String::as_str);
-                // Pluralize if count > 1
-                let name = if *count > 1 {
-                    pluralize(class_name)
-                } else {
-                    class_name.to_string()
-                };
-                format!("{count} {name}")
+            .map(|&i| {
+                let name = result.names.get(&i).map_or("unknown", String::as_str);
+                format!("{} {:.2}", name, probs.data[[i]])
             })
             .collect();
-
         parts.join(", ")
-    } else if result.probs.is_some() {
-        if let Some(probs) = &result.probs {
-            let top5 = probs.top5();
-            let parts: Vec<String> = top5
-                .iter()
-                .map(|&i| {
-                    let name = result.names.get(&i).map_or("unknown", String::as_str);
-                    format!("{} {:.2}", name, probs.data[[i]])
-                })
-                .collect();
-            parts.join(", ")
-        } else {
-            "classification".to_string()
-        }
     } else {
         String::new()
     }
