@@ -35,8 +35,12 @@ use crate::{error, verbose, warn};
     clippy::redundant_clone
 )]
 pub fn run_prediction(args: &PredictArgs) {
-    // Parse arguments
-    let model_path = &args.model;
+    // Parse arguments - use default model if not specified
+    let model_is_default = args.model.is_none();
+    let model_path = args
+        .model
+        .clone()
+        .unwrap_or_else(|| crate::download::DEFAULT_MODEL.to_string());
     let source_path = &args.source;
     let conf_threshold = args.conf;
     let iou_threshold = args.iou;
@@ -52,9 +56,8 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| d.parse().expect("Invalid device"));
     #[cfg(feature = "visualize")]
     let show = args.show;
-    // Use defaults with warnings if not specified
     // Warn if using default model (like Python does)
-    if model_path == crate::download::DEFAULT_MODEL && verbose {
+    if model_is_default && verbose {
         warn!(
             "'model' argument is missing. Using default '--model={}'.",
             crate::download::DEFAULT_MODEL

@@ -147,7 +147,7 @@ impl VideoWriter {
 /// or individual frames, and manages the `VideoWriter` state.
 pub struct SaveResults {
     save_dir: PathBuf,
-    #[allow(dead_code)]
+    #[cfg(feature = "video")]
     save_frames: bool,
     #[cfg(feature = "video")]
     video_writer: Option<VideoWriter>,
@@ -161,12 +161,13 @@ impl SaveResults {
     /// * `save_dir` - Directory to save results.
     /// * `save_frames` - If true, force saving individual frames even for video sources.
     #[must_use]
+    #[allow(unused_variables)]
     pub fn new(save_dir: PathBuf, save_frames: bool) -> Self {
         init_logging();
 
         Self {
             save_dir,
-            #[allow(unused)]
+            #[cfg(feature = "video")]
             save_frames,
             #[cfg(feature = "video")]
             video_writer: None,
@@ -239,28 +240,30 @@ impl SaveResults {
             }
         } else {
             // Image saving logic
-            let filename = if is_video {
-                format!(
-                    "{}_{}.jpg",
-                    Path::new(&meta.path)
-                        .file_stem()
-                        .unwrap_or_default()
-                        .to_string_lossy(),
-                    meta.frame_idx
-                )
+            let (save_dir, filename) = if is_video {
+                // For video sources, create a subfolder: {video_name}_frames/
+                let video_stem = Path::new(&meta.path)
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let frames_dir = self.save_dir.join(format!("{video_stem}_frames"));
+                let frame_num = meta.frame_idx + 1;
+                let filename = format!("{video_stem}_{frame_num}.jpg");
+                (frames_dir, filename)
             } else {
-                Path::new(&meta.path)
+                let filename = Path::new(&meta.path)
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
-                    .to_string()
+                    .to_string();
+                (self.save_dir.clone(), filename)
             };
 
-            let save_path = self.save_dir.join(filename);
+            let save_path = save_dir.join(filename);
 
-            // Ensure directory exists (might be redundant but safe)
-            if !self.save_dir.exists() {
-                std::fs::create_dir_all(&self.save_dir)
+            // Ensure directory exists
+            if !save_dir.exists() {
+                std::fs::create_dir_all(&save_dir)
                     .map_err(|e| InferenceError::IoError(e.to_string()))?;
             }
 

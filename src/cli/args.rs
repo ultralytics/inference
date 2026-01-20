@@ -1,7 +1,6 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 use crate::InferenceConfig;
-use crate::download::DEFAULT_MODEL;
 use clap::{Args, Parser, Subcommand};
 
 /// CLI arguments parser.
@@ -51,8 +50,8 @@ pub enum Commands {
 #[allow(clippy::struct_excessive_bools)]
 pub struct PredictArgs {
     /// Path to ONNX model file
-    #[arg(short, long, default_value = DEFAULT_MODEL)]
-    pub model: String,
+    #[arg(short, long)]
+    pub model: Option<String>,
 
     /// Input source (image, directory, glob, video, webcam, or URL)
     #[arg(short, long)]
@@ -122,7 +121,7 @@ mod tests {
         let args = Cli::parse_from(["app", "predict", "--model", "yolo11n.onnx"]);
         match args.command {
             Commands::Predict(predict_args) => {
-                assert_eq!(predict_args.model, "yolo11n.onnx");
+                assert_eq!(predict_args.model, Some("yolo11n.onnx".to_string()));
                 assert!((predict_args.conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
                 assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
                 assert!(predict_args.rect);
@@ -150,7 +149,7 @@ mod tests {
         ]);
         match args.command {
             Commands::Predict(predict_args) => {
-                assert_eq!(predict_args.model, "custom.onnx");
+                assert_eq!(predict_args.model, Some("custom.onnx".to_string()));
                 assert_eq!(predict_args.source, Some("test.jpg".to_string()));
                 assert!((predict_args.conf - 0.8).abs() < f32::EPSILON);
                 assert!(!predict_args.verbose);
