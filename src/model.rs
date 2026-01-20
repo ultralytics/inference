@@ -294,6 +294,10 @@ impl YOLOModel {
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set intra-op thread count: {e}"))
             })?
+            .with_inter_threads(1) // Optimize: single inter-op thread reduces contention for sequential inference
+            .map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to set inter-op thread count: {e}"))
+            })?
             .with_memory_pattern(true)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))

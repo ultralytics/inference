@@ -15,7 +15,7 @@ fn test_run_prediction_e2e() {
     // Basic E2E test for run_prediction
     // This ensures the main CLI entry point runs without panicking on valid input
     let args = PredictArgs {
-        model: "yolo11n.onnx".to_string(),
+        model: Some("yolo11n.onnx".to_string()),
         source: None, // Will use default images and download them
         conf: 0.25,
         iou: 0.45,
