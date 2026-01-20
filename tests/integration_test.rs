@@ -39,7 +39,7 @@ fn test_run_prediction_e2e() {
 fn test_inference_config_creation() {
     let config = InferenceConfig::default();
     assert_eq!(config.confidence_threshold, 0.25);
-    assert_eq!(config.iou_threshold, 0.45);
+    assert_eq!(config.iou_threshold, 0.7);
     assert_eq!(config.max_det, 300);
 }
 
