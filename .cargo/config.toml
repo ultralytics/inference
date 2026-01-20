@@ -14,3 +14,6 @@ BINDGEN_EXTRA_CLANG_ARGS = "-I/opt/homebrew/opt/ffmpeg@7/include"
 # without needing LD_LIBRARY_PATH set manually.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
