@@ -51,10 +51,10 @@ jpeg-decoder = "^0.3"
 fast_image_resize = { version = "^5.5", features = ["image", "rayon"] }
 
 # SIMD for fast preprocessing
-wide = "0.7"
+wide = "^0.7"
 
 # LRU cache for preprocessing LUT
-lru = "0.16"
+lru = "^0.16"
 
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "^0.17", features = ["rayon"] }
@@ -77,8 +77,8 @@ rayon = "^1.10"
 bytemuck = { version = "^1.21", features = ["derive"] }
 
 # Core - CLI arguments parsing
-clap = { version = "4.5.54", features = ["derive"] }
-colored = "3.0.0"
+clap = { version = "^4.5.54", features = ["derive"] }
+colored = "^3.0.0"
 
 # Optional - Visualization and Video support
 minifb = { version = "^0.28.0", optional = true }
