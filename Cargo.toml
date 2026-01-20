@@ -143,6 +143,9 @@ intel = ["openvino", "onednn"]
 mobile = ["nnapi", "coreml", "qnn"]
 all = ["annotate", "video"]
 
+# Use system/local libonnxruntime.so via dlopen() to avoid GLIBC mismatch on Raspberry Pi OS Bookworm.
+ort-dynamic = ["ort/load-dynamic"]
+
 [dev-dependencies]
 # Testing dependencies
 serial_test = "3"
