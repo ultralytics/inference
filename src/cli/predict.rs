@@ -88,7 +88,9 @@ pub fn run_prediction(args: &PredictArgs) {
     if let Some(classes_str) = &args.classes {
         match crate::cli::args::parse_classes(classes_str) {
             Ok(classes) => {
-                config = config.with_classes(classes);
+                if !classes.is_empty() {
+                    config = config.with_classes(classes);
+                }
             }
             Err(e) => {
                 error!("Error parsing classes: {e}");
