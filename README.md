@@ -401,6 +401,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] FP16 half-precision inference
 - [x] Batch inference support
 - [x] Rectangular inference support and optimization
+- [x] Class filtering support
 
 ### In Progress
 

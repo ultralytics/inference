@@ -290,6 +290,13 @@ fn extract_detect_boxes(
 
         for (idx, &score) in max_scores.iter().enumerate() {
             if score > conf_thresh {
+                let best_class = max_classes[idx];
+
+                // Filter by class if specified
+                if !config.keep_class(best_class) {
+                    continue;
+                }
+
                 let cx = unsafe { *output.get_unchecked(idx) };
                 let cy = unsafe { *output.get_unchecked(num_predictions + idx) };
                 let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
@@ -303,7 +310,7 @@ fn extract_detect_boxes(
                 candidates.push(Candidate {
                     bbox: [x1, y1, x2, y2],
                     score,
-                    class: max_classes[idx],
+                    class: best_class,
                 });
             }
         }
@@ -343,6 +350,11 @@ fn extract_detect_boxes(
             }
 
             if found {
+                // Filter by class if specified
+                if !config.keep_class(best_class) {
+                    continue;
+                }
+
                 let cx = unsafe { *output.get_unchecked(base) };
                 let cy = unsafe { *output.get_unchecked(base + 1) };
                 let w = unsafe { *output.get_unchecked(base + 2) };
@@ -603,6 +615,11 @@ fn postprocess_segment(
 
         let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
         let clipped = clip_coords(&scaled, preprocess.orig_shape);
+
+        // Filter by class if specified
+        if !config.keep_class(best_class) {
+            continue;
+        }
 
         candidates.push((
             [clipped[0], clipped[1], clipped[2], clipped[3]],
@@ -941,6 +958,11 @@ fn postprocess_pose(
             keypoints.push([scaled_x, scaled_y, kpt_conf]);
         }
 
+        // Filter by class if specified
+        if !config.keep_class(best_class) {
+            continue;
+        }
+
         candidates.push((
             [clipped[0], clipped[1], clipped[2], clipped[3]],
             best_score,
@@ -1177,6 +1199,11 @@ fn postprocess_obb(
         let clipped_cx = scaled_cx.max(0.0).min(ow as f32);
         #[allow(clippy::cast_precision_loss)]
         let clipped_cy = scaled_cy.max(0.0).min(oh as f32);
+
+        // Filter by class if specified
+        if !config.keep_class(best_class) {
+            continue;
+        }
 
         candidates.push((
             [clipped_cx, clipped_cy, scaled_w, scaled_h, angle],

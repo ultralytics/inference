@@ -84,6 +84,19 @@ pub fn run_prediction(args: &PredictArgs) {
         config = config.with_device(d.clone());
     }
 
+    // Apply class filter if specified
+    if let Some(classes_str) = &args.classes {
+        match crate::cli::args::parse_classes(classes_str) {
+            Ok(classes) => {
+                config = config.with_classes(classes);
+            }
+            Err(e) => {
+                error!("Error parsing classes: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
     let mut model = match YOLOModel::load_with_config(model_path, config) {
         Ok(m) => m,
         Err(e) => {
@@ -423,7 +436,7 @@ fn format_class_counts(
 /// Format detection summary like "4 persons, 1 bus".
 #[allow(clippy::option_if_let_else)]
 fn format_detection_summary(result: &Results) -> String {
-    if let Some(ref boxes) = result.boxes {
+    let summary = if let Some(ref boxes) = result.boxes {
         format_class_counts(&boxes.cls(), boxes.len(), &result.names)
     } else if let Some(ref obb) = result.obb {
         format_class_counts(&obb.cls(), obb.len(), &result.names)
@@ -439,6 +452,12 @@ fn format_detection_summary(result: &Results) -> String {
         parts.join(", ")
     } else {
         String::new()
+    };
+
+    if summary.is_empty() {
+        "(no detections)".to_string()
+    } else {
+        summary
     }
 }
 
@@ -527,7 +546,7 @@ mod tests {
         result.boxes = Some(boxes);
 
         let summary = format_detection_summary(&result);
-        assert!(summary.is_empty());
+        assert_eq!(summary, "(no detections)");
     }
 
     /// Test `format_detection_summary` with OBB detections.
@@ -573,7 +592,7 @@ mod tests {
         result.obb = Some(obb);
 
         let summary = format_detection_summary(&result);
-        assert!(summary.is_empty());
+        assert_eq!(summary, "(no detections)");
     }
 
     /// Test `format_detection_summary` with classification probs.
@@ -616,7 +635,7 @@ mod tests {
         );
 
         let summary = format_detection_summary(&result);
-        assert!(summary.is_empty());
+        assert_eq!(summary, "(no detections)");
     }
 
     /// Test `format_detection_summary` with unknown class (uses "object" fallback).
