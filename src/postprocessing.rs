@@ -327,7 +327,7 @@ fn extract_detect_boxes(
                 if num_classes - c_idx >= 8 {
                     let scores: f32x8 =
                         unsafe { (row_ptr.add(c_idx) as *const f32x8).read_unaligned() };
-                    if scores.cmp_gt(conf_v).any() {
+                    if scores.simd_gt(conf_v).any() {
                         for i in 0..8 {
                             let s = unsafe { *row_ptr.add(c_idx + i) };
                             if s > best_score {
@@ -454,7 +454,7 @@ fn extract_detect_boxes(
                     let ia = iw * ih;
                     let iou = ia / (aa + ba - ia);
 
-                    let mask = iou.cmp_gt(iou_v).move_mask() as u8;
+                    let mask = iou.simd_gt(iou_v).to_bitmask() as u8;
                     if mask != 0 {
                         for k in 0..8 {
                             if (mask & (1 << k)) != 0 && candidates[j + k].class == ac {
