@@ -22,6 +22,7 @@ use clap::{Args, Parser, Subcommand};
     --show                 Display results in a window
     --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)
     --verbose              Show verbose output [default: true]
+    --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
 Examples:
     ultralytics-inference predict
@@ -31,7 +32,7 @@ Examples:
     ultralytics-inference predict --source 0 --conf 0.5 --show
     ultralytics-inference predict --source assets/ --save --half
     ultralytics-inference predict --source image.jpg --device cuda:0
-    ultralytics-inference predict --source image.jpg --device mps"#)]
+    ultralytics-inference predict --source image.jpg --classes 0"#)]
 pub struct Cli {
     #[command(subcommand)]
     /// Subcommand to execute.
@@ -104,6 +105,43 @@ pub struct PredictArgs {
     /// Show verbose output
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub verbose: bool,
+
+    /// Filter by class IDs (e.g. 0 or "0,1,2" or "[0, 1, 2]")
+    ///
+    /// Supported formats:
+    /// - Single integer: --classes 0
+    /// - Comma-separated list: --classes "0,1,2"
+    /// - List syntax: --classes "[0, 1, 2]"
+    ///
+    /// Note: When passing a list directly without quotes, avoid spaces to prevent
+    /// shell argument parsing issues (e.g. use --classes 0,1 not --classes 0, 1).
+    #[arg(long, allow_hyphen_values = true)]
+    pub classes: Option<String>,
+}
+
+/// Parse class IDs from various formats: "1,2,3", "[1,2,3]", "(1,2,3)"
+///
+/// # Errors
+///
+/// Returns a `String` error message if any segment of the string cannot be parsed as a `usize`.
+pub fn parse_classes(s: &str) -> Result<Vec<usize>, String> {
+    // Remove brackets, parentheses, and quotes
+    let cleaned = s
+        .trim()
+        .trim_matches(|c| c == '[' || c == ']' || c == '(' || c == ')' || c == '"' || c == '\'');
+
+    if cleaned.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    cleaned
+        .split(',')
+        .map(|part| {
+            part.trim()
+                .parse::<usize>()
+                .map_err(|e| format!("Invalid class ID '{}': {}", part.trim(), e))
+        })
+        .collect()
 }
 
 #[cfg(test)]

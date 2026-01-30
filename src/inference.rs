@@ -69,6 +69,9 @@ pub struct InferenceConfig {
     /// Whether to use minimal padding (rectangular inference).
     /// Defaults to `true` to match Ultralytics Python.
     pub rect: bool,
+    /// Class IDs to filter predictions. If `None`, all classes are returned.
+    /// Useful for focusing on specific objects in multi-class detection tasks.
+    pub classes: Option<Vec<usize>>,
 }
 
 impl Default for InferenceConfig {
@@ -85,6 +88,7 @@ impl Default for InferenceConfig {
             save: Self::DEFAULT_SAVE,
             save_frames: Self::DEFAULT_SAVE_FRAMES,
             rect: Self::DEFAULT_RECT,
+            classes: None,
         }
     }
 }
@@ -302,6 +306,47 @@ impl InferenceConfig {
         self.rect = rect;
         self
     }
+
+    /// Set the class IDs to filter predictions.
+    ///
+    /// Only detections belonging to the specified classes will be returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `classes` - A vector of class IDs to keep.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use ultralytics_inference::InferenceConfig;
+    ///
+    /// // Only detect persons (class 0) and cars (class 2)
+    /// let config = InferenceConfig::new()
+    ///     .with_classes(vec![0, 2]);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub fn with_classes(mut self, classes: Vec<usize>) -> Self {
+        self.classes = Some(classes);
+        self
+    }
+    /// Check if a class should be included in the results.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class index to check.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the class should be kept.
+    /// * `false` if the class should be filtered out.
+    #[must_use]
+    pub fn keep_class(&self, class_id: usize) -> bool {
+        self.classes.as_ref().is_none_or(|c| c.contains(&class_id))
+    }
 }
 
 #[cfg(test)]
@@ -330,5 +375,23 @@ mod tests {
         assert_eq!(config.max_det, 300);
         assert_eq!(config.imgsz, Some((640, 640)));
         assert_eq!(config.num_threads, 8);
+    }
+
+    #[test]
+    fn test_keep_class() {
+        let config = InferenceConfig::default();
+        // Default: no filtering -> keep all
+        assert!(config.keep_class(0));
+        assert!(config.keep_class(100));
+
+        let config_filtered = InferenceConfig::new().with_classes(vec![1, 3]);
+        // Class 1 is in list -> keep
+        assert!(config_filtered.keep_class(1));
+        // Class 3 is in list -> keep
+        assert!(config_filtered.keep_class(3));
+        // Class 0 is NOT in list -> filter out (keep = false)
+        assert!(!config_filtered.keep_class(0));
+        // Class 2 is NOT in list -> filter out (keep = false)
+        assert!(!config_filtered.keep_class(2));
     }
 }
