@@ -14,6 +14,8 @@ use crate::annotate::{annotate_image, find_next_run_dir};
 
 #[cfg(feature = "visualize")]
 use crate::visualizer::Viewer;
+#[cfg(feature = "visualize")]
+use image::GenericImageView;
 
 use crate::utils::pluralize;
 use crate::{InferenceConfig, Results, VERSION, YOLOModel};
@@ -29,11 +31,16 @@ use crate::{error, verbose, warn};
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::missing_panics_doc
+    clippy::missing_panics_doc,
+    clippy::redundant_clone
 )]
 pub fn run_prediction(args: &PredictArgs) {
-    // Parse arguments
-    let model_path = &args.model;
+    // Parse arguments - use default model if not specified
+    let model_is_default = args.model.is_none();
+    let model_path = args
+        .model
+        .clone()
+        .unwrap_or_else(|| crate::download::DEFAULT_MODEL.to_string());
     let source_path = &args.source;
     let conf_threshold = args.conf;
     let iou_threshold = args.iou;
@@ -49,9 +56,13 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| d.parse().expect("Invalid device"));
     #[cfg(feature = "visualize")]
     let show = args.show;
-
-    // Use defaults with warnings if not specified
-    // Clap handles default model path, so model_path is always set.
+    // Warn if using default model (like Python does)
+    if model_is_default && verbose {
+        warn!(
+            "'model' argument is missing. Using default '--model={}'.",
+            crate::download::DEFAULT_MODEL
+        );
+    }
 
     // Load model first so we can determine appropriate default source based on task
     let mut config = InferenceConfig::new()
@@ -59,8 +70,9 @@ pub fn run_prediction(args: &PredictArgs) {
         .with_iou(iou_threshold)
         .with_half(half)
         .with_batch(batch_size)
-        .with_max_det(args.max_det)
-        .with_save_frames(save_frames);
+        .with_save_frames(save_frames)
+        .with_rect(args.rect)
+        .with_max_det(args.max_det);
 
     // Apply imgsz if specified
     if let Some(sz) = imgsz {
@@ -70,6 +82,21 @@ pub fn run_prediction(args: &PredictArgs) {
     // Apply device if specified
     if let Some(d) = &device {
         config = config.with_device(d.clone());
+    }
+
+    // Apply class filter if specified
+    if let Some(classes_str) = &args.classes {
+        match crate::cli::args::parse_classes(classes_str) {
+            Ok(classes) => {
+                if !classes.is_empty() {
+                    config = config.with_classes(classes);
+                }
+            }
+            Err(e) => {
+                error!("Error parsing classes: {e}");
+                process::exit(1);
+            }
+        }
     }
 
     let mut model = match YOLOModel::load_with_config(model_path, config) {
@@ -181,14 +208,6 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     }
 
-    let iter = match crate::source::SourceIterator::new(source) {
-        Ok(iter) => iter,
-        Err(e) => {
-            error!("Error initializing source: {e}");
-            process::exit(1);
-        }
-    };
-
     // Process each image/frame
     let mut all_results: Vec<(String, Results)> = Vec::new();
     let mut total_preprocess = 0.0;
@@ -206,6 +225,29 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| crate::io::SaveResults::new(d.clone(), save_frames));
     #[cfg(not(feature = "annotate"))]
     let mut result_saver: Option<crate::io::SaveResults> = None;
+
+    // Create a bounded channel for pipelined processing
+    // Buffer size 2x batch size ensures we can decode the next batch while processing current one
+    let channel_capacity = batch_size * 2;
+    let (sender, receiver) = std::sync::mpsc::sync_channel(channel_capacity);
+
+    // Spawn producer thread for frame decoding
+    let source_clone = source.clone();
+    std::thread::spawn(move || {
+        let iter = match crate::source::SourceIterator::new(source_clone) {
+            Ok(iter) => iter,
+            Err(e) => {
+                error!("Error initializing source in thread: {e}");
+                return;
+            }
+        };
+
+        for item in iter {
+            if sender.send(item).is_err() {
+                break; // Receiver dropped, stop decoding
+            }
+        }
+    });
 
     // Use BatchProcessor for centralized batch management
     {
@@ -240,8 +282,8 @@ pub fn run_prediction(args: &PredictArgs) {
                                 meta.frame_idx + 1,
                                 total_frames_str,
                                 image_path,
-                                inference_shape.1,
                                 inference_shape.0,
+                                inference_shape.1,
                                 detection_summary,
                                 result.speed.inference.unwrap_or(0.0)
                             );
@@ -251,8 +293,8 @@ pub fn run_prediction(args: &PredictArgs) {
                                 meta.frame_idx + 1,
                                 total_frames_str,
                                 image_path,
-                                inference_shape.1,
                                 inference_shape.0,
+                                inference_shape.1,
                                 detection_summary,
                                 result.speed.inference.unwrap_or(0.0)
                             );
@@ -272,8 +314,9 @@ pub fn run_prediction(args: &PredictArgs) {
 
                         #[cfg(feature = "visualize")]
                         if show {
-                            let view_width = inference_shape.1 as usize;
-                            let view_height = inference_shape.0 as usize;
+                            let (orig_w, orig_h) = img.dimensions();
+                            let view_width = orig_w as usize;
+                            let view_height = orig_h as usize;
 
                             if let Some(ref v) = viewer
                                 && (v.width != view_width || v.height != view_height)
@@ -290,14 +333,13 @@ pub fn run_prediction(args: &PredictArgs) {
 
                             if let Some(ref mut v) = viewer {
                                 let annotated = annotate_image(img, &result, None);
-                                let resized = annotated.resize_exact(
-                                    view_width as u32,
-                                    view_height as u32,
-                                    image::imageops::FilterType::Triangle,
-                                );
 
-                                if v.update(&resized).is_ok() && !is_video {
-                                    let _ = v.wait(Duration::from_millis(200));
+                                if v.update(&annotated).is_ok() {
+                                    // Main thread is blocking on channel, so visualizer wait is less critical
+                                    // but we keep a small wait to allow window events processing
+                                    if !is_video {
+                                        let _ = v.wait(Duration::from_millis(200));
+                                    }
                                 }
                             }
                         }
@@ -305,14 +347,14 @@ pub fn run_prediction(args: &PredictArgs) {
                         total_preprocess += result.speed.preprocess.unwrap_or(0.0);
                         total_inference += result.speed.inference.unwrap_or(0.0);
                         total_postprocess += result.speed.postprocess.unwrap_or(0.0);
-
                         all_results.push((image_path.clone(), result));
                     }
                 }
             },
         );
 
-        for item in iter {
+        // Main thread: consume frames from channel and run inference
+        for item in receiver {
             let (img, meta) = match item {
                 Ok(val) => val,
                 Err(e) => {
@@ -335,10 +377,11 @@ pub fn run_prediction(args: &PredictArgs) {
     // Print speed summary with inference tensor shape (after letterboxing)
     let num_results = all_results.len().max(1) as f64;
     verbose!(
-        "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape (1, 3, {}, {})",
+        "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape ({}, 3, {}, {})",
         total_preprocess / num_results,
         total_inference / num_results,
         total_postprocess / num_results,
+        batch_size,
         last_inference_shape.0,
         last_inference_shape.1
     );
@@ -353,96 +396,70 @@ pub fn run_prediction(args: &PredictArgs) {
     verbose!("💡 Learn more at https://docs.ultralytics.com/modes/predict");
 }
 
+/// Count detections per class and format as summary string (e.g., "4 persons, 1 bus").
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn format_class_counts(
+    cls: &ndarray::ArrayView1<'_, f32>,
+    count: usize,
+    names: &HashMap<usize, String>,
+) -> String {
+    if count == 0 {
+        return String::new();
+    }
+
+    // Count detections per class
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for i in 0..count {
+        let class_id = cls[i] as usize;
+        *counts.entry(class_id).or_insert(0) += 1;
+    }
+
+    // Sort by class ID for consistent output
+    let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
+    sorted_counts.sort_by_key(|(class_id, _)| *class_id);
+
+    // Format each class count with pluralization
+    let parts: Vec<String> = sorted_counts
+        .iter()
+        .map(|(class_id, count)| {
+            let class_name = names.get(class_id).map_or("object", String::as_str);
+            let name = if *count > 1 {
+                pluralize(class_name)
+            } else {
+                class_name.to_string()
+            };
+            format!("{count} {name}")
+        })
+        .collect();
+
+    parts.join(", ")
+}
+
 /// Format detection summary like "4 persons, 1 bus".
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::option_if_let_else
-)]
+#[allow(clippy::option_if_let_else)]
 fn format_detection_summary(result: &Results) -> String {
-    if let Some(ref boxes) = result.boxes {
-        if boxes.is_empty() {
-            return String::new();
-        }
-
-        // Count detections per class
-        let cls = boxes.cls();
-        let mut counts: HashMap<usize, usize> = HashMap::new();
-
-        for i in 0..boxes.len() {
-            let class_id = cls[i] as usize;
-            *counts.entry(class_id).or_insert(0) += 1;
-        }
-        // Sort by class ID for consistent output
-        let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
-        sorted_counts.sort_by_key(|(class_id, _)| *class_id);
-
-        // Format each class count
-        let parts: Vec<String> = sorted_counts
-            .iter()
-            .map(|(class_id, count)| {
-                let class_name = result.names.get(class_id).map_or("object", String::as_str);
-                // Pluralize if count > 1
-                let name = if *count > 1 {
-                    pluralize(class_name)
-                } else {
-                    class_name.to_string()
-                };
-                format!("{count} {name}")
-            })
-            .collect();
-
-        parts.join(", ")
+    let summary = if let Some(ref boxes) = result.boxes {
+        format_class_counts(&boxes.cls(), boxes.len(), &result.names)
     } else if let Some(ref obb) = result.obb {
-        if obb.is_empty() {
-            return String::new();
-        }
-
-        // Count detections per class
-        let cls = obb.cls();
-        let mut counts: HashMap<usize, usize> = HashMap::new();
-
-        for i in 0..obb.len() {
-            let class_id = cls[i] as usize;
-            *counts.entry(class_id).or_insert(0) += 1;
-        }
-
-        // Sort by class ID for consistent output
-        let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
-        sorted_counts.sort_by_key(|(class_id, _)| *class_id);
-
-        // Format each class count
-        let parts: Vec<String> = sorted_counts
+        format_class_counts(&obb.cls(), obb.len(), &result.names)
+    } else if let Some(ref probs) = result.probs {
+        let top5 = probs.top5();
+        let parts: Vec<String> = top5
             .iter()
-            .map(|(class_id, count)| {
-                let class_name = result.names.get(class_id).map_or("object", String::as_str);
-                // Pluralize if count > 1
-                let name = if *count > 1 {
-                    pluralize(class_name)
-                } else {
-                    class_name.to_string()
-                };
-                format!("{count} {name}")
+            .map(|&i| {
+                let name = result.names.get(&i).map_or("unknown", String::as_str);
+                format!("{} {:.2}", name, probs.data[[i]])
             })
             .collect();
-
         parts.join(", ")
-    } else if result.probs.is_some() {
-        if let Some(probs) = &result.probs {
-            let top5 = probs.top5();
-            let parts: Vec<String> = top5
-                .iter()
-                .map(|&i| {
-                    let name = result.names.get(&i).map_or("unknown", String::as_str);
-                    format!("{} {:.2}", name, probs.data[[i]])
-                })
-                .collect();
-            parts.join(", ")
-        } else {
-            "classification".to_string()
-        }
     } else {
         String::new()
+    };
+
+    if summary.is_empty() {
+        "(no detections)".to_string()
+    } else {
+        summary
     }
 }
 
@@ -531,7 +548,7 @@ mod tests {
         result.boxes = Some(boxes);
 
         let summary = format_detection_summary(&result);
-        assert!(summary.is_empty());
+        assert_eq!(summary, "(no detections)");
     }
 
     /// Test `format_detection_summary` with OBB detections.
@@ -577,7 +594,7 @@ mod tests {
         result.obb = Some(obb);
 
         let summary = format_detection_summary(&result);
-        assert!(summary.is_empty());
+        assert_eq!(summary, "(no detections)");
     }
 
     /// Test `format_detection_summary` with classification probs.
@@ -620,7 +637,7 @@ mod tests {
         );
 
         let summary = format_detection_summary(&result);
-        assert!(summary.is_empty());
+        assert_eq!(summary, "(no detections)");
     }
 
     /// Test `format_detection_summary` with unknown class (uses "object" fallback).

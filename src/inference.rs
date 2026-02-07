@@ -20,7 +20,7 @@
 /// let config = InferenceConfig::new()
 ///     .with_confidence(0.5)
 ///     .with_iou(0.45)
-///     .with_max_det(100)
+///     .with_max_det(300)
 ///     .with_imgsz(640, 640);
 /// ```
 ///
@@ -33,6 +33,7 @@
 ///     .with_device(Device::Cuda(0));
 /// ```
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct InferenceConfig {
     /// Confidence threshold for detections (0.0 to 1.0).
     /// Detections with confidence scores lower than this value will be discarded.
@@ -65,26 +66,49 @@ pub struct InferenceConfig {
     /// Whether to save individual frames instead of a video file when input is video.
     /// Defaults to `false` (save as video).
     pub save_frames: bool,
+    /// Whether to use minimal padding (rectangular inference).
+    /// Defaults to `true` to match Ultralytics Python.
+    pub rect: bool,
+    /// Class IDs to filter predictions. If `None`, all classes are returned.
+    /// Useful for focusing on specific objects in multi-class detection tasks.
+    pub classes: Option<Vec<usize>>,
 }
 
 impl Default for InferenceConfig {
     fn default() -> Self {
         Self {
-            confidence_threshold: 0.25,
-            iou_threshold: 0.45,
-            max_det: 300,
+            confidence_threshold: Self::DEFAULT_CONF,
+            iou_threshold: Self::DEFAULT_IOU,
+            max_det: Self::DEFAULT_MAX_DET,
             imgsz: None,
             batch: None,
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
-            half: false,
+            half: Self::DEFAULT_HALF,
             device: None,
-            save: true,
-            save_frames: false,
+            save: Self::DEFAULT_SAVE,
+            save_frames: Self::DEFAULT_SAVE_FRAMES,
+            rect: Self::DEFAULT_RECT,
+            classes: None,
         }
     }
 }
 
 impl InferenceConfig {
+    /// Default confidence threshold (0.0 to 1.0).
+    pub const DEFAULT_CONF: f32 = 0.25;
+    /// Default `IoU` threshold for NMS (0.0 to 1.0).
+    pub const DEFAULT_IOU: f32 = 0.7;
+    /// Default maximum number of detections per image.
+    pub const DEFAULT_MAX_DET: usize = 300;
+    /// Default for FP16 half-precision inference.
+    pub const DEFAULT_HALF: bool = false;
+    /// Default for saving annotated results.
+    pub const DEFAULT_SAVE: bool = true;
+    /// Default for saving individual frames (vs video).
+    pub const DEFAULT_SAVE_FRAMES: bool = false;
+    /// Default for rectangular (minimal padding) inference.
+    pub const DEFAULT_RECT: bool = true;
+
     /// Create a new configuration with default values.
     ///
     /// # Returns
@@ -267,6 +291,62 @@ impl InferenceConfig {
         self.save_frames = save_frames;
         self
     }
+
+    /// Set whether to use minimal padding (rectangular inference).
+    ///
+    /// # Arguments
+    ///
+    /// * `rect` - `true` to enable, `false` to disable.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_rect(mut self, rect: bool) -> Self {
+        self.rect = rect;
+        self
+    }
+
+    /// Set the class IDs to filter predictions.
+    ///
+    /// Only detections belonging to the specified classes will be returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `classes` - A vector of class IDs to keep.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use ultralytics_inference::InferenceConfig;
+    ///
+    /// // Only detect persons (class 0) and cars (class 2)
+    /// let config = InferenceConfig::new()
+    ///     .with_classes(vec![0, 2]);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub fn with_classes(mut self, classes: Vec<usize>) -> Self {
+        self.classes = Some(classes);
+        self
+    }
+    /// Check if a class should be included in the results.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class index to check.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the class should be kept.
+    /// * `false` if the class should be filtered out.
+    #[must_use]
+    pub fn keep_class(&self, class_id: usize) -> bool {
+        self.classes.as_ref().is_none_or(|c| c.contains(&class_id))
+    }
 }
 
 #[cfg(test)]
@@ -276,8 +356,8 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = InferenceConfig::default();
-        assert!((config.confidence_threshold - 0.25).abs() < f32::EPSILON);
-        assert!((config.iou_threshold - 0.45).abs() < f32::EPSILON);
+        assert!((config.confidence_threshold - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
+        assert!((config.iou_threshold - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
         assert_eq!(config.max_det, 300);
     }
 
@@ -286,14 +366,32 @@ mod tests {
         let config = InferenceConfig::new()
             .with_confidence(0.5)
             .with_iou(0.6)
-            .with_max_det(100)
+            .with_max_det(300)
             .with_imgsz(640, 640)
             .with_threads(8);
 
         assert!((config.confidence_threshold - 0.5).abs() < f32::EPSILON);
         assert!((config.iou_threshold - 0.6).abs() < f32::EPSILON);
-        assert_eq!(config.max_det, 100);
+        assert_eq!(config.max_det, 300);
         assert_eq!(config.imgsz, Some((640, 640)));
         assert_eq!(config.num_threads, 8);
+    }
+
+    #[test]
+    fn test_keep_class() {
+        let config = InferenceConfig::default();
+        // Default: no filtering -> keep all
+        assert!(config.keep_class(0));
+        assert!(config.keep_class(100));
+
+        let config_filtered = InferenceConfig::new().with_classes(vec![1, 3]);
+        // Class 1 is in list -> keep
+        assert!(config_filtered.keep_class(1));
+        // Class 3 is in list -> keep
+        assert!(config_filtered.keep_class(3));
+        // Class 0 is NOT in list -> filter out (keep = false)
+        assert!(!config_filtered.keep_class(0));
+        // Class 2 is NOT in list -> filter out (keep = false)
+        assert!(!config_filtered.keep_class(2));
     }
 }

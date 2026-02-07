@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use half::f16;
-use image::DynamicImage;
+use image::{DynamicImage, GenericImageView};
 use ndarray::Array3;
 use ort::session::Session;
 use ort::tensor::TensorElementType;
@@ -23,7 +23,8 @@ use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
-    image_to_array, preprocess_image_center_crop, preprocess_image_with_precision,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop,
+    preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;
@@ -60,6 +61,8 @@ pub struct YOLOModel {
     fp16_input: bool,
     /// Execution provider used for inference
     execution_provider: String,
+    /// Whether the model accepts dynamic input shapes.
+    is_dynamic: bool,
 }
 
 #[allow(
@@ -67,7 +70,12 @@ pub struct YOLOModel {
     clippy::needless_pass_by_value,
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::if_not_else,
+    clippy::manual_is_multiple_of,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
 )]
 impl YOLOModel {
     /// Load a YOLO model from an ONNX file.
@@ -266,10 +274,16 @@ impl YOLOModel {
         }
 
         if !eps.is_empty() {
+            crate::info!(
+                "Registering {} execution providers (primary: {})",
+                eps.len(),
+                provider_name
+            );
             session_builder = session_builder.with_execution_providers(eps).map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}"))
             })?;
         }
+        // CPU is the default - no warning needed when no accelerators are registered
 
         let session = session_builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
@@ -279,6 +293,10 @@ impl YOLOModel {
             .with_intra_threads(num_threads)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set intra-op thread count: {e}"))
+            })?
+            .with_inter_threads(1)
+            .map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to set inter-op thread count: {e}"))
             })?
             .with_memory_pattern(true)
             .map_err(|e| {
@@ -381,6 +399,7 @@ impl YOLOModel {
             warmed_up: false,
             fp16_input,
             execution_provider: provider_name.to_string(),
+            is_dynamic,
         };
 
         // Warmup inference to trigger JIT compilation and memory allocation
@@ -589,18 +608,60 @@ impl YOLOModel {
             .or(self.metadata.imgsz)
             .unwrap_or((640, 640));
 
+        // Check if target_size is divisible by stride (one-time warning logic per batch call)
+        // We only warn if the configured size itself is not divisible.
+        // If rect adjusts it, that's expected.
+        let stride = self.metadata.stride as usize;
+        if target_size.0 % stride != 0 || target_size.1 % stride != 0 {
+            warn!(
+                "WARNING ⚠️ imgsz=[{:?}] must be multiple of max stride {}, updating to [{}, {}]",
+                target_size,
+                stride,
+                (target_size.0 as f32 / stride as f32).ceil() as usize * stride,
+                (target_size.1 as f32 / stride as f32).ceil() as usize * stride
+            );
+        }
+
         // Preprocess all images
         let start_preprocess = Instant::now();
         let mut preprocessed_results = Vec::with_capacity(images.len());
 
+        // Check if we can use rect inference
+        // 1. Enabled in config
+        // 2. Model supports dynamic shapes
+        // 3. Batch is homogeneous (all images have same dimensions) or batch size is 1
+        let use_rect = self.config.rect && self.is_dynamic;
+        let uniform_shape = if images.len() > 1 {
+            let first_dims = images[0].dimensions();
+            images.iter().all(|img| img.dimensions() == first_dims)
+        } else {
+            true
+        };
+        let actual_rect = use_rect && uniform_shape;
+
+        // Warn if rect requested but disabled due to mixed batch
+        if self.config.rect && !uniform_shape {
+            warn!(
+                "Batch contains images of different sizes. Rectangular inference disabled for this batch (falling back to square padding)."
+            );
+        }
+
         // We will stack tensors later
         for image in images {
+            // Determine target size for this image
+            let current_target_size = if actual_rect {
+                let (w, h) = image.dimensions();
+                calculate_rect_size(w, h, target_size, self.metadata.stride)
+            } else {
+                target_size
+            };
+
             let res = if self.metadata.task == Task::Classify {
-                preprocess_image_center_crop(image, target_size, self.fp16_input)
+                preprocess_image_center_crop(image, current_target_size, self.fp16_input)
             } else {
                 preprocess_image_with_precision(
                     image,
-                    target_size,
+                    current_target_size,
                     self.metadata.stride,
                     self.fp16_input,
                 )
@@ -623,6 +684,7 @@ impl YOLOModel {
                         .view(),
                 );
             }
+
             // Concatenate along batch dimension (axis 0)
             let batch_tensor = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
                 InferenceError::InferenceError(format!("Failed to concatenate FP16 tensors: {e}"))
@@ -658,52 +720,48 @@ impl YOLOModel {
         #[allow(clippy::cast_precision_loss)]
         let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
 
+        // Process each image's output
+        let mut image_arrays = Vec::with_capacity(images.len());
+        for image in images {
+            image_arrays.push(image_to_array(image));
+        }
+
         // Post-process
         let start_postprocess = Instant::now();
 
         let mut batch_results = Vec::with_capacity(images.len());
 
         // Process each image's output
-        for (i, image) in images.iter().enumerate() {
+        for (i, (orig_img, preprocess_res)) in image_arrays
+            .into_iter()
+            .zip(preprocessed_results.into_iter())
+            .enumerate()
+        {
+            let path = paths.get(i).cloned().unwrap_or_default();
+            let speed = Speed::new(preprocess_time, inference_time, 0.0);
+
             // Construct outputs for this single image
             let mut img_outputs = Vec::new();
             for (data, shape) in &outputs {
-                // Calculate size of one image's output
                 let batch_size = shape[0];
                 let actual_batch_size = if batch_size > 0 { batch_size } else { 1 };
-
                 let total_elements = data.len();
                 let elements_per_img = total_elements / actual_batch_size;
-
                 let start = i * elements_per_img;
                 let end = start + elements_per_img;
-
-                if start >= total_elements || end > total_elements {
-                    return Err(InferenceError::InferenceError(format!(
-                        "Index out of bounds slicing output data: range {start}..{end} with length {total_elements}"
-                    )));
-                }
-                let img_data = data[start..end].to_vec();
-
-                // Adjust shape for single image: [1, ...]
+                let img_data = &data[start..end];
                 let mut img_shape = shape.clone();
                 img_shape[0] = 1;
-
                 img_outputs.push((img_data, img_shape));
             }
 
-            let orig_img = image_to_array(image);
-            let path = paths.get(i).cloned().unwrap_or_default();
-
-            let speed = Speed::new(preprocess_time, inference_time, 0.0);
-
-            let tensor_shape = preprocessed_results[i].tensor.shape();
+            let tensor_shape = preprocess_res.tensor.shape();
             let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
             let result = postprocess(
                 img_outputs,
                 self.metadata.task,
-                &preprocessed_results[i],
+                &preprocess_res,
                 &self.config,
                 &self.metadata.names,
                 orig_img,
@@ -711,6 +769,7 @@ impl YOLOModel {
                 speed,
                 inference_shape,
             );
+
             batch_results.push(vec![result]);
         }
 

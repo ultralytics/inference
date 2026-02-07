@@ -15,7 +15,7 @@ fn test_run_prediction_e2e() {
     // Basic E2E test for run_prediction
     // This ensures the main CLI entry point runs without panicking on valid input
     let args = PredictArgs {
-        model: "yolo11n.onnx".to_string(),
+        model: Some("yolo11n.onnx".to_string()),
         source: None, // Will use default images and download them
         conf: 0.25,
         iou: 0.45,
@@ -28,6 +28,8 @@ fn test_run_prediction_e2e() {
         show: false,
         device: None,
         verbose: true,
+        rect: false,
+        classes: None,
     };
 
     // This should run successfully (download model/images and predict)
@@ -38,7 +40,7 @@ fn test_run_prediction_e2e() {
 fn test_inference_config_creation() {
     let config = InferenceConfig::default();
     assert_eq!(config.confidence_threshold, 0.25);
-    assert_eq!(config.iou_threshold, 0.45);
+    assert_eq!(config.iou_threshold, 0.7);
     assert_eq!(config.max_det, 300);
 }
 
@@ -47,11 +49,11 @@ fn test_inference_config_builder() {
     let config = InferenceConfig::new()
         .with_confidence(0.5)
         .with_iou(0.7)
-        .with_max_det(100);
+        .with_max_det(300);
 
     assert_eq!(config.confidence_threshold, 0.5);
     assert_eq!(config.iou_threshold, 0.7);
-    assert_eq!(config.max_det, 100);
+    assert_eq!(config.max_det, 300);
 }
 
 #[test]

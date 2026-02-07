@@ -1,6 +1,6 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-use crate::download::DEFAULT_MODEL;
+use crate::InferenceConfig;
 use clap::{Args, Parser, Subcommand};
 
 /// CLI arguments parser.
@@ -11,23 +11,28 @@ use clap::{Args, Parser, Subcommand};
     --model, -m <MODEL>    Path to ONNX model file [default: yolo11n.onnx]
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
-    --iou <IOU>            IoU threshold for NMS [default: 0.45]
+    --iou <IOU>            IoU threshold for NMS [default: 0.7]
+    --max-det <MAX_DET>    Maximum number of detections [default: 300]
     --imgsz <IMGSZ>        Inference image size
+    --rect                 Enable rectangular inference (minimal padding) [default: true]
+    --batch <BATCH>        Batch size for inference [default: 1]
     --half                 Use FP16 half-precision inference
-    --save                 Save annotated images to runs/<task>/predict
+    --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --show                 Display results in a window
-    --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, xnnpack)
-    --verbose              Show verbose output
+    --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)
+    --verbose              Show verbose output [default: true]
+    --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
 Examples:
+    ultralytics-inference predict
     ultralytics-inference predict --model yolo11n.onnx --source image.jpg
-    ultralytics-inference predict --model yolo11n.onnx --source video.mp4
-    ultralytics-inference predict --model yolo11n.onnx --source video.mp4 --save-frames
-    ultralytics-inference predict --model yolo11n.onnx --source 0 --conf 0.5
-    ultralytics-inference predict -m yolo11n.onnx -s assets/ --save --half
-    ultralytics-inference predict -m yolo11n.onnx -s video.mp4 --imgsz 1280 --show
-    ultralytics-inference predict --model yolo11n.onnx --source image.jpg --device mps"#)]
+    ultralytics-inference predict --source video.mp4 --rect
+    ultralytics-inference predict --source video.mp4 --save-frames
+    ultralytics-inference predict --source 0 --conf 0.5 --show
+    ultralytics-inference predict --source assets/ --save --half
+    ultralytics-inference predict --source image.jpg --device cuda:0
+    ultralytics-inference predict --source image.jpg --classes 0"#)]
 pub struct Cli {
     #[command(subcommand)]
     /// Subcommand to execute.
@@ -46,43 +51,47 @@ pub enum Commands {
 #[allow(clippy::struct_excessive_bools)]
 pub struct PredictArgs {
     /// Path to ONNX model file
-    #[arg(short, long, default_value = DEFAULT_MODEL)]
-    pub model: String,
+    #[arg(short, long)]
+    pub model: Option<String>,
 
     /// Input source (image, directory, glob, video, webcam, or URL)
     #[arg(short, long)]
     pub source: Option<String>,
 
     /// Confidence threshold
-    #[arg(long, default_value_t = 0.25)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_CONF)]
     pub conf: f32,
 
     /// `IoU` threshold for NMS
-    #[arg(long, default_value_t = 0.45)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_IOU)]
     pub iou: f32,
 
     /// Maximum number of detections
-    #[arg(long, default_value_t = 300)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_MAX_DET)]
     pub max_det: usize,
 
     /// Inference image size
     #[arg(long)]
     pub imgsz: Option<usize>,
 
+    /// Enable minimal padding (rectangular inference)
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_RECT, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
+    pub rect: bool,
+
     /// Batch size for inference
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub batch: u32,
 
     /// Use FP16 half-precision inference
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_HALF)]
     pub half: bool,
 
     /// Save annotated images to runs/<task>/predict
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub save: bool,
 
     /// Save individual frames for video input (instead of video file)
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE_FRAMES)]
     pub save_frames: bool,
 
     /// Display results in a window
@@ -96,6 +105,43 @@ pub struct PredictArgs {
     /// Show verbose output
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub verbose: bool,
+
+    /// Filter by class IDs (e.g. 0 or "0,1,2" or "[0, 1, 2]")
+    ///
+    /// Supported formats:
+    /// - Single integer: --classes 0
+    /// - Comma-separated list: --classes "0,1,2"
+    /// - List syntax: --classes "[0, 1, 2]"
+    ///
+    /// Note: When passing a list directly without quotes, avoid spaces to prevent
+    /// shell argument parsing issues (e.g. use --classes 0,1 not --classes 0, 1).
+    #[arg(long, allow_hyphen_values = true)]
+    pub classes: Option<String>,
+}
+
+/// Parse class IDs from various formats: "1,2,3", "[1,2,3]", "(1,2,3)"
+///
+/// # Errors
+///
+/// Returns a `String` error message if any segment of the string cannot be parsed as a `usize`.
+pub fn parse_classes(s: &str) -> Result<Vec<usize>, String> {
+    // Remove brackets, parentheses, and quotes
+    let cleaned = s
+        .trim()
+        .trim_matches(|c| c == '[' || c == ']' || c == '(' || c == ')' || c == '"' || c == '\'');
+
+    if cleaned.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    cleaned
+        .split(',')
+        .map(|part| {
+            part.trim()
+                .parse::<usize>()
+                .map_err(|e| format!("Invalid class ID '{}': {}", part.trim(), e))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -113,9 +159,10 @@ mod tests {
         let args = Cli::parse_from(["app", "predict", "--model", "yolo11n.onnx"]);
         match args.command {
             Commands::Predict(predict_args) => {
-                assert_eq!(predict_args.model, "yolo11n.onnx");
-                assert!((predict_args.conf - 0.25).abs() < f32::EPSILON);
-                assert!((predict_args.iou - 0.45).abs() < f32::EPSILON);
+                assert_eq!(predict_args.model, Some("yolo11n.onnx".to_string()));
+                assert!((predict_args.conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
+                assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
+                assert!(predict_args.rect);
                 assert_eq!(predict_args.max_det, 300);
                 assert!(!predict_args.half);
                 assert!(predict_args.verbose);
@@ -140,7 +187,7 @@ mod tests {
         ]);
         match args.command {
             Commands::Predict(predict_args) => {
-                assert_eq!(predict_args.model, "custom.onnx");
+                assert_eq!(predict_args.model, Some("custom.onnx".to_string()));
                 assert_eq!(predict_args.source, Some("test.jpg".to_string()));
                 assert!((predict_args.conf - 0.8).abs() < f32::EPSILON);
                 assert!(!predict_args.verbose);
