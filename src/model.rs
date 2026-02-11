@@ -760,10 +760,9 @@ impl YOLOModel {
 
             let result = postprocess(
                 img_outputs,
-                self.metadata.task,
+                &self.metadata,
                 &preprocess_res,
                 &self.config,
-                &self.metadata.names,
                 orig_img,
                 path,
                 speed,

@@ -54,16 +54,15 @@ use crate::utils::{nms_per_class, nms_rotated_per_class};
 )]
 pub fn postprocess(
     outputs: Vec<(&[f32], Vec<usize>)>,
-    task: Task,
+    metadata: &crate::metadata::ModelMetadata,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    match task {
+    match metadata.task {
         Task::Detect => {
             let (output, shape) = &outputs[0];
             postprocess_detect(
@@ -71,7 +70,8 @@ pub fn postprocess(
                 shape,
                 preprocess,
                 config,
-                names,
+                &metadata.names,
+                metadata.end2end,
                 orig_img,
                 path,
                 speed,
@@ -82,11 +82,12 @@ pub fn postprocess(
             outputs,
             preprocess,
             config,
-            names,
+            &metadata.names,
             orig_img,
             path,
             speed,
             inference_shape,
+            metadata.end2end,
         ),
         Task::Pose => {
             let (output, shape) = &outputs[0];
@@ -95,16 +96,25 @@ pub fn postprocess(
                 shape,
                 preprocess,
                 config,
-                names,
+                &metadata.names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+                metadata.end2end,
+            )
+        }
+        Task::Classify => {
+            let (output, shape) = &outputs[0];
+            postprocess_classify(
+                output,
+                shape,
+                &metadata.names,
                 orig_img,
                 path,
                 speed,
                 inference_shape,
             )
-        }
-        Task::Classify => {
-            let (output, shape) = &outputs[0];
-            postprocess_classify(output, shape, names, orig_img, path, speed, inference_shape)
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];
@@ -113,11 +123,12 @@ pub fn postprocess(
                 shape,
                 preprocess,
                 config,
-                names,
+                &metadata.names,
                 orig_img,
                 path,
                 speed,
                 inference_shape,
+                metadata.end2end,
             )
         }
     }
@@ -137,6 +148,7 @@ fn postprocess_detect(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     names: &HashMap<usize, String>,
+    end2end: bool,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
@@ -144,23 +156,35 @@ fn postprocess_detect(
 ) -> Results {
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
-    // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
-    let (num_classes, num_predictions, is_transposed) =
-        parse_detect_shape(output_shape, names.len());
+    // Auto-detect E2E from shape if metadata flag is missing
+    // E2E output is [Batch, N, 6] (or [N, 6]) -> last dim is 6.
+    // Standard output is [Batch, 4+nc, N] or [Batch, N, 4+nc].
+    // If we have 80 classes, standard features is 84. If we see 6, it's E2E.
+    // Ambiguity exists only if nc=2 (features=6). In that case, we rely on flag.
+    let is_e2e_shape = output_shape.last().is_some_and(|&d| d == 6) && names.len() != 2;
+    let use_e2e = end2end || is_e2e_shape;
 
-    if output.is_empty() || num_predictions == 0 {
-        return results;
-    }
+    let boxes_data = if use_e2e {
+        extract_e2e_boxes(output, output_shape, preprocess, config)
+    } else {
+        // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
+        let (num_classes, num_predictions, is_transposed) =
+            parse_detect_shape(output_shape, names.len());
 
-    // Zero-copy extraction with stride-based indexing
-    let boxes_data = extract_detect_boxes(
-        output,
-        num_classes,
-        num_predictions,
-        is_transposed,
-        preprocess,
-        config,
-    );
+        if output.is_empty() || num_predictions == 0 {
+            return results;
+        }
+
+        // Zero-copy extraction with stride-based indexing
+        extract_detect_boxes(
+            output,
+            num_classes,
+            num_predictions,
+            is_transposed,
+            preprocess,
+            config,
+        )
+    };
 
     if !boxes_data.is_empty() {
         results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
@@ -241,6 +265,98 @@ struct Candidate {
     bbox: [f32; 4],
     score: f32,
     class: usize,
+}
+
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
+fn extract_e2e_boxes(
+    output: &[f32],
+    output_shape: &[usize],
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+) -> Array2<f32> {
+    // E2E output shape is typically [Batch, N, 6] -> [1, 300, 6]
+    // where 6 features are: [x1, y1, x2, y2, conf, cls]
+    // We need to parse this manually as it differs from standard [Batch, Feat, N]
+
+    if output_shape.is_empty() || output.is_empty() {
+        return Array2::zeros((0, 6));
+    }
+
+    // Determine dimensions (ignore batch dim if present)
+    // Likely [Batch, NumPreds, 6] or [NumPreds, 6]
+    let (num_preds, num_features) = if output_shape.len() == 3 {
+        (output_shape[1], output_shape[2])
+    } else if output_shape.len() == 2 {
+        (output_shape[0], output_shape[1])
+    } else {
+        // Fallback or error
+        return Array2::zeros((0, 6));
+    };
+
+    if num_features < 6 {
+        // Unexpected shape
+        return Array2::zeros((0, 6));
+    }
+
+    let (scale_y, scale_x) = preprocess.scale;
+    let (pad_top, pad_left) = preprocess.padding;
+    let (max_w, max_h) = (
+        preprocess.orig_shape.1 as f32,
+        preprocess.orig_shape.0 as f32,
+    );
+
+    let mut valid_predictions = Vec::new();
+
+    for i in 0..num_preds {
+        let base = i * num_features;
+
+        let score = output[base + 4];
+        if score < config.confidence_threshold {
+            continue;
+        }
+
+        let class_id = output[base + 5] as usize;
+        if !config.keep_class(class_id) {
+            continue;
+        }
+
+        let x1_raw = output[base];
+        let y1_raw = output[base + 1];
+        let x2_raw = output[base + 2];
+        let y2_raw = output[base + 3];
+
+        // Scale coordinates back to original image
+        let x1 = (x1_raw - pad_left) / scale_x;
+        let y1 = (y1_raw - pad_top) / scale_y;
+        let x2 = (x2_raw - pad_left) / scale_x;
+        let y2 = (y2_raw - pad_top) / scale_y;
+
+        // Clip to image bounds
+        let x1 = x1.clamp(0.0, max_w);
+        let y1 = y1.clamp(0.0, max_h);
+        let x2 = x2.clamp(0.0, max_w);
+        let y2 = y2.clamp(0.0, max_h);
+
+        valid_predictions.push([x1, y1, x2, y2, score, output[base + 5]]);
+    }
+
+    // Sort by confidence descending (optional but good for consistency)
+    valid_predictions.sort_by(|a, b| b[4].partial_cmp(&a[4]).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Limit to max_det
+    let count = valid_predictions.len().min(config.max_det);
+
+    let mut result = Array2::zeros((count, 6));
+    for (i, pred) in valid_predictions.iter().take(count).enumerate() {
+        result[[i, 0]] = pred[0];
+        result[[i, 1]] = pred[1];
+        result[[i, 2]] = pred[2];
+        result[[i, 3]] = pred[3];
+        result[[i, 4]] = pred[4];
+        result[[i, 5]] = pred[5];
+    }
+
+    result
 }
 
 /// Optimized detection extraction with SIMD acceleration.
@@ -525,7 +641,8 @@ fn extract_detect_boxes(
     clippy::too_many_lines,
     clippy::needless_pass_by_value,
     clippy::manual_let_else,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::suboptimal_flops
 )]
 fn postprocess_segment(
     outputs: Vec<(&[f32], Vec<usize>)>,
@@ -536,6 +653,7 @@ fn postprocess_segment(
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
+    end2end: bool,
 ) -> Results {
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
@@ -554,116 +672,210 @@ fn postprocess_segment(
     // output0: [1, 4 + nc + 32, 8400]
     // output1: [1, 32, 160, 160] (protos)
 
-    // 1. Process Detections
     // Standard segmentation models use 32 mask prototypes
     let num_masks = 32;
-    let expected_features = 4 + names.len() + num_masks;
 
-    // Manual shape check
-    let (num_preds, is_transposed) = if shape0.len() == 3 {
-        let (a, b) = (shape0[1], shape0[2]);
-        if a == expected_features {
-            (b, false) // [1, features, preds]
-        } else if b == expected_features {
-            (a, true) // [1, preds, features]
+    // 1. Process Detections
+    let (boxes_data, mask_coeffs): (Array2<f32>, Array2<f32>) = if end2end {
+
+        // Parse similarly to extract_e2e_boxes but keep mask coeffs
+        let (num_preds, num_features) = if shape0.len() == 3 {
+            (shape0[1], shape0[2])
         } else {
-            // Assume format [1, 116, 8400] if ambiguous
-            if a < b { (b, false) } else { (a, true) }
+            (shape0[0], shape0[1])
+        };
+
+        if num_features < 6 + 32 {
+            // minimal check
+            // Fallback
+            return results;
         }
+
+        // Manual parsing loop
+        let mut candidates = Vec::new();
+        let (scale_y, scale_x) = preprocess.scale;
+        let (pad_top, pad_left) = preprocess.padding;
+        let (max_w, max_h) = (
+            preprocess.orig_shape.1 as f32,
+            preprocess.orig_shape.0 as f32,
+        );
+
+        for i in 0..num_preds {
+            let base = i * num_features;
+
+            let score = output0[base + 4];
+            if score < config.confidence_threshold {
+                continue;
+            }
+
+            let class_id = output0[base + 5] as usize;
+            if !config.keep_class(class_id) {
+                continue;
+            }
+
+            // Box
+            let cx: f32 = output0[base];
+            let cy: f32 = output0[base + 1];
+            let w: f32 = output0[base + 2];
+            let h: f32 = output0[base + 3];
+
+            let x1: f32 = (cx - w * 0.5 - pad_left) / scale_x;
+            let y1: f32 = (cy - h * 0.5 - pad_top) / scale_y;
+            let x2: f32 = (cx + w * 0.5 - pad_left) / scale_x;
+            let y2: f32 = (cy + h * 0.5 - pad_top) / scale_y;
+
+            let x1: f32 = x1.clamp(0.0, max_w);
+            let y1: f32 = y1.clamp(0.0, max_h);
+            let x2: f32 = x2.clamp(0.0, max_w);
+            let y2: f32 = y2.clamp(0.0, max_h);
+
+            // Mask coeffs
+            let mut coeffs = Vec::with_capacity(num_masks);
+            for m in 0..num_masks {
+                coeffs.push(output0[base + 6 + m]);
+            }
+
+            candidates.push(([x1, y1, x2, y2], score, class_id as f32, coeffs));
+        }
+
+        // Sort
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let count = candidates.len().min(config.max_det);
+
+        let mut b_data = Array2::zeros((count, 6));
+        let mut m_coeffs = Array2::zeros((count, num_masks));
+
+        for (i, (bbox, score, class, coeffs)) in candidates.iter().take(count).enumerate() {
+            b_data[[i, 0]] = bbox[0];
+            b_data[[i, 1]] = bbox[1];
+            b_data[[i, 2]] = bbox[2];
+            b_data[[i, 3]] = bbox[3];
+            b_data[[i, 4]] = *score;
+            b_data[[i, 5]] = *class;
+            for (m, &c) in coeffs.iter().enumerate() {
+                m_coeffs[[i, m]] = c;
+            }
+        }
+        (b_data, m_coeffs)
     } else {
-        (0, false)
-    };
+        // Standard NMS path
+        let expected_features = 4 + names.len() + num_masks;
 
-    if output0.is_empty() || num_preds == 0 {
-        return results;
-    }
+        // Manual shape check
+        let (num_preds, is_transposed) = if shape0.len() == 3 {
+            let (a, b) = (shape0[1], shape0[2]);
+            if a == expected_features {
+                (b, false) // [1, features, preds]
+            } else if b == expected_features {
+                (a, true) // [1, preds, features]
+            } else {
+                // Assume format [1, 116, 8400] if ambiguous
+                if a < b { (b, false) } else { (a, true) }
+            }
+        } else {
+            (0, false)
+        };
 
-    // Convert to 2D [preds, features]
-    let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
+        if output0.is_empty() || num_preds == 0 {
+            return results;
+        }
 
-    // Filter and NMS
-    let mut candidates = Vec::new(); // (bbox, score, class, original_index)
+        // Convert to 2D [preds, features]
+        let output_2d = if is_transposed {
+            Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
+                .unwrap_or_else(|_| Array2::zeros((0, 0)))
+        } else {
+            let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
+                .unwrap_or_else(|_| Array2::zeros((0, 0)));
+            arr.t().to_owned()
+        };
 
-    for i in 0..num_preds {
-        let scores = output_2d.slice(s![i, 4..4 + names.len()]);
-        let (best_class, best_score) = scores
+        // Filter and NMS
+        let mut candidates = Vec::new(); // (bbox, score, class, original_index)
+
+        for i in 0..num_preds {
+            let scores = output_2d.slice(s![i, 4..4 + names.len()]);
+            let (best_class, best_score) = scores
+                .iter()
+                .enumerate()
+                .max_by(|&(_, a), &(_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .map_or((0, 0.0), |(idx, &score)| (idx, score));
+
+            if best_score < config.confidence_threshold {
+                continue;
+            }
+
+            // Box
+            let cx = output_2d[[i, 0]];
+            let cy = output_2d[[i, 1]];
+            let w = output_2d[[i, 2]];
+            let h = output_2d[[i, 3]];
+            let x1 = cx - w / 2.0;
+            let y1 = cy - h / 2.0;
+            let x2 = cx + w / 2.0;
+            let y2 = cy + h / 2.0;
+
+            let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+            let clipped = clip_coords(&scaled, preprocess.orig_shape);
+
+            // Filter by class if specified
+            if !config.keep_class(best_class) {
+                continue;
+            }
+
+            candidates.push((
+                [clipped[0], clipped[1], clipped[2], clipped[3]],
+                best_score,
+                best_class,
+                i, // Keep index to get coefficients
+            ));
+        }
+
+        if candidates.is_empty() {
+            return results;
+        }
+
+        // Prepare candidates for NMS (bbox, score, class)
+        let nms_candidates: Vec<_> = candidates
             .iter()
-            .enumerate()
-            .max_by(|&(_, a), &(_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or((0, 0.0), |(idx, &score)| (idx, score));
+            .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+            .collect();
 
-        if best_score < config.confidence_threshold {
-            continue;
+        let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
+        let num_kept = keep_indices.len().min(config.max_det);
+
+        // 2. Extract Box Results
+        let mut boxes_data = Array2::zeros((num_kept, 6));
+        let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
+
+        for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+            let (bbox, score, class, orig_idx) = &candidates[keep_idx];
+            boxes_data[[out_idx, 0]] = bbox[0];
+            boxes_data[[out_idx, 1]] = bbox[1];
+            boxes_data[[out_idx, 2]] = bbox[2];
+            boxes_data[[out_idx, 3]] = bbox[3];
+            boxes_data[[out_idx, 4]] = *score;
+            boxes_data[[out_idx, 5]] = *class as f32;
+
+            // Extract coefficients: [orig_idx, 4+nc..]
+            let start = 4 + names.len();
+            let coeffs = output_2d.slice(s![*orig_idx, start..start + num_masks]);
+            for m in 0..num_masks {
+                mask_coeffs[[out_idx, m]] = coeffs[m];
+            }
         }
+        (boxes_data, mask_coeffs)
+    };
 
-        // Box
-        let cx = output_2d[[i, 0]];
-        let cy = output_2d[[i, 1]];
-        let w = output_2d[[i, 2]];
-        let h = output_2d[[i, 3]];
-        let x1 = cx - w / 2.0;
-        let y1 = cy - h / 2.0;
-        let x2 = cx + w / 2.0;
-        let y2 = cy + h / 2.0;
-
-        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
-        let clipped = clip_coords(&scaled, preprocess.orig_shape);
-
-        // Filter by class if specified
-        if !config.keep_class(best_class) {
-            continue;
-        }
-
-        candidates.push((
-            [clipped[0], clipped[1], clipped[2], clipped[3]],
-            best_score,
-            best_class,
-            i, // Keep index to get coefficients
-        ));
-    }
-
-    if candidates.is_empty() {
+    if boxes_data.is_empty() {
         return results;
     }
 
-    // Prepare candidates for NMS (bbox, score, class)
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
-        .collect();
-
-    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_det);
-
-    // 2. Extract Box Results
-    let mut boxes_data = Array2::zeros((num_kept, 6));
-    let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
-
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
-        let (bbox, score, class, orig_idx) = &candidates[keep_idx];
-        boxes_data[[out_idx, 0]] = bbox[0];
-        boxes_data[[out_idx, 1]] = bbox[1];
-        boxes_data[[out_idx, 2]] = bbox[2];
-        boxes_data[[out_idx, 3]] = bbox[3];
-        boxes_data[[out_idx, 4]] = *score;
-        boxes_data[[out_idx, 5]] = *class as f32;
-
-        // Extract coefficients: [orig_idx, 4+nc..]
-        let start = 4 + names.len();
-        let coeffs = output_2d.slice(s![*orig_idx, start..start + num_masks]);
-        for m in 0..num_masks {
-            mask_coeffs[[out_idx, m]] = coeffs[m];
-        }
-    }
-
+    let num_kept = boxes_data.nrows();
     results.boxes = Some(Boxes::new(boxes_data.clone(), preprocess.orig_shape));
+
+    // 3. Process Masks
+    // ...
 
     // 3. Process Masks
     // Protos: [1, 32, 160, 160] -> [32, 25600]
@@ -841,6 +1053,7 @@ fn postprocess_pose(
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
+    end2end: bool,
 ) -> Results {
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
@@ -853,122 +1066,190 @@ fn postprocess_pose(
     let num_classes = names.len().max(1);
     let expected_features = 4 + num_classes + kpt_features;
 
-    // Parse output shape
-    let (num_preds, is_transposed) = if output_shape.len() == 3 {
-        let (a, b) = (output_shape[1], output_shape[2]);
-        if a == expected_features || (a < b && a >= 4 + kpt_features) {
-            (b, false) // [1, features, preds]
-        } else {
-            (a, true) // [1, preds, features]
-        }
-    } else if output_shape.len() == 2 {
-        let (a, b) = (output_shape[0], output_shape[1]);
-        if a < b { (b, false) } else { (a, true) }
-    } else {
-        (0, false)
-    };
+    // Detect E2E: Output shape [Batch, N, 6 + kpt_features]
+    // 6 = 4 box + 1 conf + 1 cls
+    let e2e_features = 6 + kpt_features;
+    let is_e2e_shape = output_shape.last().is_some_and(|&d| d == e2e_features);
+    let use_e2e = end2end || is_e2e_shape;
 
-    if output.is_empty() || num_preds == 0 {
-        return results;
-    }
-
-    // Infer actual feature count from data
-    let actual_features = output.len() / num_preds;
-    if actual_features < 4 + kpt_features {
-        eprintln!(
-            "WARNING ⚠️ Pose model has insufficient features ({actual_features}), expected at least {}",
-            4 + kpt_features
-        );
-        return results;
-    }
-
-    // Convert to 2D [preds, features]
-    let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
-
-    if output_2d.is_empty() {
-        return results;
-    }
-
-    // Derive number of classes from actual features
-    let derived_classes = actual_features.saturating_sub(4 + kpt_features);
-    let num_classes = derived_classes.max(1);
-
-    // Filter and NMS - store candidates with keypoints
     let mut candidates: Vec<([f32; 4], f32, usize, Vec<[f32; 3]>)> = Vec::new();
 
-    for i in 0..num_preds {
-        // Get class score(s) - for pose, typically just "person" class
-        let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+    if use_e2e {
+        // E2E Parsing: [Batch, N, Features]
+        // Flatten logic similar to extract_e2e_boxes but with keypoints
+        let (num_preds, num_feats) = if output_shape.len() == 3 {
+            (output_shape[1], output_shape[2])
+        } else {
+            // Fallback
+            (output.len() / e2e_features, e2e_features)
+        };
 
-        if best_score < config.confidence_threshold {
-            continue;
+        if num_feats < e2e_features {
+            return results;
         }
 
-        // Extract box coordinates (xywh format)
-        let cx = output_2d[[i, 0]];
-        let cy = output_2d[[i, 1]];
-        let w = output_2d[[i, 2]];
-        let h = output_2d[[i, 3]];
+        for i in 0..num_preds {
+            let base = i * num_feats;
+            let score = output[base + 4];
+            if score < config.confidence_threshold {
+                continue;
+            }
+            let class_id = output[base + 5] as usize;
+            if !config.keep_class(class_id) {
+                continue;
+            }
 
-        // Convert to xyxy
-        let x1 = cx - w / 2.0;
-        let y1 = cy - h / 2.0;
-        let x2 = cx + w / 2.0;
-        let y2 = cy + h / 2.0;
+            // Box
+            let x1 = output[base];
+            let y1 = output[base + 1];
+            let x2 = output[base + 2];
+            let y2 = output[base + 3];
 
-        // Scale box to original image space
-        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
-        let clipped = clip_coords(&scaled, preprocess.orig_shape);
+            // Scale Box
+            let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+            let clipped = clip_coords(&scaled, preprocess.orig_shape);
 
-        // Extract keypoints (after class scores)
-        let kpt_start = 4 + num_classes;
-        let mut keypoints = Vec::with_capacity(num_keypoints);
-        for k in 0..num_keypoints {
-            let kpt_offset = kpt_start + k * kpt_dim;
-            let kpt_x = output_2d[[i, kpt_offset]];
-            let kpt_y = output_2d[[i, kpt_offset + 1]];
-            let kpt_conf = output_2d[[i, kpt_offset + 2]];
+            // Keypoints
+            let mut keypoints = Vec::with_capacity(num_keypoints);
+            for k in 0..num_keypoints {
+                let k_base = base + 6 + k * kpt_dim;
+                let kx = output[k_base];
+                let ky = output[k_base + 1];
+                let kc = output[k_base + 2];
 
-            // Scale keypoint coordinates to original image space
-            let scaled_kpt = scale_coords(
-                &[kpt_x, kpt_y, kpt_x, kpt_y],
-                preprocess.scale,
-                preprocess.padding,
+                let scaled_kpt =
+                    scale_coords(&[kx, ky, kx, ky], preprocess.scale, preprocess.padding);
+                let (oh, ow) = preprocess.orig_shape;
+                keypoints.push([
+                    scaled_kpt[0].clamp(0.0, ow as f32),
+                    scaled_kpt[1].clamp(0.0, oh as f32),
+                    kc,
+                ]);
+            }
+
+            candidates.push((
+                [clipped[0], clipped[1], clipped[2], clipped[3]],
+                score,
+                class_id,
+                keypoints,
+            ));
+        }
+    } else {
+        // Standard Auto-Backend Parsing
+        // Parse output shape
+        let (num_preds, is_transposed) = if output_shape.len() == 3 {
+            let (a, b) = (output_shape[1], output_shape[2]);
+            if a == expected_features || (a < b && a >= 4 + kpt_features) {
+                (b, false) // [1, features, preds]
+            } else {
+                (a, true) // [1, preds, features]
+            }
+        } else if output_shape.len() == 2 {
+            let (a, b) = (output_shape[0], output_shape[1]);
+            if a < b { (b, false) } else { (a, true) }
+        } else {
+            (0, false)
+        };
+
+        if output.is_empty() || num_preds == 0 {
+            return results;
+        }
+
+        // Infer actual feature count from data
+        let actual_features = output.len() / num_preds;
+        if actual_features < 4 + kpt_features {
+            eprintln!(
+                "WARNING ⚠️ Pose model has insufficient features ({actual_features}), expected at least {}",
+                4 + kpt_features
             );
-            let (oh, ow) = preprocess.orig_shape;
-            #[allow(clippy::cast_precision_loss)]
-            let scaled_x = scaled_kpt[0].max(0.0).min(ow as f32);
-            #[allow(clippy::cast_precision_loss)]
-            let scaled_y = scaled_kpt[1].max(0.0).min(oh as f32);
-
-            keypoints.push([scaled_x, scaled_y, kpt_conf]);
+            return results;
         }
 
-        // Filter by class if specified
-        if !config.keep_class(best_class) {
-            continue;
+        // Convert to 2D [preds, features]
+        let output_2d = if is_transposed {
+            Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
+                .unwrap_or_else(|_| Array2::zeros((0, 0)))
+        } else {
+            let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
+                .unwrap_or_else(|_| Array2::zeros((0, 0)));
+            arr.t().to_owned()
+        };
+
+        if output_2d.is_empty() {
+            return results;
         }
 
-        candidates.push((
-            [clipped[0], clipped[1], clipped[2], clipped[3]],
-            best_score,
-            best_class,
-            keypoints,
-        ));
+        // Derive number of classes from actual features
+        let derived_classes = actual_features.saturating_sub(4 + kpt_features);
+        let num_classes = derived_classes.max(1);
+
+        for i in 0..num_preds {
+            // Get class score(s) - for pose, typically just "person" class
+            let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
+            let (best_class, best_score) = class_scores
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+                .map_or((0, 0.0), |(idx, &score)| {
+                    (idx, if score.is_nan() { 0.0 } else { score })
+                });
+
+            if best_score < config.confidence_threshold {
+                continue;
+            }
+
+            // Extract box coordinates (xywh format)
+            let cx = output_2d[[i, 0]];
+            let cy = output_2d[[i, 1]];
+            let w = output_2d[[i, 2]];
+            let h = output_2d[[i, 3]];
+
+            // Convert to xyxy
+            let x1 = cx - w / 2.0;
+            let y1 = cy - h / 2.0;
+            let x2 = cx + w / 2.0;
+            let y2 = cy + h / 2.0;
+
+            // Scale box to original image space
+            let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
+            let clipped = clip_coords(&scaled, preprocess.orig_shape);
+
+            // Extract keypoints (after class scores)
+            let kpt_start = 4 + num_classes;
+            let mut keypoints = Vec::with_capacity(num_keypoints);
+            for k in 0..num_keypoints {
+                let kpt_offset = kpt_start + k * kpt_dim;
+                let kpt_x = output_2d[[i, kpt_offset]];
+                let kpt_y = output_2d[[i, kpt_offset + 1]];
+                let kpt_conf = output_2d[[i, kpt_offset + 2]];
+
+                // Scale keypoint coordinates to original image space
+                let scaled_kpt = scale_coords(
+                    &[kpt_x, kpt_y, kpt_x, kpt_y],
+                    preprocess.scale,
+                    preprocess.padding,
+                );
+                let (oh, ow) = preprocess.orig_shape;
+                #[allow(clippy::cast_precision_loss)]
+                let scaled_x = scaled_kpt[0].max(0.0).min(ow as f32);
+                #[allow(clippy::cast_precision_loss)]
+                let scaled_y = scaled_kpt[1].max(0.0).min(oh as f32);
+
+                keypoints.push([scaled_x, scaled_y, kpt_conf]);
+            }
+
+            // Filter by class if specified
+            if !config.keep_class(best_class) {
+                continue;
+            }
+
+            candidates.push((
+                [clipped[0], clipped[1], clipped[2], clipped[3]],
+                best_score,
+                best_class,
+                keypoints,
+            ));
+        }
     }
 
     if candidates.is_empty() {
@@ -979,12 +1260,28 @@ fn postprocess_pose(
         return results;
     }
 
-    // Apply NMS
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
-        .collect();
-    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
+    // Apply NMS only if NOT E2E (E2E models are already filtered/sorted, we just take top)
+    // Actually E2E mode above pushes to candidates, so we can unified the result building.
+    // BUT E2E doesn't need NMS.
+
+    let keep_indices = if use_e2e {
+        // Just take top max_det (already naturally ordered usually, but sorting is safe)
+        let mut indices: Vec<usize> = (0..candidates.len()).collect();
+        indices.sort_by(|&a, &b| {
+            candidates[b]
+                .1
+                .partial_cmp(&candidates[a].1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        indices
+    } else {
+        let nms_candidates: Vec<_> = candidates
+            .iter()
+            .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+            .collect();
+        nms_per_class(&nms_candidates, config.iou_threshold)
+    };
+
     let num_kept = keep_indices.len().min(config.max_det);
 
     // Build output arrays
@@ -1105,6 +1402,7 @@ fn postprocess_obb(
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
+    end2end: bool,
 ) -> Results {
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
@@ -1113,134 +1411,179 @@ fn postprocess_obb(
     let num_classes = names.len().max(1);
     let expected_features = 4 + num_classes + 1;
 
-    // Parse output shape
-    let (num_preds, is_transposed) = if output_shape.len() == 3 {
-        let (a, b) = (output_shape[1], output_shape[2]);
-        if a == expected_features || (a < b && a >= 6) {
-            (b, false) // [1, features, preds]
-        } else {
-            (a, true) // [1, preds, features]
-        }
-    } else if output_shape.len() == 2 {
-        let (a, b) = (output_shape[0], output_shape[1]);
-        if a < b { (b, false) } else { (a, true) }
-    } else {
-        (0, false)
-    };
+    // Detect E2E: Output shape [Batch, N, 7]
+    // 7 = 4 box + 1 angle + 1 conf + 1 cls
+    let is_e2e_shape = output_shape.last().is_some_and(|&d| d == 7);
+    let use_e2e = end2end || is_e2e_shape;
 
-    if output.is_empty() || num_preds == 0 {
-        return results;
-    }
-
-    // Infer actual feature count from data
-    let actual_features = output.len() / num_preds;
-    if actual_features < 6 {
-        eprintln!(
-            "WARNING ⚠️ OBB model has insufficient features ({actual_features}), expected at least 6"
-        );
-        return results;
-    }
-
-    // Convert to 2D [preds, features]
-    let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
-
-    if output_2d.is_empty() {
-        return results;
-    }
-
-    // Derive number of classes from features: features = 4 + nc + 1
-    let derived_classes = actual_features.saturating_sub(5); // 4 bbox + 1 angle
-    let num_classes = derived_classes.max(1);
-
-    // Filter and NMS - store candidates with angle
     let mut candidates: Vec<([f32; 5], f32, usize)> = Vec::new(); // [cx, cy, w, h, angle], conf, class
 
-    for i in 0..num_preds {
-        // Get class scores
-        let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+    if use_e2e {
+        // E2E Parsing: [Batch, N, Features]
+        let (num_preds, num_feats) = if output_shape.len() == 3 {
+            (output_shape[1], output_shape[2])
+        } else {
+            (output.len() / 7, 7)
+        };
 
-        if best_score < config.confidence_threshold {
-            continue;
+        if num_feats < 7 {
+            return results;
         }
 
-        // Extract OBB: xywh + rotation
-        let cx = output_2d[[i, 0]];
-        let cy = output_2d[[i, 1]];
-        let w = output_2d[[i, 2]];
-        let h = output_2d[[i, 3]];
-        let angle = output_2d[[i, 4 + num_classes]]; // Last value is rotation angle (radians)
+        for i in 0..num_preds {
+            let base = i * num_feats;
+            let score = output[base + 5];
+            if score < config.confidence_threshold {
+                continue;
+            }
+            let class_id = output[base + 6] as usize;
+            if !config.keep_class(class_id) {
+                continue;
+            }
 
-        // Scale center coordinates to original image space
-        let scaled = scale_coords(&[cx, cy, cx, cy], preprocess.scale, preprocess.padding);
-        let scaled_cx = scaled[0];
-        let scaled_cy = scaled[1];
+            let cx = output[base];
+            let cy = output[base + 1];
+            let w = output[base + 2];
+            let h = output[base + 3];
+            let angle = output[base + 4];
 
-        // Scale width and height (note: don't apply padding, just scale)
-        let scaled_w = w / preprocess.scale.1;
-        let scaled_h = h / preprocess.scale.0;
+            // Scale
+            let (scale_y, scale_x) = preprocess.scale;
+            let (pad_top, pad_left) = preprocess.padding;
 
-        // Clip center to image bounds
-        let (oh, ow) = preprocess.orig_shape;
-        #[allow(clippy::cast_precision_loss)]
-        let clipped_cx = scaled_cx.max(0.0).min(ow as f32);
-        #[allow(clippy::cast_precision_loss)]
-        let clipped_cy = scaled_cy.max(0.0).min(oh as f32);
+            let cx = (cx - pad_left) / scale_x;
+            let cy = (cy - pad_top) / scale_y;
+            let w = w / scale_x;
+            let h = h / scale_y;
 
-        // Filter by class if specified
-        if !config.keep_class(best_class) {
-            continue;
+            candidates.push(([cx, cy, w, h, angle], score, class_id));
+        }
+    } else {
+        // Standard Auto-Backend Parsing
+        // Parse output shape
+        let (num_preds, is_transposed) = if output_shape.len() == 3 {
+            let (a, b) = (output_shape[1], output_shape[2]);
+            if a == expected_features || (a < b && a >= 6) {
+                (b, false) // [1, features, preds]
+            } else {
+                (a, true) // [1, preds, features]
+            }
+        } else if output_shape.len() == 2 {
+            let (a, b) = (output_shape[0], output_shape[1]);
+            if a < b { (b, false) } else { (a, true) }
+        } else {
+            (0, false)
+        };
+
+        if output.is_empty() || num_preds == 0 {
+            return results;
         }
 
-        candidates.push((
-            [clipped_cx, clipped_cy, scaled_w, scaled_h, angle],
-            best_score,
-            best_class,
-        ));
+        // Infer actual feature count from data
+        let actual_features = output.len() / num_preds;
+        if actual_features < 6 {
+            eprintln!(
+                "WARNING ⚠️ OBB model has insufficient features ({actual_features}), expected at least 6"
+            );
+            return results;
+        }
+
+        // Convert to 2D [preds, features]
+        let output_2d = if is_transposed {
+            Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
+                .unwrap_or_else(|_| Array2::zeros((0, 0)))
+        } else {
+            let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
+                .unwrap_or_else(|_| Array2::zeros((0, 0)));
+            arr.t().to_owned()
+        };
+
+        if output_2d.is_empty() {
+            return results;
+        }
+
+        // Derive number of classes from features: features = 4 + nc + 1
+        let derived_classes = actual_features.saturating_sub(5); // 4 bbox + 1 angle
+        let num_classes = derived_classes.max(1);
+
+        for i in 0..num_preds {
+            // Get class scores
+            let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
+            let (best_class, best_score) = class_scores
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+                .map_or((0, 0.0), |(idx, &score)| {
+                    (idx, if score.is_nan() { 0.0 } else { score })
+                });
+
+            if best_score < config.confidence_threshold {
+                continue;
+            }
+
+            // Extract OBB params
+            let cx = output_2d[[i, 0]];
+            let cy = output_2d[[i, 1]];
+            let w = output_2d[[i, 2]];
+            let h = output_2d[[i, 3]];
+            // Angle is usually the last feature (or before class? No, check Ultralytics OBB head)
+            // Typically: [xywh, score, ..., angle] or [xywh, angle, score?]
+            // Let's assume standard behavior: output_2d has [xywh, classes..., angle]
+            // Wait, previously I assumed angle was last.
+            let angle = output_2d[[i, actual_features - 1]];
+
+            // Scale
+            let (scale_y, scale_x) = preprocess.scale;
+            let (pad_top, pad_left) = preprocess.padding;
+
+            let cx = (cx - pad_left) / scale_x;
+            let cy = (cy - pad_top) / scale_y;
+            let w = w / scale_x;
+            let h = h / scale_y;
+
+            // Filter by class if specified
+            if !config.keep_class(best_class) {
+                continue;
+            }
+
+            candidates.push(([cx, cy, w, h, angle], best_score, best_class));
+        }
     }
 
     if candidates.is_empty() {
-        results.obb = Some(Obb::new(Array2::zeros((0, 7)), preprocess.orig_shape));
         return results;
     }
 
-    // Apply Rotated NMS for precise suppression using ProbIoU (Hellinger distance).
-    // This ensures that overlapping rotated boxes are correctly filtered based on their
-    // actual geometric overlap, which standard axis-aligned IoU cannot handle.
-    let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_det);
+    let keep_indices = if use_e2e {
+        // Just sort
+        let mut indices: Vec<usize> = (0..candidates.len()).collect();
+        indices.sort_by(|&a, &b| {
+            candidates[b]
+                .1
+                .partial_cmp(&candidates[a].1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        indices
+    } else {
+        // Apply Rotated NMS for precise suppression using ProbIoU (Hellinger distance).
+        nms_rotated_per_class(&candidates, config.iou_threshold)
+    };
 
-    // Build output array: [cx, cy, w, h, rotation, conf, cls]
-    let mut obb_data = Array2::zeros((num_kept, 7));
+    let num_kept = keep_indices.len().min(config.max_det);
+    let mut obb_data = Array2::zeros((num_kept, 7)); // [cx, cy, w, h, angle, conf, cls]
 
     for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
-        let (xywhr, score, class) = &candidates[keep_idx];
-        obb_data[[out_idx, 0]] = xywhr[0]; // cx
-        obb_data[[out_idx, 1]] = xywhr[1]; // cy
-        obb_data[[out_idx, 2]] = xywhr[2]; // w
-        obb_data[[out_idx, 3]] = xywhr[3]; // h
-        obb_data[[out_idx, 4]] = xywhr[4]; // rotation (radians)
+        let (obb, score, class) = &candidates[keep_idx];
+        obb_data[[out_idx, 0]] = obb[0];
+        obb_data[[out_idx, 1]] = obb[1];
+        obb_data[[out_idx, 2]] = obb[2];
+        obb_data[[out_idx, 3]] = obb[3];
+        obb_data[[out_idx, 4]] = obb[4];
         obb_data[[out_idx, 5]] = *score;
-        #[allow(clippy::cast_precision_loss)]
-        let class_f32 = *class as f32;
-        obb_data[[out_idx, 6]] = class_f32;
+        obb_data[[out_idx, 6]] = *class as f32;
     }
 
     results.obb = Some(Obb::new(obb_data, preprocess.orig_shape));
-
     results
 }
 
@@ -1299,6 +1642,7 @@ mod tests {
             &preprocess,
             &config,
             &names,
+            false,
             orig_img,
             String::new(),
             Speed::default(),
@@ -1341,6 +1685,7 @@ mod tests {
             &preprocess,
             &config,
             &names,
+            false,
             orig_img,
             String::new(),
             Speed::default(),
@@ -1376,6 +1721,7 @@ mod tests {
             &preprocess,
             &config,
             &names,
+            false,
             orig_img.clone(),
             String::new(),
             Speed::default(),
@@ -1390,6 +1736,7 @@ mod tests {
             &preprocess,
             &config,
             &names,
+            false,
             orig_img,
             String::new(),
             Speed::default(),

@@ -42,6 +42,8 @@ pub struct ModelMetadata {
     pub half: bool,
     /// Class ID to class name mapping.
     pub names: HashMap<usize, String>,
+    /// Whether the model is an End-to-End (E2E) model.
+    pub end2end: bool,
 }
 
 impl ModelMetadata {
@@ -144,6 +146,9 @@ impl ModelMetadata {
                         {
                             metadata.half = true;
                         }
+                    }
+                    "end2end" => {
+                        metadata.end2end = value == "true" || value == "True";
                     }
                     _ => {
                         // Check for class name entries (numeric keys)
@@ -350,6 +355,7 @@ impl Default for ModelMetadata {
             channels: 3,
             half: false,
             names: HashMap::new(),
+            end2end: false,
         }
     }
 }
