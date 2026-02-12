@@ -97,13 +97,18 @@ jobs:
 
       - name: Build (annotate + video features)
         run: |
-          # Dynamically find the ffmpeg path
-          FFMPEG_PATH=$(brew --prefix ffmpeg@7)
-          export LDFLAGS="-L$FFMPEG_PATH/lib"
-          export CPPFLAGS="-I$FFMPEG_PATH/include"
-          export PKG_CONFIG_PATH="$FFMPEG_PATH/lib/pkgconfig"
+          # Dynamically resolve the path to avoid "7.1.3" vs "7.1.3_1" issues
+          FFMPEG_DIR=$(brew --prefix ffmpeg@7)
           
-          cargo build --features annotate,video
+          export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig"
+          export LDFLAGS="-L$FFMPEG_DIR/lib"
+          export CPPFLAGS="-I$FFMPEG_DIR/include"
+          
+          # These are critical for ffmpeg-sys-next and bindgen
+          export FFMPEG_DIR="$FFMPEG_DIR"
+          export BINDGEN_EXTRA_CLANG_ARGS="-I$FFMPEG_DIR/include"
+          
+          cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
 
   # Windows video build test
   build-windows-video:
@@ -160,11 +165,17 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Coverage
-        run: cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
+        run: |
+          FFMPEG_DIR=$(brew --prefix ffmpeg@7)
+          export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig"
+          export FFMPEG_DIR="$FFMPEG_DIR"
+          export BINDGEN_EXTRA_CLANG_ARGS="-I$FFMPEG_DIR/include"
+          
+          cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
         env:
-          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib"
+          # Adding these as well just in case
+          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib" 
           CPPFLAGS: "-I/opt/homebrew/opt/ffmpeg@7/include"
-          PKG_CONFIG_PATH: "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
