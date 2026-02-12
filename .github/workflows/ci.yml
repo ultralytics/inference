@@ -96,11 +96,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build (annotate + video features)
-        run: cargo build --features annotate,video
-        env:
-          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib"
-          CPPFLAGS: "-I/opt/homebrew/opt/ffmpeg@7/include"
-          PKG_CONFIG_PATH: "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
+        run: |
+          # Dynamically find the ffmpeg path
+          FFMPEG_PATH=$(brew --prefix ffmpeg@7)
+          export LDFLAGS="-L$FFMPEG_PATH/lib"
+          export CPPFLAGS="-I$FFMPEG_PATH/include"
+          export PKG_CONFIG_PATH="$FFMPEG_PATH/lib/pkgconfig"
+          
+          cargo build --features annotate,video
 
   # Windows video build test
   build-windows-video:
