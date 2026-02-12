@@ -32,9 +32,6 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Format
         run: cargo fmt --all -- --check
 
@@ -69,9 +66,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Clippy (annotate + video)
         run: cargo clippy --all --features annotate,video -- -D warnings
 
@@ -91,9 +85,6 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
 
       - name: Build (annotate + video features)
         run: |
@@ -135,9 +126,6 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Build (annotate + video features)
         run: cargo build --features annotate,video
 
@@ -155,9 +143,6 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
-
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
