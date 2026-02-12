@@ -66,6 +66,7 @@ ort = { git = "https://github.com/pykeio/ort.git", rev = "4caf2d6a76cf401523d351
     "copy-dylibs",
     "half",
     "tls-native",
+    "num-complex"
 ] }
 
 # Core - FP16 support (required by ort's half feature)

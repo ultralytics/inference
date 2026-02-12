@@ -1752,6 +1752,7 @@ source = "git+https://github.com/pykeio/ort.git?rev=4caf2d6a76cf401523d351bb74f2
 dependencies = [
  "half",
  "ndarray 0.17.2",
+ "num-complex",
  "ort-sys",
  "smallvec",
  "tracing",
