@@ -88,14 +88,10 @@ jobs:
 
       - name: Build (annotate + video features)
         run: |
-          # Dynamically resolve the path to avoid "7.1.3" vs "7.1.3_1" issues
-          FFMPEG_DIR=$(brew --prefix ffmpeg@7)
-          
+          FFMPEG_DIR=$(brew --prefix ffmpeg@7)          
           export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig"
           export LDFLAGS="-L$FFMPEG_DIR/lib"
-          export CPPFLAGS="-I$FFMPEG_DIR/include"
-          
-          # These are critical for ffmpeg-sys-next and bindgen
+          export CPPFLAGS="-I$FFMPEG_DIR/include"          
           export FFMPEG_DIR="$FFMPEG_DIR"
           export BINDGEN_EXTRA_CLANG_ARGS="-I$FFMPEG_DIR/include"
           
