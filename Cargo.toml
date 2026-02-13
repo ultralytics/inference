@@ -46,16 +46,10 @@ path = "src/main.rs"
 
 [dependencies]
 # Core - Image loading and processing
-<<<<<<< HEAD
-image = "^0.25.9"
-jpeg-decoder = "^0.3.2"
-fast_image_resize = { version = "^5.5.0", features = ["image", "rayon"] }
-
-=======
 image = "^0.25"
 jpeg-decoder = "^0.3"
 fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
->>>>>>> main
+
 # SIMD for fast preprocessing
 wide = "^1.1"
 
@@ -73,7 +67,7 @@ ort = { git = "https://github.com/pykeio/ort.git", rev = "4caf2d6a76cf401523d351
     "copy-dylibs",
     "half",
     "tls-native",
-    "num-complex"
+    "num-complex",
 ] }
 
 # Core - FP16 support (required by ort's half feature)
@@ -155,7 +149,7 @@ all = ["annotate", "video"]
 serial_test = "3"
 tempfile = "3"
 
-
+# Debugging
 [profile.dev]
 opt-level = 0
 split-debuginfo = "unpacked"
@@ -163,6 +157,7 @@ split-debuginfo = "unpacked"
 [profile.dev.package."*"]
 opt-level = 3
 
+# Release
 [profile.release]
 opt-level = 3
 lto = "fat"
