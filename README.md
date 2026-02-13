@@ -41,8 +41,32 @@ High-performance YOLO inference library written in Rust. This library provides a
 git clone https://github.com/ultralytics/inference.git
 cd inference
 
-# Build release version
+# Build release binary (not installed globally)
 cargo build --release
+
+# Install CLI globally from this git checkout (Cargo default location)
+cargo install --path . --locked
+
+# Install CLI globally with custom features
+# Minimal build (no default features)
+cargo install --path . --locked --no-default-features
+
+# Enable video support
+cargo install --path . --locked --features video
+
+# Enable multiple accelerators
+cargo install --path . --locked --features "cuda,tensorrt"
+```
+
+`cargo install` places binaries in Cargo's default bin directory:
+
+- macOS/Linux: `~/.cargo/bin`
+- Windows: `%USERPROFILE%\\.cargo\\bin`
+
+Ensure this directory is in your `PATH`, then run from anywhere:
+
+```bash
+ultralytics-inference --help
 ```
 
 ### Export a YOLO Model to ONNX
