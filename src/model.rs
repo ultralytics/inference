@@ -13,7 +13,7 @@ use half::f16;
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array3;
 use ort::session::Session;
-use ort::tensor::TensorElementType;
+use ort::value::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
 
@@ -312,7 +312,7 @@ impl YOLOModel {
         let input_info = session.inputs().first();
         let input_name = input_info.map_or_else(|| "images".to_string(), |i| i.name().to_string());
 
-        // Check if model input tensor expects FP16 (rare - most models use FP32 input even with half weights)
+        // Check if model input tensor expects FP16 (rare most models use FP32 input even with half weights)
         let model_input_fp16 = input_info.is_some_and(|i| {
             matches!(
                 i.dtype(),

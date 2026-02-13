@@ -46,10 +46,16 @@ path = "src/main.rs"
 
 [dependencies]
 # Core - Image loading and processing
+<<<<<<< HEAD
 image = "^0.25.9"
 jpeg-decoder = "^0.3.2"
 fast_image_resize = { version = "^5.5.0", features = ["image", "rayon"] }
 
+=======
+image = "^0.25"
+jpeg-decoder = "^0.3"
+fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
+>>>>>>> main
 # SIMD for fast preprocessing
 wide = "^1.1"
 
@@ -60,25 +66,26 @@ lru = "^0.16"
 ndarray = { version = "^0.17", features = ["rayon"] }
 
 # ONNX Runtime 1.23 - using latest from GitHub for best performance
-ort = { git = "https://github.com/pykeio/ort.git", rev = "2de34065983a5c034f5afcc072b23b99479f465b", default-features = false, features = [
+ort = { git = "https://github.com/pykeio/ort.git", rev = "4caf2d6a76cf401523d351bb74f2b76acd0d1bff", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",
     "copy-dylibs",
     "half",
     "tls-native",
+    "num-complex"
 ] }
 
 # Core - FP16 support (required by ort's half feature)
-half = { version = "^2.4", features = ["num-traits"] }
-ureq = "^3.1.4"
+half = { version = "^2.7", features = ["num-traits"] }
+ureq = "^3.2.0"
 dirs = "^6.0"
-rayon = "^1.10"
-bytemuck = { version = "^1.21", features = ["derive"] }
+rayon = "^1.11"
+bytemuck = { version = "^1.25", features = ["derive"] }
 
 # Core - CLI arguments parsing
-clap = { version = "^4.5.54", features = ["derive"] }
-colored = "^3.0.0"
+clap = { version = "^4.5.58", features = ["derive"] }
+colored = "^3.1.1"
 
 # Optional - Visualization and Video support
 minifb = { version = "^0.28.0", optional = true }

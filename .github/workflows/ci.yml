@@ -32,9 +32,6 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Format
         run: cargo fmt --all -- --check
 
@@ -69,9 +66,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Clippy (annotate + video)
         run: cargo clippy --all --features annotate,video -- -D warnings
 
@@ -92,15 +86,16 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Build (annotate + video features)
-        run: cargo build --features annotate,video
-        env:
-          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib"
-          CPPFLAGS: "-I/opt/homebrew/opt/ffmpeg@7/include"
-          PKG_CONFIG_PATH: "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
+        run: |
+          FFMPEG_DIR=$(brew --prefix ffmpeg@7)          
+          export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig"
+          export LDFLAGS="-L$FFMPEG_DIR/lib"
+          export CPPFLAGS="-I$FFMPEG_DIR/include"          
+          export FFMPEG_DIR="$FFMPEG_DIR"
+          export BINDGEN_EXTRA_CLANG_ARGS="-I$FFMPEG_DIR/include"
+          
+          cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
 
   # Windows video build test
   build-windows-video:
@@ -127,9 +122,6 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Build (annotate + video features)
         run: cargo build --features annotate,video
 
@@ -148,20 +140,23 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
 
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
-
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 
       - name: Coverage
-        run: cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
+        run: |
+          FFMPEG_DIR=$(brew --prefix ffmpeg@7)
+          export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig"
+          export FFMPEG_DIR="$FFMPEG_DIR"
+          export BINDGEN_EXTRA_CLANG_ARGS="-I$FFMPEG_DIR/include"
+          
+          cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
         env:
-          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib"
+          # Adding these as well just in case
+          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib" 
           CPPFLAGS: "-I/opt/homebrew/opt/ffmpeg@7/include"
-          PKG_CONFIG_PATH: "/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
