@@ -1,0 +1,33 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+[package]
+name = "ultralytics-inference-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8.8", features = ["multipart"] }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+image = "0.25"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# OpenAPI documentation
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+# Local dependency to the main inference library
+ultralytics-inference = { path = "../../", default-features = false, features = [
+    "annotate",
+    "xnnpack",
+] }
+
+[features]
+default = []
+# Video support (adds FFmpeg dependency - larger image)
+video = ["ultralytics-inference/video"]
+# GPU acceleration features (passed through to ultralytics-inference)
+cuda = ["ultralytics-inference/cuda"]
+tensorrt = ["ultralytics-inference/tensorrt"]
+nvidia = ["cuda", "tensorrt"]
