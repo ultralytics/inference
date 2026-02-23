@@ -58,8 +58,8 @@ lru = "^0.16"
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "^0.17", features = ["rayon"] }
 
-# ONNX Runtime 1.23 - using latest from GitHub for best performance
-ort = { git = "https://github.com/pykeio/ort.git", rev = "4caf2d6a76cf401523d351bb74f2b76acd0d1bff", default-features = false, features = [
+# ONNX Runtime 1.24.2 - using latest from GitHub for best performance
+ort = { git = "https://github.com/pykeio/ort.git", rev = "060aff6b63ddc02eab97c79b3839c0c90be1a8a7", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",
