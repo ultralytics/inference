@@ -77,7 +77,7 @@ rayon = "^1.11"
 bytemuck = { version = "^1.25", features = ["derive"] }
 
 # Core - CLI arguments parsing
-clap = { version = "^4.5.58", features = ["derive"] }
+clap = { version = "^4.5.60", features = ["derive"] }
 colored = "^3.1.1"
 
 # Optional - Visualization and Video support
