@@ -41,15 +41,19 @@ jobs:
       - name: Tests (annotate feature)
         run: cargo test --no-default-features --features annotate
 
-  # Video feature tests (requires ffmpeg)
+  # Video feature tests for Linux - FFmpeg 7 and 8
   test-video:
-    name: test / linux / ffmpeg ${{ matrix.ffmpeg_version }}
+    name: test / linux / ffmpeg ${{ matrix.ffmpeg_version }} / ${{ matrix.feature }}
     runs-on: ubuntu-latest
     container: jrottenberg/ffmpeg:${{ matrix.ffmpeg_version }}-ubuntu
 
     strategy:
       matrix:
-        ffmpeg_version: ["7.1"]
+        include:
+          - ffmpeg_version: "8.0"
+            feature: "video"
+          - ffmpeg_version: "7.1"
+            feature: "video-ffmpeg7"
       fail-fast: false
 
     steps:
@@ -66,44 +70,40 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Pin video-rs for FFmpeg 7
+        if: matrix.feature == 'video-ffmpeg7'
+        run: cargo update -p video-rs --precise 0.10.5
+
       - name: Clippy (annotate + video)
-        run: cargo clippy --all --features annotate,video -- -D warnings
+        run: cargo clippy --all --features annotate,${{ matrix.feature }} -- -D warnings
 
       - name: Tests (annotate + video)
-        run: cargo test --all --features annotate,video
+        run: cargo test --all --features annotate,${{ matrix.feature }}
 
-  # macOS video build test
+  # macOS FFmpeg 8 video build test
   build-macos-video:
-    name: build / macos / ffmpeg 7
+    name: build / macos / ffmpeg 8 / video
     runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v6
 
       - name: Install dependencies
-        run: brew install ffmpeg@7 pkg-config
+        run: brew install ffmpeg pkg-config
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build (annotate + video features)
-        run: |
-          FFMPEG_DIR=$(brew --prefix ffmpeg@7)          
-          export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig"
-          export LDFLAGS="-L$FFMPEG_DIR/lib"
-          export CPPFLAGS="-I$FFMPEG_DIR/include"          
-          export FFMPEG_DIR="$FFMPEG_DIR"
-          export BINDGEN_EXTRA_CLANG_ARGS="-I$FFMPEG_DIR/include"
-          
-          cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
+        run: cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
 
-  # Windows video build test
+  # Windows FFmpeg 8 video build test
   build-windows-video:
-    name: build / windows / ffmpeg 7.1
+    name: build / windows / ffmpeg 8 / video
     runs-on: windows-latest
 
     env:
-      FFMPEG_DOWNLOAD_URL: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.1.1-full_build-shared.7z
+      FFMPEG_DOWNLOAD_URL: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z
 
     steps:
       - uses: actions/checkout@v6
@@ -112,8 +112,8 @@ jobs:
         run: |
           $VCINSTALLDIR = $(& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath)
           Add-Content $env:GITHUB_ENV "LIBCLANG_PATH=${VCINSTALLDIR}\VC\Tools\LLVM\x64\bin"
-          Invoke-WebRequest "${env:FFMPEG_DOWNLOAD_URL}" -OutFile ffmpeg-7.1.1-full_build-shared.7z
-          7z x ffmpeg-7.1.1-full_build-shared.7z
+          Invoke-WebRequest "${env:FFMPEG_DOWNLOAD_URL}" -OutFile ffmpeg-shared.7z
+          7z x ffmpeg-shared.7z
           mkdir ffmpeg
           mv ffmpeg-*/* ffmpeg/
           Add-Content $env:GITHUB_ENV "FFMPEG_DIR=${pwd}\ffmpeg"
@@ -125,7 +125,7 @@ jobs:
       - name: Build (annotate + video features)
         run: cargo build --features annotate,video
 
-  # Code coverage (runs on macOS with ffmpeg for full feature coverage)
+  # Code coverage (runs on macOS with FFmpeg 8 for full feature coverage)
   coverage:
     name: coverage
     runs-on: macos-latest
@@ -135,7 +135,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install dependencies
-        run: brew install ffmpeg@7 pkg-config
+        run: brew install ffmpeg pkg-config
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -146,17 +146,7 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Coverage
-        run: |
-          FFMPEG_DIR=$(brew --prefix ffmpeg@7)
-          export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig"
-          export FFMPEG_DIR="$FFMPEG_DIR"
-          export BINDGEN_EXTRA_CLANG_ARGS="-I$FFMPEG_DIR/include"
-          
-          cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
-        env:
-          # Adding these as well just in case
-          LDFLAGS: "-L/opt/homebrew/opt/ffmpeg@7/lib" 
-          CPPFLAGS: "-I/opt/homebrew/opt/ffmpeg@7/include"
+        run: cargo llvm-cov --features annotate,video --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

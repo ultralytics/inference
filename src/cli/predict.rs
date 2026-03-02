@@ -200,10 +200,10 @@ pub fn run_prediction(args: &PredictArgs) {
 
     // Source is already initialized above
     let is_video = source.is_video();
-    #[cfg(not(feature = "video"))]
+    #[cfg(not(feature = "video-runtime"))]
     if is_video {
         warn!(
-            "Video source detected but 'video' feature is not enabled. Please compile with '--features video'"
+            "Video source detected but video support is not enabled. Please compile with '--features video' (FFmpeg 8) or '--features video-ffmpeg7'"
         );
         process::exit(1);
     }
