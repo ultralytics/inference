@@ -121,13 +121,13 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
-    needs: [test, test-video]
+    needs: [test]
 
     steps:
       - uses: actions/checkout@v6
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg pkg-config
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavdevice-dev libswscale-dev libswresample-dev libpostproc-dev clang
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
