@@ -229,8 +229,8 @@
 //! |---------|-------------|
 //! | `annotate` | Image annotation support (default) |
 //! | `visualize` | Real-time window display (default) |
-//! | `video` | Video support via FFmpeg 8 |
-//! | `video-ffmpeg7` | Video support via FFmpeg 7 (legacy compatibility) |
+//! | `video` | Video support via `FFmpeg` 8 |
+//! | `video-ffmpeg7` | Video support via `FFmpeg` 7 |
 //! | `cuda` | NVIDIA CUDA acceleration |
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
