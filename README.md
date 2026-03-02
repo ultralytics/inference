@@ -371,10 +371,10 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 
 Video features require FFmpeg installed on your system. Two feature flags are available:
 
-| Feature         | FFmpeg Version | video-rs | Description           |
-| --------------- | -------------- | -------- | --------------------- |
-| `video`         | 8              | 0.11+    | Default, recommended  |
-| `video-ffmpeg7` | 7.x            | 0.10.x   | FFmpeg-7 support      |
+| Feature         | FFmpeg Version | video-rs | Description          |
+| --------------- | -------------- | -------- | -------------------- |
+| `video`         | 8              | 0.11+    | Default, recommended |
+| `video-ffmpeg7` | 7.x            | 0.10.x   | FFmpeg-7 support     |
 
 **FFmpeg 8 (default):**
 
