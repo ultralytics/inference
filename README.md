@@ -369,14 +369,7 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 
 ### Video Support (FFmpeg)
 
-Video features require FFmpeg installed on your system. Two feature flags are available:
-
-| Feature         | FFmpeg Version | video-rs | Description          |
-| --------------- | -------------- | -------- | -------------------- |
-| `video`         | 8              | 0.11+    | Default, recommended |
-| `video-ffmpeg7` | 7.x            | 0.10.x   | FFmpeg-7 support     |
-
-**FFmpeg 8 (default):**
+Video features require FFmpeg (7 or 8) installed on your system:
 
 ```bash
 # macOS
@@ -388,22 +381,6 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 # Build with video support
 cargo build --release --features video
 ```
-
-**FFmpeg 7 (optional):**
-
-```bash
-# macOS
-brew install ffmpeg@7
-
-# Ubuntu/Debian (use ffmpeg 7.x packages)
-apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libclang-dev
-
-# Pin video-rs to the FFmpeg 7 compatible version, then build
-cargo update -p video-rs --precise 0.10.5
-cargo build --release --features video-ffmpeg7
-```
-
-> **Note:** The `video` and `video-ffmpeg7` features are mutually exclusive — enable only one at a time.
 
 To build without annotation support (smaller binary):
 

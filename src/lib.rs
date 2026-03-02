@@ -229,8 +229,7 @@
 //! |---------|-------------|
 //! | `annotate` | Image annotation support (default) |
 //! | `visualize` | Real-time window display (default) |
-//! | `video` | Video support via `FFmpeg` 8 |
-//! | `video-ffmpeg7` | Video support via `FFmpeg` 7 |
+//! | `video` | Video file support (FFmpeg) |
 //! | `cuda` | NVIDIA CUDA acceleration |
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
@@ -241,16 +240,6 @@
 //! This project is dual-licensed under [AGPL-3.0](https://github.com/ultralytics/inference/blob/main/LICENSE)
 //! for open-source use or [Ultralytics Enterprise License](https://ultralytics.com/license)
 //! for commercial applications.
-
-#[cfg(all(feature = "video", feature = "video-ffmpeg7"))]
-compile_error!("Features 'video' and 'video-ffmpeg7' are mutually exclusive. Enable only one.");
-#[cfg(all(
-    feature = "video-runtime",
-    not(any(feature = "video", feature = "video-ffmpeg7"))
-))]
-compile_error!(
-    "Feature 'video-runtime' is internal. Enable either 'video' (FFmpeg 8) or 'video-ffmpeg7'."
-);
 
 // Modules
 #[cfg(feature = "annotate")]

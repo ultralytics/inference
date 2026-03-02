@@ -2,16 +2,16 @@
 
 //! I/O utilities for saving results including video encoding.
 
-#[cfg(feature = "video-runtime")]
+#[cfg(feature = "video")]
 use video_rs::{Encoder, Time, encode::Settings as EncoderSettings};
 
 use crate::error::{InferenceError, Result};
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "video-runtime")]
+#[cfg(feature = "video")]
 use std::sync::Once;
 
-#[cfg(feature = "video-runtime")]
+#[cfg(feature = "video")]
 static INIT: Once = Once::new();
 
 /// Initialize global video logging configuration.
@@ -20,7 +20,7 @@ static INIT: Once = Once::new();
 /// (only errors are shown). safe to call multiple times.
 #[allow(clippy::missing_const_for_fn)]
 pub fn init_logging() {
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     INIT.call_once(|| {
         if let Err(e) = video_rs::init() {
             eprintln!("Failed to initialize video-rs: {e}");
@@ -31,7 +31,7 @@ pub fn init_logging() {
 }
 
 /// A wrapper around `video-rs` encoder to simplify video saving.
-#[cfg(feature = "video-runtime")]
+#[cfg(feature = "video")]
 pub struct VideoWriter {
     encoder: Encoder,
     frame_duration: Time,
@@ -40,7 +40,7 @@ pub struct VideoWriter {
     height: usize,
 }
 
-#[cfg(feature = "video-runtime")]
+#[cfg(feature = "video")]
 impl VideoWriter {
     /// Create a new `VideoWriter`.
     ///
@@ -110,9 +110,6 @@ impl VideoWriter {
 
         let raw = img_buffer.into_raw();
 
-        #[cfg(all(feature = "video-ffmpeg7", not(feature = "video")))]
-        let frame_array = ndarray_0_16::Array3::from_shape_vec((height, width, 3), raw)
-            .map_err(|e| InferenceError::VideoError(e.to_string()))?;
         #[cfg(feature = "video")]
         let frame_array = ndarray::Array3::from_shape_vec((height, width, 3), raw)
             .map_err(|e| InferenceError::VideoError(e.to_string()))?;
@@ -145,9 +142,9 @@ impl VideoWriter {
 /// or individual frames, and manages the `VideoWriter` state.
 pub struct SaveResults {
     save_dir: PathBuf,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     save_frames: bool,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     video_writer: Option<VideoWriter>,
 }
 
@@ -165,9 +162,9 @@ impl SaveResults {
 
         Self {
             save_dir,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             save_frames,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             video_writer: None,
         }
     }
@@ -194,13 +191,13 @@ impl SaveResults {
     ) -> Result<()> {
         init_logging();
 
-        #[cfg(feature = "video-runtime")]
+        #[cfg(feature = "video")]
         let save_as_video = is_video && !self.save_frames;
-        #[cfg(not(feature = "video-runtime"))]
+        #[cfg(not(feature = "video"))]
         let save_as_video = false;
 
         if save_as_video {
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             {
                 // Video saving logic
                 if self.video_writer.is_none() {
@@ -278,7 +275,7 @@ impl SaveResults {
     ///
     /// Returns an error if the video writer fails to finish.
     pub fn finish(self) -> Result<()> {
-        #[cfg(feature = "video-runtime")]
+        #[cfg(feature = "video")]
         if let Some(writer) = self.video_writer {
             writer.finish()?;
         }

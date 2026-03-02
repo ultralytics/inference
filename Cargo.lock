@@ -1558,21 +1558,6 @@ dependencies = [
 
 [[package]]
 name = "ndarray"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
-dependencies = [
- "matrixmultiply",
- "num-complex",
- "num-integer",
- "num-traits",
- "portable-atomic",
- "portable-atomic-util",
- "rawpointer",
-]
-
-[[package]]
-name = "ndarray"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "520080814a7a6b4a6e9070823bb24b4531daac8c4627e08ba5de8c5ef2f2752d"
@@ -1803,7 +1788,7 @@ version = "2.0.0-rc.11"
 source = "git+https://github.com/pykeio/ort.git?rev=060aff6b63ddc02eab97c79b3839c0c90be1a8a7#060aff6b63ddc02eab97c79b3839c0c90be1a8a7"
 dependencies = [
  "half",
- "ndarray 0.17.2",
+ "ndarray",
  "num-complex",
  "ort-sys",
  "smallvec",
@@ -2714,8 +2699,7 @@ dependencies = [
  "jpeg-decoder",
  "lru",
  "minifb",
- "ndarray 0.16.1",
- "ndarray 0.17.2",
+ "ndarray",
  "ort",
  "rayon",
  "serial_test",
@@ -2836,7 +2820,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2633ec4c2a8aeb7c0e970f75ba99122a75841e9f7b34d5225366d0e61a870a8c"
 dependencies = [
  "ffmpeg-next",
- "ndarray 0.17.2",
+ "ndarray",
  "tracing",
  "url",
 ]

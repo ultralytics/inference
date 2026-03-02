@@ -826,10 +826,10 @@ impl YOLOModel {
         use crate::annotate::annotate_image;
 
         let is_video = source.is_video();
-        #[cfg(not(feature = "video-runtime"))]
+        #[cfg(not(feature = "video"))]
         if is_video {
             return Err(InferenceError::FeatureNotEnabled(
-                "Video support requires '--features video' (FFmpeg 8) or '--features video-ffmpeg7'"
+                "Video support requires '--features video'"
                     .to_string(),
             ));
         }

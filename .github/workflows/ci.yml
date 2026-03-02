@@ -43,17 +43,13 @@ jobs:
 
   # Video feature tests for Linux - FFmpeg 7 and 8
   test-video:
-    name: test / linux / ffmpeg ${{ matrix.ffmpeg_version }} / ${{ matrix.feature }}
+    name: test / linux / ffmpeg ${{ matrix.ffmpeg_version }}
     runs-on: ubuntu-latest
     container: jrottenberg/ffmpeg:${{ matrix.ffmpeg_version }}-ubuntu
 
     strategy:
       matrix:
-        include:
-          - ffmpeg_version: "8.0"
-            feature: "video"
-          - ffmpeg_version: "7.1"
-            feature: "video-ffmpeg7"
+        ffmpeg_version: ["8.0", "7.1"]
       fail-fast: false
 
     steps:
@@ -70,15 +66,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Pin video-rs for FFmpeg 7
-        if: matrix.feature == 'video-ffmpeg7'
-        run: cargo update -p video-rs --precise 0.10.5
-
       - name: Clippy (annotate + video)
-        run: cargo clippy --all --features annotate,${{ matrix.feature }} -- -D warnings
+        run: cargo clippy --all --features annotate,video -- -D warnings
 
       - name: Tests (annotate + video)
-        run: cargo test --all --features annotate,${{ matrix.feature }}
+        run: cargo test --all --features annotate,video
 
   # macOS FFmpeg 8 video build test
   build-macos-video:

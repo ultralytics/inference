@@ -227,7 +227,7 @@ impl Default for SourceMeta {
     }
 }
 
-#[cfg(feature = "video-runtime")]
+#[cfg(feature = "video")]
 use video_rs::ffmpeg;
 
 /// Iterator over frames from a source.
@@ -235,17 +235,17 @@ pub struct SourceIterator {
     source: Source,
     current_frame: usize,
     image_paths: Vec<PathBuf>,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     decoder: Option<video_rs::decode::Decoder>,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     webcam_decoder: Option<(ffmpeg::format::context::Input, ffmpeg::decoder::Video)>,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     webcam_stream_index: usize,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     total_frames: Option<usize>,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     webcam_init_failed: bool,
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     video_init_failed: bool,
 }
 
@@ -277,17 +277,17 @@ impl SourceIterator {
             source,
             current_frame: 0,
             image_paths,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             decoder: None,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             webcam_decoder: None,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             webcam_stream_index: 0,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             total_frames: None,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             webcam_init_failed: false,
-            #[cfg(feature = "video-runtime")]
+            #[cfg(feature = "video")]
             video_init_failed: false,
         })
     }
@@ -435,7 +435,7 @@ impl SourceIterator {
     }
 
     /// Get the next video frame.
-    #[cfg(feature = "video-runtime")]
+    #[cfg(feature = "video")]
     #[allow(unsafe_code, clippy::too_many_lines)]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         // Handle Webcam separately using native ffmpeg
@@ -687,7 +687,7 @@ impl SourceIterator {
         }
     }
 
-    #[cfg(not(feature = "video-runtime"))]
+    #[cfg(not(feature = "video"))]
     #[allow(
         clippy::unused_self,
         clippy::unnecessary_wraps,
@@ -695,7 +695,7 @@ impl SourceIterator {
     )]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         Some(Err(InferenceError::FeatureNotEnabled(
-            "Video support requires '--features video' (FFmpeg 8) or '--features video-ffmpeg7'"
+            "Video support requires '--features video'"
                 .to_string(),
         )))
     }
@@ -740,7 +740,7 @@ impl Iterator for SourceIterator {
     }
 }
 
-#[cfg(feature = "video-runtime")]
+#[cfg(feature = "video")]
 fn video_frame_to_image(arr: &video_rs::Frame) -> Result<DynamicImage> {
     let shape = arr.shape();
     let height = u32::try_from(shape[0])
