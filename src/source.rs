@@ -695,8 +695,7 @@ impl SourceIterator {
     )]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         Some(Err(InferenceError::FeatureNotEnabled(
-            "Video support requires '--features video'"
-                .to_string(),
+            "Video support requires '--features video'".to_string(),
         )))
     }
 }

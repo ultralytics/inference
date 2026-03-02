@@ -229,7 +229,7 @@
 //! |---------|-------------|
 //! | `annotate` | Image annotation support (default) |
 //! | `visualize` | Real-time window display (default) |
-//! | `video` | Video file support (FFmpeg) |
+//! | `video` | Video file support (`FFmpeg`) |
 //! | `cuda` | NVIDIA CUDA acceleration |
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |

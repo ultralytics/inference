@@ -829,8 +829,7 @@ impl YOLOModel {
         #[cfg(not(feature = "video"))]
         if is_video {
             return Err(InferenceError::FeatureNotEnabled(
-                "Video support requires '--features video'"
-                    .to_string(),
+                "Video support requires '--features video'".to_string(),
             ));
         }
 
