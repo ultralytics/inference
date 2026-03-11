@@ -367,6 +367,21 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 | `minifb`   | Window creation and buffer display |
 | `video-rs` | Video decoding/encoding (ffmpeg)   |
 
+### Video Support (FFmpeg)
+
+Video features require FFmpeg (7 or 8) installed on your system:
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libclang-dev
+
+# Build with video support
+cargo build --release --features video
+```
+
 To build without annotation support (smaller binary):
 
 ```bash

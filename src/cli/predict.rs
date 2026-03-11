@@ -203,7 +203,7 @@ pub fn run_prediction(args: &PredictArgs) {
     #[cfg(not(feature = "video"))]
     if is_video {
         warn!(
-            "Video source detected but 'video' feature is not enabled. Please compile with '--features video'"
+            "Video source detected but video support is not enabled. Please compile with '--features video'"
         );
         process::exit(1);
     }

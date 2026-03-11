@@ -228,7 +228,7 @@ impl Default for SourceMeta {
 }
 
 #[cfg(feature = "video")]
-use ffmpeg_next as ffmpeg;
+use video_rs::ffmpeg;
 
 /// Iterator over frames from a source.
 pub struct SourceIterator {
@@ -465,7 +465,7 @@ impl SourceIterator {
                 // Find input format by name using low-level C API
                 let c_name = std::ffi::CString::new(input_format_name).unwrap();
                 #[allow(unsafe_code)]
-                let ptr = unsafe { ffmpeg_sys_next::av_find_input_format(c_name.as_ptr()) };
+                let ptr = unsafe { video_rs::ffmpeg::ffi::av_find_input_format(c_name.as_ptr()) };
 
                 let input_format = if ptr.is_null() {
                     self.webcam_init_failed = true;
@@ -695,7 +695,7 @@ impl SourceIterator {
     )]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         Some(Err(InferenceError::FeatureNotEnabled(
-            "Video support requires 'video' feature".to_string(),
+            "Video support requires '--features video'".to_string(),
         )))
     }
 }

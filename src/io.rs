@@ -26,8 +26,7 @@ pub fn init_logging() {
             eprintln!("Failed to initialize video-rs: {e}");
         }
 
-        #[cfg(feature = "ffmpeg-next")]
-        ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Error);
+        video_rs::ffmpeg::log::set_level(video_rs::ffmpeg::log::Level::Error);
     });
 }
 
@@ -111,11 +110,7 @@ impl VideoWriter {
 
         let raw = img_buffer.into_raw();
 
-        #[cfg(feature = "ndarray_0_16")]
-        let frame_array = ndarray_0_16::Array3::from_shape_vec((height, width, 3), raw)
-            .map_err(|e| InferenceError::VideoError(e.to_string()))?;
-
-        #[cfg(not(feature = "ndarray_0_16"))]
+        #[cfg(feature = "video")]
         let frame_array = ndarray::Array3::from_shape_vec((height, width, 3), raw)
             .map_err(|e| InferenceError::VideoError(e.to_string()))?;
 
