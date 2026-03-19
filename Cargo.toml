@@ -59,14 +59,14 @@ lru = "^0.16"
 ndarray = { version = "^0.17", features = ["rayon"] }
 
 # ONNX Runtime 1.24.2 - using latest from GitHub for best performance
-ort = { git = "https://github.com/pykeio/ort.git", rev = "060aff6b63ddc02eab97c79b3839c0c90be1a8a7", default-features = false, features = [
+ort = { git = "https://github.com/pykeio/ort.git", rev = "f085e4c2516901ee606d1e10022142afa9348bf1", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",
     "copy-dylibs",
     "half",
     "tls-native",
-    "num-complex"
+    "num-complex",
 ] }
 
 # Core - FP16 support (required by ort's half feature)
