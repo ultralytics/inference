@@ -71,7 +71,7 @@ ort = { git = "https://github.com/pykeio/ort.git", rev = "f085e4c2516901ee606d1e
 
 # Core - FP16 support (required by ort's half feature)
 half = { version = "^2.7", features = ["num-traits"] }
-ureq = "^3.2.0"
+ureq = "^3.3.0"
 dirs = "^6.0"
 rayon = "^1.11"
 bytemuck = { version = "^1.25", features = ["derive"] }
