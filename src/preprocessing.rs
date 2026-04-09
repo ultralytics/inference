@@ -37,9 +37,17 @@ use ndarray::{Array3, Array4};
 /// Default letterbox padding color (gray).
 pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
 
-/// Fixed-point scale factor for integer bilinear interpolation (2^11 = 2048).
+/// Fixed-point scale factor for bilinear interpolation (2^11 = 2048).
+/// Matches `OpenCV`'s `INTER_RESIZE_COEF_BITS = 11` for `INTER_LINEAR`.
 const SCALE_BITS: i32 = 11;
 const SCALE_INT: i32 = 1 << SCALE_BITS;
+
+/// Double scale bits for single-pass bilinear interpolation.
+const SCALE_BITS_2X: i32 = 2 * SCALE_BITS;
+
+/// Rounding bias for fixed-point bilinear, added before the final right-shift
+/// to achieve round-to-nearest behavior matching `OpenCV`'s `saturate_cast`.
+const ROUND_BIAS: i32 = 1 << (SCALE_BITS_2X - 1);
 
 /// Normalized letterbox padding color (114/255 ≈ 0.447).
 const LETTERBOX_NORM: f32 = 114.0 / 255.0;
@@ -54,6 +62,8 @@ const LUT_CACHE_SIZE: usize = 8;
 // Type Aliases
 // ================================================================================================
 
+/// X LUT entry: (`x0_byte_offset`, `x1_byte_offset`, 1-fx, fx) using 11-bit fixed-point
+/// weights matching `OpenCV`'s `INTER_LINEAR` coordinate mapping.
 type XLutEntry = (usize, usize, i32, i32);
 type XLutKey = (u32, u32);
 
@@ -204,6 +214,12 @@ pub fn preprocess_image_with_precision(
 // ================================================================================================
 
 /// Get or compute the X coordinate LUT for bilinear interpolation.
+///
+/// Uses 11-bit fixed-point weights matching `OpenCV`'s `INTER_LINEAR` coordinate mapping:
+/// `src_x = (dst_x + 0.5) * (src_w / dst_w) - 0.5`
+///
+/// Weight computation matches `OpenCV`'s `resize.cpp`:
+/// `cbuf[0] = saturate_cast<short>((1-fx) * 2048); cbuf[1] = 2048 - cbuf[0];`
 fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Vec<XLutEntry> {
     let key = (src_w, dst_w);
 
@@ -221,10 +237,14 @@ fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Vec<XLutEntry> {
             .map(|dx| {
                 let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
                 let x0 = sx.floor() as i32;
-                let fx = ((sx - x0 as f32) * SCALE_INT as f32) as i32;
+                // Match OpenCV: cbuf[0] = saturate_cast<short>((1-fx)*SCALE),
+                //               cbuf[1] = SCALE - cbuf[0]
+                let fx_f = sx - x0 as f32;
+                let fx_inv = ((1.0 - fx_f) * SCALE_INT as f32 + 0.5) as i32;
+                let fx = SCALE_INT - fx_inv;
                 let x0c = x0.clamp(0, src_w_max) as usize * 3;
                 let x1c = (x0 + 1).clamp(0, src_w_max) as usize * 3;
-                (x0c, x1c, SCALE_INT - fx, fx)
+                (x0c, x1c, fx_inv, fx)
             })
             .collect();
 
@@ -250,7 +270,6 @@ fn fused_zerocopy_preprocess(
     use rayon::prelude::*;
     use std::mem::MaybeUninit;
     use std::sync::atomic::{AtomicPtr, Ordering};
-    use wide::f32x4;
 
     let (dst_h, dst_w) = target_size;
     let channel_size = dst_h * dst_w;
@@ -266,7 +285,6 @@ fn fused_zerocopy_preprocess(
     let x_lut = get_or_compute_x_lut(src_w, new_width);
     let scale_y = src_h as f32 / new_height as f32;
     let src_h_max = (src_h - 1) as i32;
-    let inv_255_vec = f32x4::splat(INV_255);
 
     let pad_top_usize = pad_top as usize;
     let pad_left_usize = pad_left as usize;
@@ -293,12 +311,14 @@ fn fused_zerocopy_preprocess(
                 return;
             }
 
-            // Image row calculations
+            // Image row calculations - 11-bit fixed-point bilinear matching
+            // OpenCV's INTER_LINEAR (INTER_RESIZE_COEF_BITS = 11).
             let img_dy = dy - pad_top_usize;
             let sy = ((img_dy as f32 + 0.5) * scale_y - 0.5).max(0.0);
             let y0 = sy.floor() as i32;
-            let fy = ((sy - y0 as f32) * SCALE_INT as f32) as i32;
-            let fy_inv = SCALE_INT - fy;
+            let fy_f = sy - y0 as f32;
+            let fy_inv = ((1.0 - fy_f) * SCALE_INT as f32 + 0.5) as i32;
+            let fy = SCALE_INT - fy_inv;
 
             let y0c = y0.clamp(0, src_h_max) as usize;
             let y1c = (y0 + 1).clamp(0, src_h_max) as usize;
@@ -312,69 +332,20 @@ fn fused_zerocopy_preprocess(
                 *b_row.add(dx) = LETTERBOX_NORM;
             }
 
-            // Inner image - SIMD loop (4 pixels at a time)
+            // Inner image pixels - fixed-point bilinear with rounding.
+            // Uses untruncated weights (w = fx * fy, range [0, 2048^2]) and a
+            // single shift with rounding bias, matching OpenCV's saturate_cast:
+            //   result = (sum + ROUND_BIAS) >> 22
+            // Max intermediate: 255 * 2048^2 + 2^21 ≈ 1.07B < i32::MAX.
             let mut img_dx = 0usize;
             let src_ptr = src_raw.as_ptr();
 
-            while img_dx + 4 <= new_width_usize {
-                let mut r_vals = [0.0f32; 4];
-                let mut g_vals = [0.0f32; 4];
-                let mut b_vals = [0.0f32; 4];
-
-                for i in 0..4 {
-                    let (x0_off, x1_off, fx_inv, fx) = *x_lut.get_unchecked(img_dx + i);
-                    let w00 = (fx_inv * fy_inv) >> SCALE_BITS;
-                    let w10 = (fx * fy_inv) >> SCALE_BITS;
-                    let w01 = (fx_inv * fy) >> SCALE_BITS;
-                    let w11 = (fx * fy) >> SCALE_BITS;
-
-                    let p00 = src_ptr.add(row0_off + x0_off);
-                    let p10 = src_ptr.add(row0_off + x1_off);
-                    let p01 = src_ptr.add(row1_off + x0_off);
-                    let p11 = src_ptr.add(row1_off + x1_off);
-
-                    r_vals[i] = ((*p00 as i32 * w00
-                        + *p10 as i32 * w10
-                        + *p01 as i32 * w01
-                        + *p11 as i32 * w11)
-                        >> SCALE_BITS) as f32;
-                    g_vals[i] = ((*p00.add(1) as i32 * w00
-                        + *p10.add(1) as i32 * w10
-                        + *p01.add(1) as i32 * w01
-                        + *p11.add(1) as i32 * w11)
-                        >> SCALE_BITS) as f32;
-                    b_vals[i] = ((*p00.add(2) as i32 * w00
-                        + *p10.add(2) as i32 * w10
-                        + *p01.add(2) as i32 * w01
-                        + *p11.add(2) as i32 * w11)
-                        >> SCALE_BITS) as f32;
-                }
-
-                // SIMD normalize
-                let r_simd = f32x4::new(r_vals) * inv_255_vec;
-                let g_simd = f32x4::new(g_vals) * inv_255_vec;
-                let b_simd = f32x4::new(b_vals) * inv_255_vec;
-
-                let out_x = pad_left_usize + img_dx;
-                let r_arr: [f32; 4] = r_simd.into();
-                let g_arr: [f32; 4] = g_simd.into();
-                let b_arr: [f32; 4] = b_simd.into();
-
-                // Direct raw pointer writes (no bounds checks)
-                std::ptr::copy_nonoverlapping(r_arr.as_ptr(), r_row.add(out_x), 4);
-                std::ptr::copy_nonoverlapping(g_arr.as_ptr(), g_row.add(out_x), 4);
-                std::ptr::copy_nonoverlapping(b_arr.as_ptr(), b_row.add(out_x), 4);
-
-                img_dx += 4;
-            }
-
-            // Scalar tail
             while img_dx < new_width_usize {
                 let (x0_off, x1_off, fx_inv, fx) = *x_lut.get_unchecked(img_dx);
-                let w00 = (fx_inv * fy_inv) >> SCALE_BITS;
-                let w10 = (fx * fy_inv) >> SCALE_BITS;
-                let w01 = (fx_inv * fy) >> SCALE_BITS;
-                let w11 = (fx * fy) >> SCALE_BITS;
+                let w00 = fx_inv * fy_inv;
+                let w10 = fx * fy_inv;
+                let w01 = fx_inv * fy;
+                let w11 = fx * fy;
 
                 let p00 = src_ptr.add(row0_off + x0_off);
                 let p10 = src_ptr.add(row0_off + x1_off);
@@ -385,20 +356,23 @@ fn fused_zerocopy_preprocess(
                 *r_row.add(out_x) = ((*p00 as i32 * w00
                     + *p10 as i32 * w10
                     + *p01 as i32 * w01
-                    + *p11 as i32 * w11)
-                    >> SCALE_BITS) as f32
+                    + *p11 as i32 * w11
+                    + ROUND_BIAS)
+                    >> SCALE_BITS_2X) as f32
                     * INV_255;
                 *g_row.add(out_x) = ((*p00.add(1) as i32 * w00
                     + *p10.add(1) as i32 * w10
                     + *p01.add(1) as i32 * w01
-                    + *p11.add(1) as i32 * w11)
-                    >> SCALE_BITS) as f32
+                    + *p11.add(1) as i32 * w11
+                    + ROUND_BIAS)
+                    >> SCALE_BITS_2X) as f32
                     * INV_255;
                 *b_row.add(out_x) = ((*p00.add(2) as i32 * w00
                     + *p10.add(2) as i32 * w10
                     + *p01.add(2) as i32 * w01
-                    + *p11.add(2) as i32 * w11)
-                    >> SCALE_BITS) as f32
+                    + *p11.add(2) as i32 * w11
+                    + ROUND_BIAS)
+                    >> SCALE_BITS_2X) as f32
                     * INV_255;
 
                 img_dx += 1;
@@ -510,7 +484,6 @@ fn calculate_letterbox_params(
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let new_h = (orig_h * scale).round() as u32;
 
-    // Calculate padding to center the image (matching Python Ultralytics default)
     #[allow(clippy::cast_possible_truncation)]
     let pad_w = (target_size.1 as u32).saturating_sub(new_w);
     #[allow(clippy::cast_possible_truncation)]
@@ -520,13 +493,13 @@ fn calculate_letterbox_params(
     let pad_left = pad_w / 2;
     let pad_top = pad_h / 2;
 
-    // Scale factors for coordinate conversion back to original
-    #[allow(clippy::cast_precision_loss)]
-    let scale_x = new_w as f32 / orig_w;
-    #[allow(clippy::cast_precision_loss)]
-    let scale_y = new_h as f32 / orig_h;
-
-    (new_w, new_h, pad_left, pad_top, (scale_y, scale_x))
+    // Use a uniform gain for coordinate back-projection.
+    // This matches Ultralytics `scale_boxes()`, which applies a single
+    // `gain = min(target_h / orig_h, target_w / orig_w)` to both axes.
+    // Per-axis gains (`new_w / orig_w`, `new_h / orig_h`) can diverge slightly
+    // after rounding `new_w`/`new_h`, leading to small box shifts and
+    // different NMS results.
+    (new_w, new_h, pad_left, pad_top, (scale, scale))
 }
 
 /// Convert an RGB image to a normalized NCHW tensor (FP32).

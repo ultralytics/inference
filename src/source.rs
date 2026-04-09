@@ -230,13 +230,158 @@ impl Default for SourceMeta {
 #[cfg(feature = "video")]
 use video_rs::ffmpeg;
 
+/// Custom FFmpeg video decoder using `SWS_BILINEAR` for YUV→RGB conversion.
+///
+/// `video-rs` defaults to `SWS_AREA`, which can produce slightly different
+/// pixel values during colorspace conversion. Those differences can affect
+/// borderline confidence predictions and lead to small detection drift.
+/// For consistency, this decoder uses `SWS_BILINEAR` explicitly.
+#[cfg(feature = "video")]
+struct BilinearVideoDecoder {
+    input_ctx: ffmpeg::format::context::Input,
+    decoder: ffmpeg::decoder::Video,
+    scaler: Option<ffmpeg::software::scaling::context::Context>,
+    stream_index: usize,
+    /// Total frames (estimated from duration * fps).
+    total_frames: Option<usize>,
+    /// Frames per second.
+    fps: f32,
+}
+
+#[cfg(feature = "video")]
+impl BilinearVideoDecoder {
+    fn new(path: &Path) -> Result<Self> {
+        ffmpeg::init().map_err(|e| InferenceError::VideoError(format!("FFmpeg init: {e}")))?;
+
+        let input_ctx = ffmpeg::format::input(path)
+            .map_err(|e| InferenceError::VideoError(format!("Cannot open {}: {e}", path.display())))?;
+
+        let stream = input_ctx
+            .streams()
+            .best(ffmpeg::media::Type::Video)
+            .ok_or_else(|| InferenceError::VideoError("No video stream found".into()))?;
+
+        let stream_index = stream.index();
+
+        // Estimate total frames
+        #[allow(clippy::cast_possible_truncation)]
+        let fps = f64::from(stream.avg_frame_rate()) as f32;
+        #[allow(clippy::cast_precision_loss)]
+        let duration_secs = input_ctx.duration() as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let total_frames = if duration_secs > 0.0 && fps > 0.0 {
+            Some((duration_secs * f64::from(fps)) as usize)
+        } else {
+            None
+        };
+
+        let context_decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+            .map_err(|e| InferenceError::VideoError(format!("Codec context: {e}")))?;
+        let decoder = context_decoder
+            .decoder()
+            .video()
+            .map_err(|e| InferenceError::VideoError(format!("Video decoder: {e}")))?;
+
+        Ok(Self {
+            input_ctx,
+            decoder,
+            scaler: None,
+            stream_index,
+            total_frames,
+            fps,
+        })
+    }
+
+    /// Decode the next frame as an RGB24 `DynamicImage`.
+    fn decode_next(&mut self) -> Option<Result<DynamicImage>> {
+        let mut decoded = ffmpeg::util::frame::video::Video::empty();
+
+        loop {
+            // Try to receive a frame from the decoder first
+            if self.decoder.receive_frame(&mut decoded).is_ok() {
+                return Some(self.frame_to_image(&decoded));
+            }
+
+            // Read packets until we find one for our stream
+            let mut found_packet = false;
+            for (stream, packet) in self.input_ctx.packets() {
+                if stream.index() == self.stream_index {
+                    if self.decoder.send_packet(&packet).is_err() {
+                        continue;
+                    }
+                    found_packet = true;
+                    break;
+                }
+            }
+
+            if !found_packet {
+                // End of stream - flush decoder
+                let _ = self.decoder.send_eof();
+                return if self.decoder.receive_frame(&mut decoded).is_ok() {
+                    Some(self.frame_to_image(&decoded))
+                } else {
+                    None
+                };
+            }
+
+            // Try to receive again after sending the packet
+            if self.decoder.receive_frame(&mut decoded).is_ok() {
+                return Some(self.frame_to_image(&decoded));
+            }
+        }
+    }
+
+    /// Convert a decoded video frame to RGB24 DynamicImage using BILINEAR scaler.
+    fn frame_to_image(&mut self, decoded: &ffmpeg::util::frame::video::Video) -> Result<DynamicImage> {
+        // Initialize scaler on first frame (we need actual dimensions)
+        if self.scaler.is_none() {
+            self.scaler = Some(
+                ffmpeg::software::scaling::context::Context::get(
+                    decoded.format(),
+                    decoded.width(),
+                    decoded.height(),
+                    ffmpeg::format::Pixel::RGB24,
+                    decoded.width(),
+                    decoded.height(),
+                    ffmpeg::software::scaling::flag::Flags::BILINEAR,
+                )
+                .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
+            );
+        }
+
+        let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
+        self.scaler
+            .as_mut()
+            .unwrap()
+            .run(decoded, &mut rgb_frame)
+            .map_err(|e| InferenceError::VideoError(format!("Scale: {e}")))?;
+
+        let width = rgb_frame.width();
+        let height = rgb_frame.height();
+        let data = rgb_frame.data(0);
+        let stride = rgb_frame.stride(0);
+
+        // Copy tightly-packed RGB data (stride may be wider than width*3)
+        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height as usize {
+            let row = &data[y * stride..y * stride + (width as usize) * 3];
+            rgb_data.extend_from_slice(row);
+        }
+
+        let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+            InferenceError::ImageError("Failed to create image from video frame".into())
+        })?;
+        Ok(DynamicImage::ImageRgb8(img_buffer))
+    }
+}
+
 /// Iterator over frames from a source.
 pub struct SourceIterator {
     source: Source,
     current_frame: usize,
     image_paths: Vec<PathBuf>,
     #[cfg(feature = "video")]
-    decoder: Option<video_rs::decode::Decoder>,
+    decoder: Option<BilinearVideoDecoder>,
     #[cfg(feature = "video")]
     webcam_decoder: Option<(ffmpeg::format::context::Input, ffmpeg::decoder::Video)>,
     #[cfg(feature = "video")]
@@ -625,27 +770,13 @@ impl SourceIterator {
             let path_str = match &self.source {
                 Source::Video(p) => Some(p.to_string_lossy().to_string()),
                 Source::Stream(s) => Some(s.clone()),
-                // Webcam handled above
                 _ => None,
             };
 
             if let Some(path_str) = path_str {
-                match video_rs::decode::Decoder::new(Path::new(&path_str)) {
+                match BilinearVideoDecoder::new(Path::new(&path_str)) {
                     Ok(d) => {
-                        // Calculate total frames from duration and frame rate
-                        // Note: limit to Video source only as streams/webcams are infinite
-                        #[allow(clippy::collapsible_if)]
-                        if let Source::Video(_) = &self.source {
-                            if let Ok(duration) = d.duration() {
-                                let fps = d.frame_rate();
-                                let duration_seconds = duration.as_secs_f64();
-                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                                {
-                                    self.total_frames =
-                                        Some((duration_seconds * f64::from(fps)) as usize);
-                                }
-                            }
-                        }
+                        self.total_frames = d.total_frames;
                         self.decoder = Some(d);
                     }
                     Err(e) => {
@@ -659,10 +790,8 @@ impl SourceIterator {
         }
 
         if let Some(decoder) = &mut self.decoder {
-            // Attempt to decode next frame
-            match decoder.decode() {
-                Ok((_ts, frame)) => {
-                    let fps = decoder.frame_rate();
+            match decoder.decode_next() {
+                Some(Ok(img)) => {
                     let meta = SourceMeta {
                         frame_idx: self.current_frame,
                         total_frames: self.total_frames,
@@ -671,16 +800,13 @@ impl SourceIterator {
                             .path()
                             .map(|p| p.to_string_lossy().to_string())
                             .unwrap_or_default(),
-                        fps: Some(fps),
+                        fps: Some(decoder.fps),
                     };
                     self.current_frame += 1;
-
-                    match video_frame_to_image(&frame) {
-                        Ok(img) => Some(Ok((img, meta))),
-                        Err(e) => Some(Err(e)),
-                    }
+                    Some(Ok((img, meta)))
                 }
-                Err(_e) => None,
+                Some(Err(e)) => Some(Err(e)),
+                None => None,
             }
         } else {
             None
@@ -739,29 +865,6 @@ impl Iterator for SourceIterator {
     }
 }
 
-#[cfg(feature = "video")]
-fn video_frame_to_image(arr: &video_rs::Frame) -> Result<DynamicImage> {
-    let shape = arr.shape();
-    let height = u32::try_from(shape[0])
-        .map_err(|_| InferenceError::ImageError("Image height exceeds u32::MAX".to_string()))?;
-    let width = u32::try_from(shape[1])
-        .map_err(|_| InferenceError::ImageError("Image width exceeds u32::MAX".to_string()))?;
-
-    // video_rs::Frame is an ndarray::Array3<u8> with shape (H, W, 3) and standard layout (C-contiguous).
-    // We can directly copy the raw data.
-    let rgb_data = arr
-        .as_slice()
-        .ok_or_else(|| {
-            InferenceError::ImageError("Failed to get raw slice from video frame".to_string())
-        })?
-        .to_vec();
-
-    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
-        InferenceError::ImageError("Failed to create image from video frame".to_string())
-    })?;
-
-    Ok(DynamicImage::ImageRgb8(img_buffer))
-}
 
 #[cfg(test)]
 mod tests {
