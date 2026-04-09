@@ -253,8 +253,9 @@ impl BilinearVideoDecoder {
     fn new(path: &Path) -> Result<Self> {
         ffmpeg::init().map_err(|e| InferenceError::VideoError(format!("FFmpeg init: {e}")))?;
 
-        let input_ctx = ffmpeg::format::input(path)
-            .map_err(|e| InferenceError::VideoError(format!("Cannot open {}: {e}", path.display())))?;
+        let input_ctx = ffmpeg::format::input(path).map_err(|e| {
+            InferenceError::VideoError(format!("Cannot open {}: {e}", path.display()))
+        })?;
 
         let stream = input_ctx
             .streams()
@@ -332,7 +333,10 @@ impl BilinearVideoDecoder {
     }
 
     /// Convert a decoded video frame to RGB24 DynamicImage using BILINEAR scaler.
-    fn frame_to_image(&mut self, decoded: &ffmpeg::util::frame::video::Video) -> Result<DynamicImage> {
+    fn frame_to_image(
+        &mut self,
+        decoded: &ffmpeg::util::frame::video::Video,
+    ) -> Result<DynamicImage> {
         // Initialize scaler on first frame (we need actual dimensions)
         if self.scaler.is_none() {
             self.scaler = Some(
@@ -864,7 +868,6 @@ impl Iterator for SourceIterator {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
