@@ -56,7 +56,7 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| d.parse().expect("Invalid device"));
     #[cfg(feature = "visualize")]
     let show = args.show;
-    // Warn if using default model (like Python does)
+    // Warn if using default model
     if model_is_default && verbose {
         warn!(
             "'model' argument is missing. Using default '--model={}'.",
