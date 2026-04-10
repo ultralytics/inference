@@ -137,7 +137,9 @@ impl From<&str> for Source {
             return Self::Glob(s.to_string());
         }
 
-        let path = PathBuf::from(s);
+        let path = PathBuf::from(s)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(s));
 
         // Check if it's a directory
         if path.is_dir() {
