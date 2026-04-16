@@ -130,8 +130,7 @@ impl YOLOModel {
             config.num_threads
         } else {
             // Use all available cores for intra-op parallelism (single inference)
-            std::thread::available_parallelism()
-                .map_or(4, std::num::NonZero::get)
+            std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
         };
 
         // Create ONNX Runtime session with optimizations
