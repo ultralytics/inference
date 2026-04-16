@@ -130,9 +130,7 @@ impl YOLOModel {
             config.num_threads
         } else {
             // Use all available cores for intra-op parallelism (single inference)
-            std::thread::available_parallelism()
-                .map(std::num::NonZero::get)
-                .unwrap_or(4)
+            std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
         };
 
         // Create ONNX Runtime session with optimizations
@@ -734,7 +732,7 @@ impl YOLOModel {
         // Process each image's output
         for (i, (orig_img, preprocess_res)) in image_arrays
             .into_iter()
-            .zip(preprocessed_results.into_iter())
+            .zip(preprocessed_results)
             .enumerate()
         {
             let path = paths.get(i).cloned().unwrap_or_default();
