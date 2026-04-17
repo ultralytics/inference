@@ -40,7 +40,7 @@ use crate::warn;
 /// ```no_run
 /// use ultralytics_inference::YOLOModel;
 ///
-/// let mut model = YOLOModel::load("yolo11n.onnx").unwrap();
+/// let mut model = YOLOModel::load("yolo26n.onnx").unwrap();
 /// let results = model.predict("image.jpg").unwrap();
 /// println!("Found {} detections", results.len());
 /// ```
@@ -96,7 +96,7 @@ impl YOLOModel {
     /// ```no_run
     /// use ultralytics_inference::YOLOModel;
     ///
-    /// let model = YOLOModel::load("yolo11n.onnx")?;
+    /// let model = YOLOModel::load("yolo26n.onnx")?;
     /// # Ok::<(), ultralytics_inference::InferenceError>(())
     /// ```
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -1016,7 +1016,7 @@ impl YOLOModel {
     ///
     /// ```no_run
     /// use ultralytics_inference::YOLOModel;
-    /// let mut model = YOLOModel::load("yolo11n.onnx")?;
+    /// let mut model = YOLOModel::load("yolo26n.onnx")?;
     /// println!("Model name: {}", model.metadata().model_name());
     /// # Ok::<(), ultralytics_inference::InferenceError>(())
     /// ```
@@ -1079,16 +1079,16 @@ mod tests {
         // Since we can't easily mock YOLOModel (it wraps internal ORT session),
         // we can at least test specific public methods if we had a valid model.
         // But for getters, we need an instance.
-        // We can use the auto-downloaded yolo11n.onnx if available,
+        // We can use the auto-downloaded yolo26n.onnx if available,
         // but unit tests should be hermetic if possible.
-        // However, we rely on yolo11n.onnx for other tests.
+        // However, we rely on yolo26n.onnx for other tests.
 
         // Only run if model exists or can be downloaded
-        if let Ok(model) = YOLOModel::load("yolo11n.onnx") {
+        if let Ok(model) = YOLOModel::load("yolo26n.onnx") {
             assert_eq!(model.task(), Task::Detect);
             assert!(model.num_classes() > 0);
             assert_eq!(model.stride(), 32);
-            assert_eq!(model.imgsz(), (640, 640)); // Default for yolo11n
+            assert_eq!(model.imgsz(), (640, 640)); // Default for yolo26n
             assert!(!model.names().is_empty());
             assert_eq!(model.model_path(), ""); // Placeholder returns empty string
 
