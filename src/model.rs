@@ -474,6 +474,8 @@ impl YOLOModel {
             "half",
             "channels",
             "args",
+            "end2end",
+            "kpt_shape",
         ];
 
         for key in &keys {
@@ -766,6 +768,8 @@ impl YOLOModel {
                 path,
                 speed,
                 inference_shape,
+                self.metadata.end2end,
+                self.metadata.kpt_shape,
             );
 
             batch_results.push(vec![result]);
