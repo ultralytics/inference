@@ -70,7 +70,14 @@ pub fn postprocess(
             let (output, shape) = &outputs[0];
             if end2end || is_end2end_detect_shape(shape) {
                 postprocess_detect_end2end(
-                    output, shape, preprocess, config, names, orig_img, path, speed,
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
                     inference_shape,
                 )
             } else {
@@ -152,7 +159,14 @@ pub fn postprocess(
             let (output, shape) = &outputs[0];
             if end2end || is_end2end_obb_shape(shape) {
                 postprocess_obb_end2end(
-                    output, shape, preprocess, config, names, orig_img, path, speed,
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
                     inference_shape,
                 )
             } else {
@@ -1383,8 +1397,13 @@ fn postprocess_detect_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let (x1, y1, x2, y2) =
-            scale_xyxy(output[base], output[base + 1], output[base + 2], output[base + 3], preprocess);
+        let (x1, y1, x2, y2) = scale_xyxy(
+            output[base],
+            output[base + 1],
+            output[base + 2],
+            output[base + 3],
+            preprocess,
+        );
         rows.push([
             x1.clamp(0.0, max_w),
             y1.clamp(0.0, max_h),
@@ -1418,7 +1437,9 @@ fn postprocess_detect_end2end(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::too_many_lines,
-    clippy::needless_pass_by_value
+    clippy::needless_pass_by_value,
+    clippy::similar_names,
+    clippy::manual_let_else
 )]
 fn postprocess_segment_end2end(
     outputs: Vec<(&[f32], Vec<usize>)>,
@@ -1448,10 +1469,7 @@ fn postprocess_segment_end2end(
     let feats = shape0[2];
     let num_masks = shape1[1];
     if feats < 6 + num_masks {
-        eprintln!(
-            "WARNING ⚠️ End2end segment features ({feats}) < 6 + num_masks ({}).",
-            num_masks
-        );
+        eprintln!("WARNING ⚠️ End2end segment features ({feats}) < 6 + num_masks ({num_masks}).");
         return results;
     }
 
@@ -1594,7 +1612,11 @@ fn postprocess_segment_end2end(
 }
 
 /// Post-process YOLO26 end-to-end pose output `[1, max_det, 6 + nk*kpt_dim]`.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::similar_names
+)]
 fn postprocess_pose_end2end(
     output: &[f32],
     output_shape: &[usize],
@@ -1668,7 +1690,10 @@ fn postprocess_pose_end2end(
     }
 
     if rows.is_empty() {
-        results.keypoints = Some(Keypoints::new(Array3::zeros((0, nk, 3)), preprocess.orig_shape));
+        results.keypoints = Some(Keypoints::new(
+            Array3::zeros((0, nk, 3)),
+            preprocess.orig_shape,
+        ));
         return results;
     }
 
