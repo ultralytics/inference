@@ -95,8 +95,12 @@ pub fn postprocess(
             }
         }
         Task::Segment => {
-            let shape0 = &outputs[0].1;
-            if end2end || is_end2end_segment_shape(shape0) {
+            // Derive proto channel count from the second output tensor (shape `[1, nm, mh, mw]`),
+            // so exports with non-default prototype counts are still classified correctly.
+            let proto_channels = outputs
+                .get(1)
+                .and_then(|(_, s)| if s.len() == 4 { Some(s[1]) } else { None });
+            if end2end || is_end2end_segment_shape(&outputs[0].1, proto_channels) {
                 postprocess_segment_end2end(
                     outputs,
                     preprocess,
@@ -122,8 +126,13 @@ pub fn postprocess(
         }
         Task::Pose => {
             let (output, shape) = &outputs[0];
-            let (nk, kpt_dim) = kpt_shape.unwrap_or((17, 3));
-            if end2end || is_end2end_pose_shape(shape, nk, kpt_dim) {
+            // Prefer metadata-provided `kpt_shape`; otherwise infer the keypoint
+            // layout from the tensor shape so non-COCO pose models still work.
+            let resolved_kpt = kpt_shape.or_else(|| infer_end2end_kpt_shape(shape));
+            let is_end2end = end2end
+                || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_pose_shape(shape, nk, kd));
+            if is_end2end {
+                let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
                 postprocess_pose_end2end(
                     output,
                     shape,
@@ -193,14 +202,35 @@ fn is_end2end_detect_shape(shape: &[usize]) -> bool {
 
 /// Detect if a 3D shape matches YOLO26 end2end segment layout `[1, max_det, 6 + nm]`.
 ///
-/// End2end segment rows are `[x1, y1, x2, y2, conf, cls, 32 mask coeffs]` = 38.
-fn is_end2end_segment_shape(shape: &[usize]) -> bool {
-    shape.len() == 3 && shape[2] == 6 + 32 && shape[1] <= 4096
+/// When the proto tensor's channel count is known (passed via `proto_channels`),
+/// it is used as the authoritative `nm`; otherwise the shape is rejected since
+/// hardcoding `nm=32` would misclassify exports with non-default prototype counts.
+fn is_end2end_segment_shape(shape: &[usize], proto_channels: Option<usize>) -> bool {
+    proto_channels.is_some_and(|nm| shape.len() == 3 && shape[2] == 6 + nm && shape[1] <= 4096)
 }
 
 /// Detect if a 3D shape matches YOLO26 end2end pose layout `[1, max_det, 6 + nk*dim]`.
 fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
     shape.len() == 3 && shape[2] == 6 + nk * kpt_dim && shape[1] <= 4096
+}
+
+/// Infer `(nk, kpt_dim)` from a pose tensor shape assumed to be end-to-end
+/// (`[1, max_det, 6 + nk*kpt_dim]`). Used when `kpt_shape` metadata is absent.
+///
+/// Prefers `kpt_dim=3` (Ultralytics default with visibility); falls back to `kpt_dim=2`.
+/// Returns `None` if the shape doesn't look like the end-to-end layout.
+fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
+    if shape.len() != 3 || shape[1] == 0 || shape[1] > 4096 || shape[2] <= 6 {
+        return None;
+    }
+    let kpt_feats = shape[2] - 6;
+    if kpt_feats.is_multiple_of(3) {
+        Some((kpt_feats / 3, 3))
+    } else if kpt_feats.is_multiple_of(2) {
+        Some((kpt_feats / 2, 2))
+    } else {
+        None
+    }
 }
 
 /// Detect if a 3D shape matches YOLO26 end2end OBB layout `[1, max_det, 7]`.

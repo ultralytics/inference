@@ -179,9 +179,11 @@ impl ModelMetadata {
         Ok(metadata)
     }
 
-    /// Parse a `kpt_shape` value like "[17, 3]" into a tuple.
+    /// Parse a `kpt_shape` value like "[17, 3]" or "(17, 3)" into a tuple.
     fn parse_kpt_shape(value: &str) -> Option<(usize, usize)> {
-        let inner = value.trim().trim_start_matches('[').trim_end_matches(']');
+        let inner = value
+            .trim()
+            .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
         let parts: Vec<usize> = inner
             .split(',')
             .filter_map(|s| s.trim().parse().ok())
