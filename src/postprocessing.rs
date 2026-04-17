@@ -1412,15 +1412,14 @@ fn postprocess_detect_end2end(
 
     let (oh, ow) = preprocess.orig_shape;
     let (max_w, max_h) = (ow as f32, oh as f32);
-    let conf_thresh = config.confidence_threshold;
     let user_cap = config.max_det.min(max_det);
 
-    let mut rows: Vec<[f32; 6]> = Vec::with_capacity(user_cap);
+    let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
     for i in 0..max_det {
         let base = i * feats;
         let conf = output[base + 4];
-        if conf < conf_thresh {
-            // End2end outputs are sorted by confidence descending; we can stop.
+        // End2end outputs are sorted by confidence descending; stop on first below threshold.
+        if conf < config.confidence_threshold {
             break;
         }
         let cls = output[base + 5] as usize;
@@ -1434,7 +1433,7 @@ fn postprocess_detect_end2end(
             output[base + 3],
             preprocess,
         );
-        rows.push([
+        flat.extend_from_slice(&[
             x1.clamp(0.0, max_w),
             y1.clamp(0.0, max_h),
             x2.clamp(0.0, max_w),
@@ -1442,21 +1441,16 @@ fn postprocess_detect_end2end(
             conf,
             cls as f32,
         ]);
-        if rows.len() >= user_cap {
+        if flat.len() >= user_cap * 6 {
             break;
         }
     }
 
-    if rows.is_empty() {
-        return results;
+    let n = flat.len() / 6;
+    if n > 0 {
+        let boxes_data = Array2::from_shape_vec((n, 6), flat).expect("flat length matches (n, 6)");
+        results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     }
-    let mut boxes_data = Array2::zeros((rows.len(), 6));
-    for (i, r) in rows.iter().enumerate() {
-        for (j, v) in r.iter().enumerate() {
-            boxes_data[[i, j]] = *v;
-        }
-    }
-    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     results
 }
 
@@ -1505,16 +1499,15 @@ fn postprocess_segment_end2end(
 
     let (oh, ow) = preprocess.orig_shape;
     let (max_w, max_h) = (ow as f32, oh as f32);
-    let conf_thresh = config.confidence_threshold;
     let user_cap = config.max_det.min(max_det);
 
-    let mut kept_rows: Vec<[f32; 6]> = Vec::with_capacity(user_cap);
-    let mut kept_coeffs: Vec<Vec<f32>> = Vec::with_capacity(user_cap);
+    let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
+    let mut flat_coeffs: Vec<f32> = Vec::with_capacity(user_cap * num_masks);
 
     for i in 0..max_det {
         let base = i * feats;
         let conf = output0[base + 4];
-        if conf < conf_thresh {
+        if conf < config.confidence_threshold {
             break;
         }
         let cls = output0[base + 5] as usize;
@@ -1528,7 +1521,7 @@ fn postprocess_segment_end2end(
             output0[base + 3],
             preprocess,
         );
-        kept_rows.push([
+        flat_boxes.extend_from_slice(&[
             x1.clamp(0.0, max_w),
             y1.clamp(0.0, max_h),
             x2.clamp(0.0, max_w),
@@ -1537,28 +1530,21 @@ fn postprocess_segment_end2end(
             cls as f32,
         ]);
         let coeff_start = base + 6;
-        kept_coeffs.push(output0[coeff_start..coeff_start + num_masks].to_vec());
-        if kept_rows.len() >= user_cap {
+        flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
+        if flat_boxes.len() >= user_cap * 6 {
             break;
         }
     }
 
-    if kept_rows.is_empty() {
+    let num_kept = flat_boxes.len() / 6;
+    if num_kept == 0 {
         return results;
     }
 
-    let num_kept = kept_rows.len();
-    let mut boxes_data = Array2::zeros((num_kept, 6));
-    let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
-    for (i, r) in kept_rows.iter().enumerate() {
-        for (j, v) in r.iter().enumerate() {
-            boxes_data[[i, j]] = *v;
-        }
-        for (m, v) in kept_coeffs[i].iter().enumerate() {
-            mask_coeffs[[i, m]] = *v;
-        }
-    }
-    results.boxes = Some(Boxes::new(boxes_data.clone(), preprocess.orig_shape));
+    let boxes_data =
+        Array2::from_shape_vec((num_kept, 6), flat_boxes).expect("flat length matches (n, 6)");
+    let mask_coeffs = Array2::from_shape_vec((num_kept, num_masks), flat_coeffs)
+        .expect("flat length matches (n, num_masks)");
 
     // Protos -> masks (mirrors standard segment path).
     let mh = shape1[2];
@@ -1637,6 +1623,7 @@ fn postprocess_segment_end2end(
             },
         );
 
+    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
     results
 }
@@ -1672,16 +1659,17 @@ fn postprocess_pose_end2end(
 
     let (oh, ow) = preprocess.orig_shape;
     let (max_w, max_h) = (ow as f32, oh as f32);
-    let conf_thresh = config.confidence_threshold;
+    let (scale_y, scale_x) = preprocess.scale;
+    let (pad_top, pad_left) = preprocess.padding;
     let user_cap = config.max_det.min(max_det);
 
-    let mut rows: Vec<[f32; 6]> = Vec::with_capacity(user_cap);
-    let mut kpts: Vec<Vec<[f32; 3]>> = Vec::with_capacity(user_cap);
+    let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
+    let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * 3);
 
     for i in 0..max_det {
         let base = i * feats;
         let conf = output[base + 4];
-        if conf < conf_thresh {
+        if conf < config.confidence_threshold {
             break;
         }
         let cls = output[base + 5] as usize;
@@ -1695,7 +1683,7 @@ fn postprocess_pose_end2end(
             output[base + 3],
             preprocess,
         );
-        rows.push([
+        flat_boxes.extend_from_slice(&[
             x1.clamp(0.0, max_w),
             y1.clamp(0.0, max_h),
             x2.clamp(0.0, max_w),
@@ -1704,44 +1692,28 @@ fn postprocess_pose_end2end(
             cls as f32,
         ]);
         let kstart = base + 6;
-        let mut kvec = Vec::with_capacity(nk);
         for k in 0..nk {
             let off = kstart + k * kpt_dim;
-            let kx_raw = output[off];
-            let ky_raw = output[off + 1];
+            let sx = (output[off] - pad_left) / scale_x;
+            let sy = (output[off + 1] - pad_top) / scale_y;
             let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
-            let (sx, sy, _, _) = scale_xyxy(kx_raw, ky_raw, kx_raw, ky_raw, preprocess);
-            kvec.push([sx.clamp(0.0, max_w), sy.clamp(0.0, max_h), kconf]);
+            flat_kpts.extend_from_slice(&[sx.clamp(0.0, max_w), sy.clamp(0.0, max_h), kconf]);
         }
-        kpts.push(kvec);
-        if rows.len() >= user_cap {
+        if flat_boxes.len() >= user_cap * 6 {
             break;
         }
     }
 
-    if rows.is_empty() {
-        results.keypoints = Some(Keypoints::new(
-            Array3::zeros((0, nk, 3)),
-            preprocess.orig_shape,
-        ));
-        return results;
-    }
-
-    let n = rows.len();
-    let mut boxes_data = Array2::zeros((n, 6));
-    let mut kdata = Array3::zeros((n, nk, 3));
-    for i in 0..n {
-        for (j, v) in rows[i].iter().enumerate() {
-            boxes_data[[i, j]] = *v;
-        }
-        for k in 0..nk {
-            kdata[[i, k, 0]] = kpts[i][k][0];
-            kdata[[i, k, 1]] = kpts[i][k][1];
-            kdata[[i, k, 2]] = kpts[i][k][2];
-        }
-    }
-    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    let n = flat_boxes.len() / 6;
+    // Always emit a keypoints tensor (even empty) to match the non-end2end pose path.
+    let kdata =
+        Array3::from_shape_vec((n, nk, 3), flat_kpts).expect("flat length matches (n, nk, 3)");
     results.keypoints = Some(Keypoints::new(kdata, preprocess.orig_shape));
+    if n > 0 {
+        let boxes_data =
+            Array2::from_shape_vec((n, 6), flat_boxes).expect("flat length matches (n, 6)");
+        results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    }
     results
 }
 
@@ -1760,63 +1732,49 @@ fn postprocess_obb_end2end(
     inference_shape: (u32, u32),
 ) -> Results {
     let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
-    if output_shape.len() != 3 || output.is_empty() {
-        return results;
-    }
-    let max_det = output_shape[1];
-    let feats = output_shape[2];
-    if feats < 7 || max_det == 0 {
-        results.obb = Some(Obb::new(Array2::zeros((0, 7)), preprocess.orig_shape));
-        return results;
-    }
+    let mut flat: Vec<f32> = Vec::new();
 
-    let (oh, ow) = preprocess.orig_shape;
-    let (max_w, max_h) = (ow as f32, oh as f32);
-    let conf_thresh = config.confidence_threshold;
-    let user_cap = config.max_det.min(max_det);
-    let (scale_y, scale_x) = preprocess.scale;
-    let (pad_top, pad_left) = preprocess.padding;
+    if output_shape.len() == 3 && !output.is_empty() {
+        let max_det = output_shape[1];
+        let feats = output_shape[2];
+        if feats >= 7 && max_det > 0 {
+            let (oh, ow) = preprocess.orig_shape;
+            let (max_w, max_h) = (ow as f32, oh as f32);
+            let (scale_y, scale_x) = preprocess.scale;
+            let (pad_top, pad_left) = preprocess.padding;
+            let user_cap = config.max_det.min(max_det);
+            flat.reserve(user_cap * 7);
 
-    let mut rows: Vec<[f32; 7]> = Vec::with_capacity(user_cap);
-    for i in 0..max_det {
-        let base = i * feats;
-        let conf = output[base + 4];
-        if conf < conf_thresh {
-            break;
-        }
-        let cls = output[base + 5] as usize;
-        if !config.keep_class(cls) {
-            continue;
-        }
-        let cx = (output[base] - pad_left) / scale_x;
-        let cy = (output[base + 1] - pad_top) / scale_y;
-        let w = output[base + 2] / scale_x;
-        let h = output[base + 3] / scale_y;
-        let angle = output[base + 6];
-        rows.push([
-            cx.clamp(0.0, max_w),
-            cy.clamp(0.0, max_h),
-            w,
-            h,
-            angle,
-            conf,
-            cls as f32,
-        ]);
-        if rows.len() >= user_cap {
-            break;
+            for i in 0..max_det {
+                let base = i * feats;
+                let conf = output[base + 4];
+                if conf < config.confidence_threshold {
+                    break;
+                }
+                let cls = output[base + 5] as usize;
+                if !config.keep_class(cls) {
+                    continue;
+                }
+                let cx = (output[base] - pad_left) / scale_x;
+                let cy = (output[base + 1] - pad_top) / scale_y;
+                flat.extend_from_slice(&[
+                    cx.clamp(0.0, max_w),
+                    cy.clamp(0.0, max_h),
+                    output[base + 2] / scale_x,
+                    output[base + 3] / scale_y,
+                    output[base + 6],
+                    conf,
+                    cls as f32,
+                ]);
+                if flat.len() >= user_cap * 7 {
+                    break;
+                }
+            }
         }
     }
 
-    if rows.is_empty() {
-        results.obb = Some(Obb::new(Array2::zeros((0, 7)), preprocess.orig_shape));
-        return results;
-    }
-    let mut obb_data = Array2::zeros((rows.len(), 7));
-    for (i, r) in rows.iter().enumerate() {
-        for (j, v) in r.iter().enumerate() {
-            obb_data[[i, j]] = *v;
-        }
-    }
+    let n = flat.len() / 7;
+    let obb_data = Array2::from_shape_vec((n, 7), flat).expect("flat length matches (n, 7)");
     results.obb = Some(Obb::new(obb_data, preprocess.orig_shape));
     results
 }
