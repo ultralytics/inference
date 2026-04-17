@@ -215,21 +215,24 @@ fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
 }
 
 /// Infer `(nk, kpt_dim)` from a pose tensor shape assumed to be end-to-end
-/// (`[1, max_det, 6 + nk*kpt_dim]`). Used when `kpt_shape` metadata is absent.
+/// (`[1, max_det, 6 + nk*kpt_dim]`). Used only when `kpt_shape` metadata is absent.
 ///
-/// Prefers `kpt_dim=3` (Ultralytics default with visibility); falls back to `kpt_dim=2`.
-/// Returns `None` if the shape doesn't look like the end-to-end layout.
+/// Returns `None` for shapes that don't match the end-to-end layout, and for
+/// shapes where `kpt_feats` is divisible by both 2 and 3 (e.g. 36, 42) because
+/// the layout is ambiguous — `(12, 3)` and `(18, 2)` both decode the same
+/// tensor. Ambiguous cases fall through to the legacy pose path rather than
+/// silently guessing the wrong dimension.
 fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
     if shape.len() != 3 || shape[1] == 0 || shape[1] > 4096 || shape[2] <= 6 {
         return None;
     }
     let kpt_feats = shape[2] - 6;
-    if kpt_feats.is_multiple_of(3) {
-        Some((kpt_feats / 3, 3))
-    } else if kpt_feats.is_multiple_of(2) {
-        Some((kpt_feats / 2, 2))
-    } else {
-        None
+    let div3 = kpt_feats.is_multiple_of(3);
+    let div2 = kpt_feats.is_multiple_of(2);
+    match (div3, div2) {
+        (true, false) => Some((kpt_feats / 3, 3)),
+        (false, true) => Some((kpt_feats / 2, 2)),
+        _ => None, // not divisible by either, or ambiguous (divisible by 6)
     }
 }
 
@@ -1796,6 +1799,20 @@ mod tests {
         assert_eq!(nc, 80);
         assert_eq!(np, 8400);
         assert!(transposed);
+    }
+
+    #[test]
+    fn test_infer_end2end_kpt_shape() {
+        // COCO pose: 17 kpts × 3 dims -> kpt_feats=51 (only div3) -> (17, 3)
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6 + 51]), Some((17, 3)));
+        // Pure 2D pose: 17 × 2 -> kpt_feats=34 (only div2) -> (17, 2)
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6 + 34]), Some((17, 2)));
+        // Ambiguous (divisible by 6): 12 × 3 vs 18 × 2 both decode to 36 -> None
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6 + 36]), None);
+        // Shape that isn't the end-to-end layout -> None
+        assert_eq!(infer_end2end_kpt_shape(&[1, 56, 8400]), None);
+        // shape[2] <= 6 -> None (no keypoint features)
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6]), None);
     }
 
     #[test]
