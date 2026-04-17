@@ -26,7 +26,7 @@ use clap::{Args, Parser, Subcommand};
 
 Examples:
     ultralytics-inference predict
-    ultralytics-inference predict --model yolo11n.onnx --source image.jpg
+    ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
     ultralytics-inference predict --source 0 --conf 0.5 --show
@@ -156,10 +156,10 @@ mod tests {
 
     #[test]
     fn test_predict_args_defaults() {
-        let args = Cli::parse_from(["app", "predict", "--model", "yolo11n.onnx"]);
+        let args = Cli::parse_from(["app", "predict", "--model", "yolo26n.onnx"]);
         match args.command {
             Commands::Predict(predict_args) => {
-                assert_eq!(predict_args.model, Some("yolo11n.onnx".to_string()));
+                assert_eq!(predict_args.model, Some("yolo26n.onnx".to_string()));
                 assert!((predict_args.conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
                 assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
                 assert!(predict_args.rect);
