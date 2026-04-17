@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 #[command(after_help = r#"Predict Options:
-    --model, -m <MODEL>    Path to ONNX model file [default: yolo11n.onnx]
+    --model, -m <MODEL>    Path to ONNX model file [default: yolo26n.onnx]
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
     --iou <IOU>            IoU threshold for NMS [default: 0.7]
