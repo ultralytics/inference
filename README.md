@@ -32,7 +32,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 ### Prerequisites
 
 - [Rust 1.85+](https://rustup.rs/) (install via rustup, edition 2024 required)
-- A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo11n.pt format=onnx`)
+- A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo26n.pt format=onnx`)
 
 ### Installation
 
@@ -73,11 +73,11 @@ ultralytics-inference --help
 
 ```bash
 # Using Ultralytics CLI
-yolo export model=yolo11n.pt format=onnx
+yolo export model=yolo26n.pt format=onnx
 
 # Or with Python
 from ultralytics import YOLO
-model = YOLO("yolo11n.pt")
+model = YOLO("yolo26n.pt")
 model.export(format="onnx")
 ```
 
@@ -88,22 +88,22 @@ model.export(format="onnx")
 cargo run --release -- predict
 
 # With explicit arguments
-cargo run --release -- predict --model yolo11n.onnx --source image.jpg
+cargo run --release -- predict --model yolo26n.onnx --source image.jpg
 
 # On a directory of images
-cargo run --release -- predict --model yolo11n.onnx --source assets/
+cargo run --release -- predict --model yolo26n.onnx --source assets/
 
 # With custom thresholds
-cargo run --release -- predict -m yolo11n.onnx -s image.jpg --conf 0.5 --iou 0.45
+cargo run --release -- predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
 
 # With visualization and custom image size
-cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --show --imgsz 1280
+cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
 
 # Save individual frames for video input
-cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --save-frames
+cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --save-frames
 
 # Rectangular inference
-cargo run --release -- predict --model yolo11n.onnx --source image.jpg --rect
+cargo run --release -- predict --model yolo26n.onnx --source image.jpg --rect
 ```
 
 ### Example Output
@@ -111,11 +111,11 @@ cargo run --release -- predict --model yolo11n.onnx --source image.jpg --rect
 ```
 # ultralytics-inference predict
 
-WARNING ⚠️ 'model' argument is missing. Using default 'model=yolo11n.onnx'.
+WARNING ⚠️ 'model' argument is missing. Using default 'model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
 Ultralytics 0.0.8 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
-YOLO11n summary: 80 classes, imgsz=(640, 640)
+YOLO26n summary: 80 classes, imgsz=(640, 640)
 
 image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 640x480 4 persons, 1 bus, 36.4ms
 image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
@@ -143,7 +143,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 | Option          | Short | Description                                       | Default                                 |
 | --------------- | ----- | ------------------------------------------------- | --------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file                           | `yolo11n.onnx`                          |
+| `--model`       | `-m`  | Path to ONNX model file                           | `yolo26n.onnx`                          |
 | `--source`      | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
 | `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
 | `--conf`        |       | Confidence threshold                              | `0.25`                                  |
@@ -185,7 +185,7 @@ use ultralytics_inference::{YOLOModel, InferenceConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load model - metadata (classes, task, imgsz) is read automatically
-    let mut model = YOLOModel::load("yolo11n.onnx")?;
+    let mut model = YOLOModel::load("yolo26n.onnx")?;
 
     // Run inference
     let results = model.predict("image.jpg")?;
@@ -218,7 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_iou(0.45)
         .with_max_det(300);
 
-    let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
+    let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
     let results = model.predict("image.jpg")?;
 
     Ok(())
@@ -253,7 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configure the model to use this device
     let config = InferenceConfig::new().with_device(device);
 
-    let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
+    let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
     let results = model.predict("image.jpg")?;
 
     Ok(())
@@ -405,7 +405,7 @@ cargo test test_boxes_creation
 
 Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
 
-### YOLO11n Detection Model (640x640)
+### YOLO26n Detection Model (640x640)
 
 | Precision | Model Size | Preprocess | Inference | Postprocess | Total |
 | --------- | ---------- | ---------- | --------- | ----------- | ----- |
