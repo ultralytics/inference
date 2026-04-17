@@ -42,6 +42,11 @@ pub struct ModelMetadata {
     pub half: bool,
     /// Class ID to class name mapping.
     pub names: HashMap<usize, String>,
+    /// Whether the model was exported with end-to-end NMS-free output
+    /// (YOLO26-style post-NMS output: `[B, max_det, 6+extra]`).
+    pub end2end: bool,
+    /// Pose keypoint shape as (`num_keypoints`, `dims`), e.g. (17, 3).
+    pub kpt_shape: Option<(usize, usize)>,
 }
 
 impl ModelMetadata {
@@ -136,6 +141,12 @@ impl ModelMetadata {
                     "half" => {
                         metadata.half = value == "true" || value == "True";
                     }
+                    "end2end" => {
+                        metadata.end2end = value == "true" || value == "True";
+                    }
+                    "kpt_shape" => {
+                        metadata.kpt_shape = Self::parse_kpt_shape(value);
+                    }
                     "args" => {
                         // Parse args dict for half flag: {'half': True, ...}
                         if value.contains("'half': True")
@@ -166,6 +177,22 @@ impl ModelMetadata {
         }
 
         Ok(metadata)
+    }
+
+    /// Parse a `kpt_shape` value like "[17, 3]" or "(17, 3)" into a tuple.
+    fn parse_kpt_shape(value: &str) -> Option<(usize, usize)> {
+        let inner = value
+            .trim()
+            .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
+        let parts: Vec<usize> = inner
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if parts.len() >= 2 {
+            Some((parts[0], parts[1]))
+        } else {
+            None
+        }
     }
 
     /// Parse the imgsz field which can be a YAML list.
@@ -350,6 +377,8 @@ impl Default for ModelMetadata {
             channels: 3,
             half: false,
             names: HashMap::new(),
+            end2end: false,
+            kpt_shape: None,
         }
     }
 }

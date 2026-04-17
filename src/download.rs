@@ -12,40 +12,40 @@ use std::time::{Duration, Instant};
 
 use crate::error::{InferenceError, Result};
 
-/// Default YOLO model name.
-pub const DEFAULT_MODEL: &str = "yolo11n.onnx";
+/// Base URL for Ultralytics ONNX model assets. All downloadable models share this prefix.
+const ASSETS_BASE_URL: &str = "https://github.com/ultralytics/assets/releases/download/v8.4.0";
+
+/// Default YOLO detection model name.
+pub const DEFAULT_MODEL: &str = "yolo26n.onnx";
 
 /// Default YOLO segmentation model name.
-pub const DEFAULT_SEGMENT_MODEL: &str = "yolo11n-seg.onnx";
-
-/// URL for downloading the default YOLO model.
-const DEFAULT_DETECT_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.onnx";
-
-/// URL for downloading the default YOLO model.
-const DEFAULT_SEGMENT_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx";
+pub const DEFAULT_SEGMENT_MODEL: &str = "yolo26n-seg.onnx";
 
 /// Default YOLO pose model name.
-pub const DEFAULT_POSE_MODEL: &str = "yolo11n-pose.onnx";
-
-/// URL for downloading the default YOLO pose model.
-const DEFAULT_POSE_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.onnx";
+pub const DEFAULT_POSE_MODEL: &str = "yolo26n-pose.onnx";
 
 /// Default YOLO OBB model name.
-pub const DEFAULT_OBB_MODEL: &str = "yolo11n-obb.onnx";
-
-/// URL for downloading the default YOLO OBB model.
-const DEFAULT_OBB_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-obb.onnx";
+pub const DEFAULT_OBB_MODEL: &str = "yolo26n-obb.onnx";
 
 /// Default YOLO classification model name.
-pub const DEFAULT_CLS_MODEL: &str = "yolo11n-cls.onnx";
+pub const DEFAULT_CLS_MODEL: &str = "yolo26n-cls.onnx";
 
-/// URL for downloading the default YOLO classification model.
-const DEFAULT_CLS_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-cls.onnx";
+/// Filenames that can be auto-downloaded from the Ultralytics assets release.
+/// Each entry resolves to `{ASSETS_BASE_URL}/{filename}`.
+const DOWNLOADABLE_MODELS: &[&str] = &[
+    // YOLO26 (end-to-end by default)
+    "yolo26n.onnx",
+    "yolo26n-seg.onnx",
+    "yolo26n-pose.onnx",
+    "yolo26n-obb.onnx",
+    "yolo26n-cls.onnx",
+    // YOLO11
+    "yolo11n.onnx",
+    "yolo11n-seg.onnx",
+    "yolo11n-pose.onnx",
+    "yolo11n-obb.onnx",
+    "yolo11n-cls.onnx",
+];
 
 /// URL for downloading the default Bus.jpg image
 const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
@@ -330,41 +330,26 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
 /// Attempt to download a model if it matches a known downloadable model.
 ///
-/// Currently supports:
-/// - `yolo11n.onnx` - Default `YOLO11n` detection model
-/// - `yolo11n-seg.onnx` - `YOLO11n` segmentation model
-/// - `yolo11n-pose.onnx` - `YOLO11n` pose estimation model
-/// - `yolo11n-obb.onnx` - `YOLO11n` oriented bounding box model
-/// - `yolo11n-cls.onnx` - `YOLO11n` classification model
-/// Downloads a YOLO model from Ultralytics assets if it's a known model.
+/// Supports the YOLO26 and YOLO11 nano ONNX models listed in [`DOWNLOADABLE_MODELS`].
+/// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// Returns the path to the downloaded model.
-#[allow(clippy::missing_errors_doc, clippy::doc_lazy_continuation)]
+#[allow(clippy::missing_errors_doc)]
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
     let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-    // Map of supported downloadable models
-    let url = match filename {
-        DEFAULT_MODEL => DEFAULT_DETECT_MODEL_URL,
-        DEFAULT_SEGMENT_MODEL => DEFAULT_SEGMENT_MODEL_URL,
-        DEFAULT_POSE_MODEL => DEFAULT_POSE_MODEL_URL,
-        DEFAULT_OBB_MODEL => DEFAULT_OBB_MODEL_URL,
-        DEFAULT_CLS_MODEL => DEFAULT_CLS_MODEL_URL,
-        _ => {
-            return Err(InferenceError::ModelLoadError(format!(
-                "Model file not found: {}. Auto-download is supported for: yolo11n.onnx, yolo11n-seg.onnx, yolo11n-pose.onnx, yolo11n-obb.onnx, yolo11n-cls.onnx",
-                path.display(),
-            )));
-        }
-    };
+    if !DOWNLOADABLE_MODELS.contains(&filename) {
+        return Err(InferenceError::ModelLoadError(format!(
+            "Model file not found: {}. Auto-download is supported for: {}",
+            path.display(),
+            DOWNLOADABLE_MODELS.join(", "),
+        )));
+    }
 
-    // Use the path as provided (current directory if just filename)
+    let url = format!("{ASSETS_BASE_URL}/{filename}");
     let dest_path = path.to_path_buf();
-
-    // Download the model
-    download_file(url, &dest_path)?;
-
+    download_file(&url, &dest_path)?;
     Ok(dest_path)
 }
 

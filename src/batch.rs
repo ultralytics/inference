@@ -15,7 +15,7 @@
 //! ```no_run
 //! use ultralytics_inference::{YOLOModel, batch::BatchProcessor};
 //!
-//! let mut model = YOLOModel::load("yolo11n.onnx")?;
+//! let mut model = YOLOModel::load("yolo26n.onnx")?;
 //! let mut processor = BatchProcessor::new(&mut model, 4, |results, images, paths, metas| {
 //!     for (idx, result_vec) in results.iter().enumerate() {
 //!         println!("Image {}: {} detections", paths[idx], result_vec.len());
@@ -44,7 +44,7 @@ use image::DynamicImage;
 /// use ultralytics_inference::{YOLOModel, batch::BatchProcessor};
 ///
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let mut model = YOLOModel::load("yolo11n.onnx")?;
+///     let mut model = YOLOModel::load("yolo26n.onnx")?;
 ///     let batch_size = 4;
 ///     
 ///     let mut processor = BatchProcessor::new(&mut model, batch_size, |results, images, paths, metas| {
@@ -180,12 +180,12 @@ mod tests {
 
     /// Test that `BatchProcessor` correctly buffers images and invokes callback.
     ///
-    /// Uses `batch_size=1` since the default yolo11n.onnx model only supports batch=1.
+    /// Uses `batch_size=1` since the default yolo26n.onnx model only supports batch=1.
     /// The model is auto-downloaded if not present.
     #[test]
     #[serial]
     fn test_batch_processor_with_model() {
-        let mut model = YOLOModel::load("yolo11n.onnx").expect("Model should load");
+        let mut model = YOLOModel::load("yolo26n.onnx").expect("Model should load");
 
         let callback_count = Rc::new(RefCell::new(0));
         let callback_count_clone = Rc::clone(&callback_count);
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_batch_processor_empty_flush() {
-        let mut model = YOLOModel::load("yolo11n.onnx").expect("Model should load");
+        let mut model = YOLOModel::load("yolo26n.onnx").expect("Model should load");
 
         let callback_count = Rc::new(RefCell::new(0));
         let callback_count_clone = Rc::clone(&callback_count);
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_batch_processor_callback_count() {
-        let mut model = YOLOModel::load("yolo11n.onnx").expect("Model should load");
+        let mut model = YOLOModel::load("yolo26n.onnx").expect("Model should load");
 
         let count = Rc::new(RefCell::new(0));
         let count_clone = Rc::clone(&count);
