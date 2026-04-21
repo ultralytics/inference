@@ -152,11 +152,7 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "cuda")]
                 crate::Device::Cuda(i) => {
-                    eps.push(
-                        ort::execution_providers::CUDAExecutionProvider::default()
-                            .with_device_id(*i as i32)
-                            .build(),
-                    );
+                    eps.push(Self::build_cuda_ep(*i as i32));
                     provider_name = "CUDAExecutionProvider";
                 }
                 #[cfg(feature = "coreml")]
@@ -224,7 +220,7 @@ impl YOLOModel {
 
             #[cfg(feature = "cuda")]
             {
-                eps.push(ort::execution_providers::CUDAExecutionProvider::default().build());
+                eps.push(Self::build_cuda_ep(0));
                 if provider_name == "CPUExecutionProvider" {
                     provider_name = "CUDAExecutionProvider";
                 }
@@ -404,6 +400,24 @@ impl YOLOModel {
         model.warmup()?;
 
         Ok(model)
+    }
+
+    /// Build the CUDA execution provider.
+    ///
+    /// TF32 is enabled. TF32 is a reduced-precision format available on
+    /// NVIDIA Tensor cores (Ampere and newer) that accelerates FP32
+    /// `MatMul` and `Conv` ops by truncating the mantissa to 10 bits before
+    /// multiplying, while keeping FP32 range for accumulation. It typically
+    /// gives a significant speedup on FP32 models with accuracy loss well
+    /// below detection-threshold sensitivity. On GPUs without TF32
+    /// hardware (pre-Ampere), the flag is a silent no-op cuDNN falls
+    /// back to standard FP32.
+    #[cfg(feature = "cuda")]
+    fn build_cuda_ep(device_id: i32) -> ort::execution_providers::ExecutionProviderDispatch {
+        ort::execution_providers::CUDAExecutionProvider::default()
+            .with_device_id(device_id)
+            .with_tf32(true)
+            .build()
     }
 
     /// Maximum allowed image dimension to prevent OOM during warmup.
