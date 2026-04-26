@@ -141,6 +141,7 @@ impl YOLOModel {
         // Register execution providers based on features and device config
         #[allow(unused_mut)]
         let mut eps: Vec<ort::execution_providers::ExecutionProviderDispatch> = Vec::new();
+        #[allow(unused_mut)]
         let mut provider_name = "CPUExecutionProvider";
 
         if let Some(device) = &config.device {
