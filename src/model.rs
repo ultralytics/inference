@@ -146,10 +146,7 @@ impl YOLOModel {
         if let Some(device) = &config.device {
             // User requested specific device
             match device {
-                crate::Device::Cpu => {
-                    // No specific provider needed, will fall back to CPU
-                    provider_name = "CPUExecutionProvider";
-                }
+                crate::Device::Cpu => {}
                 #[cfg(feature = "cuda")]
                 crate::Device::Cuda(i) => {
                     eps.push(Self::build_cuda_ep(*i as i32));
@@ -210,8 +207,6 @@ impl YOLOModel {
             }
         } else {
             // Default: Register all available providers in preference order
-            provider_name = "CPUExecutionProvider";
-
             #[cfg(feature = "tensorrt")]
             {
                 eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
