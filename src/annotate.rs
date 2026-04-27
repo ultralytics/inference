@@ -146,7 +146,6 @@ pub fn annotate_image(
     top_k: Option<usize>,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
-    let (_width, _height) = img.dimensions();
 
     // Check if any class name is non-ASCII to select font
     let mut use_unicode_font = false;
