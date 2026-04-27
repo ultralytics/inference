@@ -37,10 +37,13 @@ use crate::{error, verbose, warn};
 pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments - use default model if not specified
     let model_is_default = args.model.is_none();
-    let model_path = args
-        .model
-        .clone()
-        .unwrap_or_else(|| crate::download::DEFAULT_MODEL.to_string());
+    let model_path = args.model.clone().unwrap_or_else(|| {
+        let suffix = args
+            .task
+            .unwrap_or(crate::task::Task::Detect)
+            .model_suffix();
+        format!("yolo26n{suffix}.onnx")
+    });
     let source_path = &args.source;
     let conf_threshold = args.conf;
     let iou_threshold = args.iou;
@@ -56,12 +59,8 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| d.parse().expect("Invalid device"));
     #[cfg(feature = "visualize")]
     let show = args.show;
-    // Warn if using default model
     if model_is_default && verbose {
-        warn!(
-            "'model' argument is missing. Using default '--model={}'.",
-            crate::download::DEFAULT_MODEL
-        );
+        warn!("'model' argument is missing. Using default '--model={model_path}'.");
     }
 
     // Load model first so we can determine appropriate default source based on task
@@ -106,6 +105,16 @@ pub fn run_prediction(args: &PredictArgs) {
             process::exit(1);
         }
     };
+
+    if let Some(task) = args.task {
+        if !model_is_default && verbose && task != model.task() {
+            warn!(
+                "'--task={task}' overrides task detected from model metadata ('{}').",
+                model.task()
+            );
+        }
+        model.set_task(task);
+    }
 
     // Determine source
     let source = source_path.as_ref().map_or_else(
