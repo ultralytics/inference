@@ -195,16 +195,16 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **Task and Model Resolution:**
 
-| Invocation                                        | Model used          | Notes                                                                      |
-| ------------------------------------------------- | ------------------- | -------------------------------------------------------------------------- |
-| `predict`                                         | `yolo26n.onnx`      | Default detect model, auto-downloaded                                      |
-| `predict --task segment`                          | `yolo26n-seg.onnx`  | Nano seg model, auto-downloaded                                            |
-| `predict --task pose`                             | `yolo26n-pose.onnx` | Nano pose model, auto-downloaded                                           |
-| `predict --task obb`                              | `yolo26n-obb.onnx`  | Nano OBB model, auto-downloaded                                            |
-| `predict --task classify`                         | `yolo26n-cls.onnx`  | Nano classify model, auto-downloaded                                       |
-| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`  | Task read from model metadata                                              |
-| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`  | `--task` matches metadata, proceeds normally                               |
-| `predict --task segment --model yolo26n.onnx`     | error               | `--task` conflicts with model metadata (`detect`), exits with error        |
+| Invocation                                        | Model used          | Notes                                                               |
+| ------------------------------------------------- | ------------------- | ------------------------------------------------------------------- |
+| `predict`                                         | `yolo26n.onnx`      | Default detect model, auto-downloaded                               |
+| `predict --task segment`                          | `yolo26n-seg.onnx`  | Nano seg model, auto-downloaded                                     |
+| `predict --task pose`                             | `yolo26n-pose.onnx` | Nano pose model, auto-downloaded                                    |
+| `predict --task obb`                              | `yolo26n-obb.onnx`  | Nano OBB model, auto-downloaded                                     |
+| `predict --task classify`                         | `yolo26n-cls.onnx`  | Nano classify model, auto-downloaded                                |
+| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`  | Task read from model metadata                                       |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`  | `--task` matches metadata, proceeds normally                        |
+| `predict --task segment --model yolo26n.onnx`     | error               | `--task` conflicts with model metadata (`detect`), exits with error |
 
 **Auto-downloadable models:**
 
