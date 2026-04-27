@@ -73,7 +73,7 @@ ort = { git = "https://github.com/pykeio/ort.git", rev = "f085e4c2516901ee606d1e
 half = { version = "^2.7", features = ["num-traits"] }
 ureq = "^3.3.0"
 dirs = "^6.0"
-rayon = "^1.11"
+rayon = "^1.12"
 bytemuck = { version = "^1.25", features = ["derive"] }
 
 # Core - CLI arguments parsing
