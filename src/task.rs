@@ -51,6 +51,24 @@ impl Task {
     }
 
     /// Return the ONNX filename suffix for this task.
+    ///
+    /// Used to construct model filenames: `yolo26n{suffix}.onnx`.
+    ///
+    /// | Task       | Suffix   |
+    /// |------------|----------|
+    /// | Detect     | `""`     |
+    /// | Segment    | `"-seg"` |
+    /// | Pose       | `"-pose"`|
+    /// | Classify   | `"-cls"` |
+    /// | Obb        | `"-obb"` |
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use ultralytics_inference::Task;
+    /// assert_eq!(Task::Segment.model_suffix(), "-seg");
+    /// assert_eq!(Task::Detect.model_suffix(), "");
+    /// ```
     #[must_use]
     pub const fn model_suffix(&self) -> &'static str {
         match self {
@@ -62,7 +80,21 @@ impl Task {
         }
     }
 
-    /// Return the default nano model filename for this task.
+    /// Return the default nano YOLO26 model filename for this task.
+    ///
+    /// This is the model that the CLI auto-downloads when `--model` is omitted
+    /// and `--task` is specified.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use ultralytics_inference::Task;
+    /// assert_eq!(Task::Detect.default_model(),  "yolo26n.onnx");
+    /// assert_eq!(Task::Segment.default_model(), "yolo26n-seg.onnx");
+    /// assert_eq!(Task::Pose.default_model(),    "yolo26n-pose.onnx");
+    /// assert_eq!(Task::Obb.default_model(),     "yolo26n-obb.onnx");
+    /// assert_eq!(Task::Classify.default_model(),"yolo26n-cls.onnx");
+    /// ```
     #[must_use]
     pub fn default_model(&self) -> String {
         format!("yolo26n{}.onnx", self.model_suffix())
