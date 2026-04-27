@@ -50,6 +50,18 @@ impl Task {
         }
     }
 
+    /// Return the ONNX filename suffix for the nano model of this task.
+    #[must_use]
+    pub const fn model_suffix(&self) -> &'static str {
+        match self {
+            Self::Detect => "",
+            Self::Segment => "-seg",
+            Self::Pose => "-pose",
+            Self::Classify => "-cls",
+            Self::Obb => "-obb",
+        }
+    }
+
     /// Check whether this task produces bounding boxes.
     ///
     /// # Returns
