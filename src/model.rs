@@ -303,7 +303,7 @@ impl YOLOModel {
         let input_name = input_info.map_or_else(|| "images".to_string(), |i| i.name().to_string());
 
         // Check if model input tensor expects FP16 (rare most models use FP32 input even with half weights)
-        let model_input_fp16 = input_info.is_some_and(|i| {
+        let fp16_input = input_info.is_some_and(|i| {
             matches!(
                 i.dtype(),
                 ValueType::Tensor {
@@ -323,9 +323,6 @@ impl YOLOModel {
                 false
             }
         });
-
-        // Use FP16 input if model tensor type requires it
-        let fp16_input = model_input_fp16;
 
         let output_names: Vec<String> = session
             .outputs()
