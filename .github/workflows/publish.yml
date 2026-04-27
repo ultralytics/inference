@@ -1,6 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-# Publish crate to crates.io https://crates.io/crates/ultralytics-template-rust
+# Publish crate to crates.io https://crates.io/crates/ultralytics-inference
 
 name: Publish to crates.io
 
@@ -12,36 +12,33 @@ on:
       publish:
         type: boolean
         description: Publish to crates.io
+        default: false
 
 jobs:
   check:
     if: github.repository == 'ultralytics/inference'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     outputs:
       increment: ${{ steps.check_version.outputs.increment }}
       current_tag: ${{ steps.check_version.outputs.current_tag }}
       previous_tag: ${{ steps.check_version.outputs.previous_tag }}
-      crate_url: https://crates.io/crates/ultralytics-template-rust
+      crate_url: https://crates.io/crates/ultralytics-inference
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - uses: astral-sh/setup-uv@v7
-      - name: Install ultralytics-actions
-        run: uv pip install --system --no-cache ultralytics-actions
       - name: Fetch tags
         run: git fetch --tags --force
       - id: check_version
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           import os
           import re
           import subprocess
+          from pathlib import Path
 
           version = None
           with open("Cargo.toml") as f:
@@ -63,11 +60,13 @@ jobs:
           previous_tag = next((t for t in tags if t != current_tag), "")
 
           remote = subprocess.run(
-            ["git", "ls-remote", "--tags", "origin", current_tag],
+            ["git", "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{current_tag}"],
             text=True,
             capture_output=True,
           )
-          tag_exists = current_tag in tags or bool(remote.stdout.strip())
+          if remote.returncode not in (0, 2):
+            raise SystemExit(remote.stderr.strip() or "Failed to check remote tag")
+          tag_exists = current_tag in tags or remote.returncode == 0
           increment = str(not tag_exists)
 
           print(f"Local version: {version}")
@@ -75,45 +74,38 @@ jobs:
           print(f"Previous tag: {previous_tag or '<none>'}")
           print(f"Tag exists: {tag_exists}")
 
-          os.system(f'echo "increment={increment}" >> $GITHUB_OUTPUT')
-          os.system(f'echo "current_tag={current_tag}" >> $GITHUB_OUTPUT')
-          os.system(f'echo "previous_tag={previous_tag}" >> $GITHUB_OUTPUT')
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as f:
+            print(f"increment={increment}", file=f)
+            print(f"current_tag={current_tag}", file=f)
+            print(f"previous_tag={previous_tag}", file=f)
           if increment == "True":
             print("Ready to publish new version to crates.io ✅.")
-      - name: Tag and Release
-        if: steps.check_version.outputs.increment == 'True'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CURRENT_TAG: ${{ steps.check_version.outputs.current_tag }}
-          PREVIOUS_TAG: ${{ steps.check_version.outputs.previous_tag }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          git config --global user.name "UltralyticsAssistant"
-          git config --global user.email "web@ultralytics.com"
-          git tag -a "$CURRENT_TAG" -m "$(git log -1 --pretty=%B)"
-          git push origin "$CURRENT_TAG"
-          ultralytics-actions-summarize-release
-          uv cache prune --ci
+          PY
 
   build:
     needs: check
-    if: needs.check.outputs.increment == 'True'
+    if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavdevice-dev libswscale-dev libswresample-dev libpostproc-dev clang
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test --all --all-features
+      - run: cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
+      - run: cargo test --no-default-features --features annotate
+      - run: cargo clippy --all --features annotate,video -- -D warnings
+      - run: cargo test --all --features annotate,video
+      - run: cargo publish --dry-run --locked
 
   publish:
     needs: [check, build]
-    if: needs.check.outputs.increment == 'True'
+    if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
     runs-on: ubuntu-latest
     environment:
       name: Release - crates.io
@@ -124,13 +116,48 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo publish
+      - run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  sbom:
+  release:
     needs: [check, build, publish]
-    if: needs.check.outputs.increment == 'True'
+    if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install ultralytics-actions
+        run: uv pip install --system --no-cache ultralytics-actions
+      - name: Tag and Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ needs.check.outputs.current_tag }}
+          PREVIOUS_TAG: ${{ needs.check.outputs.previous_tag }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          git config --global user.name "UltralyticsAssistant"
+          git config --global user.email "web@ultralytics.com"
+          git fetch --tags --force
+          if git ls-remote --exit-code --tags origin "refs/tags/$CURRENT_TAG" >/dev/null 2>&1; then
+            echo "Tag $CURRENT_TAG already exists."
+          else
+            git tag -a "$CURRENT_TAG" -m "$(git log -1 --pretty=%B)"
+            git push origin "$CURRENT_TAG"
+          fi
+          ultralytics-actions-summarize-release
+          uv cache prune --ci
+
+  sbom:
+    needs: [check, build, publish, release]
+    if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -145,6 +172,6 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
           path: .
-      - run: gh release upload ${{ needs.check.outputs.current_tag }} sbom.spdx.json
+      - run: gh release upload ${{ needs.check.outputs.current_tag }} sbom.spdx.json --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

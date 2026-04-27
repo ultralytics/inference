@@ -277,16 +277,19 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                 );
             }
 
-            fs::rename(&temp_path, dest).map_err(|e| {
+            if let Err(e) = fs::rename(&temp_path, dest) {
                 let _ = fs::remove_file(&temp_path);
-                (
+                if dest.exists() {
+                    return Ok(());
+                }
+                return Err((
                     InferenceError::ModelLoadError(format!(
                         "Failed to move downloaded file to {}: {e}",
                         dest.display()
                     )),
                     false,
-                )
-            })?;
+                ));
+            }
 
             Ok(())
         })();
