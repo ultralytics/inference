@@ -300,7 +300,8 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
 /// Attempt to download a model if it matches a known downloadable model.
 ///
-/// Supports YOLO26 and YOLO11 ONNX models (n/s/m/l/x) listed in [`DOWNLOADABLE_MODELS`].
+/// Supports all YOLO26 and YOLO11 ONNX models across sizes (n/s/m/l/x) and
+/// task variants (detect, segment, pose, obb, classify).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// Returns the path to the downloaded model.
