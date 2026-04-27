@@ -5,11 +5,23 @@
 //! This module handles task-specific post-processing of raw model outputs,
 //! including NMS, coordinate transformation, and result construction.
 
+#![allow(
+    unsafe_code,
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    clippy::if_not_else,
+    clippy::ptr_as_ptr,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+
 use std::collections::HashMap;
+
+use wide::{CmpGt, f32x8};
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{Array2, Array3, ArrayView2, Zip, s};
+use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -41,7 +53,7 @@ use crate::utils::{nms_per_class, nms_rotated_per_class};
     clippy::implicit_hasher
 )]
 pub fn postprocess(
-    outputs: Vec<(Vec<f32>, Vec<usize>)>,
+    outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
@@ -50,45 +62,103 @@ pub fn postprocess(
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
+    end2end: bool,
+    kpt_shape: Option<(usize, usize)>,
 ) -> Results {
     match task {
         Task::Detect => {
             let (output, shape) = &outputs[0];
-            postprocess_detect(
-                output,
-                shape,
-                preprocess,
-                config,
-                names,
-                orig_img,
-                path,
-                speed,
-                inference_shape,
-            )
+            if end2end || is_end2end_detect_shape(shape) {
+                postprocess_detect_end2end(
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                )
+            } else {
+                postprocess_detect(
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                )
+            }
         }
-        Task::Segment => postprocess_segment(
-            outputs,
-            preprocess,
-            config,
-            names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        ),
+        Task::Segment => {
+            // Derive proto channel count from the second output tensor (shape `[1, nm, mh, mw]`),
+            // so exports with non-default prototype counts are still classified correctly.
+            let proto_channels = outputs
+                .get(1)
+                .and_then(|(_, s)| if s.len() == 4 { Some(s[1]) } else { None });
+            if end2end || is_end2end_segment_shape(&outputs[0].1, proto_channels) {
+                postprocess_segment_end2end(
+                    outputs,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                )
+            } else {
+                postprocess_segment(
+                    outputs,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                )
+            }
+        }
         Task::Pose => {
             let (output, shape) = &outputs[0];
-            postprocess_pose(
-                output,
-                shape,
-                preprocess,
-                config,
-                names,
-                orig_img,
-                path,
-                speed,
-                inference_shape,
-            )
+            // Prefer metadata-provided `kpt_shape`; otherwise infer the keypoint
+            // layout from the tensor shape so non-COCO pose models still work.
+            let resolved_kpt = kpt_shape.or_else(|| infer_end2end_kpt_shape(shape));
+            let is_end2end = end2end
+                || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_pose_shape(shape, nk, kd));
+            if is_end2end {
+                let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
+                postprocess_pose_end2end(
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                    nk,
+                    kpt_dim,
+                )
+            } else {
+                postprocess_pose(
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                )
+            }
         }
         Task::Classify => {
             let (output, shape) = &outputs[0];
@@ -96,40 +166,84 @@ pub fn postprocess(
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];
-            postprocess_obb(
-                output,
-                shape,
-                preprocess,
-                config,
-                names,
-                orig_img,
-                path,
-                speed,
-                inference_shape,
-            )
+            if end2end || is_end2end_obb_shape(shape) {
+                postprocess_obb_end2end(
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                )
+            } else {
+                postprocess_obb(
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                )
+            }
         }
     }
 }
 
+/// Detect if a 3D shape matches YOLO26 end2end detect layout `[1, max_det, 6]`.
+fn is_end2end_detect_shape(shape: &[usize]) -> bool {
+    shape.len() == 3 && shape[2] == 6 && shape[1] <= 4096
+}
+
+/// Detect if a 3D shape matches YOLO26 end2end segment layout `[1, max_det, 6 + nm]`.
+///
+/// When the proto tensor's channel count is known (passed via `proto_channels`),
+/// it is used as the authoritative `nm`; otherwise the shape is rejected since
+/// hardcoding `nm=32` would misclassify exports with non-default prototype counts.
+fn is_end2end_segment_shape(shape: &[usize], proto_channels: Option<usize>) -> bool {
+    proto_channels.is_some_and(|nm| shape.len() == 3 && shape[2] == 6 + nm && shape[1] <= 4096)
+}
+
+/// Detect if a 3D shape matches YOLO26 end2end pose layout `[1, max_det, 6 + nk*dim]`.
+fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
+    shape.len() == 3 && shape[2] == 6 + nk * kpt_dim && shape[1] <= 4096
+}
+
+/// Infer `(nk, kpt_dim)` from a pose tensor shape assumed to be end-to-end
+/// (`[1, max_det, 6 + nk*kpt_dim]`). Used only when `kpt_shape` metadata is absent.
+///
+/// Returns `None` for shapes that don't match the end-to-end layout, and for
+/// shapes where `kpt_feats` is divisible by both 2 and 3 (e.g. 36, 42) because
+/// the layout is ambiguous — `(12, 3)` and `(18, 2)` both decode the same
+/// tensor. Ambiguous cases fall through to the legacy pose path rather than
+/// silently guessing the wrong dimension.
+fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
+    if shape.len() != 3 || shape[1] == 0 || shape[1] > 4096 || shape[2] <= 6 {
+        return None;
+    }
+    let kpt_feats = shape[2] - 6;
+    let div3 = kpt_feats.is_multiple_of(3);
+    let div2 = kpt_feats.is_multiple_of(2);
+    match (div3, div2) {
+        (true, false) => Some((kpt_feats / 3, 3)),
+        (false, true) => Some((kpt_feats / 2, 2)),
+        _ => None, // not divisible by either, or ambiguous (divisible by 6)
+    }
+}
+
+/// Detect if a 3D shape matches YOLO26 end2end OBB layout `[1, max_det, 7]`.
+fn is_end2end_obb_shape(shape: &[usize]) -> bool {
+    shape.len() == 3 && shape[2] == 7 && shape[1] <= 4096
+}
+
 /// Post-process detection model output.
 ///
-/// Converts raw YOLO model output into a list of bounding boxes with class scores.
-///
-/// # Arguments
-///
-/// * `output` - Flat vector of model output values.
-/// * `output_shape` - Shape of the output tensor.
-/// * `preprocess` - Preprocessing metadata (scaling, padding).
-/// * `config` - Inference configuration (thresholds).
-/// * `names` - Class ID to name mapping.
-/// * `orig_img` - Original image data.
-/// * `path` - Source image path.
-/// * `speed` - Timing metrics.
-/// * `inference_shape` - Input shape used for inference.
-///
-/// # Returns
-///
-/// `Results` struct containing detected bounding boxes.
+/// Zero-copy implementation using stride-based indexing to avoid memory allocations.
 #[allow(
     clippy::too_many_arguments,
     clippy::similar_names,
@@ -156,24 +270,15 @@ fn postprocess_detect(
         return results;
     }
 
-    // Convert flat output to 2D array
-    let output_2d = if is_transposed {
-        // Shape is [1, num_preds, num_features] - already in correct format
-        Array2::from_shape_vec((num_predictions, 4 + num_classes), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        // Shape is [1, num_features, num_preds] - need to transpose
-        let arr = Array2::from_shape_vec((4 + num_classes, num_predictions), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
-
-    if output_2d.is_empty() {
-        return results;
-    }
-
-    // Extract boxes and scores
-    let boxes_data = extract_detect_boxes(output_2d.view(), num_classes, preprocess, config);
+    // Zero-copy extraction with stride-based indexing
+    let boxes_data = extract_detect_boxes(
+        output,
+        num_classes,
+        num_predictions,
+        is_transposed,
+        preprocess,
+        config,
+    );
 
     if !boxes_data.is_empty() {
         results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
@@ -241,93 +346,273 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
     }
 }
 
-/// Extract detection boxes from model output.
+/// Ultra-fast detection extraction - single-threaded tight loop.
 ///
-/// Filters predictions by confidence threshold and converts coordinates to original image space.
-#[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
+/// Key optimizations:
+/// - No parallelization overhead (Rayon adds ~0.5ms for small workloads)
+/// - Pre-sized allocations
+/// - Minimal branching in hot loops
+/// - Direct unsafe indexing
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
+#[derive(Clone, Copy)]
+struct Candidate {
+    bbox: [f32; 4],
+    score: f32,
+    class: usize,
+}
+
+/// Optimized detection extraction with SIMD acceleration.
+///
+/// Key optimizations:
+/// - SIMD-accelerated candidate extraction (f32x8)
+/// - Parallel Bitmask NMS (IoU 1 vs 8)
+/// - Struct-of-Arrays (SoA) layout for NMS cache locality
+/// - Direct unsafe indexing for performance
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn extract_detect_boxes(
-    output: ArrayView2<f32>,
-    _num_classes: usize,
+    output: &[f32],
+    num_classes: usize,
+    num_predictions: usize,
+    is_transposed: bool,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
 ) -> Array2<f32> {
-    let _num_predictions = output.nrows();
-    let mut candidates = Vec::new();
-
-    // Iterate over rows efficiently
-    // output shape is (num_predictions, 4 + num_classes)
-    // We can iterate over raw elements if we are careful, but using outer_iter() is safer and still fast
-
-    // Pre-calculate scaling factors to avoid repeated struct access
+    let feat_count = 4 + num_classes;
     let (scale_y, scale_x) = preprocess.scale;
     let (pad_top, pad_left) = preprocess.padding;
     let orig_shape = preprocess.orig_shape;
     let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
+    let conf_thresh = config.confidence_threshold;
+    let max_det = config.max_det;
+    let iou_thresh = config.iou_threshold;
+    let conf_v = f32x8::splat(conf_thresh);
 
-    for row in output.outer_iter() {
-        // Row is [cx, cy, w, h, class_scores...]
+    let mut candidates: Vec<Candidate> = Vec::with_capacity(256);
 
-        // Efficiently find the best class score without allocating a new slice or iterator chain.
-        // We skip low-confidence detections early to avoid expensive coordinate scaling and NMS operations later.
-        let scores = row.slice(s![4..]);
+    // Candidate Extraction
+    if !is_transposed {
+        // Layout [feat, pred] - Cache-friendly linear scan
+        let mut max_scores = vec![conf_thresh; num_predictions];
+        let mut max_classes = vec![0usize; num_predictions];
 
-        // Find best class manually to avoid iterator overhead
-        let (best_class, best_score) =
-            scores
-                .iter()
-                .enumerate()
-                .fold((0, 0.0f32), |(best_idx, best_val), (idx, &val)| {
-                    if val > best_val {
-                        (idx, val)
-                    } else {
-                        (best_idx, best_val)
-                    }
-                });
-
-        // Filter by confidence threshold early to reduce computation
-        if best_score < config.confidence_threshold {
-            continue;
+        for c in 0..num_classes {
+            let offset = (4 + c) * num_predictions;
+            let class_scores = &output[offset..offset + num_predictions];
+            for (idx, &score) in class_scores.iter().enumerate() {
+                if score > max_scores[idx] {
+                    max_scores[idx] = score;
+                    max_classes[idx] = c;
+                }
+            }
         }
 
-        // Extract coordinates only for candidate detections
-        let cx = row[0];
-        let cy = row[1];
-        let w = row[2];
-        let h = row[3];
+        for (idx, &score) in max_scores.iter().enumerate() {
+            if score > conf_thresh {
+                let best_class = max_classes[idx];
 
-        let x1 = (cx - w / 2.0 - pad_left) / scale_x;
-        let y1 = (cy - h / 2.0 - pad_top) / scale_y;
-        let x2 = (cx + w / 2.0 - pad_left) / scale_x;
-        let y2 = (cy + h / 2.0 - pad_top) / scale_y;
+                // Filter by class if specified
+                if !config.keep_class(best_class) {
+                    continue;
+                }
 
-        // Clip (clamp)
-        let x1 = x1.clamp(0.0, max_w);
-        let y1 = y1.clamp(0.0, max_h);
-        let x2 = x2.clamp(0.0, max_w);
-        let y2 = y2.clamp(0.0, max_h);
+                let cx = unsafe { *output.get_unchecked(idx) };
+                let cy = unsafe { *output.get_unchecked(num_predictions + idx) };
+                let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
+                let h = unsafe { *output.get_unchecked(3 * num_predictions + idx) };
 
-        candidates.push(([x1, y1, x2, y2], best_score, best_class));
+                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
+                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
+                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
+                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+
+                candidates.push(Candidate {
+                    bbox: [x1, y1, x2, y2],
+                    score,
+                    class: best_class,
+                });
+            }
+        }
+    } else {
+        // Layout [pred, feat] - Process 8 classes at once
+        for idx in 0..num_predictions {
+            let base = idx * feat_count;
+            let row_ptr = unsafe { output.as_ptr().add(base + 4) };
+            let mut best_score = conf_thresh;
+            let mut best_class = 0;
+            let mut found = false;
+
+            for c_idx in (0..num_classes).step_by(8) {
+                if num_classes - c_idx >= 8 {
+                    let scores: f32x8 =
+                        unsafe { (row_ptr.add(c_idx) as *const f32x8).read_unaligned() };
+                    if scores.simd_gt(conf_v).any() {
+                        for i in 0..8 {
+                            let s = unsafe { *row_ptr.add(c_idx + i) };
+                            if s > best_score {
+                                best_score = s;
+                                best_class = c_idx + i;
+                                found = true;
+                            }
+                        }
+                    }
+                } else {
+                    for i in c_idx..num_classes {
+                        let s = unsafe { *row_ptr.add(i) };
+                        if s > best_score {
+                            best_score = s;
+                            best_class = i;
+                            found = true;
+                        }
+                    }
+                }
+            }
+
+            if found {
+                // Filter by class if specified
+                if !config.keep_class(best_class) {
+                    continue;
+                }
+
+                let cx = unsafe { *output.get_unchecked(base) };
+                let cy = unsafe { *output.get_unchecked(base + 1) };
+                let w = unsafe { *output.get_unchecked(base + 2) };
+                let h = unsafe { *output.get_unchecked(base + 3) };
+
+                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
+                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
+                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
+                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+
+                candidates.push(Candidate {
+                    bbox: [x1, y1, x2, y2],
+                    score: best_score,
+                    class: best_class,
+                });
+            }
+        }
     }
 
     if candidates.is_empty() {
         return Array2::zeros((0, 6));
     }
 
-    // Apply per-class NMS (only suppress boxes within the same class)
-    let keep_indices = nms_per_class(&candidates, config.iou_threshold);
+    // Top-K Selection & Sort
+    let nms_limit = (max_det * 10).min(candidates.len());
+    if candidates.len() > nms_limit {
+        candidates.select_nth_unstable_by(nms_limit, |a, b| b.score.partial_cmp(&a.score).unwrap());
+        candidates.truncate(nms_limit);
+    }
+    candidates.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
 
+    // Population of SoA for NMS (small copy, very fast)
+    let n = candidates.len();
+    let mut x1 = Vec::with_capacity(n);
+    let mut y1 = Vec::with_capacity(n);
+    let mut x2 = Vec::with_capacity(n);
+    let mut y2 = Vec::with_capacity(n);
+    let mut areas = Vec::with_capacity(n);
+
+    for c in &candidates {
+        x1.push(c.bbox[0]);
+        y1.push(c.bbox[1]);
+        x2.push(c.bbox[2]);
+        y2.push(c.bbox[3]);
+        areas.push((c.bbox[2] - c.bbox[0]) * (c.bbox[3] - c.bbox[1]));
+    }
+
+    let mut suppressed = vec![false; n];
+    let mut keep = Vec::with_capacity(max_det);
+    let iou_v = f32x8::splat(iou_thresh);
     // Build output array with kept detections
-    let num_kept = keep_indices.len().min(config.max_detections);
-    let mut result = Array2::zeros((num_kept, 6));
+    // let num_kept = keep_indices.len().min(config.max_det);
+    // let mut result = Array2::zeros((num_kept, 6));
 
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
-        let (bbox, score, class) = &candidates[keep_idx];
-        result[[out_idx, 0]] = bbox[0];
-        result[[out_idx, 1]] = bbox[1];
-        result[[out_idx, 2]] = bbox[2];
-        result[[out_idx, 3]] = bbox[3];
-        result[[out_idx, 4]] = *score;
-        result[[out_idx, 5]] = *class as f32;
+    for i in 0..n {
+        if suppressed[i] {
+            continue;
+        }
+        keep.push(i);
+        if keep.len() >= max_det {
+            break;
+        }
+
+        let ax1 = f32x8::splat(x1[i]);
+        let ay1 = f32x8::splat(y1[i]);
+        let ax2 = f32x8::splat(x2[i]);
+        let ay2 = f32x8::splat(y2[i]);
+        let aa = f32x8::splat(areas[i]);
+        let ac = candidates[i].class;
+
+        let mut j = i + 1;
+        while j < n {
+            if n - j >= 8 {
+                // Inline fast class and suppression check
+                let mut chunk_needs_processing = false;
+                for k in 0..8 {
+                    if candidates[j + k].class == ac && !suppressed[j + k] {
+                        chunk_needs_processing = true;
+                        break;
+                    }
+                }
+
+                if chunk_needs_processing {
+                    let bx1 = unsafe { (x1.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let by1 = unsafe { (y1.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let bx2 = unsafe { (x2.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let by2 = unsafe { (y2.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let ba = unsafe { (areas.as_ptr().add(j) as *const f32x8).read_unaligned() };
+
+                    let ix1 = ax1.max(bx1);
+                    let iy1 = ay1.max(by1);
+                    let ix2 = ax2.min(bx2);
+                    let iy2 = ay2.min(by2);
+
+                    let iw = (ix2 - ix1).max(f32x8::ZERO);
+                    let ih = (iy2 - iy1).max(f32x8::ZERO);
+                    let ia = iw * ih;
+                    let iou = ia / (aa + ba - ia);
+
+                    let mask = iou.simd_gt(iou_v).to_bitmask() as u8;
+                    if mask != 0 {
+                        for k in 0..8 {
+                            if (mask & (1 << k)) != 0 && candidates[j + k].class == ac {
+                                suppressed[j + k] = true;
+                            }
+                        }
+                    }
+                }
+                j += 8;
+            } else {
+                for k in j..n {
+                    if !suppressed[k] && candidates[k].class == ac {
+                        let ix1 = x1[i].max(x1[k]);
+                        let iy1 = y1[i].max(y1[k]);
+                        let ix2 = x2[i].min(x2[k]);
+                        let iy2 = y2[i].min(y2[k]);
+                        let iw = (ix2 - ix1).max(0.0);
+                        let ih = (iy2 - iy1).max(0.0);
+                        let ia = iw * ih;
+                        let iou = ia / (areas[i] + areas[k] - ia);
+                        if iou > iou_thresh {
+                            suppressed[k] = true;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    // Result Construction
+    let num_kept = keep.len();
+    let mut result = Array2::zeros((num_kept, 6));
+    for (out_idx, &idx) in keep.iter().enumerate() {
+        let c = &candidates[idx];
+        result[[out_idx, 0]] = c.bbox[0].clamp(0.0, max_w);
+        result[[out_idx, 1]] = c.bbox[1].clamp(0.0, max_h);
+        result[[out_idx, 2]] = c.bbox[2].clamp(0.0, max_w);
+        result[[out_idx, 3]] = c.bbox[3].clamp(0.0, max_h);
+        result[[out_idx, 4]] = c.score;
+        result[[out_idx, 5]] = c.class as f32;
     }
 
     result
@@ -361,7 +646,7 @@ fn extract_detect_boxes(
     clippy::cast_possible_truncation
 )]
 fn postprocess_segment(
-    outputs: Vec<(Vec<f32>, Vec<usize>)>,
+    outputs: Vec<(&[f32], Vec<usize>)>,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     names: &HashMap<usize, String>,
@@ -413,10 +698,10 @@ fn postprocess_segment(
 
     // Convert to 2D [preds, features]
     let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, expected_features), output0.clone())
+        Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
             .unwrap_or_else(|_| Array2::zeros((0, 0)))
     } else {
-        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.clone())
+        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
             .unwrap_or_else(|_| Array2::zeros((0, 0)));
         arr.t().to_owned()
     };
@@ -429,7 +714,7 @@ fn postprocess_segment(
         let (best_class, best_score) = scores
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|&(_, a), &(_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map_or((0, 0.0), |(idx, &score)| (idx, score));
 
         if best_score < config.confidence_threshold {
@@ -448,6 +733,11 @@ fn postprocess_segment(
 
         let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
         let clipped = clip_coords(&scaled, preprocess.orig_shape);
+
+        // Filter by class if specified
+        if !config.keep_class(best_class) {
+            continue;
+        }
 
         candidates.push((
             [clipped[0], clipped[1], clipped[2], clipped[3]],
@@ -468,7 +758,7 @@ fn postprocess_segment(
         .collect();
 
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // 2. Extract Box Results
     let mut boxes_data = Array2::zeros((num_kept, 6));
@@ -514,7 +804,7 @@ fn postprocess_segment(
         );
     }
 
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.clone()) {
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
         Ok(arr) => arr,
         Err(e) => {
             eprintln!("WARNING ⚠️ Failed to create protos array: {e}. Skipping mask generation.");
@@ -551,77 +841,81 @@ fn postprocess_segment(
     Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
         .and(boxes_data.outer_iter())
-        .par_for_each(|mut mask_out, mask_flat, box_data| {
-            // Create a local resizer for each task (Resizer is not Sync)
-            let mut resizer = Resizer::new();
-            let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
+        .par_for_each(
+            |mut mask_out: ArrayViewMut2<f32>,
+             mask_flat: ArrayView1<f32>,
+             box_data: ArrayView1<f32>| {
+                // Create a local resizer for each task (Resizer is not Sync)
+                let mut resizer = Resizer::new();
+                let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
-            // Sigmoid into a Vec<f32>
-            let f32_data: Vec<f32> = mask_flat
-                .iter()
-                .map(|&val| 1.0 / (1.0 + (-val).exp()))
-                .collect();
+                // Sigmoid into a Vec<f32>
+                let f32_data: Vec<f32> = mask_flat
+                    .iter()
+                    .map(|&val| 1.0 / (1.0 + (-val).exp()))
+                    .collect();
 
-            // Use bytemuck for efficient f32->bytes conversion
-            let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+                // Use bytemuck for efficient f32->bytes conversion
+                let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
 
-            // Create source image (160x160)
-            let src_image = match Image::from_vec_u8(
-                mw as u32,
-                mh as u32,
-                src_bytes.to_vec(),
-                PixelType::F32,
-            ) {
-                Ok(img) => img,
-                Err(_) => return, // Skip if creation fails
-            };
+                // Create source image (160x160)
+                let src_image = match Image::from_vec_u8(
+                    mw as u32,
+                    mh as u32,
+                    src_bytes.to_vec(),
+                    PixelType::F32,
+                ) {
+                    Ok(img) => img,
+                    Err(_) => return, // Skip if creation fails
+                };
 
-            // Create dest image (orig_w x orig_h)
-            let mut dst_image = Image::new(ow, oh, PixelType::F32);
+                // Create dest image (orig_w x orig_h)
+                let mut dst_image = Image::new(ow, oh, PixelType::F32);
 
-            // Configure resize with crop
-            let safe_crop_x = f64::from(crop_x.max(0.0));
-            let safe_crop_y = f64::from(crop_y.max(0.0));
-            let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
-            let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
+                // Configure resize with crop
+                let safe_crop_x = f64::from(crop_x.max(0.0));
+                let safe_crop_y = f64::from(crop_y.max(0.0));
+                let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
+                let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
 
-            let options = ResizeOptions::new().resize_alg(resize_alg).crop(
-                safe_crop_x,
-                safe_crop_y,
-                safe_crop_w,
-                safe_crop_h,
-            );
+                let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+                    safe_crop_x,
+                    safe_crop_y,
+                    safe_crop_w,
+                    safe_crop_h,
+                );
 
-            // Handle resize errors gracefully
-            if resizer
-                .resize(&src_image, &mut dst_image, &options)
-                .is_err()
-            {
-                return;
-            }
+                // Handle resize errors gracefully
+                if resizer
+                    .resize(&src_image, &mut dst_image, &options)
+                    .is_err()
+                {
+                    return;
+                }
 
-            // Get resized data as f32 slice
-            let dst_bytes = dst_image.buffer();
-            let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
+                // Get resized data as f32 slice
+                let dst_bytes = dst_image.buffer();
+                let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
 
-            // Apply bbox cropping and store directly to output array
-            let x1 = box_data[0].max(0.0).min(ow as f32);
-            let y1 = box_data[1].max(0.0).min(oh as f32);
-            let x2 = box_data[2].max(0.0).min(ow as f32);
-            let y2 = box_data[3].max(0.0).min(oh as f32);
+                // Apply bbox cropping and store directly to output array
+                let x1 = box_data[0].max(0.0).min(ow as f32);
+                let y1 = box_data[1].max(0.0).min(oh as f32);
+                let x2 = box_data[2].max(0.0).min(ow as f32);
+                let y2 = box_data[3].max(0.0).min(oh as f32);
 
-            for y in 0..oh as usize {
-                for x in 0..ow as usize {
-                    let val = dst_slice[y * ow as usize + x];
-                    let x_f = x as f32;
-                    let y_f = y as f32;
-                    // Apply bounding box mask: invalid pixels outside the box are zeroed.
-                    if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
-                        mask_out[[y, x]] = val;
+                for y in 0..oh as usize {
+                    for x in 0..ow as usize {
+                        let val = dst_slice[y * ow as usize + x];
+                        let x_f = x as f32;
+                        let y_f = y as f32;
+                        // Apply bounding box mask: invalid pixels outside the box are zeroed.
+                        if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
+                            mask_out[[y, x]] = val;
+                        }
                     }
                 }
-            }
-        });
+            },
+        );
 
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
@@ -782,6 +1076,11 @@ fn postprocess_pose(
             keypoints.push([scaled_x, scaled_y, kpt_conf]);
         }
 
+        // Filter by class if specified
+        if !config.keep_class(best_class) {
+            continue;
+        }
+
         candidates.push((
             [clipped[0], clipped[1], clipped[2], clipped[3]],
             best_score,
@@ -804,7 +1103,7 @@ fn postprocess_pose(
         .map(|(bbox, score, class, _)| (*bbox, *score, *class))
         .collect();
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // Build output arrays
     let mut boxes_data = Array2::zeros((num_kept, 6));
@@ -869,11 +1168,8 @@ fn postprocess_classify(
         return results;
     }
 
-    // Filter out NaN values and ensure valid probabilities
-    let mut probs_vec: Vec<f32> = output
-        .iter()
-        .map(|&v| if v.is_nan() { 0.0 } else { v })
-        .collect();
+    // Probs::new expects an Array1, which we can create from the slice
+    let mut probs_vec = output.to_vec();
 
     // Check if softmax is already applied (sum ≈ 1.0)
     let sum: f32 = probs_vec.iter().sum();
@@ -1022,6 +1318,11 @@ fn postprocess_obb(
         #[allow(clippy::cast_precision_loss)]
         let clipped_cy = scaled_cy.max(0.0).min(oh as f32);
 
+        // Filter by class if specified
+        if !config.keep_class(best_class) {
+            continue;
+        }
+
         candidates.push((
             [clipped_cx, clipped_cy, scaled_w, scaled_h, angle],
             best_score,
@@ -1038,7 +1339,7 @@ fn postprocess_obb(
     // This ensures that overlapping rotated boxes are correctly filtered based on their
     // actual geometric overlap, which standard axis-aligned IoU cannot handle.
     let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_detections);
+    let num_kept = keep_indices.len().min(config.max_det);
 
     // Build output array: [cx, cy, w, h, rotation, conf, cls]
     let mut obb_data = Array2::zeros((num_kept, 7));
@@ -1061,6 +1362,426 @@ fn postprocess_obb(
     results
 }
 
+// -------- YOLO26 end-to-end (NMS-free) postprocessing --------
+//
+// End-to-end exports bake NMS into the graph and produce a tensor of shape
+// `[B, max_det, 6 + extra]`, where the first 6 columns are always
+// `[x1, y1, x2, y2, conf, cls]` (OBB is the exception — see `postprocess_obb_end2end`).
+// Coordinates are in the letterboxed model-input space, so we still scale/pad-correct
+// them back to original-image space. No NMS, no class-score matrix.
+
+/// Helper: scale a model-space xyxy box to original image coordinates.
+#[inline]
+fn scale_xyxy(
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    preprocess: &PreprocessResult,
+) -> (f32, f32, f32, f32) {
+    let (scale_y, scale_x) = preprocess.scale;
+    let (pad_top, pad_left) = preprocess.padding;
+    (
+        (x1 - pad_left) / scale_x,
+        (y1 - pad_top) / scale_y,
+        (x2 - pad_left) / scale_x,
+        (y2 - pad_top) / scale_y,
+    )
+}
+
+/// Post-process YOLO26 end-to-end detection output `[1, max_det, 6]`.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+fn postprocess_detect_end2end(
+    output: &[f32],
+    output_shape: &[usize],
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: &HashMap<usize, String>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+) -> Results {
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+
+    if output_shape.len() != 3 || output.is_empty() {
+        return results;
+    }
+    let max_det = output_shape[1];
+    let feats = output_shape[2];
+    if feats < 6 || max_det == 0 {
+        return results;
+    }
+
+    let (oh, ow) = preprocess.orig_shape;
+    let (max_w, max_h) = (ow as f32, oh as f32);
+    let user_cap = config.max_det.min(max_det);
+
+    let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
+    for i in 0..max_det {
+        let base = i * feats;
+        let conf = output[base + 4];
+        // End2end outputs are sorted by confidence descending; stop on first below threshold.
+        if conf < config.confidence_threshold {
+            break;
+        }
+        let cls = output[base + 5] as usize;
+        if !config.keep_class(cls) {
+            continue;
+        }
+        let (x1, y1, x2, y2) = scale_xyxy(
+            output[base],
+            output[base + 1],
+            output[base + 2],
+            output[base + 3],
+            preprocess,
+        );
+        flat.extend_from_slice(&[
+            x1.clamp(0.0, max_w),
+            y1.clamp(0.0, max_h),
+            x2.clamp(0.0, max_w),
+            y2.clamp(0.0, max_h),
+            conf,
+            cls as f32,
+        ]);
+        if flat.len() >= user_cap * 6 {
+            break;
+        }
+    }
+
+    let n = flat.len() / 6;
+    if n > 0 {
+        let boxes_data = Array2::from_shape_vec((n, 6), flat).expect("flat length matches (n, 6)");
+        results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    }
+    results
+}
+
+/// Post-process YOLO26 end-to-end segmentation output.
+///
+/// `output0`: `[1, max_det, 6 + nm]`, `output1`: `[1, nm, mh, mw]` (protos).
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::too_many_lines,
+    clippy::needless_pass_by_value,
+    clippy::similar_names,
+    clippy::manual_let_else
+)]
+fn postprocess_segment_end2end(
+    outputs: Vec<(&[f32], Vec<usize>)>,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: &HashMap<usize, String>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+) -> Results {
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    if outputs.len() < 2 {
+        eprintln!(
+            "WARNING ⚠️ End2end segmentation missing protos output (got {} outputs).",
+            outputs.len()
+        );
+        return results;
+    }
+    let (output0, shape0) = &outputs[0];
+    let (output1, shape1) = &outputs[1];
+
+    if shape0.len() != 3 || shape1.len() != 4 {
+        return results;
+    }
+    let max_det = shape0[1];
+    let feats = shape0[2];
+    let num_masks = shape1[1];
+    if feats < 6 + num_masks {
+        eprintln!("WARNING ⚠️ End2end segment features ({feats}) < 6 + num_masks ({num_masks}).");
+        return results;
+    }
+
+    let (oh, ow) = preprocess.orig_shape;
+    let (max_w, max_h) = (ow as f32, oh as f32);
+    let user_cap = config.max_det.min(max_det);
+
+    let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
+    let mut flat_coeffs: Vec<f32> = Vec::with_capacity(user_cap * num_masks);
+
+    for i in 0..max_det {
+        let base = i * feats;
+        let conf = output0[base + 4];
+        if conf < config.confidence_threshold {
+            break;
+        }
+        let cls = output0[base + 5] as usize;
+        if !config.keep_class(cls) {
+            continue;
+        }
+        let (x1, y1, x2, y2) = scale_xyxy(
+            output0[base],
+            output0[base + 1],
+            output0[base + 2],
+            output0[base + 3],
+            preprocess,
+        );
+        flat_boxes.extend_from_slice(&[
+            x1.clamp(0.0, max_w),
+            y1.clamp(0.0, max_h),
+            x2.clamp(0.0, max_w),
+            y2.clamp(0.0, max_h),
+            conf,
+            cls as f32,
+        ]);
+        let coeff_start = base + 6;
+        flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
+        if flat_boxes.len() >= user_cap * 6 {
+            break;
+        }
+    }
+
+    let num_kept = flat_boxes.len() / 6;
+    if num_kept == 0 {
+        return results;
+    }
+
+    let boxes_data =
+        Array2::from_shape_vec((num_kept, 6), flat_boxes).expect("flat length matches (n, 6)");
+    let mask_coeffs = Array2::from_shape_vec((num_kept, num_masks), flat_coeffs)
+        .expect("flat length matches (n, num_masks)");
+
+    // Protos -> masks (mirrors standard segment path).
+    let mh = shape1[2];
+    let mw = shape1[3];
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("WARNING ⚠️ Failed to build protos array: {e}. Skipping masks.");
+            return results;
+        }
+    };
+    let masks_flat = mask_coeffs.dot(&protos);
+
+    let (th, tw) = inference_shape;
+    let (pad_top, pad_left) = preprocess.padding;
+    let scale_w = mw as f32 / tw as f32;
+    let scale_h = mh as f32 / th as f32;
+    let crop_x = pad_left * scale_w;
+    let crop_y = pad_top * scale_h;
+    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
+    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
+
+    let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
+    Zip::from(masks_data.outer_iter_mut())
+        .and(masks_flat.outer_iter())
+        .and(boxes_data.outer_iter())
+        .par_for_each(
+            |mut mask_out: ArrayViewMut2<f32>,
+             mask_flat: ArrayView1<f32>,
+             box_data: ArrayView1<f32>| {
+                let mut resizer = Resizer::new();
+                let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
+                let f32_data: Vec<f32> = mask_flat
+                    .iter()
+                    .map(|&v| 1.0 / (1.0 + (-v).exp()))
+                    .collect();
+                let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+                let src_image = match Image::from_vec_u8(
+                    mw as u32,
+                    mh as u32,
+                    src_bytes.to_vec(),
+                    PixelType::F32,
+                ) {
+                    Ok(i) => i,
+                    Err(_) => return,
+                };
+                let mut dst_image = Image::new(ow, oh, PixelType::F32);
+                let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+                    f64::from(crop_x.max(0.0)),
+                    f64::from(crop_y.max(0.0)),
+                    f64::from(crop_w.max(1.0).min(mw as f32)),
+                    f64::from(crop_h.max(1.0).min(mh as f32)),
+                );
+                if resizer
+                    .resize(&src_image, &mut dst_image, &options)
+                    .is_err()
+                {
+                    return;
+                }
+                let dst_bytes = dst_image.buffer();
+                let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
+                let x1 = box_data[0].max(0.0).min(ow as f32);
+                let y1 = box_data[1].max(0.0).min(oh as f32);
+                let x2 = box_data[2].max(0.0).min(ow as f32);
+                let y2 = box_data[3].max(0.0).min(oh as f32);
+                for y in 0..oh as usize {
+                    for x in 0..ow as usize {
+                        let val = dst_slice[y * ow as usize + x];
+                        let xf = x as f32;
+                        let yf = y as f32;
+                        if xf >= x1 && xf <= x2 && yf >= y1 && yf <= y2 {
+                            mask_out[[y, x]] = val;
+                        }
+                    }
+                }
+            },
+        );
+
+    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
+    results
+}
+
+/// Post-process YOLO26 end-to-end pose output `[1, max_det, 6 + nk*kpt_dim]`.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::similar_names
+)]
+fn postprocess_pose_end2end(
+    output: &[f32],
+    output_shape: &[usize],
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: &HashMap<usize, String>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+    nk: usize,
+    kpt_dim: usize,
+) -> Results {
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    if output_shape.len() != 3 || output.is_empty() || nk == 0 || kpt_dim < 2 {
+        return results;
+    }
+    let max_det = output_shape[1];
+    let feats = output_shape[2];
+    if feats < 6 + nk * kpt_dim || max_det == 0 {
+        return results;
+    }
+
+    let (oh, ow) = preprocess.orig_shape;
+    let (max_w, max_h) = (ow as f32, oh as f32);
+    let (scale_y, scale_x) = preprocess.scale;
+    let (pad_top, pad_left) = preprocess.padding;
+    let user_cap = config.max_det.min(max_det);
+
+    let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
+    let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * 3);
+
+    for i in 0..max_det {
+        let base = i * feats;
+        let conf = output[base + 4];
+        if conf < config.confidence_threshold {
+            break;
+        }
+        let cls = output[base + 5] as usize;
+        if !config.keep_class(cls) {
+            continue;
+        }
+        let (x1, y1, x2, y2) = scale_xyxy(
+            output[base],
+            output[base + 1],
+            output[base + 2],
+            output[base + 3],
+            preprocess,
+        );
+        flat_boxes.extend_from_slice(&[
+            x1.clamp(0.0, max_w),
+            y1.clamp(0.0, max_h),
+            x2.clamp(0.0, max_w),
+            y2.clamp(0.0, max_h),
+            conf,
+            cls as f32,
+        ]);
+        let kstart = base + 6;
+        for k in 0..nk {
+            let off = kstart + k * kpt_dim;
+            let sx = (output[off] - pad_left) / scale_x;
+            let sy = (output[off + 1] - pad_top) / scale_y;
+            let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
+            flat_kpts.extend_from_slice(&[sx.clamp(0.0, max_w), sy.clamp(0.0, max_h), kconf]);
+        }
+        if flat_boxes.len() >= user_cap * 6 {
+            break;
+        }
+    }
+
+    let n = flat_boxes.len() / 6;
+    // Always emit a keypoints tensor (even empty) to match the non-end2end pose path.
+    let kdata =
+        Array3::from_shape_vec((n, nk, 3), flat_kpts).expect("flat length matches (n, nk, 3)");
+    results.keypoints = Some(Keypoints::new(kdata, preprocess.orig_shape));
+    if n > 0 {
+        let boxes_data =
+            Array2::from_shape_vec((n, 6), flat_boxes).expect("flat length matches (n, 6)");
+        results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    }
+    results
+}
+
+/// Post-process YOLO26 end-to-end OBB output `[1, max_det, 7]`
+/// with layout `[cx, cy, w, h, conf, cls, angle]`.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+fn postprocess_obb_end2end(
+    output: &[f32],
+    output_shape: &[usize],
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: &HashMap<usize, String>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+) -> Results {
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut flat: Vec<f32> = Vec::new();
+
+    if output_shape.len() == 3 && !output.is_empty() {
+        let max_det = output_shape[1];
+        let feats = output_shape[2];
+        if feats >= 7 && max_det > 0 {
+            let (oh, ow) = preprocess.orig_shape;
+            let (max_w, max_h) = (ow as f32, oh as f32);
+            let (scale_y, scale_x) = preprocess.scale;
+            let (pad_top, pad_left) = preprocess.padding;
+            let user_cap = config.max_det.min(max_det);
+            flat.reserve(user_cap * 7);
+
+            for i in 0..max_det {
+                let base = i * feats;
+                let conf = output[base + 4];
+                if conf < config.confidence_threshold {
+                    break;
+                }
+                let cls = output[base + 5] as usize;
+                if !config.keep_class(cls) {
+                    continue;
+                }
+                let cx = (output[base] - pad_left) / scale_x;
+                let cy = (output[base + 1] - pad_top) / scale_y;
+                flat.extend_from_slice(&[
+                    cx.clamp(0.0, max_w),
+                    cy.clamp(0.0, max_h),
+                    output[base + 2] / scale_x,
+                    output[base + 3] / scale_y,
+                    output[base + 6],
+                    conf,
+                    cls as f32,
+                ]);
+                if flat.len() >= user_cap * 7 {
+                    break;
+                }
+            }
+        }
+    }
+
+    let n = flat.len() / 7;
+    let obb_data = Array2::from_shape_vec((n, 7), flat).expect("flat length matches (n, 7)");
+    results.obb = Some(Obb::new(obb_data, preprocess.orig_shape));
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1078,6 +1799,20 @@ mod tests {
         assert_eq!(nc, 80);
         assert_eq!(np, 8400);
         assert!(transposed);
+    }
+
+    #[test]
+    fn test_infer_end2end_kpt_shape() {
+        // COCO pose: 17 kpts × 3 dims -> kpt_feats=51 (only div3) -> (17, 3)
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6 + 51]), Some((17, 3)));
+        // Pure 2D pose: 17 × 2 -> kpt_feats=34 (only div2) -> (17, 2)
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6 + 34]), Some((17, 2)));
+        // Ambiguous (divisible by 6): 12 × 3 vs 18 × 2 both decode to 36 -> None
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6 + 36]), None);
+        // Shape that isn't the end-to-end layout -> None
+        assert_eq!(infer_end2end_kpt_shape(&[1, 56, 8400]), None);
+        // shape[2] <= 6 -> None (no keypoint features)
+        assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6]), None);
     }
 
     #[test]

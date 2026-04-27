@@ -146,7 +146,6 @@ pub fn annotate_image(
     top_k: Option<usize>,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
-    let (_width, _height) = img.dimensions();
 
     // Check if any class name is non-ASCII to select font
     let mut use_unicode_font = false;
@@ -302,7 +301,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
 
         // Draw masks onto the overlay
         if let Some(ref masks) = result.masks {
-            let (mask_n, _mask_h, _mask_w) = masks.data.dim();
+            let mask_n = masks.data.dim().0;
 
             for i in 0..boxes.len() {
                 if i >= mask_n {
@@ -879,5 +878,50 @@ fn draw_classification(
                 y_pos += line_height;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::results::Speed;
+    use ndarray::Array3;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_get_class_color() {
+        let c = get_class_color(0);
+        assert_eq!(c, Rgb([4, 42, 255]));
+    }
+
+    #[test]
+    fn test_draw_line_segment() {
+        let mut img = image::RgbImage::new(100, 100);
+        let color = Rgb([255, 0, 0]);
+        // Draw horizontal line
+        draw_line_segment(&mut img, 10.0, 10.0, 50.0, 10.0, color, 1);
+
+        // Check a pixel in the middle
+        assert_eq!(*img.get_pixel(30, 10), color);
+        // Check pixel outside
+        assert_eq!(*img.get_pixel(30, 20), Rgb([0, 0, 0]));
+    }
+
+    #[test]
+    fn test_annotate_image_empty() {
+        let img = DynamicImage::new_rgb8(100, 100);
+
+        let orig_img = Array3::<u8>::zeros((100, 100, 3));
+        let path = "test.jpg".to_string();
+        let names = HashMap::new();
+        let speed = Speed::new(0.0, 0.0, 0.0);
+
+        // Correct constructor matching src/results.rs:101
+        let results = Results::new(orig_img, path, names, speed, (640, 640));
+
+        let annotated = annotate_image(&img, &results, None);
+        // Should return same dimensions
+        assert_eq!(annotated.width(), 100);
+        assert_eq!(annotated.height(), 100);
     }
 }

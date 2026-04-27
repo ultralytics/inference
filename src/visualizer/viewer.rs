@@ -39,7 +39,7 @@ impl Viewer {
             width,
             height,
             WindowOptions {
-                resize: true,
+                resize: false,
                 ..WindowOptions::default()
             },
         )

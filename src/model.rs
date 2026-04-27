@@ -10,10 +10,10 @@ use std::path::Path;
 use std::time::Instant;
 
 use half::f16;
-use image::DynamicImage;
+use image::{DynamicImage, GenericImageView};
 use ndarray::Array3;
 use ort::session::Session;
-use ort::tensor::TensorElementType;
+use ort::value::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
 
@@ -23,10 +23,12 @@ use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
-    image_to_array, preprocess_image_center_crop, preprocess_image_with_precision,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop,
+    preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;
+use crate::warn;
 
 /// YOLO model for inference.
 ///
@@ -38,7 +40,7 @@ use crate::task::Task;
 /// ```no_run
 /// use ultralytics_inference::YOLOModel;
 ///
-/// let mut model = YOLOModel::load("yolo11n.onnx").unwrap();
+/// let mut model = YOLOModel::load("yolo26n.onnx").unwrap();
 /// let results = model.predict("image.jpg").unwrap();
 /// println!("Found {} detections", results.len());
 /// ```
@@ -59,6 +61,8 @@ pub struct YOLOModel {
     fp16_input: bool,
     /// Execution provider used for inference
     execution_provider: String,
+    /// Whether the model accepts dynamic input shapes.
+    is_dynamic: bool,
 }
 
 #[allow(
@@ -66,7 +70,12 @@ pub struct YOLOModel {
     clippy::needless_pass_by_value,
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::if_not_else,
+    clippy::manual_is_multiple_of,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
 )]
 impl YOLOModel {
     /// Load a YOLO model from an ONNX file.
@@ -87,7 +96,7 @@ impl YOLOModel {
     /// ```no_run
     /// use ultralytics_inference::YOLOModel;
     ///
-    /// let model = YOLOModel::load("yolo11n.onnx")?;
+    /// let model = YOLOModel::load("yolo26n.onnx")?;
     /// # Ok::<(), ultralytics_inference::InferenceError>(())
     /// ```
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -121,9 +130,7 @@ impl YOLOModel {
             config.num_threads
         } else {
             // Use all available cores for intra-op parallelism (single inference)
-            std::thread::available_parallelism()
-                .map(std::num::NonZero::get)
-                .unwrap_or(4)
+            std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
         };
 
         // Create ONNX Runtime session with optimizations
@@ -134,22 +141,16 @@ impl YOLOModel {
         // Register execution providers based on features and device config
         #[allow(unused_mut)]
         let mut eps: Vec<ort::execution_providers::ExecutionProviderDispatch> = Vec::new();
+        #[allow(unused_mut)]
         let mut provider_name = "CPUExecutionProvider";
 
         if let Some(device) = &config.device {
             // User requested specific device
             match device {
-                crate::Device::Cpu => {
-                    // No specific provider needed, will fall back to CPU
-                    provider_name = "CPUExecutionProvider";
-                }
+                crate::Device::Cpu => {}
                 #[cfg(feature = "cuda")]
                 crate::Device::Cuda(i) => {
-                    eps.push(
-                        ort::execution_providers::CUDAExecutionProvider::default()
-                            .with_device_id(*i as i32)
-                            .build(),
-                    );
+                    eps.push(Self::build_cuda_ep(*i as i32));
                     provider_name = "CUDAExecutionProvider";
                 }
                 #[cfg(feature = "coreml")]
@@ -200,15 +201,13 @@ impl YOLOModel {
                 // Handle cases where feature is disabled but enum variant exists
                 #[allow(unreachable_patterns)]
                 _ => {
-                    eprintln!(
-                        "\x1b[33mWARNING ⚠️ Device '{device}' requested but feature not enabled or supported. Falling back to available providers.\x1b[0m"
+                    warn!(
+                        "Device '{device}' requested but feature not enabled or supported. Falling back to available providers."
                     );
                 }
             }
         } else {
             // Default: Register all available providers in preference order
-            provider_name = "CPUExecutionProvider";
-
             #[cfg(feature = "tensorrt")]
             {
                 eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
@@ -217,7 +216,7 @@ impl YOLOModel {
 
             #[cfg(feature = "cuda")]
             {
-                eps.push(ort::execution_providers::CUDAExecutionProvider::default().build());
+                eps.push(Self::build_cuda_ep(0));
                 if provider_name == "CPUExecutionProvider" {
                     provider_name = "CUDAExecutionProvider";
                 }
@@ -265,10 +264,16 @@ impl YOLOModel {
         }
 
         if !eps.is_empty() {
+            crate::info!(
+                "Registering {} execution providers (primary: {})",
+                eps.len(),
+                provider_name
+            );
             session_builder = session_builder.with_execution_providers(eps).map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}"))
             })?;
         }
+        // CPU is the default - no warning needed when no accelerators are registered
 
         let session = session_builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
@@ -278,6 +283,10 @@ impl YOLOModel {
             .with_intra_threads(num_threads)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set intra-op thread count: {e}"))
+            })?
+            .with_inter_threads(1)
+            .map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to set inter-op thread count: {e}"))
             })?
             .with_memory_pattern(true)
             .map_err(|e| {
@@ -293,8 +302,8 @@ impl YOLOModel {
         let input_info = session.inputs().first();
         let input_name = input_info.map_or_else(|| "images".to_string(), |i| i.name().to_string());
 
-        // Check if model input tensor expects FP16 (rare - most models use FP32 input even with half weights)
-        let model_input_fp16 = input_info.is_some_and(|i| {
+        // Check if model input tensor expects FP16 (rare most models use FP32 input even with half weights)
+        let fp16_input = input_info.is_some_and(|i| {
             matches!(
                 i.dtype(),
                 ValueType::Tensor {
@@ -314,9 +323,6 @@ impl YOLOModel {
                 false
             }
         });
-
-        // Use FP16 input if model tensor type requires it
-        let fp16_input = model_input_fp16;
 
         let output_names: Vec<String> = session
             .outputs()
@@ -380,12 +386,31 @@ impl YOLOModel {
             warmed_up: false,
             fp16_input,
             execution_provider: provider_name.to_string(),
+            is_dynamic,
         };
 
         // Warmup inference to trigger JIT compilation and memory allocation
         model.warmup()?;
 
         Ok(model)
+    }
+
+    /// Build the CUDA execution provider.
+    ///
+    /// TF32 is enabled. TF32 is a reduced-precision format available on
+    /// NVIDIA Tensor cores (Ampere and newer) that accelerates FP32
+    /// `MatMul` and `Conv` ops by truncating the mantissa to 10 bits before
+    /// multiplying, while keeping FP32 range for accumulation. It typically
+    /// gives a significant speedup on FP32 models with accuracy loss well
+    /// below detection-threshold sensitivity. On GPUs without TF32
+    /// hardware (pre-Ampere), the flag is a silent no-op cuDNN falls
+    /// back to standard FP32.
+    #[cfg(feature = "cuda")]
+    fn build_cuda_ep(device_id: i32) -> ort::execution_providers::ExecutionProviderDispatch {
+        ort::execution_providers::CUDAExecutionProvider::default()
+            .with_device_id(device_id)
+            .with_tf32(true)
+            .build()
     }
 
     /// Maximum allowed image dimension to prevent OOM during warmup.
@@ -456,6 +481,8 @@ impl YOLOModel {
             "half",
             "channels",
             "args",
+            "end2end",
+            "kpt_shape",
         ];
 
         for key in &keys {
@@ -535,6 +562,52 @@ impl YOLOModel {
     ///
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
+        // Delegate to predict_internal with single image
+        // We pass local slice of references to avoid cloning images
+        let images = [image];
+        let paths = [path];
+
+        // predict_internal returns Vec<Vec<Results>>
+        // We take the first (and only) element
+        let mut results = self.predict_internal(&images, &paths)?;
+
+        Ok(results.pop().unwrap_or_default())
+    }
+
+    /// Run inference on a batch of `DynamicImage`s.
+    ///
+    /// # Arguments
+    ///
+    /// * `images` - A slice of images to run inference on.
+    /// * `paths` - A slice of optional paths/identifiers for the images.
+    ///
+    /// # Returns
+    ///
+    /// Vector of Vectors of Results (one vector of results per image).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if inference fails.
+    pub fn predict_batch(
+        &mut self,
+        images: &[DynamicImage],
+        paths: &[String],
+    ) -> Result<Vec<Vec<Results>>> {
+        // Create vector of references
+        let image_refs: Vec<&DynamicImage> = images.iter().collect();
+        self.predict_internal(&image_refs, paths)
+    }
+
+    /// Internal method to run inference on a batch of image references.
+    fn predict_internal(
+        &mut self,
+        images: &[&DynamicImage],
+        paths: &[String],
+    ) -> Result<Vec<Vec<Results>>> {
+        if images.is_empty() {
+            return Ok(Vec::new());
+        }
+
         // Get target size from config or metadata
         let target_size = self
             .config
@@ -542,70 +615,185 @@ impl YOLOModel {
             .or(self.metadata.imgsz)
             .unwrap_or((640, 640));
 
-        // Preprocess - generate FP16 tensor if model expects FP16 input
-        let start_preprocess = Instant::now();
-        let preprocess_result = if self.metadata.task == Task::Classify {
-            preprocess_image_center_crop(image, target_size, self.fp16_input)
-        } else {
-            preprocess_image_with_precision(
-                image,
+        // Check if target_size is divisible by stride (one-time warning logic per batch call)
+        // We only warn if the configured size itself is not divisible.
+        // If rect adjusts it, that's expected.
+        let stride = self.metadata.stride as usize;
+        if target_size.0 % stride != 0 || target_size.1 % stride != 0 {
+            warn!(
+                "WARNING ⚠️ imgsz=[{:?}] must be multiple of max stride {}, updating to [{}, {}]",
                 target_size,
-                self.metadata.stride,
-                self.fp16_input,
-            )
+                stride,
+                (target_size.0 as f32 / stride as f32).ceil() as usize * stride,
+                (target_size.1 as f32 / stride as f32).ceil() as usize * stride
+            );
+        }
+
+        // Preprocess all images
+        let start_preprocess = Instant::now();
+        let mut preprocessed_results = Vec::with_capacity(images.len());
+
+        // Check if we can use rect inference
+        // 1. Enabled in config
+        // 2. Model supports dynamic shapes
+        // 3. Batch is homogeneous (all images have same dimensions) or batch size is 1
+        let use_rect = self.config.rect && self.is_dynamic;
+        let uniform_shape = if images.len() > 1 {
+            let first_dims = images[0].dimensions();
+            images.iter().all(|img| img.dimensions() == first_dims)
+        } else {
+            true
         };
-        let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
+        let actual_rect = use_rect && uniform_shape;
 
-        // Convert original image to array for results
-        let orig_img = image_to_array(image);
+        // Warn if rect requested but disabled due to mixed batch
+        if self.config.rect && !uniform_shape {
+            warn!(
+                "Batch contains images of different sizes. Rectangular inference disabled for this batch (falling back to square padding)."
+            );
+        }
 
-        // Run inference with appropriate precision
+        // We will stack tensors later
+        for image in images {
+            // Determine target size for this image
+            let current_target_size = if actual_rect {
+                let (w, h) = image.dimensions();
+                calculate_rect_size(w, h, target_size, self.metadata.stride)
+            } else {
+                target_size
+            };
+
+            let res = if self.metadata.task == Task::Classify {
+                preprocess_image_center_crop(image, current_target_size, self.fp16_input)
+            } else {
+                preprocess_image_with_precision(
+                    image,
+                    current_target_size,
+                    self.metadata.stride,
+                    self.fp16_input,
+                )
+            };
+            preprocessed_results.push(res);
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let preprocess_time =
+            start_preprocess.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
+
+        // Stack tensors
         let start_inference = Instant::now();
         let outputs = if self.fp16_input {
-            // Use FP16 tensor directly (no round-trip
-            let tensor_f16 = preprocess_result
-                .tensor_f16
-                .as_ref()
-                .expect("FP16 tensor should be available");
-            self.run_inference_f16(tensor_f16)?
+            let mut arrays = Vec::with_capacity(images.len());
+            for res in &preprocessed_results {
+                arrays.push(
+                    res.tensor_f16
+                        .as_ref()
+                        .expect("FP16 tensor should be available")
+                        .view(),
+                );
+            }
+
+            // Concatenate along batch dimension (axis 0)
+            let batch_tensor = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to concatenate FP16 tensors: {e}"))
+            })?;
+            // ndarray concatenate returns ArrayxD, we need Array4
+            let batch_tensor = batch_tensor
+                .into_dimensionality::<ndarray::Ix4>()
+                .map_err(|e| {
+                    InferenceError::InferenceError(format!(
+                        "Failed to convert concatenated tensor to 4D: {e}"
+                    ))
+                })?;
+
+            self.run_inference_f16(&batch_tensor)?
         } else {
-            let input_tensor = &preprocess_result.tensor;
+            let mut arrays = Vec::with_capacity(images.len());
+            for res in &preprocessed_results {
+                arrays.push(res.tensor.view());
+            }
+            let batch_tensor = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to concatenate FP32 tensors: {e}"))
+            })?;
+            let batch_tensor = batch_tensor
+                .into_dimensionality::<ndarray::Ix4>()
+                .map_err(|e| {
+                    InferenceError::InferenceError(format!(
+                        "Failed to convert concatenated tensor to 4D: {e}"
+                    ))
+                })?;
 
-            self.run_inference(input_tensor)?
+            self.run_inference(&batch_tensor)?
         };
-        let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0;
+        #[allow(clippy::cast_precision_loss)]
+        let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
 
-        // Post-process
-        let _start_postprocess = Instant::now();
+        // Process each image's output
+        let mut image_arrays = Vec::with_capacity(images.len());
+        for image in images {
+            image_arrays.push(image_to_array(image));
+        }
 
         // Post-process
         let start_postprocess = Instant::now();
 
-        let speed = Speed::new(preprocess_time, inference_time, 0.0);
+        let mut batch_results = Vec::with_capacity(images.len());
 
-        // Extract inference tensor shape (height, width) from preprocessed tensor
-        let tensor_shape = preprocess_result.tensor.shape();
-        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
+        // Process each image's output
+        for (i, (orig_img, preprocess_res)) in image_arrays
+            .into_iter()
+            .zip(preprocessed_results)
+            .enumerate()
+        {
+            let path = paths.get(i).cloned().unwrap_or_default();
+            let speed = Speed::new(preprocess_time, inference_time, 0.0);
 
-        let result = postprocess(
-            outputs,
-            self.metadata.task,
-            &preprocess_result,
-            &self.config,
-            &self.metadata.names,
-            orig_img,
-            path,
-            speed,
-            inference_shape,
-        );
+            // Construct outputs for this single image
+            let mut img_outputs = Vec::new();
+            for (data, shape) in &outputs {
+                let batch_size = shape[0];
+                let actual_batch_size = if batch_size > 0 { batch_size } else { 1 };
+                let total_elements = data.len();
+                let elements_per_img = total_elements / actual_batch_size;
+                let start = i * elements_per_img;
+                let end = start + elements_per_img;
+                let img_data = &data[start..end];
+                let mut img_shape = shape.clone();
+                img_shape[0] = 1;
+                img_outputs.push((img_data, img_shape));
+            }
 
-        let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
+            let tensor_shape = preprocess_res.tensor.shape();
+            let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
-        // Update speed with postprocess time
-        let mut final_result = result;
-        final_result.speed.postprocess = Some(postprocess_time);
+            let result = postprocess(
+                img_outputs,
+                self.metadata.task,
+                &preprocess_res,
+                &self.config,
+                &self.metadata.names,
+                orig_img,
+                path,
+                speed,
+                inference_shape,
+                self.metadata.end2end,
+                self.metadata.kpt_shape,
+            );
 
-        Ok(vec![final_result])
+            batch_results.push(vec![result]);
+        }
+
+        #[allow(clippy::cast_precision_loss)]
+        let postprocess_time =
+            start_postprocess.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
+
+        // Update postprocess time for all results
+        for img_results in &mut batch_results {
+            for res in img_results {
+                res.speed.postprocess = Some(postprocess_time);
+            }
+        }
+
+        Ok(batch_results)
     }
 
     /// Run inference on a raw array.
@@ -620,24 +808,81 @@ impl YOLOModel {
     /// Vector of Results.
     pub fn predict_array(&mut self, image: &Array3<u8>, path: String) -> Result<Vec<Results>> {
         // Convert array to DynamicImage
-        let shape = image.shape();
-        let (height, width) = (shape[0] as u32, shape[1] as u32);
+        let dynamic_img = crate::utils::array_to_image(image)?;
+        self.predict_image(&dynamic_img, path)
+    }
 
-        let mut rgb_data = Vec::with_capacity((height * width * 3) as usize);
-        for y in 0..height as usize {
-            for x in 0..width as usize {
-                rgb_data.push(image[[y, x, 0]]);
-                rgb_data.push(image[[y, x, 1]]);
-                rgb_data.push(image[[y, x, 2]]);
+    /// Process a source and save results if requested.
+    ///
+    /// This method is gated by the "annotate" feature.
+    /// Uses `config.save` to determine whether to save annotated results.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The input source.
+    /// * `save_dir` - Directory to save results (required if saving).
+    ///
+    /// # Returns
+    ///
+    /// * Vector of `SourceMeta` and Results pairs.
+    #[cfg(feature = "annotate")]
+    #[allow(clippy::too_many_lines)]
+    pub fn predict_source(
+        &mut self,
+        source: crate::source::Source,
+        save_dir: Option<&Path>,
+    ) -> Result<Vec<(crate::source::SourceMeta, Results)>> {
+        use crate::annotate::annotate_image;
+
+        let is_video = source.is_video();
+        #[cfg(not(feature = "video"))]
+        if is_video {
+            return Err(InferenceError::FeatureNotEnabled(
+                "Video support requires '--features video'".to_string(),
+            ));
+        }
+
+        let iterator = crate::source::SourceIterator::new(source)?;
+        let mut results_vec = Vec::new();
+
+        // Initialize ResultSaver if saving is enabled (config.save defaults to true)
+        let mut result_saver = if self.config.save {
+            if let Some(d) = save_dir {
+                Some(crate::io::SaveResults::new(
+                    d.to_path_buf(),
+                    self.config.save_frames,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        for frame_result in iterator {
+            let (img, meta) = frame_result?;
+
+            // Run inference
+            let results = self.predict_image(&img, meta.path.clone())?;
+
+            // Take the first result (since we process one frame at a time)
+            if let Some(result) = results.into_iter().next() {
+                // Save logic
+                if let Some(saver) = &mut result_saver {
+                    let annotated = annotate_image(&img, &result, None);
+                    saver.save(is_video, &meta, &annotated)?;
+                }
+
+                results_vec.push((meta, result));
             }
         }
 
-        let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
-            InferenceError::ImageError("Failed to create image buffer".to_string())
-        })?;
+        // Finish saver
+        if let Some(saver) = result_saver {
+            saver.finish()?;
+        }
 
-        let dynamic_img = DynamicImage::ImageRgb8(img_buffer);
-        self.predict_image(&dynamic_img, path)
+        Ok(results_vec)
     }
 
     /// Run the ONNX model inference with FP32 input.
@@ -778,7 +1023,7 @@ impl YOLOModel {
     ///
     /// ```no_run
     /// use ultralytics_inference::YOLOModel;
-    /// let mut model = YOLOModel::load("yolo11n.onnx")?;
+    /// let mut model = YOLOModel::load("yolo26n.onnx")?;
     /// println!("Model name: {}", model.metadata().model_name());
     /// # Ok::<(), ultralytics_inference::InferenceError>(())
     /// ```
@@ -811,6 +1056,8 @@ impl std::fmt::Debug for YOLOModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_model_not_found() {
@@ -820,5 +1067,43 @@ mod tests {
             result.unwrap_err(),
             InferenceError::ModelLoadError(_)
         ));
+    }
+
+    #[test]
+    fn test_model_load_invalid_file() {
+        // Create a temporary file with garbage data
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "garbage").unwrap();
+        let path = file.path();
+
+        let result = YOLOModel::load(path);
+        // ONNX Runtime should fail to load this
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_model_accessors_with_dummy() {
+        // Since we can't easily mock YOLOModel (it wraps internal ORT session),
+        // we can at least test specific public methods if we had a valid model.
+        // But for getters, we need an instance.
+        // We can use the auto-downloaded yolo26n.onnx if available,
+        // but unit tests should be hermetic if possible.
+        // However, we rely on yolo26n.onnx for other tests.
+
+        // Only run if model exists or can be downloaded
+        if let Ok(model) = YOLOModel::load("yolo26n.onnx") {
+            assert_eq!(model.task(), Task::Detect);
+            assert!(model.num_classes() > 0);
+            assert_eq!(model.stride(), 32);
+            assert_eq!(model.imgsz(), (640, 640)); // Default for yolo26n
+            assert!(!model.names().is_empty());
+            assert_eq!(model.model_path(), ""); // Placeholder returns empty string
+
+            // Test Debug impl
+            let debug_str = format!("{model:?}");
+            assert!(debug_str.contains("YOLOModel"));
+            assert!(debug_str.contains("task"));
+            assert!(debug_str.contains("num_classes"));
+        }
     }
 }

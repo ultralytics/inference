@@ -8,7 +8,6 @@
 // Modules
 /// CLI arguments.
 pub mod args;
-/// Logging utilities.
-pub mod logging;
+
 /// Prediction logic.
 pub mod predict;

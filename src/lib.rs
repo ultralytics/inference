@@ -17,7 +17,7 @@
 //!
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
-//! - **All YOLO Versions** - Supports `YOLOv5`, `YOLOv8`, `YOLO11`, and future versions
+//! - **Supported YOLO Versions** - `YOLO11` and `YOLO26` (including YOLO26 end-to-end NMS-free exports)
 //! - **All Tasks** - Detection, segmentation, pose estimation, classification, and OBB
 //! - **Ultralytics API** - Results API matches the Python package for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
@@ -45,7 +45,7 @@
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Load model - metadata (classes, task, imgsz) is read automatically
-//!     let mut model = YOLOModel::load("yolo11n.onnx")?;
+//!     let mut model = YOLOModel::load("yolo26n.onnx")?;
 //!
 //!     // Run inference
 //!     let results = model.predict("image.jpg")?;
@@ -79,19 +79,19 @@
 //! ultralytics-inference predict
 //!
 //! # Run on a specific image
-//! ultralytics-inference predict --model yolo11n.onnx --source image.jpg
+//! ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 //!
 //! # Run on a directory of images
-//! ultralytics-inference predict --model yolo11n.onnx --source images/
+//! ultralytics-inference predict --model yolo26n.onnx --source images/
 //!
 //! # With custom thresholds
-//! ultralytics-inference predict -m yolo11n.onnx -s image.jpg --conf 0.5 --iou 0.45
+//! ultralytics-inference predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
 //!
 //! # With visualization window
-//! ultralytics-inference predict --model yolo11n.onnx --source video.mp4 --show
+//! ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show
 //!
 //! # Save annotated results
-//! ultralytics-inference predict --model yolo11n.onnx --source image.jpg --save
+//! ultralytics-inference predict --model yolo26n.onnx --source image.jpg --save
 //!
 //! # Show help
 //! ultralytics-inference help
@@ -101,7 +101,7 @@
 //!
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
-//! | `--model` | `-m` | Path to ONNX model | `yolo11n.onnx` |
+//! | `--model` | `-m` | Path to ONNX model | `yolo26n.onnx` |
 //! | `--source` | `-s` | Input source | Sample images |
 //! | `--device` | | Device to use (cpu, cuda:0, mps, coreml, etc.) | `cpu` |
 //! | `--conf` | | Confidence threshold | `0.25` |
@@ -117,19 +117,19 @@
 //!
 //! ```bash
 //! # Detection (default)
-//! yolo export model=yolo11n.pt format=onnx
+//! yolo export model=yolo26n.pt format=onnx
 //!
 //! # Segmentation
-//! yolo export model=yolo11n-seg.pt format=onnx
+//! yolo export model=yolo26n-seg.pt format=onnx
 //!
 //! # Pose Estimation
-//! yolo export model=yolo11n-pose.pt format=onnx
+//! yolo export model=yolo26n-pose.pt format=onnx
 //!
 //! # Classification
-//! yolo export model=yolo11n-cls.pt format=onnx
+//! yolo export model=yolo26n-cls.pt format=onnx
 //!
 //! # Oriented Bounding Boxes
-//! yolo export model=yolo11n-obb.pt format=onnx
+//! yolo export model=yolo26n-obb.pt format=onnx
 //! ```
 //!
 //! The task is auto-detected from ONNX metadata:
@@ -139,21 +139,21 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Segmentation model - returns masks
-//! let mut model = YOLOModel::load("yolo11n-seg.onnx")?;
+//! let mut model = YOLOModel::load("yolo26n-seg.onnx")?;
 //! let results = model.predict("image.jpg")?;
 //! if let Some(ref masks) = results[0].masks {
 //!     println!("Found {} instance masks", masks.len());
 //! }
 //!
 //! // Pose model - returns keypoints
-//! let mut model = YOLOModel::load("yolo11n-pose.onnx")?;
+//! let mut model = YOLOModel::load("yolo26n-pose.onnx")?;
 //! let results = model.predict("image.jpg")?;
 //! if let Some(ref keypoints) = results[0].keypoints {
 //!     println!("Found {} poses", keypoints.len());
 //! }
 //!
 //! // Classification model - returns probabilities
-//! let mut model = YOLOModel::load("yolo11n-cls.onnx")?;
+//! let mut model = YOLOModel::load("yolo26n-cls.onnx")?;
 //! let results = model.predict("image.jpg")?;
 //! if let Some(ref probs) = results[0].probs {
 //!     println!("Top-1: class {} ({:.1}%)", probs.top1(), probs.top1conf() * 100.0);
@@ -172,7 +172,7 @@
 //! let config = InferenceConfig::new()
 //!     .with_confidence(0.5)    // Confidence threshold
 //!     .with_iou(0.45)          // NMS IoU threshold
-//!     .with_max_detections(100) // Max detections per image
+//!     .with_max_det(300) // Max detections per image
 //!     .with_imgsz(640, 640);   // Input image size
 //! ```
 //!
@@ -229,7 +229,7 @@
 //! |---------|-------------|
 //! | `annotate` | Image annotation support (default) |
 //! | `visualize` | Real-time window display (default) |
-//! | `video` | Video file and stream support |
+//! | `video` | Video file support (`FFmpeg`) |
 //! | `cuda` | NVIDIA CUDA acceleration |
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
@@ -244,11 +244,15 @@
 // Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
+pub mod batch;
 pub mod cli;
 pub mod device;
 pub mod download;
 pub mod error;
 pub mod inference;
+pub mod io;
+
+pub mod logging;
 pub mod metadata;
 pub mod model;
 pub mod postprocessing;

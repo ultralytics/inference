@@ -12,375 +12,351 @@ use std::time::{Duration, Instant};
 
 use crate::error::{InferenceError, Result};
 
-/// Default YOLO model name.
-pub const DEFAULT_MODEL: &str = "yolo11n.onnx";
+const ASSETS_BASE_URL: &str = "https://github.com/ultralytics/assets/releases/download/v8.4.0";
+
+/// Default YOLO detection model name.
+pub const DEFAULT_MODEL: &str = "yolo26n.onnx";
 
 /// Default YOLO segmentation model name.
-pub const DEFAULT_SEGMENT_MODEL: &str = "yolo11n-seg.onnx";
-
-/// URL for downloading the default YOLO model.
-const DEFAULT_DETECT_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.onnx";
-
-/// URL for downloading the default YOLO model.
-const DEFAULT_SEGMENT_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx";
+pub const DEFAULT_SEGMENT_MODEL: &str = "yolo26n-seg.onnx";
 
 /// Default YOLO pose model name.
-pub const DEFAULT_POSE_MODEL: &str = "yolo11n-pose.onnx";
-
-/// URL for downloading the default YOLO pose model.
-const DEFAULT_POSE_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.onnx";
+pub const DEFAULT_POSE_MODEL: &str = "yolo26n-pose.onnx";
 
 /// Default YOLO OBB model name.
-pub const DEFAULT_OBB_MODEL: &str = "yolo11n-obb.onnx";
-
-/// URL for downloading the default YOLO OBB model.
-const DEFAULT_OBB_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-obb.onnx";
+pub const DEFAULT_OBB_MODEL: &str = "yolo26n-obb.onnx";
 
 /// Default YOLO classification model name.
-pub const DEFAULT_CLS_MODEL: &str = "yolo11n-cls.onnx";
+pub const DEFAULT_CLS_MODEL: &str = "yolo26n-cls.onnx";
 
-/// URL for downloading the default YOLO classification model.
-const DEFAULT_CLS_MODEL_URL: &str =
-    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-cls.onnx";
+const DOWNLOADABLE_MODELS: &[&str] = &[
+    // YOLO26
+    "yolo26n.onnx",
+    "yolo26n-seg.onnx",
+    "yolo26n-pose.onnx",
+    "yolo26n-obb.onnx",
+    "yolo26n-cls.onnx",
+    // YOLO11
+    "yolo11n.onnx",
+    "yolo11n-seg.onnx",
+    "yolo11n-pose.onnx",
+    "yolo11n-obb.onnx",
+    "yolo11n-cls.onnx",
+];
 
-/// URL for downloading the default Bus.jpg image
 const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
-
-/// URL for downloading the default Zidane.jpg image
 const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
-
-/// URL for downloading the default Boats.jpg image (for OBB)
 const DEFAULT_BOATS_IMAGE_URL: &str = "https://ultralytics.com/images/boats.jpg";
 
-/// Default image URLs for detection, segmentation, pose, and classification tasks
+/// Default image URLs for detection, segmentation, pose, and classification tasks.
 pub const DEFAULT_IMAGES: &[&str] = &[DEFAULT_BUS_IMAGE_URL, DEFAULT_ZIDANE_IMAGE_URL];
 
-/// Default image URL for OBB (Oriented Bounding Box) tasks
+/// Default image URL for OBB (Oriented Bounding Box) tasks.
 pub const DEFAULT_OBB_IMAGE: &str = DEFAULT_BOATS_IMAGE_URL;
 
-/// Connection timeout in seconds.
 const CONNECT_TIMEOUT: u64 = 30;
-
-/// Read timeout in seconds.
 const READ_TIMEOUT: u64 = 300;
+const MAX_RETRIES: u32 = 3;
+const RETRY_BASE_DELAY_SECS: u64 = 2;
+const BAR_WIDTH: usize = 12;
+const MIN_UPDATE_INTERVAL: f64 = 0.1;
 
-/// Format bytes as human-readable string (e.g., "10.4MB").
-#[allow(clippy::cast_precision_loss)]
 fn format_bytes(bytes: f64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-
-    if bytes >= GB {
-        format!("{:.1}GB", bytes / GB)
-    } else if bytes >= MB {
-        format!("{:.1}MB", bytes / MB)
-    } else if bytes >= KB {
-        format!("{:.1}KB", bytes / KB)
-    } else {
-        format!("{bytes:.0}B")
+    for (unit, factor) in [
+        ("GB", 1_073_741_824.0_f64),
+        ("MB", 1_048_576.0),
+        ("KB", 1024.0),
+    ] {
+        if bytes >= factor {
+            return format!("{:.1}{unit}", bytes / factor);
+        }
     }
+    format!("{bytes:.0}B")
 }
 
-/// Format time duration.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn format_time(seconds: f64) -> String {
     if seconds < 60.0 {
         format!("{seconds:.1}s")
     } else if seconds < 3600.0 {
-        let mins = (seconds / 60.0) as u32;
-        let secs = seconds % 60.0;
-        format!("{mins}:{secs:04.1}")
+        format!("{}:{:04.1}", (seconds / 60.0) as u32, seconds % 60.0)
     } else {
-        let hours = (seconds / 3600.0) as u32;
-        let mins = ((seconds % 3600.0) / 60.0) as u32;
-        let secs = seconds % 60.0;
-        format!("{hours}:{mins:02}:{secs:04.1}")
+        format!(
+            "{}:{:02}:{:04.1}",
+            (seconds / 3600.0) as u32,
+            ((seconds % 3600.0) / 60.0) as u32,
+            seconds % 60.0
+        )
     }
 }
 
-/// Generate progress bar string.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
 fn generate_bar(progress: f64, width: usize) -> String {
-    let filled = (progress * width as f64) as usize;
-    let partial = progress.mul_add(width as f64, -(filled as f64));
-
-    let mut bar = "━".repeat(filled);
-    if filled < width {
-        if partial > 0.5 {
-            bar.push('╸');
-            bar.push_str(&"─".repeat(width - filled - 1));
-        } else {
-            bar.push_str(&"─".repeat(width - filled));
-        }
-    }
-    bar
+    let filled = ((progress * width as f64) as usize).min(width);
+    format!("{}{}", "━".repeat(filled), "─".repeat(width - filled))
 }
 
-/// Download a file from URL to the specified path with progress bar.
+const fn is_transient(e: &ureq::Error) -> bool {
+    match e {
+        ureq::Error::Timeout(_) | ureq::Error::Io(_) => true,
+        ureq::Error::StatusCode(c) => *c >= 500,
+        _ => false,
+    }
+}
+
+/// Download a file from URL to the specified path with progress bar and retry.
 ///
-/// Uses streaming download to a temporary file, then atomic rename to prevent
-/// corrupted files from partial downloads.
+/// Retries up to `MAX_RETRIES` times on transient failures with exponential backoff.
+/// Permanent errors (4xx, filesystem) are returned immediately without retrying.
+/// Uses a temp file and atomic rename to prevent corrupted partial downloads.
 #[allow(
     clippy::similar_names,
     clippy::too_many_lines,
     clippy::large_stack_arrays,
-    clippy::items_after_statements,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
 fn download_file(url: &str, dest: &Path) -> Result<()> {
-    // Create ureq agent with timeouts
-    let config = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
-        .timeout_recv_body(Some(Duration::from_secs(READ_TIMEOUT)))
-        .build();
-    let agent = ureq::Agent::new_with_config(config);
+    let mut last_err = InferenceError::ModelLoadError(String::new());
 
-    let response = agent.get(url).call().map_err(|e| {
-        let msg = match &e {
-            ureq::Error::Timeout(_) => format!("Connection timed out while downloading {url}"),
-            ureq::Error::Io(io_err) => {
-                format!("Network error downloading {url}: {io_err}")
-            }
-            _ => format!("Failed to download {url}: {e}"),
-        };
-        InferenceError::ModelLoadError(msg)
-    })?;
+    for attempt in 1..=MAX_RETRIES {
+        let attempt_result: std::result::Result<(), (InferenceError, bool)> = (|| {
+            let config = ureq::Agent::config_builder()
+                .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
+                .timeout_recv_body(Some(Duration::from_secs(READ_TIMEOUT)))
+                .build();
+            let agent = ureq::Agent::new_with_config(config);
 
-    // Get content length for progress calculation
-    let content_length: Option<u64> = response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s: &str| s.parse().ok());
-
-    let total_size = content_length.unwrap_or(0);
-
-    // Create temp file for atomic download (same directory for atomic rename)
-    let temp_path = dest.with_extension("part");
-
-    // Clean up any existing partial download
-    let _ = fs::remove_file(&temp_path);
-
-    let temp_file = File::create(&temp_path).map_err(|e| {
-        InferenceError::ModelLoadError(format!(
-            "Failed to create temp file {}: {e}",
-            temp_path.display()
-        ))
-    })?;
-    let mut writer = BufWriter::new(temp_file);
-
-    let mut reader = response.into_body().into_reader();
-    let mut downloaded: u64 = 0;
-    let mut buffer = [0u8; 65536]; // 64KB buffer
-    let start_time = Instant::now();
-    let mut last_update = Instant::now();
-
-    // Progress bar settings
-    const BAR_WIDTH: usize = 12;
-    const MIN_UPDATE_INTERVAL: f64 = 0.1; // Update at most every 100ms
-
-    // Description for progress bar
-    let desc = format!("Downloading {} to '{}'", url, dest.display());
-
-    let download_result: std::result::Result<(), InferenceError> = (|| {
-        loop {
-            let bytes_read = reader.read(&mut buffer).map_err(|e| {
-                InferenceError::ModelLoadError(format!("Failed to read from network: {e}"))
+            let response = agent.get(url).call().map_err(|e| {
+                let msg = match &e {
+                    ureq::Error::Timeout(_) => {
+                        format!("Connection timed out while downloading {url}")
+                    }
+                    ureq::Error::Io(io_err) => format!("Network error downloading {url}: {io_err}"),
+                    _ => format!("Failed to download {url}: {e}"),
+                };
+                (InferenceError::ModelLoadError(msg), is_transient(&e))
             })?;
 
-            if bytes_read == 0 {
-                break;
+            let total_size: u64 = response
+                .headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+
+            let temp_path = dest.with_file_name(format!(
+                "{}.part.{}.{}",
+                dest.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("download"),
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos()
+            ));
+            let _ = fs::remove_file(&temp_path);
+
+            let mut downloaded: u64 = 0;
+            let start_time = Instant::now();
+            let desc: String = format!("Downloading {url} to '{}'", dest.display());
+            let stream_result: std::result::Result<(), (InferenceError, bool)> = {
+                let mut writer = BufWriter::new(File::create(&temp_path).map_err(|e| {
+                    (
+                        InferenceError::ModelLoadError(format!(
+                            "Failed to create temp file {}: {e}",
+                            temp_path.display()
+                        )),
+                        false,
+                    )
+                })?);
+                let mut reader = response.into_body().into_reader();
+                let mut buffer = [0u8; 65536];
+                let mut last_update = Instant::now();
+
+                (|| {
+                    loop {
+                        let bytes_read = reader.read(&mut buffer).map_err(|e| {
+                            (
+                                InferenceError::ModelLoadError(format!(
+                                    "Failed to read from network: {e}"
+                                )),
+                                true,
+                            )
+                        })?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        writer.write_all(&buffer[..bytes_read]).map_err(|e| {
+                            (
+                                InferenceError::ModelLoadError(format!(
+                                    "Failed to write to temp file: {e}"
+                                )),
+                                false,
+                            )
+                        })?;
+                        downloaded += bytes_read as u64;
+
+                        let now = Instant::now();
+                        if now.duration_since(last_update).as_secs_f64() < MIN_UPDATE_INTERVAL {
+                            continue;
+                        }
+                        last_update = now;
+
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        let rate = if elapsed > 0.0 {
+                            downloaded as f64 / elapsed
+                        } else {
+                            0.0
+                        };
+                        if total_size > 0 {
+                            let progress = (downloaded as f64 / total_size as f64).min(1.0);
+                            let bar = generate_bar(progress, BAR_WIDTH);
+                            eprint!(
+                                "\r\x1b[K{desc}: {}% {bar} {}/{} {}/s {}",
+                                (progress * 100.0) as u8,
+                                format_bytes(downloaded as f64),
+                                format_bytes(total_size as f64),
+                                format_bytes(rate),
+                                format_time(elapsed)
+                            );
+                        } else {
+                            eprint!(
+                                "\r\x1b[K{desc}: {} {}/s {}",
+                                format_bytes(downloaded as f64),
+                                format_bytes(rate),
+                                format_time(elapsed)
+                            );
+                        }
+                        std::io::stderr().flush().ok();
+                    }
+                    writer.flush().map_err(|e| {
+                        (
+                            InferenceError::ModelLoadError(format!(
+                                "Failed to flush temp file: {e}"
+                            )),
+                            false,
+                        )
+                    })?;
+                    Ok(())
+                })()
+                // writer, reader, buffer, last_update dropped here
+            };
+
+            if stream_result.is_err() {
+                let _ = fs::remove_file(&temp_path);
             }
+            stream_result?;
 
-            // Stream directly to file
-            writer.write_all(&buffer[..bytes_read]).map_err(|e| {
-                InferenceError::ModelLoadError(format!("Failed to write to temp file: {e}"))
-            })?;
-
-            downloaded += bytes_read as u64;
-
-            // Rate-limit progress updates
-            let now = Instant::now();
-            if now.duration_since(last_update).as_secs_f64() < MIN_UPDATE_INTERVAL {
-                continue;
-            }
-            last_update = now;
-
-            // Calculate progress
             let elapsed = start_time.elapsed().as_secs_f64();
             let rate = if elapsed > 0.0 {
                 downloaded as f64 / elapsed
             } else {
                 0.0
             };
-
             if total_size > 0 {
-                let progress = (downloaded as f64 / total_size as f64).min(1.0);
-                let percent = (progress * 100.0) as u8;
-                let bar = generate_bar(progress, BAR_WIDTH);
-                let rate_str = format!("{}/s", format_bytes(rate));
-
-                eprint!(
-                    "\r\x1b[K{}: {}% {} {}/{} {} {}",
-                    desc,
-                    percent,
-                    bar,
-                    format_bytes(downloaded as f64),
+                eprintln!(
+                    "\r\x1b[K{desc}: 100% {} {} {}/s {}",
+                    generate_bar(1.0, BAR_WIDTH),
                     format_bytes(total_size as f64),
-                    rate_str,
+                    format_bytes(rate),
                     format_time(elapsed)
                 );
             } else {
-                eprint!(
-                    "\r\x1b[K{}: {} {}/s {}",
-                    desc,
+                eprintln!(
+                    "\r\x1b[K{desc}: {} {}/s {}",
                     format_bytes(downloaded as f64),
                     format_bytes(rate),
                     format_time(elapsed)
                 );
             }
-            std::io::stderr().flush().ok();
+
+            fs::rename(&temp_path, dest).map_err(|e| {
+                let _ = fs::remove_file(&temp_path);
+                (
+                    InferenceError::ModelLoadError(format!(
+                        "Failed to move downloaded file to {}: {e}",
+                        dest.display()
+                    )),
+                    false,
+                )
+            })?;
+
+            Ok(())
+        })();
+
+        match attempt_result {
+            Ok(()) => return Ok(()),
+            Err((e, false)) => return Err(e),
+            Err((e, true)) => {
+                last_err = e;
+                if attempt < MAX_RETRIES {
+                    let delay = RETRY_BASE_DELAY_SECS * (1 << (attempt - 1));
+                    eprintln!(
+                        "Download attempt {attempt}/{MAX_RETRIES} failed: {last_err}. Retrying in {delay}s..."
+                    );
+                    std::thread::sleep(Duration::from_secs(delay));
+                }
+            }
         }
-
-        // Flush the writer
-        writer.flush().map_err(|e| {
-            InferenceError::ModelLoadError(format!("Failed to flush temp file: {e}"))
-        })?;
-
-        Ok(())
-    })();
-
-    // Handle download failure - clean up temp file
-    if let Err(e) = download_result {
-        let _ = fs::remove_file(&temp_path);
-        return Err(e);
     }
 
-    // Final progress line
-    let elapsed = start_time.elapsed().as_secs_f64();
-    let rate = if elapsed > 0.0 {
-        downloaded as f64 / elapsed
-    } else {
-        0.0
-    };
-
-    if total_size > 0 {
-        let bar = generate_bar(1.0, BAR_WIDTH);
-        eprintln!(
-            "\r\x1b[K{}: 100% {} {} {}/s {}",
-            desc,
-            bar,
-            format_bytes(total_size as f64),
-            format_bytes(rate),
-            format_time(elapsed)
-        );
-    } else {
-        eprintln!(
-            "\r\x1b[K{}: {} {}/s {}",
-            desc,
-            format_bytes(downloaded as f64),
-            format_bytes(rate),
-            format_time(elapsed)
-        );
-    }
-
-    // Atomic rename from temp file to final destination
-    fs::rename(&temp_path, dest).map_err(|e| {
-        // Clean up temp file on rename failure
-        let _ = fs::remove_file(&temp_path);
-        InferenceError::ModelLoadError(format!(
-            "Failed to move downloaded file to {}: {e}",
-            dest.display()
-        ))
-    })?;
-
-    Ok(())
+    Err(last_err)
 }
 
 /// Attempt to download a model if it matches a known downloadable model.
 ///
-/// Currently supports:
-/// - `yolo11n.onnx` - Default `YOLO11n` detection model
-/// - `yolo11n-seg.onnx` - `YOLO11n` segmentation model
-/// - `yolo11n-pose.onnx` - `YOLO11n` pose estimation model
-/// - `yolo11n-obb.onnx` - `YOLO11n` oriented bounding box model
-/// - `yolo11n-cls.onnx` - `YOLO11n` classification model
-/// Downloads a YOLO model from Ultralytics assets if it's a known model.
+/// Supports the YOLO26 and YOLO11 nano ONNX models listed in [`DOWNLOADABLE_MODELS`].
+/// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// Returns the path to the downloaded model.
-#[allow(clippy::missing_errors_doc, clippy::doc_lazy_continuation)]
+#[allow(clippy::missing_errors_doc)]
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
     let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-    // Map of supported downloadable models
-    let url = match filename {
-        DEFAULT_MODEL => DEFAULT_DETECT_MODEL_URL,
-        DEFAULT_SEGMENT_MODEL => DEFAULT_SEGMENT_MODEL_URL,
-        DEFAULT_POSE_MODEL => DEFAULT_POSE_MODEL_URL,
-        DEFAULT_OBB_MODEL => DEFAULT_OBB_MODEL_URL,
-        DEFAULT_CLS_MODEL => DEFAULT_CLS_MODEL_URL,
-        _ => {
-            return Err(InferenceError::ModelLoadError(format!(
-                "Model file not found: {}. Auto-download is supported for: yolo11n.onnx, yolo11n-seg.onnx, yolo11n-pose.onnx, yolo11n-obb.onnx, yolo11n-cls.onnx",
-                path.display(),
-            )));
-        }
-    };
+    if !DOWNLOADABLE_MODELS.contains(&filename) {
+        return Err(InferenceError::ModelLoadError(format!(
+            "Model file not found: {}. Auto-download is supported for: {}",
+            path.display(),
+            DOWNLOADABLE_MODELS.join(", "),
+        )));
+    }
 
-    // Use the path as provided (current directory if just filename)
-    let dest_path = path.to_path_buf();
-
-    // Download the model
-    download_file(url, &dest_path)?;
-
-    Ok(dest_path)
+    download_file(&format!("{ASSETS_BASE_URL}/{filename}"), path)?;
+    Ok(path.to_path_buf())
 }
 
 /// Download an image from a URL to the current directory.
 /// Skips download if the file already exists.
 ///
-/// # Arguments
-/// * `url` - The URL to download from
-///
-/// # Returns
-/// The path to the downloaded (or existing) file, or an error if download fails
 /// # Errors
-/// Returns an error if the download fails or file I/O errors occur
+/// Returns an error if the download fails or file I/O errors occur.
 pub fn download_image(url: &str) -> Result<String> {
     let filename = url.rsplit('/').next().unwrap_or("image.jpg");
-    let dest_path = Path::new(filename);
+    let dest = Path::new(filename);
 
-    // Skip download if file already exists
-    if dest_path.exists() {
-        eprintln!("Image already exists: {filename}");
-        return Ok(filename.to_string());
+    if !dest.exists() {
+        download_file(url, dest)?;
     }
 
-    eprintln!("Downloading {url}...");
-
-    download_file(url, dest_path)?;
-
-    Ok(filename.to_string())
+    Ok(dest
+        .canonicalize()
+        .or_else(|_| std::env::current_dir().map(|p| p.join(filename)))
+        .map_or_else(
+            |_| filename.to_string(),
+            |p| p.to_string_lossy().into_owned(),
+        ))
 }
 
 /// Download multiple images from URLs to the current directory.
-/// Returns a vector of paths to the successfully downloaded files.
 /// Skips files that already exist.
-///
-/// # Arguments
-/// * `urls` - Slice of URLs to download
 #[must_use]
 pub fn download_images(urls: &[&str]) -> Vec<String> {
     urls.iter()

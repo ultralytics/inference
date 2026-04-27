@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.6"
+version = "0.0.10"
 edition = "2024"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
@@ -48,43 +48,45 @@ path = "src/main.rs"
 # Core - Image loading and processing
 image = "^0.25"
 jpeg-decoder = "^0.3"
-fast_image_resize = { version = "^5.4", features = ["image", "rayon"] }
+fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
+# SIMD for fast preprocessing
+wide = "^1.3"
+
+# LRU cache for preprocessing LUT
+lru = "^0.18"
 
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "^0.17", features = ["rayon"] }
 
-# ONNX Runtime 1.23 - using latest from GitHub for best performance
-ort = { git = "https://github.com/pykeio/ort.git", default-features = false, features = [
+# ONNX Runtime 1.24.2 - using latest from GitHub for best performance
+ort = { git = "https://github.com/pykeio/ort.git", rev = "f085e4c2516901ee606d1e10022142afa9348bf1", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",
     "copy-dylibs",
     "half",
     "tls-native",
+    "num-complex",
 ] }
 
 # Core - FP16 support (required by ort's half feature)
-half = { version = "^2.4", features = ["num-traits"] }
-ureq = "^3.1.4"
+half = { version = "^2.7", features = ["num-traits"] }
+ureq = "^3.3.0"
 dirs = "^6.0"
-rayon = "^1.10"
-bytemuck = { version = "^1.21", features = ["derive"] }
+rayon = "^1.12"
+bytemuck = { version = "^1.25", features = ["derive"] }
 
 # Core - CLI arguments parsing
-clap = { version = "4.5.53", features = ["derive"] }
-colored = "3.0.0"
+clap = { version = "^4.6.1", features = ["derive"] }
+colored = "^3.1.1"
 
+# Optional - Visualization and Video support
 minifb = { version = "^0.28.0", optional = true }
-video-rs = { version = "^0.10.5", features = ["ndarray"], optional = true }
+video-rs = { version = ">=0.10.5, <0.12", features = ["ndarray"], optional = true }
 
 # Optional - Image annotation (for --save feature)
-imageproc = { version = "^0.25", optional = true }
+imageproc = { version = "^0.26", optional = true }
 ab_glyph = { version = "^0.2", optional = true }
-
-# Optional - Video support
-ffmpeg-next = { version = "^7.1.0", optional = true }
-ffmpeg-sys-next = { version = "^7.1.3", optional = true }
-
 
 [features]
 default = ["annotate", "visualize"]
@@ -92,8 +94,8 @@ default = ["annotate", "visualize"]
 # Real-time visualization
 visualize = ["minifb"]
 
-# Video support
-video = ["video-rs", "ffmpeg-next", "ffmpeg-sys-next"]
+# Video file support (requires ffmpeg installed on system)
+video = ["video-rs"]
 
 # Image annotation support (for --save feature in CLI)
 annotate = ["imageproc", "ab_glyph"]
@@ -138,6 +140,9 @@ all = ["annotate", "video"]
 
 [dev-dependencies]
 # Testing dependencies
+serial_test = "3"
+tempfile = "3"
+
 
 [profile.dev]
 opt-level = 0
@@ -148,7 +153,7 @@ opt-level = 3
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true

@@ -1,5 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+//! Logging utilities.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Global verbosity flag.
@@ -28,7 +30,7 @@ macro_rules! info {
 macro_rules! warn {
     ($($arg:tt)*) => {
         use colored::Colorize;
-        eprintln!("{} {}", "WARNING ⚠️".yellow().bold(), format!($($arg)*));
+        eprintln!("{} {}", "WARNING ⚠️ ".yellow().bold(), format!($($arg)*));
     }
 }
 
@@ -37,7 +39,7 @@ macro_rules! warn {
 macro_rules! error {
     ($($arg:tt)*) => {
         use colored::Colorize;
-        eprintln!("{} {}", "Error:".red().bold(), format!($($arg)*));
+        eprintln!("{} {}", "ERROR 💥".red().bold(), format!($($arg)*));
     }
 }
 
@@ -46,7 +48,7 @@ macro_rules! error {
 macro_rules! success {
     ($($arg:tt)*) => {
         use colored::Colorize;
-        println!("{} {}", "✅".green(), format!($($arg)*));
+        println!("{} {}", "SUCCESS ✅".green().bold(), format!($($arg)*));
     }
 }
 
@@ -54,7 +56,7 @@ macro_rules! success {
 #[macro_export]
 macro_rules! verbose {
     ($($arg:tt)*) => {
-        if $crate::cli::logging::is_verbose() {
+        if $crate::logging::is_verbose() {
             println!("{}", format!($($arg)*));
         }
     }
@@ -65,7 +67,7 @@ macro_rules! verbose {
 macro_rules! section {
     ($($arg:tt)*) => {
         use colored::Colorize;
-        if $crate::cli::logging::is_verbose() {
+        if $crate::logging::is_verbose() {
             println!();
             println!("{}", format!($($arg)*).cyan().bold());
         }

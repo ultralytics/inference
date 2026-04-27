@@ -7,6 +7,15 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
+[![codecov](https://codecov.io/gh/ultralytics/inference/graph/badge.svg?token=AVE5n6yvnf)](https://codecov.io/gh/ultralytics/inference)
+[![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
+[![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)](https://blog.rust-lang.org/)
+
+<!-- Enable After <releasing to Crates.io -->
+<!-- [![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
+[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference)](https://docs.rs/ultralytics-inference)
+![Crates.io Total Downloads](https://img.shields.io/crates/d/ultralytics-inference)
+-->
 
 ## ✨ Features
 
@@ -23,7 +32,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 ### Prerequisites
 
 - [Rust 1.85+](https://rustup.rs/) (install via rustup, edition 2024 required)
-- A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo11n.pt format=onnx`)
+- A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo26n.pt format=onnx`)
 
 ### Installation
 
@@ -32,19 +41,43 @@ High-performance YOLO inference library written in Rust. This library provides a
 git clone https://github.com/ultralytics/inference.git
 cd inference
 
-# Build release version
+# Build release binary (not installed globally)
 cargo build --release
+
+# Install CLI globally from this git checkout (Cargo default location)
+cargo install --path . --locked
+
+# Install CLI globally with custom features
+# Minimal build (no default features)
+cargo install --path . --locked --no-default-features
+
+# Enable video support
+cargo install --path . --locked --features video
+
+# Enable multiple accelerators
+cargo install --path . --locked --features "cuda,tensorrt"
+```
+
+`cargo install` places binaries in Cargo's default bin directory:
+
+- macOS/Linux: `~/.cargo/bin`
+- Windows: `%USERPROFILE%\\.cargo\\bin`
+
+Ensure this directory is in your `PATH`, then run from anywhere:
+
+```bash
+ultralytics-inference --help
 ```
 
 ### Export a YOLO Model to ONNX
 
 ```bash
 # Using Ultralytics CLI
-yolo export model=yolo11n.pt format=onnx
+yolo export model=yolo26n.pt format=onnx
 
 # Or with Python
 from ultralytics import YOLO
-model = YOLO("yolo11n.pt")
+model = YOLO("yolo26n.pt")
 model.export(format="onnx")
 ```
 
@@ -55,28 +88,39 @@ model.export(format="onnx")
 cargo run --release -- predict
 
 # With explicit arguments
-cargo run --release -- predict --model yolo11n.onnx --source image.jpg
+cargo run --release -- predict --model yolo26n.onnx --source image.jpg
 
 # On a directory of images
-cargo run --release -- predict --model yolo11n.onnx --source assets/
+cargo run --release -- predict --model yolo26n.onnx --source assets/
 
 # With custom thresholds
-cargo run --release -- predict -m yolo11n.onnx -s image.jpg --conf 0.5 --iou 0.45
+cargo run --release -- predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
 
 # With visualization and custom image size
-cargo run --release -- predict --model yolo11n.onnx --source video.mp4 --show --imgsz 1280
+cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
+
+# Save individual frames for video input
+cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --save-frames
+
+# Rectangular inference
+cargo run --release -- predict --model yolo26n.onnx --source image.jpg --rect
 ```
 
 ### Example Output
 
 ```
-WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics 0.0.4 🚀 Rust ONNX CPU
-YOLO11 summary: 80 classes, imgsz=(640, 640)
+# ultralytics-inference predict
 
-image 1/2 bus.jpg: 810x1080 4 persons, 1 bus, 27.3ms
-image 2/2 zidane.jpg: 1280x720 2 persons, 1 tie, 24.9ms
-Speed: 9.4ms preprocess, 26.1ms inference, 0.8ms postprocess per image at shape (1, 3, 720, 1280)
+WARNING ⚠️ 'model' argument is missing. Using default 'model=yolo26n.onnx'.
+WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
+Ultralytics 0.0.8 🚀 Rust ONNX FP32 CPU
+Using ONNX Runtime CPUExecutionProvider
+YOLO26n summary: 80 classes, imgsz=(640, 640)
+
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 640x480 4 persons, 1 bus, 36.4ms
+image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
+Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 384, 640)
+Results saved to runs/detect/predict1
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
 
@@ -97,18 +141,22 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option      | Short | Description                                       | Default                                 |
-| ----------- | ----- | ------------------------------------------------- | --------------------------------------- |
-| `--model`   | `-m`  | Path to ONNX model file                           | `yolo11n.onnx`                          |
-| `--source`  | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
-| `--device`  |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
-| `--conf`    |       | Confidence threshold                              | `0.25`                                  |
-| `--iou`     |       | IoU threshold for NMS                             | `0.45`                                  |
-| `--imgsz`   |       | Inference image size                              | `Model metadata`                        |
-| `--half`    |       | Use FP16 half-precision inference                 | `false`                                 |
-| `--save`    |       | Save annotated images to runs/<task>/predict      | `false`                                 |
-| `--show`    |       | Display results in a window                       | `false`                                 |
-| `--verbose` |       | Show verbose output                               | `true`                                  |
+| Option          | Short | Description                                       | Default                                 |
+| --------------- | ----- | ------------------------------------------------- | --------------------------------------- |
+| `--model`       | `-m`  | Path to ONNX model file                           | `yolo26n.onnx`                          |
+| `--source`      | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
+| `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
+| `--conf`        |       | Confidence threshold                              | `0.25`                                  |
+| `--iou`         |       | IoU threshold for NMS                             | `0.7`                                   |
+| `--max-det`     |       | Maximum number of detections                      | `300`                                   |
+| `--imgsz`       |       | Inference image size                              | `Model metadata`                        |
+| `--rect`        |       | Enable rectangular inference (minimal padding)    | `true`                                  |
+| `--batch`       |       | Batch size for inference                          | `1`                                     |
+| `--half`        |       | Use FP16 half-precision inference                 | `false`                                 |
+| `--save`        |       | Save annotated results to runs/<task>/predict     | `true`                                  |
+| `--save-frames` |       | Save individual frames for video                  | `false`                                 |
+| `--show`        |       | Display results in a window                       | `false`                                 |
+| `--verbose`     |       | Show verbose output                               | `true`                                  |
 
 **Source Options:**
 
@@ -137,7 +185,7 @@ use ultralytics_inference::{YOLOModel, InferenceConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load model - metadata (classes, task, imgsz) is read automatically
-    let mut model = YOLOModel::load("yolo11n.onnx")?;
+    let mut model = YOLOModel::load("yolo26n.onnx")?;
 
     // Run inference
     let results = model.predict("image.jpg")?;
@@ -168,9 +216,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = InferenceConfig::new()
         .with_confidence(0.5)
         .with_iou(0.45)
-        .with_max_detections(100);
+        .with_max_det(300);
 
-    let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
+    let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
     let results = model.predict("image.jpg")?;
 
     Ok(())
@@ -205,7 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configure the model to use this device
     let config = InferenceConfig::new().with_device(device);
 
-    let mut model = YOLOModel::load_with_config("yolo11n.onnx", config)?;
+    let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
     let results = model.predict("image.jpg")?;
 
     Ok(())
@@ -221,16 +269,25 @@ inference/
 │   ├── main.rs             # CLI application
 │   ├── model.rs            # YOLOModel - ONNX session and inference
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb
-│   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize)
-│   ├── postprocessing.rs   # Detection post-processing (NMS, decode)
+│   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize, SIMD)
+│   ├── postprocessing.rs   # Detection post-processing (NMS, decode, SIMD)
 │   ├── metadata.rs         # ONNX model metadata parsing
-│   ├── source.rs           # Input source handling
-│   ├── task.rs             # Task enum (Detect, Segment, Pose, etc.)
+│   ├── source.rs           # Input source handling (images, video, webcam)
+│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb)
 │   ├── inference.rs        # InferenceConfig
+│   ├── batch.rs            # Batch processing pipeline
+│   ├── device.rs           # Device enum (CPU, CUDA, MPS, CoreML, etc.)
 │   ├── download.rs         # Model and asset downloading
-│   ├── visualizer/         # Visualization tools (Viewer)
+│   ├── annotate.rs         # Image annotation (bounding boxes, masks, keypoints)
+│   ├── io.rs               # Result saving (images, videos)
+│   ├── logging.rs          # Logging macros
 │   ├── error.rs            # Error types
-│   └── utils.rs            # Utility functions (NMS, IoU)
+│   ├── utils.rs            # Utility functions (NMS, IoU)
+│   ├── cli/                # CLI module
+│   │   ├── mod.rs          # CLI module exports
+│   │   ├── args.rs         # CLI argument parsing
+│   │   └── predict.rs      # Predict command implementation
+│   └── visualizer/         # Real-time visualization (minifb)
 ├── tests/
 │   └── integration_test.rs # Integration tests
 ├── assets/                 # Test images
@@ -285,13 +342,16 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 
 ### Core Dependencies (always included)
 
-| Crate               | Purpose                 |
-| ------------------- | ----------------------- |
-| `ort`               | ONNX Runtime bindings   |
-| `ndarray`           | N-dimensional arrays    |
-| `image`             | Image loading/decoding  |
-| `fast_image_resize` | SIMD-optimized resizing |
-| `half`              | FP16 support            |
+| Crate               | Purpose                         |
+| ------------------- | ------------------------------- |
+| `ort`               | ONNX Runtime bindings           |
+| `ndarray`           | N-dimensional arrays            |
+| `image`             | Image loading/decoding          |
+| `jpeg-decoder`      | JPEG decoding                   |
+| `fast_image_resize` | SIMD-optimized resizing         |
+| `half`              | FP16 support                    |
+| `lru`               | LRU cache for preprocessing LUT |
+| `wide`              | SIMD for fast preprocessing     |
 
 ### Optional Dependencies (for `--save` feature)
 
@@ -306,6 +366,21 @@ One of the key benefits of this library is **minimal dependencies** - no PyTorch
 | ---------- | ---------------------------------- |
 | `minifb`   | Window creation and buffer display |
 | `video-rs` | Video decoding/encoding (ffmpeg)   |
+
+### Video Support (FFmpeg)
+
+Video features require FFmpeg (7 or 8) installed on your system:
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libclang-dev
+
+# Build with video support
+cargo build --release --features video
+```
 
 To build without annotation support (smaller binary):
 
@@ -330,7 +405,7 @@ cargo test test_boxes_creation
 
 Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
 
-### YOLO11n Detection Model (640x640)
+### YOLO26n Detection Model (640x640)
 
 | Precision | Model Size | Preprocess | Inference | Postprocess | Total |
 | --------- | ---------- | ---------- | --------- | ----------- | ----- |
@@ -357,16 +432,19 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 
 - [x] Detection, Segmentation, Pose, Classification, OBB inference
 - [x] ONNX model metadata parsing (auto-detect classes, task, imgsz)
+- [x] Hardware acceleration support (CUDA, TensorRT, CoreML, OpenVINO, XNNPACK)
 - [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`)
 - [x] Multiple input sources (images, directories, globs, URLs)
 - [x] Video file support and webcam/RTSP streaming
 - [x] Image annotation and visualization
 - [x] FP16 half-precision inference
+- [x] Batch inference support
+- [x] Rectangular inference support and optimization
+- [x] Class filtering support
 
 ### In Progress
 
 - [ ] Python bindings (PyO3)
-- [ ] Batch inference optimization
 - [ ] WebAssembly (WASM) support for browser inference
 
 ## 💡 Contributing
@@ -399,7 +477,7 @@ Ultralytics offers two licensing options:
   <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
   <a href="https://twitter.com/ultralytics"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-twitter.png" width="3%" alt="Ultralytics Twitter"></a>
   <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
-  <a href="https://youtube.com/ultralytics?sub_confirmation=1"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-youtube.png" width="3%" alt="Ultralytics YouTube"></a>
+  <a href="https://www.youtube.com/ultralytics?sub_confirmation=1"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-youtube.png" width="3%" alt="Ultralytics YouTube"></a>
   <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
   <a href="https://www.tiktok.com/@ultralytics"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-tiktok.png" width="3%" alt="Ultralytics TikTok"></a>
   <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
