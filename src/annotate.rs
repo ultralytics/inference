@@ -146,7 +146,6 @@ pub fn annotate_image(
     top_k: Option<usize>,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
-    let (_width, _height) = img.dimensions();
 
     // Check if any class name is non-ASCII to select font
     let mut use_unicode_font = false;
@@ -302,7 +301,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
 
         // Draw masks onto the overlay
         if let Some(ref masks) = result.masks {
-            let (mask_n, _mask_h, _mask_w) = masks.data.dim();
+            let mask_n = masks.data.dim().0;
 
             for i in 0..boxes.len() {
                 if i >= mask_n {
