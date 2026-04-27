@@ -105,13 +105,19 @@ pub fn run_prediction(args: &PredictArgs) {
     };
 
     if let Some(task) = args.task {
-        if !model_is_default && verbose && task != model.task() {
-            warn!(
-                "'--task={task}' overrides task detected from model metadata ('{}').",
+        if model_is_default {
+            // Model was auto-selected from --task, so metadata will always agree.
+            // set_task is a no-op here but kept for explicitness.
+            model.set_task(task);
+        } else if task != model.task() {
+            error!(
+                "'--task={task}' conflicts with task '{}' detected from model metadata. \
+                 Provide a model that matches the requested task, or omit --task.",
                 model.task()
             );
+            process::exit(1);
         }
-        model.set_task(task);
+        // task == model.task(): explicit model, matching task — nothing to do.
     }
 
     // Determine source
