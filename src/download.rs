@@ -68,6 +68,12 @@ const CONNECT_TIMEOUT: u64 = 30;
 /// Read timeout in seconds.
 const READ_TIMEOUT: u64 = 300;
 
+/// Maximum number of download attempts before giving up.
+const MAX_RETRIES: u32 = 3;
+
+/// Base delay in seconds between retry attempts (doubles each retry: 2s, 4s, 8s).
+const RETRY_BASE_DELAY_SECS: u64 = 2;
+
 /// Format bytes as human-readable string (e.g., "10.4MB").
 #[allow(clippy::cast_precision_loss)]
 fn format_bytes(bytes: f64) -> String {
@@ -125,10 +131,29 @@ fn generate_bar(progress: f64, width: usize) -> String {
     bar
 }
 
-/// Download a file from URL to the specified path with progress bar.
-///
-/// Uses streaming download to a temporary file, then atomic rename to prevent
-/// corrupted files from partial downloads.
+/// Download a file from URL to the specified path, retrying on transient errors.
+fn download_file(url: &str, dest: &Path) -> Result<()> {
+    let mut last_err = InferenceError::ModelLoadError(String::new());
+
+    for attempt in 1..=MAX_RETRIES {
+        match download_file_once(url, dest) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = e;
+                if attempt < MAX_RETRIES {
+                    let delay = RETRY_BASE_DELAY_SECS * (1 << (attempt - 1));
+                    eprintln!(
+                        "Download attempt {attempt}/{MAX_RETRIES} failed: {last_err}. Retrying in {delay}s..."
+                    );
+                    std::thread::sleep(Duration::from_secs(delay));
+                }
+            }
+        }
+    }
+
+    Err(last_err)
+}
+
 #[allow(
     clippy::similar_names,
     clippy::too_many_lines,
@@ -138,7 +163,7 @@ fn generate_bar(progress: f64, width: usize) -> String {
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn download_file(url: &str, dest: &Path) -> Result<()> {
+fn download_file_once(url: &str, dest: &Path) -> Result<()> {
     // Create ureq agent with timeouts
     let config = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
