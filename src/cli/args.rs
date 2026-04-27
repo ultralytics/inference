@@ -10,18 +10,19 @@ use clap::{Args, Parser, Subcommand};
 #[command(propagate_version = true)]
 #[command(after_help = r#"Predict Options:
     --model, -m <MODEL>    Path to ONNX model file [default: yolo26n.onnx]
-    --task <TASK>          Task type: detect, segment, pose, obb, cls (selects nano model if --model omitted)
+    --task <TASK>          Task type: detect, segment, pose, obb, classify [default: detect]
+                           Selects the matching nano model when --model is omitted
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
     --iou <IOU>            IoU threshold for NMS [default: 0.7]
     --max-det <MAX_DET>    Maximum number of detections [default: 300]
-    --imgsz <IMGSZ>        Inference image size
+    --imgsz <IMGSZ>        Inference image size [default: model metadata]
     --rect                 Enable rectangular inference (minimal padding) [default: true]
     --batch <BATCH>        Batch size for inference [default: 1]
-    --half                 Use FP16 half-precision inference
+    --half                 Use FP16 half-precision inference [default: false]
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
-    --show                 Display results in a window
+    --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)
     --verbose              Show verbose output [default: true]
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
@@ -29,7 +30,9 @@ use clap::{Args, Parser, Subcommand};
 Examples:
     ultralytics-inference predict
     ultralytics-inference predict --task segment
+    ultralytics-inference predict --task pose
     ultralytics-inference predict --task obb --source aerial.jpg
+    ultralytics-inference predict --task classify --source image.jpg
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
@@ -58,8 +61,8 @@ pub struct PredictArgs {
     #[arg(short, long)]
     pub model: Option<String>,
 
-    /// Task type — selects nano model for auto-download when --model is omitted
-    /// (detect, segment, pose, obb, cls)
+    /// Task type; selects nano model for auto-download when --model is omitted
+    /// (detect, segment, pose, obb, classify)
     #[arg(long)]
     pub task: Option<Task>,
 

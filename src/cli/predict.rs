@@ -117,7 +117,7 @@ pub fn run_prediction(args: &PredictArgs) {
             );
             process::exit(1);
         }
-        // task == model.task(): explicit model, matching task — nothing to do.
+        // task == model.task(): explicit model, matching task; nothing to do.
     }
 
     // Determine source

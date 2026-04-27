@@ -178,8 +178,7 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | --------------- | ----- | -------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name                                   | `yolo26n.onnx`                          |
 | `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect`                                |
-| `--source`      | `-s`  | Input source (image, video, webcam index, or URL)                                                        | `Task dependent Ultralytics URL assets` |
-| `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)                                                           | `cpu`                                   |
+| `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                       | `Task dependent Ultralytics URL assets` |
 | `--conf`        |       | Confidence threshold                                                                                     | `0.25`                                  |
 | `--iou`         |       | IoU threshold for NMS                                                                                    | `0.7`                                   |
 | `--max-det`     |       | Maximum number of detections                                                                             | `300`                                   |
@@ -190,8 +189,9 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                          | `true`                                  |
 | `--save-frames` |       | Save individual frames for video                                                                         | `false`                                 |
 | `--show`        |       | Display results in a window                                                                              | `false`                                 |
-| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                              | all classes                             |
+| `--device`      |       | Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)                             | `cpu`                                   |
 | `--verbose`     |       | Show verbose output                                                                                      | `true`                                  |
+| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                              | all classes                             |
 
 **Task and Model Resolution:**
 
@@ -203,8 +203,8 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 | `predict --task obb`                              | `yolo26n-obb.onnx`  | Nano OBB model, auto-downloaded                                            |
 | `predict --task classify`                         | `yolo26n-cls.onnx`  | Nano classify model, auto-downloaded                                       |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`  | Task read from model metadata                                              |
-| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`  | `--task` matches metadata, no warning                                      |
-| `predict --task segment --model yolo26n.onnx`     | `yolo26n.onnx`      | Task overridden with warning; results may be empty if architectures differ |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`  | `--task` matches metadata, proceeds normally                               |
+| `predict --task segment --model yolo26n.onnx`     | error               | `--task` conflicts with model metadata (`detect`), exits with error        |
 
 **Auto-downloadable models:**
 
@@ -499,7 +499,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Rectangular inference support and optimization
 - [x] Class filtering support
 - [x] Auto-download all YOLO11 and YOLO26 ONNX models (all sizes n/s/m/l/x, all tasks)
-- [x] `--task` CLI flag — selects and auto-downloads the matching nano model when `--model` is omitted
+- [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
 
 ### In Progress
 
