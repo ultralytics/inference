@@ -17,32 +17,23 @@ const ASSETS_BASE_URL: &str = "https://github.com/ultralytics/assets/releases/do
 /// Default YOLO detection model name.
 pub const DEFAULT_MODEL: &str = "yolo26n.onnx";
 
-/// Default YOLO segmentation model name.
-pub const DEFAULT_SEGMENT_MODEL: &str = "yolo26n-seg.onnx";
+/// YOLO Model families, sizes, and variants supported for auto-download.
+const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11"];
+const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
+const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 
-/// Default YOLO pose model name.
-pub const DEFAULT_POSE_MODEL: &str = "yolo26n-pose.onnx";
-
-/// Default YOLO OBB model name.
-pub const DEFAULT_OBB_MODEL: &str = "yolo26n-obb.onnx";
-
-/// Default YOLO classification model name.
-pub const DEFAULT_CLS_MODEL: &str = "yolo26n-cls.onnx";
-
-const DOWNLOADABLE_MODELS: &[&str] = &[
-    // YOLO26
-    "yolo26n.onnx",
-    "yolo26n-seg.onnx",
-    "yolo26n-pose.onnx",
-    "yolo26n-obb.onnx",
-    "yolo26n-cls.onnx",
-    // YOLO11
-    "yolo11n.onnx",
-    "yolo11n-seg.onnx",
-    "yolo11n-pose.onnx",
-    "yolo11n-obb.onnx",
-    "yolo11n-cls.onnx",
-];
+fn downloadable_models() -> Vec<String> {
+    MODEL_FAMILIES
+        .iter()
+        .flat_map(|family| {
+            MODEL_SIZES.iter().flat_map(move |size| {
+                MODEL_VARIANTS
+                    .iter()
+                    .map(move |variant| format!("{family}{size}{variant}.onnx"))
+            })
+        })
+        .collect()
+}
 
 const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
 const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
@@ -312,7 +303,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
 /// Attempt to download a model if it matches a known downloadable model.
 ///
-/// Supports the YOLO26 and YOLO11 nano ONNX models listed in [`DOWNLOADABLE_MODELS`].
+/// Supports YOLO26 and YOLO11 ONNX models (n/s/m/l/x) listed in [`DOWNLOADABLE_MODELS`].
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// Returns the path to the downloaded model.
@@ -321,11 +312,12 @@ pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
     let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-    if !DOWNLOADABLE_MODELS.contains(&filename) {
+    let models = downloadable_models();
+    if !models.iter().any(|m| m == filename) {
         return Err(InferenceError::ModelLoadError(format!(
             "Model file not found: {}. Auto-download is supported for: {}",
             path.display(),
-            DOWNLOADABLE_MODELS.join(", "),
+            models.join(", "),
         )));
     }
 
