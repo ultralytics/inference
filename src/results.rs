@@ -56,7 +56,7 @@ impl Speed {
 
 /// Main results container for YOLO inference.
 ///
-/// This class matches the Ultralytics Python `Results` class API.
+/// Contains the original image, detection results (boxes, masks, keypoints, etc.), timing information, and metadata.
 #[derive(Debug, Clone)]
 pub struct Results {
     /// Original image as HWC array (height, width, channels).
@@ -343,7 +343,6 @@ pub enum SummaryValue {
 /// Detection bounding boxes.
 ///
 /// Stores bounding boxes in xyxy format along with confidence scores and class IDs.
-/// Matches the Ultralytics Python `Boxes` class API.
 #[derive(Debug, Clone)]
 pub struct Boxes {
     /// Raw data array with shape (N, 6) containing [x1, y1, x2, y2, conf, cls].
