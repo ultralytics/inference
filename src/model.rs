@@ -1033,7 +1033,7 @@ impl YOLOModel {
     }
 
     /// Override the task type read from model metadata.
-    pub fn set_task(&mut self, task: crate::task::Task) {
+    pub const fn set_task(&mut self, task: crate::task::Task) {
         self.metadata.task = task;
     }
 
