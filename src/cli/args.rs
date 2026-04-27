@@ -1,5 +1,6 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+use crate::task::Task;
 use crate::InferenceConfig;
 use clap::{Args, Parser, Subcommand};
 
@@ -9,6 +10,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(propagate_version = true)]
 #[command(after_help = r#"Predict Options:
     --model, -m <MODEL>    Path to ONNX model file [default: yolo26n.onnx]
+    --task <TASK>          Task type: detect, segment, pose, obb, cls (selects nano model if --model omitted)
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
     --iou <IOU>            IoU threshold for NMS [default: 0.7]
@@ -26,6 +28,8 @@ use clap::{Args, Parser, Subcommand};
 
 Examples:
     ultralytics-inference predict
+    ultralytics-inference predict --task segment
+    ultralytics-inference predict --task obb --source aerial.jpg
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
@@ -53,6 +57,11 @@ pub struct PredictArgs {
     /// Path to ONNX model file
     #[arg(short, long)]
     pub model: Option<String>,
+
+    /// Task type — selects nano model for auto-download when --model is omitted
+    /// (detect, segment, pose, obb, cls)
+    #[arg(long)]
+    pub task: Option<Task>,
 
     /// Input source (image, directory, glob, video, webcam, or URL)
     #[arg(short, long)]
