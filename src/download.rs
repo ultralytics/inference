@@ -61,21 +61,17 @@ const RETRY_BASE_DELAY_SECS: u64 = 2;
 const BAR_WIDTH: usize = 12;
 const MIN_UPDATE_INTERVAL: f64 = 0.1;
 
-#[allow(clippy::cast_precision_loss)]
 fn format_bytes(bytes: f64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-
-    if bytes >= GB {
-        format!("{:.1}GB", bytes / GB)
-    } else if bytes >= MB {
-        format!("{:.1}MB", bytes / MB)
-    } else if bytes >= KB {
-        format!("{:.1}KB", bytes / KB)
-    } else {
-        format!("{bytes:.0}B")
+    for (unit, factor) in [
+        ("GB", 1_073_741_824.0_f64),
+        ("MB", 1_048_576.0),
+        ("KB", 1024.0),
+    ] {
+        if bytes >= factor {
+            return format!("{:.1}{unit}", bytes / factor);
+        }
     }
+    format!("{bytes:.0}B")
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -83,14 +79,14 @@ fn format_time(seconds: f64) -> String {
     if seconds < 60.0 {
         format!("{seconds:.1}s")
     } else if seconds < 3600.0 {
-        let mins = (seconds / 60.0) as u32;
-        let secs = seconds % 60.0;
-        format!("{mins}:{secs:04.1}")
+        format!("{}:{:04.1}", (seconds / 60.0) as u32, seconds % 60.0)
     } else {
-        let hours = (seconds / 3600.0) as u32;
-        let mins = ((seconds % 3600.0) / 60.0) as u32;
-        let secs = seconds % 60.0;
-        format!("{hours}:{mins:02}:{secs:04.1}")
+        format!(
+            "{}:{:02}:{:04.1}",
+            (seconds / 3600.0) as u32,
+            ((seconds % 3600.0) / 60.0) as u32,
+            seconds % 60.0
+        )
     }
 }
 
@@ -100,22 +96,10 @@ fn format_time(seconds: f64) -> String {
     clippy::cast_sign_loss
 )]
 fn generate_bar(progress: f64, width: usize) -> String {
-    let filled = (progress * width as f64) as usize;
-    let partial = progress.mul_add(width as f64, -(filled as f64));
-
-    let mut bar = "━".repeat(filled);
-    if filled < width {
-        if partial > 0.5 {
-            bar.push('╸');
-            bar.push_str(&"─".repeat(width - filled - 1));
-        } else {
-            bar.push_str(&"─".repeat(width - filled));
-        }
-    }
-    bar
+    let filled = ((progress * width as f64) as usize).min(width);
+    format!("{}{}", "━".repeat(filled), "─".repeat(width - filled))
 }
 
-// Timeouts and I/O errors are transient; 4xx and filesystem errors are permanent.
 const fn is_transient(e: &ureq::Error) -> bool {
     match e {
         ureq::Error::Timeout(_) | ureq::Error::Io(_) => true,
@@ -141,9 +125,6 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut last_err = InferenceError::ModelLoadError(String::new());
 
     for attempt in 1..=MAX_RETRIES {
-        // Each attempt runs in a closure so `?` propagates to `attempt_result`
-        // rather than returning from the outer function, allowing retries.
-        // Err((e, true)) = transient, retry; Err((e, false)) = permanent, fail fast.
         let attempt_result: std::result::Result<(), (InferenceError, bool)> = (|| {
             let config = ureq::Agent::config_builder()
                 .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
@@ -169,22 +150,17 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0);
 
-            let mut temp_name = dest
-                .file_name()
-                .map_or_else(|| PathBuf::from("download"), PathBuf::from)
-                .into_os_string();
-            temp_name.push(format!(
-                ".part.{}.{}",
+            let temp_path = dest.with_file_name(format!(
+                "{}.part.{}.{}",
+                dest.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("download"),
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .subsec_nanos()
             ));
-            let temp_path = dest
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(temp_name);
             let _ = fs::remove_file(&temp_path);
 
             let mut writer = BufWriter::new(File::create(&temp_path).map_err(|e| {
@@ -241,10 +217,10 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                     };
                     if total_size > 0 {
                         let progress = (downloaded as f64 / total_size as f64).min(1.0);
-                        let percent = (progress * 100.0) as u8;
                         let bar = generate_bar(progress, BAR_WIDTH);
                         eprint!(
-                            "\r\x1b[K{desc}: {percent}% {bar} {}/{} {}/s {}",
+                            "\r\x1b[K{desc}: {}% {bar} {}/{} {}/s {}",
+                            (progress * 100.0) as u8,
                             format_bytes(downloaded as f64),
                             format_bytes(total_size as f64),
                             format_bytes(rate),
@@ -281,9 +257,9 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                 0.0
             };
             if total_size > 0 {
-                let bar = generate_bar(1.0, BAR_WIDTH);
                 eprintln!(
-                    "\r\x1b[K{desc}: 100% {bar} {} {}/s {}",
+                    "\r\x1b[K{desc}: 100% {} {} {}/s {}",
+                    generate_bar(1.0, BAR_WIDTH),
                     format_bytes(total_size as f64),
                     format_bytes(rate),
                     format_time(elapsed)
@@ -349,10 +325,8 @@ pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
         )));
     }
 
-    let url = format!("{ASSETS_BASE_URL}/{filename}");
-    let dest_path = path.to_path_buf();
-    download_file(&url, &dest_path)?;
-    Ok(dest_path)
+    download_file(&format!("{ASSETS_BASE_URL}/{filename}"), path)?;
+    Ok(path.to_path_buf())
 }
 
 /// Download an image from a URL to the current directory.
@@ -362,27 +336,19 @@ pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
 /// Returns an error if the download fails or file I/O errors occur.
 pub fn download_image(url: &str) -> Result<String> {
     let filename = url.rsplit('/').next().unwrap_or("image.jpg");
-    let dest_path = Path::new(filename);
+    let dest = Path::new(filename);
 
-    let abs_path = dest_path
+    if !dest.exists() {
+        download_file(url, dest)?;
+    }
+
+    Ok(dest
         .canonicalize()
         .or_else(|_| std::env::current_dir().map(|p| p.join(filename)))
         .map_or_else(
             |_| filename.to_string(),
-            |p| p.to_string_lossy().to_string(),
-        );
-
-    if dest_path.exists() {
-        return Ok(abs_path);
-    }
-
-    eprintln!("Downloading {url}...");
-    download_file(url, dest_path)?;
-
-    Ok(dest_path.canonicalize().map_or_else(
-        |_| filename.to_string(),
-        |p| p.to_string_lossy().to_string(),
-    ))
+            |p| p.to_string_lossy().into_owned(),
+        ))
 }
 
 /// Download multiple images from URLs to the current directory.
