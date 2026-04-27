@@ -1032,6 +1032,11 @@ impl YOLOModel {
         &self.metadata
     }
 
+    /// Override the task type read from model metadata.
+    pub fn set_task(&mut self, task: crate::task::Task) {
+        self.metadata.task = task;
+    }
+
     /// Get the model path.
     #[must_use]
     pub const fn model_path(&self) -> &'static str {
