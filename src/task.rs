@@ -50,7 +50,7 @@ impl Task {
         }
     }
 
-    /// Return the ONNX filename suffix for the nano model of this task.
+    /// Return the ONNX filename suffix for this task.
     #[must_use]
     pub const fn model_suffix(&self) -> &'static str {
         match self {
@@ -60,6 +60,12 @@ impl Task {
             Self::Classify => "-cls",
             Self::Obb => "-obb",
         }
+    }
+
+    /// Return the default nano model filename for this task.
+    #[must_use]
+    pub fn default_model(&self) -> String {
+        format!("yolo26n{}.onnx", self.model_suffix())
     }
 
     /// Check whether this task produces bounding boxes.
