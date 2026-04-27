@@ -163,87 +163,91 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
             ));
             let _ = fs::remove_file(&temp_path);
 
-            let mut writer = BufWriter::new(File::create(&temp_path).map_err(|e| {
-                (
-                    InferenceError::ModelLoadError(format!(
-                        "Failed to create temp file {}: {e}",
-                        temp_path.display()
-                    )),
-                    false,
-                )
-            })?);
-
-            let mut reader = response.into_body().into_reader();
             let mut downloaded: u64 = 0;
-            let mut buffer = [0u8; 65536];
             let start_time = Instant::now();
-            let mut last_update = Instant::now();
-            let desc = format!("Downloading {url} to '{}'", dest.display());
+            let desc: String = format!("Downloading {url} to '{}'", dest.display());
+            let stream_result: std::result::Result<(), (InferenceError, bool)> = {
+                let mut writer = BufWriter::new(File::create(&temp_path).map_err(|e| {
+                    (
+                        InferenceError::ModelLoadError(format!(
+                            "Failed to create temp file {}: {e}",
+                            temp_path.display()
+                        )),
+                        false,
+                    )
+                })?);
+                let mut reader = response.into_body().into_reader();
+                let mut buffer = [0u8; 65536];
+                let mut last_update = Instant::now();
 
-            let stream_result: std::result::Result<(), (InferenceError, bool)> = (|| {
-                loop {
-                    let bytes_read = reader.read(&mut buffer).map_err(|e| {
-                        (
-                            InferenceError::ModelLoadError(format!(
-                                "Failed to read from network: {e}"
-                            )),
-                            true,
-                        )
-                    })?;
-                    if bytes_read == 0 {
-                        break;
+                (|| {
+                    loop {
+                        let bytes_read = reader.read(&mut buffer).map_err(|e| {
+                            (
+                                InferenceError::ModelLoadError(format!(
+                                    "Failed to read from network: {e}"
+                                )),
+                                true,
+                            )
+                        })?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        writer.write_all(&buffer[..bytes_read]).map_err(|e| {
+                            (
+                                InferenceError::ModelLoadError(format!(
+                                    "Failed to write to temp file: {e}"
+                                )),
+                                false,
+                            )
+                        })?;
+                        downloaded += bytes_read as u64;
+
+                        let now = Instant::now();
+                        if now.duration_since(last_update).as_secs_f64() < MIN_UPDATE_INTERVAL {
+                            continue;
+                        }
+                        last_update = now;
+
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        let rate = if elapsed > 0.0 {
+                            downloaded as f64 / elapsed
+                        } else {
+                            0.0
+                        };
+                        if total_size > 0 {
+                            let progress = (downloaded as f64 / total_size as f64).min(1.0);
+                            let bar = generate_bar(progress, BAR_WIDTH);
+                            eprint!(
+                                "\r\x1b[K{desc}: {}% {bar} {}/{} {}/s {}",
+                                (progress * 100.0) as u8,
+                                format_bytes(downloaded as f64),
+                                format_bytes(total_size as f64),
+                                format_bytes(rate),
+                                format_time(elapsed)
+                            );
+                        } else {
+                            eprint!(
+                                "\r\x1b[K{desc}: {} {}/s {}",
+                                format_bytes(downloaded as f64),
+                                format_bytes(rate),
+                                format_time(elapsed)
+                            );
+                        }
+                        std::io::stderr().flush().ok();
                     }
-                    writer.write_all(&buffer[..bytes_read]).map_err(|e| {
+                    writer.flush().map_err(|e| {
                         (
                             InferenceError::ModelLoadError(format!(
-                                "Failed to write to temp file: {e}"
+                                "Failed to flush temp file: {e}"
                             )),
                             false,
                         )
                     })?;
-                    downloaded += bytes_read as u64;
-
-                    let now = Instant::now();
-                    if now.duration_since(last_update).as_secs_f64() < MIN_UPDATE_INTERVAL {
-                        continue;
-                    }
-                    last_update = now;
-
-                    let elapsed = start_time.elapsed().as_secs_f64();
-                    let rate = if elapsed > 0.0 {
-                        downloaded as f64 / elapsed
-                    } else {
-                        0.0
-                    };
-                    if total_size > 0 {
-                        let progress = (downloaded as f64 / total_size as f64).min(1.0);
-                        let bar = generate_bar(progress, BAR_WIDTH);
-                        eprint!(
-                            "\r\x1b[K{desc}: {}% {bar} {}/{} {}/s {}",
-                            (progress * 100.0) as u8,
-                            format_bytes(downloaded as f64),
-                            format_bytes(total_size as f64),
-                            format_bytes(rate),
-                            format_time(elapsed)
-                        );
-                    } else {
-                        eprint!(
-                            "\r\x1b[K{desc}: {} {}/s {}",
-                            format_bytes(downloaded as f64),
-                            format_bytes(rate),
-                            format_time(elapsed)
-                        );
-                    }
-                    std::io::stderr().flush().ok();
-                }
-                writer.flush().map_err(|e| {
-                    (
-                        InferenceError::ModelLoadError(format!("Failed to flush temp file: {e}")),
-                        false,
-                    )
-                })?;
-                Ok(())
-            })();
+                    Ok(())
+                })()
+                // writer, reader, buffer, last_update dropped here
+            };
 
             if stream_result.is_err() {
                 let _ = fs::remove_file(&temp_path);
