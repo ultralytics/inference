@@ -95,7 +95,7 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_HALF)]
     pub half: bool,
 
-    /// Save annotated images to runs/<task>/predict
+    /// Save annotated images to runs/\<task\>/predict
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub save: bool,
 
@@ -128,7 +128,7 @@ pub struct PredictArgs {
     pub classes: Option<String>,
 }
 
-/// Parse class IDs from various formats: "1,2,3", "[1,2,3]", "(1,2,3)"
+/// Parse class IDs from various formats: `"1,2,3"`, `"[1,2,3]"`, `"(1,2,3)"`
 ///
 /// # Errors
 ///
