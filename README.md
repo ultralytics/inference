@@ -24,6 +24,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 🔧 **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
+- ⬇️ **Auto Download** - Automatically downloads YOLO11 and YOLO26 ONNX models (all sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
 - 🪶 **Minimal Dependencies** - No PyTorch, no heavy ML frameworks - just 5 core crates
 
@@ -84,17 +85,31 @@ model.export(format="onnx")
 ### Run Inference
 
 ```bash
-# With defaults (auto-downloads model and sample images)
+# With defaults (auto-downloads yolo26n.onnx and sample images)
 cargo run --release -- predict
 
-# With explicit arguments
+# Select task — auto-downloads the nano model for that task
+cargo run --release -- predict --task segment          # downloads yolo26n-seg.onnx
+cargo run --release -- predict --task pose             # downloads yolo26n-pose.onnx
+cargo run --release -- predict --task obb              # downloads yolo26n-obb.onnx
+cargo run --release -- predict --task classify         # downloads yolo26n-cls.onnx
+
+# With explicit model (task is read from model metadata)
 cargo run --release -- predict --model yolo26n.onnx --source image.jpg
+
+# Auto-download any supported size (n/s/m/l/x)
+cargo run --release -- predict --model yolo26l.onnx --source image.jpg
+cargo run --release -- predict --model yolo11x-seg.onnx --source image.jpg
 
 # On a directory of images
 cargo run --release -- predict --model yolo26n.onnx --source assets/
 
 # With custom thresholds
 cargo run --release -- predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
+
+# Filter by class IDs
+cargo run --release -- predict --model yolo26n.onnx --source image.jpg --classes 0
+cargo run --release -- predict --model yolo26n.onnx --source image.jpg --classes "0,1,2"
 
 # With visualization and custom image size
 cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
@@ -111,9 +126,9 @@ cargo run --release -- predict --model yolo26n.onnx --source image.jpg --rect
 ```
 # ultralytics-inference predict
 
-WARNING ⚠️ 'model' argument is missing. Using default 'model=yolo26n.onnx'.
+WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics 0.0.8 🚀 Rust ONNX FP32 CPU
+Ultralytics 0.0.10 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -121,6 +136,24 @@ image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 640x480 4 persons, 1 bus,
 image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
 Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 384, 640)
 Results saved to runs/detect/predict1
+💡 Learn more at https://docs.ultralytics.com/modes/predict
+```
+
+**With `--task` (auto-downloads the matching nano model):**
+
+```
+# ultralytics-inference predict --task segment
+
+WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
+WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
+Ultralytics 0.0.10 🚀 Rust ONNX FP32 CPU
+Using ONNX Runtime CPUExecutionProvider
+YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
+
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 48.2ms
+image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 38.1ms
+Speed: 1.6ms preprocess, 44.3ms inference, 1.2ms postprocess per image at shape (1, 3, 384, 640)
+Results saved to runs/segment/predict1
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
 
@@ -141,22 +174,46 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option          | Short | Description                                       | Default                                 |
-| --------------- | ----- | ------------------------------------------------- | --------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file                           | `yolo26n.onnx`                          |
-| `--source`      | `-s`  | Input source (image, video, webcam index, or URL) | `Task dependent Ultralytics URL assets` |
-| `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)    | `cpu`                                   |
-| `--conf`        |       | Confidence threshold                              | `0.25`                                  |
-| `--iou`         |       | IoU threshold for NMS                             | `0.7`                                   |
-| `--max-det`     |       | Maximum number of detections                      | `300`                                   |
-| `--imgsz`       |       | Inference image size                              | `Model metadata`                        |
-| `--rect`        |       | Enable rectangular inference (minimal padding)    | `true`                                  |
-| `--batch`       |       | Batch size for inference                          | `1`                                     |
-| `--half`        |       | Use FP16 half-precision inference                 | `false`                                 |
-| `--save`        |       | Save annotated results to runs/<task>/predict     | `true`                                  |
-| `--save-frames` |       | Save individual frames for video                  | `false`                                 |
-| `--show`        |       | Display results in a window                       | `false`                                 |
-| `--verbose`     |       | Show verbose output                               | `true`                                  |
+| Option          | Short | Description                                                                   | Default                                 |
+| --------------- | ----- | ----------------------------------------------------------------------------- | --------------------------------------- |
+| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name        | `yolo26n.onnx`                          |
+| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect` |
+| `--source`      | `-s`  | Input source (image, video, webcam index, or URL)                             | `Task dependent Ultralytics URL assets` |
+| `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)                                | `cpu`                                   |
+| `--conf`        |       | Confidence threshold                                                          | `0.25`                                  |
+| `--iou`         |       | IoU threshold for NMS                                                         | `0.7`                                   |
+| `--max-det`     |       | Maximum number of detections                                                  | `300`                                   |
+| `--imgsz`       |       | Inference image size                                                          | `Model metadata`                        |
+| `--rect`        |       | Enable rectangular inference (minimal padding)                                | `true`                                  |
+| `--batch`       |       | Batch size for inference                                                      | `1`                                     |
+| `--half`        |       | Use FP16 half-precision inference                                             | `false`                                 |
+| `--save`        |       | Save annotated results to runs/\<task\>/predict                               | `true`                                  |
+| `--save-frames` |       | Save individual frames for video                                              | `false`                                 |
+| `--show`        |       | Display results in a window                                                   | `false`                                 |
+| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                  | all classes                             |
+| `--verbose`     |       | Show verbose output                                                           | `true`                                  |
+
+**Task and Model Resolution:**
+
+| Invocation                              | Model used                         | Notes                                      |
+| --------------------------------------- | ---------------------------------- | ------------------------------------------ |
+| `predict`                               | `yolo26n.onnx`                     | Default detect model, auto-downloaded      |
+| `predict --task segment`                | `yolo26n-seg.onnx`                 | Nano seg model, auto-downloaded            |
+| `predict --task pose`                   | `yolo26n-pose.onnx`                | Nano pose model, auto-downloaded           |
+| `predict --task obb`                    | `yolo26n-obb.onnx`                 | Nano OBB model, auto-downloaded            |
+| `predict --task classify`               | `yolo26n-cls.onnx`                 | Nano classify model, auto-downloaded       |
+| `predict --model yolo26l-seg.onnx`      | `yolo26l-seg.onnx`                 | Task read from model metadata              |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, no warning      |
+| `predict --task segment --model yolo26n.onnx`     | `yolo26n.onnx`         | Task overridden with warning; results may be empty if architectures differ |
+
+**Auto-downloadable models:**
+
+All YOLO11 and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five task variants are supported for auto-download:
+
+| Family  | Variants                                                                 |
+| ------- | ------------------------------------------------------------------------ |
+| YOLO26  | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
+| YOLO11  | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
 
 **Source Options:**
 
@@ -441,6 +498,8 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Batch inference support
 - [x] Rectangular inference support and optimization
 - [x] Class filtering support
+- [x] Auto-download all YOLO11 and YOLO26 ONNX models (all sizes n/s/m/l/x, all tasks)
+- [x] `--task` CLI flag — selects and auto-downloads the matching nano model when `--model` is omitted
 
 ### In Progress
 
