@@ -89,10 +89,10 @@ model.export(format="onnx")
 cargo run --release -- predict
 
 # Select task — auto-downloads the nano model for that task
-cargo run --release -- predict --task segment          # downloads yolo26n-seg.onnx
-cargo run --release -- predict --task pose             # downloads yolo26n-pose.onnx
-cargo run --release -- predict --task obb              # downloads yolo26n-obb.onnx
-cargo run --release -- predict --task classify         # downloads yolo26n-cls.onnx
+cargo run --release -- predict --task segment  # downloads yolo26n-seg.onnx
+cargo run --release -- predict --task pose     # downloads yolo26n-pose.onnx
+cargo run --release -- predict --task obb      # downloads yolo26n-obb.onnx
+cargo run --release -- predict --task classify # downloads yolo26n-cls.onnx
 
 # With explicit model (task is read from model metadata)
 cargo run --release -- predict --model yolo26n.onnx --source image.jpg
@@ -174,46 +174,46 @@ cargo run --release -- predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option          | Short | Description                                                                   | Default                                 |
-| --------------- | ----- | ----------------------------------------------------------------------------- | --------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name        | `yolo26n.onnx`                          |
-| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect` |
-| `--source`      | `-s`  | Input source (image, video, webcam index, or URL)                             | `Task dependent Ultralytics URL assets` |
-| `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)                                | `cpu`                                   |
-| `--conf`        |       | Confidence threshold                                                          | `0.25`                                  |
-| `--iou`         |       | IoU threshold for NMS                                                         | `0.7`                                   |
-| `--max-det`     |       | Maximum number of detections                                                  | `300`                                   |
-| `--imgsz`       |       | Inference image size                                                          | `Model metadata`                        |
-| `--rect`        |       | Enable rectangular inference (minimal padding)                                | `true`                                  |
-| `--batch`       |       | Batch size for inference                                                      | `1`                                     |
-| `--half`        |       | Use FP16 half-precision inference                                             | `false`                                 |
-| `--save`        |       | Save annotated results to runs/\<task\>/predict                               | `true`                                  |
-| `--save-frames` |       | Save individual frames for video                                              | `false`                                 |
-| `--show`        |       | Display results in a window                                                   | `false`                                 |
-| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                  | all classes                             |
-| `--verbose`     |       | Show verbose output                                                           | `true`                                  |
+| Option          | Short | Description                                                                                              | Default                                 |
+| --------------- | ----- | -------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name                                   | `yolo26n.onnx`                          |
+| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect`                                |
+| `--source`      | `-s`  | Input source (image, video, webcam index, or URL)                                                        | `Task dependent Ultralytics URL assets` |
+| `--device`      |       | Device to use (cpu, cuda:0, mps, coreml, etc.)                                                           | `cpu`                                   |
+| `--conf`        |       | Confidence threshold                                                                                     | `0.25`                                  |
+| `--iou`         |       | IoU threshold for NMS                                                                                    | `0.7`                                   |
+| `--max-det`     |       | Maximum number of detections                                                                             | `300`                                   |
+| `--imgsz`       |       | Inference image size                                                                                     | `Model metadata`                        |
+| `--rect`        |       | Enable rectangular inference (minimal padding)                                                           | `true`                                  |
+| `--batch`       |       | Batch size for inference                                                                                 | `1`                                     |
+| `--half`        |       | Use FP16 half-precision inference                                                                        | `false`                                 |
+| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                          | `true`                                  |
+| `--save-frames` |       | Save individual frames for video                                                                         | `false`                                 |
+| `--show`        |       | Display results in a window                                                                              | `false`                                 |
+| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                              | all classes                             |
+| `--verbose`     |       | Show verbose output                                                                                      | `true`                                  |
 
 **Task and Model Resolution:**
 
-| Invocation                              | Model used                         | Notes                                      |
-| --------------------------------------- | ---------------------------------- | ------------------------------------------ |
-| `predict`                               | `yolo26n.onnx`                     | Default detect model, auto-downloaded      |
-| `predict --task segment`                | `yolo26n-seg.onnx`                 | Nano seg model, auto-downloaded            |
-| `predict --task pose`                   | `yolo26n-pose.onnx`                | Nano pose model, auto-downloaded           |
-| `predict --task obb`                    | `yolo26n-obb.onnx`                 | Nano OBB model, auto-downloaded            |
-| `predict --task classify`               | `yolo26n-cls.onnx`                 | Nano classify model, auto-downloaded       |
-| `predict --model yolo26l-seg.onnx`      | `yolo26l-seg.onnx`                 | Task read from model metadata              |
-| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, no warning      |
-| `predict --task segment --model yolo26n.onnx`     | `yolo26n.onnx`         | Task overridden with warning; results may be empty if architectures differ |
+| Invocation                                        | Model used          | Notes                                                                      |
+| ------------------------------------------------- | ------------------- | -------------------------------------------------------------------------- |
+| `predict`                                         | `yolo26n.onnx`      | Default detect model, auto-downloaded                                      |
+| `predict --task segment`                          | `yolo26n-seg.onnx`  | Nano seg model, auto-downloaded                                            |
+| `predict --task pose`                             | `yolo26n-pose.onnx` | Nano pose model, auto-downloaded                                           |
+| `predict --task obb`                              | `yolo26n-obb.onnx`  | Nano OBB model, auto-downloaded                                            |
+| `predict --task classify`                         | `yolo26n-cls.onnx`  | Nano classify model, auto-downloaded                                       |
+| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`  | Task read from model metadata                                              |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`  | `--task` matches metadata, no warning                                      |
+| `predict --task segment --model yolo26n.onnx`     | `yolo26n.onnx`      | Task overridden with warning; results may be empty if architectures differ |
 
 **Auto-downloadable models:**
 
 All YOLO11 and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five task variants are supported for auto-download:
 
-| Family  | Variants                                                                 |
-| ------- | ------------------------------------------------------------------------ |
-| YOLO26  | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
-| YOLO11  | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
+| Family | Variants                                                                        |
+| ------ | ------------------------------------------------------------------------------- |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
 
 **Source Options:**
 
