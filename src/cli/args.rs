@@ -1,7 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-use crate::task::Task;
 use crate::InferenceConfig;
+use crate::task::Task;
 use clap::{Args, Parser, Subcommand};
 
 /// CLI arguments parser.
