@@ -30,6 +30,7 @@ fn test_run_prediction_e2e() {
         verbose: true,
         rect: false,
         classes: None,
+        task: None,
     };
 
     // This should run successfully (download model/images and predict)
