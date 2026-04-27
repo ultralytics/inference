@@ -66,8 +66,7 @@ pub struct InferenceConfig {
     /// Whether to save individual frames instead of a video file when input is video.
     /// Defaults to `false` (save as video).
     pub save_frames: bool,
-    /// Whether to use minimal padding (rectangular inference).
-    /// Defaults to `true` to match Ultralytics Python.
+    /// Whether to use minimal padding (rectangular inference). Defaults to `true`.
     pub rect: bool,
     /// Class IDs to filter predictions. If `None`, all classes are returned.
     /// Useful for focusing on specific objects in multi-class detection tasks.
