@@ -38,11 +38,9 @@ pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments - use default model if not specified
     let model_is_default = args.model.is_none();
     let model_path = args.model.clone().unwrap_or_else(|| {
-        let suffix = args
-            .task
+        args.task
             .unwrap_or(crate::task::Task::Detect)
-            .model_suffix();
-        format!("yolo26n{suffix}.onnx")
+            .default_model()
     });
     let source_path = &args.source;
     let conf_threshold = args.conf;
