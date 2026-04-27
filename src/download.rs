@@ -14,9 +14,6 @@ use crate::error::{InferenceError, Result};
 
 const ASSETS_BASE_URL: &str = "https://github.com/ultralytics/assets/releases/download/v8.4.0";
 
-/// Default YOLO detection model name.
-pub const DEFAULT_MODEL: &str = "yolo26n.onnx";
-
 /// YOLO Model families, sizes, and variants supported for auto-download.
 const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
