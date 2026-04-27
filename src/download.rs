@@ -71,8 +71,14 @@ const READ_TIMEOUT: u64 = 300;
 /// Maximum number of download attempts before giving up.
 const MAX_RETRIES: u32 = 3;
 
-/// Base delay in seconds between retry attempts (doubles each retry: 2s, 4s, 8s).
+/// Base delay in seconds between retry attempts (doubles each retry: 2s, 4s).
 const RETRY_BASE_DELAY_SECS: u64 = 2;
+
+/// Progress bar width in characters.
+const BAR_WIDTH: usize = 12;
+
+/// Minimum interval in seconds between progress bar updates.
+const MIN_UPDATE_INTERVAL: f64 = 0.1;
 
 /// Format bytes as human-readable string (e.g., "10.4MB").
 #[allow(clippy::cast_precision_loss)]
@@ -131,12 +137,179 @@ fn generate_bar(progress: f64, width: usize) -> String {
     bar
 }
 
-/// Download a file from URL to the specified path, retrying on transient errors.
+/// Download a file from URL to the specified path with progress bar and retry.
+///
+/// Retries up to `MAX_RETRIES` times on transient failures with exponential backoff.
+/// Uses a temp file and atomic rename to prevent corrupted partial downloads.
+#[allow(
+    clippy::similar_names,
+    clippy::too_many_lines,
+    clippy::large_stack_arrays,
+    clippy::items_after_statements,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut last_err = InferenceError::ModelLoadError(String::new());
 
     for attempt in 1..=MAX_RETRIES {
-        match download_file_once(url, dest) {
+        // Each attempt runs in a closure so `?` propagates to `attempt_result`
+        // rather than returning from the outer function, allowing retries.
+        let attempt_result: Result<()> = (|| {
+            let config = ureq::Agent::config_builder()
+                .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
+                .timeout_recv_body(Some(Duration::from_secs(READ_TIMEOUT)))
+                .build();
+            let agent = ureq::Agent::new_with_config(config);
+
+            let response = agent.get(url).call().map_err(|e| {
+                let msg = match &e {
+                    ureq::Error::Timeout(_) => {
+                        format!("Connection timed out while downloading {url}")
+                    }
+                    ureq::Error::Io(io_err) => {
+                        format!("Network error downloading {url}: {io_err}")
+                    }
+                    _ => format!("Failed to download {url}: {e}"),
+                };
+                InferenceError::ModelLoadError(msg)
+            })?;
+
+            let total_size: u64 = response
+                .headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+
+            // Unique temp path in same dir as dest for atomic rename
+            let unique_suffix = format!(
+                ".{}.{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos()
+            );
+            let mut temp_name = dest
+                .file_name()
+                .map_or_else(|| PathBuf::from("download"), PathBuf::from)
+                .into_os_string();
+            temp_name.push(".part");
+            temp_name.push(unique_suffix);
+            let temp_path = dest
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(temp_name);
+            let _ = fs::remove_file(&temp_path);
+
+            let mut writer = BufWriter::new(File::create(&temp_path).map_err(|e| {
+                InferenceError::ModelLoadError(format!(
+                    "Failed to create temp file {}: {e}",
+                    temp_path.display()
+                ))
+            })?);
+
+            let mut reader = response.into_body().into_reader();
+            let mut downloaded: u64 = 0;
+            let mut buffer = [0u8; 65536];
+            let start_time = Instant::now();
+            let mut last_update = Instant::now();
+            let desc = format!("Downloading {url} to '{}'", dest.display());
+
+            let stream_result: Result<()> = (|| {
+                loop {
+                    let bytes_read = reader.read(&mut buffer).map_err(|e| {
+                        InferenceError::ModelLoadError(format!("Failed to read from network: {e}"))
+                    })?;
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    writer.write_all(&buffer[..bytes_read]).map_err(|e| {
+                        InferenceError::ModelLoadError(format!("Failed to write to temp file: {e}"))
+                    })?;
+                    downloaded += bytes_read as u64;
+
+                    let now = Instant::now();
+                    if now.duration_since(last_update).as_secs_f64() < MIN_UPDATE_INTERVAL {
+                        continue;
+                    }
+                    last_update = now;
+
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let rate = if elapsed > 0.0 {
+                        downloaded as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    if total_size > 0 {
+                        let progress = (downloaded as f64 / total_size as f64).min(1.0);
+                        let percent = (progress * 100.0) as u8;
+                        let bar = generate_bar(progress, BAR_WIDTH);
+                        let rate_str = format!("{}/s", format_bytes(rate));
+                        eprint!(
+                            "\r\x1b[K{desc}: {percent}% {bar} {}/{} {rate_str} {}",
+                            format_bytes(downloaded as f64),
+                            format_bytes(total_size as f64),
+                            format_time(elapsed)
+                        );
+                    } else {
+                        eprint!(
+                            "\r\x1b[K{desc}: {} {}/s {}",
+                            format_bytes(downloaded as f64),
+                            format_bytes(rate),
+                            format_time(elapsed)
+                        );
+                    }
+                    std::io::stderr().flush().ok();
+                }
+                writer.flush().map_err(|e| {
+                    InferenceError::ModelLoadError(format!("Failed to flush temp file: {e}"))
+                })?;
+                Ok(())
+            })();
+
+            if let Err(e) = stream_result {
+                let _ = fs::remove_file(&temp_path);
+                return Err(e);
+            }
+
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let rate = if elapsed > 0.0 {
+                downloaded as f64 / elapsed
+            } else {
+                0.0
+            };
+            if total_size > 0 {
+                let bar = generate_bar(1.0, BAR_WIDTH);
+                eprintln!(
+                    "\r\x1b[K{desc}: 100% {bar} {} {}/s {}",
+                    format_bytes(total_size as f64),
+                    format_bytes(rate),
+                    format_time(elapsed)
+                );
+            } else {
+                eprintln!(
+                    "\r\x1b[K{desc}: {} {}/s {}",
+                    format_bytes(downloaded as f64),
+                    format_bytes(rate),
+                    format_time(elapsed)
+                );
+            }
+
+            fs::rename(&temp_path, dest).map_err(|e| {
+                let _ = fs::remove_file(&temp_path);
+                InferenceError::ModelLoadError(format!(
+                    "Failed to move downloaded file to {}: {e}",
+                    dest.display()
+                ))
+            })?;
+
+            Ok(())
+        })();
+
+        match attempt_result {
             Ok(()) => return Ok(()),
             Err(e) => {
                 last_err = e;
@@ -152,205 +325,6 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
     }
 
     Err(last_err)
-}
-
-#[allow(
-    clippy::similar_names,
-    clippy::too_many_lines,
-    clippy::large_stack_arrays,
-    clippy::items_after_statements,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
-fn download_file_once(url: &str, dest: &Path) -> Result<()> {
-    // Create ureq agent with timeouts
-    let config = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
-        .timeout_recv_body(Some(Duration::from_secs(READ_TIMEOUT)))
-        .build();
-    let agent = ureq::Agent::new_with_config(config);
-
-    let response = agent.get(url).call().map_err(|e| {
-        let msg = match &e {
-            ureq::Error::Timeout(_) => format!("Connection timed out while downloading {url}"),
-            ureq::Error::Io(io_err) => {
-                format!("Network error downloading {url}: {io_err}")
-            }
-            _ => format!("Failed to download {url}: {e}"),
-        };
-        InferenceError::ModelLoadError(msg)
-    })?;
-
-    // Get content length for progress calculation
-    let content_length: Option<u64> = response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s: &str| s.parse().ok());
-
-    let total_size = content_length.unwrap_or(0);
-
-    // Create unique temp file for atomic download to prevent race conditions
-    // Format: <filename>.part.<pid>.<timestamp_nanos>
-    let unique_suffix = format!(
-        ".{}.{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos()
-    );
-    let mut temp_path = dest
-        .file_name()
-        .map_or_else(|| PathBuf::from("download"), PathBuf::from)
-        .into_os_string();
-    temp_path.push(".part");
-    temp_path.push(unique_suffix);
-
-    // Create temp path in the same directory as dest to ensure atomic rename works
-    let temp_path = dest
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(temp_path);
-
-    // Clean up any existing partial download
-    let _ = fs::remove_file(&temp_path);
-
-    let temp_file = File::create(&temp_path).map_err(|e| {
-        InferenceError::ModelLoadError(format!(
-            "Failed to create temp file {}: {e}",
-            temp_path.display()
-        ))
-    })?;
-    let mut writer = BufWriter::new(temp_file);
-
-    let mut reader = response.into_body().into_reader();
-    let mut downloaded: u64 = 0;
-    let mut buffer = [0u8; 65536]; // 64KB buffer
-    let start_time = Instant::now();
-    let mut last_update = Instant::now();
-
-    // Progress bar settings
-    const BAR_WIDTH: usize = 12;
-    const MIN_UPDATE_INTERVAL: f64 = 0.1; // Update at most every 100ms
-
-    // Description for progress bar
-    let desc = format!("Downloading {} to '{}'", url, dest.display());
-
-    let download_result: std::result::Result<(), InferenceError> = (|| {
-        loop {
-            let bytes_read = reader.read(&mut buffer).map_err(|e| {
-                InferenceError::ModelLoadError(format!("Failed to read from network: {e}"))
-            })?;
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            // Stream directly to file
-            writer.write_all(&buffer[..bytes_read]).map_err(|e| {
-                InferenceError::ModelLoadError(format!("Failed to write to temp file: {e}"))
-            })?;
-
-            downloaded += bytes_read as u64;
-
-            // Rate-limit progress updates
-            let now = Instant::now();
-            if now.duration_since(last_update).as_secs_f64() < MIN_UPDATE_INTERVAL {
-                continue;
-            }
-            last_update = now;
-
-            // Calculate progress
-            let elapsed = start_time.elapsed().as_secs_f64();
-            let rate = if elapsed > 0.0 {
-                downloaded as f64 / elapsed
-            } else {
-                0.0
-            };
-
-            if total_size > 0 {
-                let progress = (downloaded as f64 / total_size as f64).min(1.0);
-                let percent = (progress * 100.0) as u8;
-                let bar = generate_bar(progress, BAR_WIDTH);
-                let rate_str = format!("{}/s", format_bytes(rate));
-
-                eprint!(
-                    "\r\x1b[K{}: {}% {} {}/{} {} {}",
-                    desc,
-                    percent,
-                    bar,
-                    format_bytes(downloaded as f64),
-                    format_bytes(total_size as f64),
-                    rate_str,
-                    format_time(elapsed)
-                );
-            } else {
-                eprint!(
-                    "\r\x1b[K{}: {} {}/s {}",
-                    desc,
-                    format_bytes(downloaded as f64),
-                    format_bytes(rate),
-                    format_time(elapsed)
-                );
-            }
-            std::io::stderr().flush().ok();
-        }
-
-        // Flush the writer
-        writer.flush().map_err(|e| {
-            InferenceError::ModelLoadError(format!("Failed to flush temp file: {e}"))
-        })?;
-
-        Ok(())
-    })();
-
-    // Handle download failure - clean up temp file
-    if let Err(e) = download_result {
-        let _ = fs::remove_file(&temp_path);
-        return Err(e);
-    }
-
-    // Final progress line
-    let elapsed = start_time.elapsed().as_secs_f64();
-    let rate = if elapsed > 0.0 {
-        downloaded as f64 / elapsed
-    } else {
-        0.0
-    };
-
-    if total_size > 0 {
-        let bar = generate_bar(1.0, BAR_WIDTH);
-        eprintln!(
-            "\r\x1b[K{}: 100% {} {} {}/s {}",
-            desc,
-            bar,
-            format_bytes(total_size as f64),
-            format_bytes(rate),
-            format_time(elapsed)
-        );
-    } else {
-        eprintln!(
-            "\r\x1b[K{}: {} {}/s {}",
-            desc,
-            format_bytes(downloaded as f64),
-            format_bytes(rate),
-            format_time(elapsed)
-        );
-    }
-
-    // Atomic rename from temp file to final destination
-    fs::rename(&temp_path, dest).map_err(|e| {
-        // Clean up temp file on rename failure
-        let _ = fs::remove_file(&temp_path);
-        InferenceError::ModelLoadError(format!(
-            "Failed to move downloaded file to {}: {e}",
-            dest.display()
-        ))
-    })?;
-
-    Ok(())
 }
 
 /// Attempt to download a model if it matches a known downloadable model.
