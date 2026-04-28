@@ -1064,7 +1064,6 @@ impl YOLOModel {
     pub const fn set_task(&mut self, task: crate::task::Task) {
         self.metadata.task = task;
     }
-
 }
 
 #[allow(clippy::missing_fields_in_debug)]

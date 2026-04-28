@@ -80,7 +80,6 @@ thread_local! {
 // Types
 // ================================================================================================
 
-
 /// Result of preprocessing an image, containing the tensor and transform info.
 #[derive(Debug, Clone)]
 pub struct PreprocessResult {

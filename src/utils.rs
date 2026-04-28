@@ -102,7 +102,6 @@ pub fn calculate_probiou(box1: &[f32; 5], box2: &[f32; 5]) -> f32 {
     1.0 - hd
 }
 
-
 /// Per-class Non-Maximum Suppression (NMS) for filtering overlapping detections
 ///
 /// Only suppresses boxes within the same class, matching Ultralytics behavior.
