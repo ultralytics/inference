@@ -126,7 +126,6 @@ armnn = ["ort/armnn"]       # ARM NN
 tvm = ["ort/tvm"]           # Apache TVM
 migraphx = ["ort/migraphx"] # AMD MIGraphX
 rknpu = ["ort/rknpu"]       # Rockchip NPU
-vitis = ["ort/vitis"]       # Xilinx Vitis AI
 cann = ["ort/cann"]         # Huawei CANN
 webgpu = ["ort/webgpu"]     # WebGPU
 azure = ["ort/azure"]       # Azure
