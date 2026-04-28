@@ -102,51 +102,6 @@ pub fn calculate_probiou(box1: &[f32; 5], box2: &[f32; 5]) -> f32 {
     1.0 - hd
 }
 
-/// Non-Maximum Suppression (NMS) for filtering overlapping detections
-///
-/// # Arguments
-///
-/// * `boxes` - Vector of bounding boxes with scores [(bbox, score)]
-/// * `iou_threshold` - `IoU` threshold for suppression
-///
-/// # Returns
-///
-/// Indices of boxes to keep
-///
-/// # Panics
-///
-/// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
-#[must_use]
-pub fn nms(boxes: &[([f32; 4], f32)], iou_threshold: f32) -> Vec<usize> {
-    if boxes.is_empty() {
-        return vec![];
-    }
-
-    // Sort by score (descending)
-    let mut indices: Vec<usize> = (0..boxes.len()).collect();
-    indices.sort_by(|&a, &b| boxes[b].1.partial_cmp(&boxes[a].1).unwrap());
-
-    let mut keep = vec![];
-    let mut suppressed = vec![false; boxes.len()];
-
-    for &i in &indices {
-        if suppressed[i] {
-            continue;
-        }
-        keep.push(i);
-
-        for &j in &indices {
-            if !suppressed[j] && i != j {
-                let iou = calculate_iou(&boxes[i].0, &boxes[j].0);
-                if iou > iou_threshold {
-                    suppressed[j] = true;
-                }
-            }
-        }
-    }
-
-    keep
-}
 
 /// Per-class Non-Maximum Suppression (NMS) for filtering overlapping detections
 ///
@@ -329,19 +284,6 @@ mod tests {
         let box2 = [5.0, 5.0, 15.0, 15.0];
         let iou = calculate_iou(&box1, &box2);
         assert!((iou - 0.142_857).abs() < 0.001); // 25 / (100 + 100 - 25)
-    }
-
-    #[test]
-    fn test_nms() {
-        let boxes = vec![
-            ([0.0, 0.0, 10.0, 10.0], 0.9),
-            ([1.0, 1.0, 11.0, 11.0], 0.8),
-            ([100.0, 100.0, 110.0, 110.0], 0.95),
-        ];
-        let keep = nms(&boxes, 0.5);
-        assert_eq!(keep.len(), 2); // Should keep boxes at indices 2 and 0
-        assert!(keep.contains(&2));
-        assert!(keep.contains(&0));
     }
 
     #[test]

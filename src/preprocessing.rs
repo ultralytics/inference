@@ -80,25 +80,6 @@ thread_local! {
 // Types
 // ================================================================================================
 
-/// Tensor data that can be either FP32 or FP16.
-#[derive(Debug, Clone)]
-pub enum TensorData {
-    /// 32-bit floating point tensor.
-    Float32(Array4<f32>),
-    /// 16-bit floating point tensor.
-    Float16(Array4<f16>),
-}
-
-impl TensorData {
-    /// Get the shape of the tensor.
-    #[must_use]
-    pub fn shape(&self) -> &[usize] {
-        match self {
-            Self::Float32(t) => t.shape(),
-            Self::Float16(t) => t.shape(),
-        }
-    }
-}
 
 /// Result of preprocessing an image, containing the tensor and transform info.
 #[derive(Debug, Clone)]
