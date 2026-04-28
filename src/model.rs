@@ -1064,14 +1064,6 @@ impl YOLOModel {
     pub const fn set_task(&mut self, task: crate::task::Task) {
         self.metadata.task = task;
     }
-
-    /// Get the model path.
-    #[must_use]
-    pub const fn model_path(&self) -> &'static str {
-        // Note: ONNX Runtime doesn't expose the original path
-        // This is a placeholder - in practice, users should track the path themselves
-        ""
-    }
 }
 
 #[allow(clippy::missing_fields_in_debug)]
@@ -1130,8 +1122,6 @@ mod tests {
             assert_eq!(model.stride(), 32);
             assert_eq!(model.imgsz(), (640, 640)); // Default for yolo26n
             assert!(!model.names().is_empty());
-            assert_eq!(model.model_path(), ""); // Placeholder returns empty string
-
             // Test Debug impl
             let debug_str = format!("{model:?}");
             assert!(debug_str.contains("YOLOModel"));
