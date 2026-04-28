@@ -218,7 +218,7 @@
 //! | [`inference`] | [`InferenceConfig`] for customizing inference settings |
 //! | [`source`] | Input source handling ([`Source`], [`SourceIterator`]) |
 //! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Pose, etc.) |
-//! | [`error`] | Error types ([`InferenceError`], [`Result`]) |
+//! | [`mod@error`] | Error types ([`InferenceError`], [`Result`]) |
 //! | [`preprocessing`] | Image preprocessing utilities |
 //! | [`postprocessing`] | Detection post-processing (NMS, decode) |
 //! | [`metadata`] | ONNX model metadata parsing |
