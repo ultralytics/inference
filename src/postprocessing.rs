@@ -219,7 +219,7 @@ fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
 ///
 /// Returns `None` for shapes that don't match the end-to-end layout, and for
 /// shapes where `kpt_feats` is divisible by both 2 and 3 (e.g. 36, 42) because
-/// the layout is ambiguous — `(12, 3)` and `(18, 2)` both decode the same
+/// the layout is ambiguous: `(12, 3)` and `(18, 2)` both decode the same
 /// tensor. Ambiguous cases fall through to the legacy pose path rather than
 /// silently guessing the wrong dimension.
 fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
@@ -1366,7 +1366,7 @@ fn postprocess_obb(
 //
 // End-to-end exports bake NMS into the graph and produce a tensor of shape
 // `[B, max_det, 6 + extra]`, where the first 6 columns are always
-// `[x1, y1, x2, y2, conf, cls]` (OBB is the exception — see `postprocess_obb_end2end`).
+// `[x1, y1, x2, y2, conf, cls]` (OBB is the exception; see `postprocess_obb_end2end`).
 // Coordinates are in the letterboxed model-input space, so we still scale/pad-correct
 // them back to original-image space. No NMS, no class-score matrix.
 

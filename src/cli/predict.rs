@@ -37,10 +37,11 @@ use crate::{error, verbose, warn};
 pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments - use default model if not specified
     let model_is_default = args.model.is_none();
-    let model_path = args
-        .model
-        .clone()
-        .unwrap_or_else(|| crate::download::DEFAULT_MODEL.to_string());
+    let model_path = args.model.clone().unwrap_or_else(|| {
+        args.task
+            .unwrap_or(crate::task::Task::Detect)
+            .default_model()
+    });
     let source_path = &args.source;
     let conf_threshold = args.conf;
     let iou_threshold = args.iou;
@@ -56,12 +57,8 @@ pub fn run_prediction(args: &PredictArgs) {
         .map(|d| d.parse().expect("Invalid device"));
     #[cfg(feature = "visualize")]
     let show = args.show;
-    // Warn if using default model
     if model_is_default && verbose {
-        warn!(
-            "'model' argument is missing. Using default '--model={}'.",
-            crate::download::DEFAULT_MODEL
-        );
+        warn!("'model' argument is missing. Using default '--model={model_path}'.");
     }
 
     // Load model first so we can determine appropriate default source based on task
@@ -106,6 +103,22 @@ pub fn run_prediction(args: &PredictArgs) {
             process::exit(1);
         }
     };
+
+    if let Some(task) = args.task {
+        if model_is_default {
+            // Model was auto-selected from --task, so metadata will always agree.
+            // set_task is a no-op here but kept for explicitness.
+            model.set_task(task);
+        } else if task != model.task() {
+            error!(
+                "'--task={task}' conflicts with task '{}' detected from model metadata. \
+                 Provide a model that matches the requested task, or omit --task.",
+                model.task()
+            );
+            process::exit(1);
+        }
+        // task == model.task(): explicit model, matching task; nothing to do.
+    }
 
     // Determine source
     let source = source_path.as_ref().map_or_else(

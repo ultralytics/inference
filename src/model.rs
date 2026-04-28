@@ -981,7 +981,19 @@ impl YOLOModel {
         Ok(results)
     }
 
-    /// Get the model's task type.
+    /// Get the model's task type as detected from ONNX metadata.
+    ///
+    /// The task is parsed automatically when the model is loaded. Use
+    /// [`set_task`](Self::set_task) to override it at runtime if needed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ultralytics_inference::{Task, YOLOModel};
+    /// let model = YOLOModel::load("yolo26n-seg.onnx")?;
+    /// assert_eq!(model.task(), Task::Segment);
+    /// # Ok::<(), ultralytics_inference::InferenceError>(())
+    /// ```
     #[must_use]
     pub const fn task(&self) -> Task {
         self.metadata.task
@@ -1030,6 +1042,27 @@ impl YOLOModel {
     #[must_use]
     pub const fn metadata(&self) -> &ModelMetadata {
         &self.metadata
+    }
+
+    /// Override the task type read from model metadata.
+    ///
+    /// Use this when you want to force a specific post-processing path without
+    /// reloading the model. The model architecture must actually match the target
+    /// task; overriding to a mismatched task will produce empty or incorrect
+    /// results.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ultralytics_inference::{Task, YOLOModel};
+    /// let mut model = YOLOModel::load("yolo26n-seg.onnx")?;
+    /// // confirm the task before overriding
+    /// assert_eq!(model.task(), Task::Segment);
+    /// model.set_task(Task::Segment); // no-op here, but illustrates the API
+    /// # Ok::<(), ultralytics_inference::InferenceError>(())
+    /// ```
+    pub const fn set_task(&mut self, task: crate::task::Task) {
+        self.metadata.task = task;
     }
 
     /// Get the model path.
