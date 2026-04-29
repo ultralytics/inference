@@ -27,10 +27,7 @@
 //!
 //! Add to your `Cargo.toml`:
 //!
-//! ```toml
-//! [dependencies]
-//! ultralytics-inference = "0.0.5"
-//! ```
+#![doc = concat!("```toml\n[dependencies]\nultralytics-inference = \"", env!("CARGO_PKG_VERSION"), "\"\n```")]
 //!
 //! Or install the CLI tool:
 //!
