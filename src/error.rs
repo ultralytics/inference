@@ -19,13 +19,7 @@ pub enum InferenceError {
     /// Invalid configuration provided.
     ConfigError(String),
     /// IO error (file not found, permission denied, etc.).
-    IoError(String),
-    /// Wrapped `std::io::Error`
     Io(std::io::Error),
-    /// Error parsing model metadata.
-    MetadataError(String),
-    /// Post-processing error.
-    PostProcessingError(String),
     /// Visualizer error.
     VisualizerError(String),
     /// Video/stream processing error.
@@ -41,10 +35,7 @@ impl fmt::Display for InferenceError {
             Self::InferenceError(msg) => write!(f, "Inference error: {msg}"),
             Self::ImageError(msg) => write!(f, "Image error: {msg}"),
             Self::ConfigError(msg) => write!(f, "Config error: {msg}"),
-            Self::IoError(msg) => write!(f, "IO error: {msg}"),
             Self::Io(err) => write!(f, "IO error: {err}"),
-            Self::MetadataError(msg) => write!(f, "Metadata error: {msg}"),
-            Self::PostProcessingError(msg) => write!(f, "Post-processing error: {msg}"),
             Self::VisualizerError(msg) => write!(f, "Visualizer error: {msg}"),
             Self::VideoError(msg) => write!(f, "Video error: {msg}"),
             Self::FeatureNotEnabled(msg) => write!(f, "Feature not enabled: {msg}"),

@@ -60,10 +60,8 @@ impl VideoWriter {
         // Ensure parent directory exists
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                InferenceError::IoError(format!(
-                    "Failed to create directory {}: {e}",
-                    parent.display()
-                ))
+                let dir = parent.display();
+                std::io::Error::new(e.kind(), format!("Failed to create directory {dir}: {e}"))
             })?;
         }
 
@@ -222,8 +220,7 @@ impl SaveResults {
                     if let Some(parent) = save_path.parent()
                         && !parent.exists()
                     {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|e| InferenceError::IoError(e.to_string()))?;
+                        std::fs::create_dir_all(parent)?;
                     }
 
                     self.video_writer = Some(VideoWriter::new(save_path, width, height, fps)?);
@@ -258,8 +255,7 @@ impl SaveResults {
 
             // Ensure directory exists
             if !save_dir.exists() {
-                std::fs::create_dir_all(&save_dir)
-                    .map_err(|e| InferenceError::IoError(e.to_string()))?;
+                std::fs::create_dir_all(&save_dir)?;
             }
 
             annotated
