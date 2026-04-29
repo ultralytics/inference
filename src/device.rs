@@ -50,47 +50,36 @@ impl fmt::Display for Device {
 impl FromStr for Device {
     type Err = String;
 
-    #[allow(clippy::option_if_let_else)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_lowercase();
+        if let Some(rest) = s.strip_prefix("cuda") {
+            return Ok(Self::Cuda(parse_device_index(rest)));
+        }
+        if let Some(rest) = s.strip_prefix("directml") {
+            return Ok(Self::DirectMl(parse_device_index(rest)));
+        }
+        if let Some(rest) = s.strip_prefix("tensorrt") {
+            return Ok(Self::TensorRt(parse_device_index(rest)));
+        }
+        if let Some(rest) = s.strip_prefix("rocm") {
+            return Ok(Self::Rocm(parse_device_index(rest)));
+        }
         match s.as_str() {
             "cpu" => Ok(Self::Cpu),
             "mps" => Ok(Self::Mps),
             "coreml" => Ok(Self::CoreMl),
             "openvino" => Ok(Self::OpenVino),
             "xnnpack" => Ok(Self::Xnnpack),
-            _ => s.strip_prefix("cuda").map_or_else(
-                || {
-                    if let Some(rest) = s.strip_prefix("directml") {
-                        let index = parse_device_index(rest).unwrap_or(0);
-                        Ok(Self::DirectMl(index))
-                    } else if let Some(rest) = s.strip_prefix("tensorrt") {
-                        let index = parse_device_index(rest).unwrap_or(0);
-                        Ok(Self::TensorRt(index))
-                    } else if let Some(rest) = s.strip_prefix("rocm") {
-                        let index = parse_device_index(rest).unwrap_or(0);
-                        Ok(Self::Rocm(index))
-                    } else {
-                        Err(format!("Unknown device: {s}"))
-                    }
-                },
-                |rest| {
-                    let index = parse_device_index(rest).unwrap_or(0);
-                    Ok(Self::Cuda(index))
-                },
-            ),
+            _ => Err(format!("Unknown device: {s}")),
         }
     }
 }
 
-/// Helper to parse device index from string (e.g. ":0")
-fn parse_device_index(s: &str) -> Option<usize> {
-    if s.is_empty() {
-        return None;
-    }
-    // Handle ":0", ":1" etc.
+/// Parse a trailing device index like `":0"`, defaulting to `0` when absent.
+fn parse_device_index(s: &str) -> usize {
     s.strip_prefix(':')
-        .and_then(|index_str| index_str.parse::<usize>().ok())
+        .and_then(|i| i.parse().ok())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
