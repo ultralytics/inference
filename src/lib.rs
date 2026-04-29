@@ -217,11 +217,6 @@
 //!
 //! The [`Results`] struct provides access to inference outputs:
 //!
-//!
-//! ## Results API
-//!
-//! The [`Results`] struct provides access to inference outputs:
-//!
 //! - [`Boxes`] - Bounding boxes with `xyxy()`, `xywh()`, `xyxyn()`, `xywhn()`, `conf()`, `cls()` methods
 //! - [`Masks`] - Segmentation masks with `data`, `orig_shape` fields
 //! - [`Keypoints`] - Pose keypoints with `xy()`, `xyn()`, `conf()` methods
