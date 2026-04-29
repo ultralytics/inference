@@ -34,11 +34,8 @@ pub enum Task {
 }
 
 impl Task {
-    /// Get the string representation used in ONNX model metadata.
-    ///
-    /// # Returns
-    ///
-    /// * A static string slice representing the task (e.g., "detect", "segment").
+    /// Get the string representation used in ONNX model metadata
+    /// (e.g. `"detect"`, `"segment"`).
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -50,24 +47,12 @@ impl Task {
         }
     }
 
-    /// Return the ONNX filename suffix for this task.
-    ///
-    /// Used to construct model filenames: `yolo26n{suffix}.onnx`.
-    ///
-    /// | Task       | Suffix   |
-    /// |------------|----------|
-    /// | Detect     | `""`     |
-    /// | Segment    | `"-seg"` |
-    /// | Pose       | `"-pose"`|
-    /// | Classify   | `"-cls"` |
-    /// | Obb        | `"-obb"` |
-    ///
-    /// # Example
+    /// ONNX filename suffix for this task, used to construct `yolo26n{suffix}.onnx`.
     ///
     /// ```
     /// use ultralytics_inference::Task;
-    /// assert_eq!(Task::Segment.model_suffix(), "-seg");
     /// assert_eq!(Task::Detect.model_suffix(), "");
+    /// assert_eq!(Task::Segment.model_suffix(), "-seg");
     /// ```
     #[must_use]
     pub const fn model_suffix(&self) -> &'static str {
@@ -80,71 +65,45 @@ impl Task {
         }
     }
 
-    /// Return the default nano YOLO26 model filename for this task.
+    /// Default nano YOLO26 model filename for this task.
     ///
-    /// This is the model that the CLI auto-downloads when `--model` is omitted
-    /// and `--task` is specified.
-    ///
-    /// # Example
+    /// Used by the CLI to auto-pick a model when `--model` is omitted but `--task` is set.
     ///
     /// ```
     /// use ultralytics_inference::Task;
-    /// assert_eq!(Task::Detect.default_model(),  "yolo26n.onnx");
+    /// assert_eq!(Task::Detect.default_model(), "yolo26n.onnx");
     /// assert_eq!(Task::Segment.default_model(), "yolo26n-seg.onnx");
-    /// assert_eq!(Task::Pose.default_model(),    "yolo26n-pose.onnx");
-    /// assert_eq!(Task::Obb.default_model(),     "yolo26n-obb.onnx");
-    /// assert_eq!(Task::Classify.default_model(),"yolo26n-cls.onnx");
     /// ```
     #[must_use]
     pub fn default_model(&self) -> String {
         format!("yolo26n{}.onnx", self.model_suffix())
     }
 
-    /// Check whether this task produces bounding boxes.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the task outputs bounding boxes (Detect, Segment, Pose, Obb).
+    /// Returns `true` when the task outputs bounding boxes — namely Detect, Segment, Pose, and Obb.
     #[must_use]
     pub const fn has_boxes(&self) -> bool {
         matches!(self, Self::Detect | Self::Segment | Self::Pose | Self::Obb)
     }
 
-    /// Check whether this task produces segmentation masks.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the task outputs masks (Segment).
+    /// Returns `true` only for the Segment task, which outputs per-instance segmentation masks.
     #[must_use]
     pub const fn has_masks(&self) -> bool {
         matches!(self, Self::Segment)
     }
 
-    /// Check whether this task produces keypoints.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the task outputs keypoints (Pose).
+    /// Returns `true` only for the Pose task, which outputs skeletal keypoints.
     #[must_use]
     pub const fn has_keypoints(&self) -> bool {
         matches!(self, Self::Pose)
     }
 
-    /// Check whether this task produces classification probabilities.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the task outputs global class probabilities (Classify).
+    /// Returns `true` only for the Classify task, which outputs global class probabilities.
     #[must_use]
     pub const fn has_probs(&self) -> bool {
         matches!(self, Self::Classify)
     }
 
-    /// Check whether this task produces oriented bounding boxes.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the task outputs rotated bounding boxes (Obb).
+    /// Returns `true` only for the Obb task, which outputs oriented (rotated) bounding boxes.
     #[must_use]
     pub const fn has_obb(&self) -> bool {
         matches!(self, Self::Obb)
@@ -153,7 +112,7 @@ impl Task {
 
 impl fmt::Display for Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        f.write_str(self.as_str())
     }
 }
 

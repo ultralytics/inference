@@ -27,10 +27,7 @@
 //!
 //! Add to your `Cargo.toml`:
 //!
-//! ```toml
-//! [dependencies]
-//! ultralytics-inference = "0.0.5"
-//! ```
+#![doc = concat!("```toml\n[dependencies]\nultralytics-inference = \"", env!("CARGO_PKG_VERSION"), "\"\n```")]
 //!
 //! Or install the CLI tool:
 //!
@@ -78,6 +75,12 @@
 //! # Run with defaults (auto-downloads model and sample images)
 //! ultralytics-inference predict
 //!
+//! # Select task — auto-downloads the matching nano model
+//! ultralytics-inference predict --task segment
+//! ultralytics-inference predict --task pose
+//! ultralytics-inference predict --task obb
+//! ultralytics-inference predict --task classify
+//!
 //! # Run on a specific image
 //! ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 //!
@@ -85,13 +88,19 @@
 //! ultralytics-inference predict --model yolo26n.onnx --source images/
 //!
 //! # With custom thresholds
-//! ultralytics-inference predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
+//! ultralytics-inference predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.7
+//!
+//! # Filter by class IDs
+//! ultralytics-inference predict --source image.jpg --classes "0,1,2"
 //!
 //! # With visualization window
 //! ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show
 //!
 //! # Save annotated results
 //! ultralytics-inference predict --model yolo26n.onnx --source image.jpg --save
+//!
+//! # Save individual frames for video input
+//! ultralytics-inference predict --source video.mp4 --save-frames
 //!
 //! # Show help
 //! ultralytics-inference help
@@ -101,15 +110,22 @@
 //!
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
-//! | `--model` | `-m` | Path to ONNX model | `yolo26n.onnx` |
-//! | `--source` | `-s` | Input source | Sample images |
-//! | `--device` | | Device to use (cpu, cuda:0, mps, coreml, etc.) | `cpu` |
+//! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name | `yolo26n.onnx` |
+//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect` |
+//! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
-//! | `--iou` | | `IoU` threshold for NMS | `0.45` |
-//! | `--imgsz` | | Inference image size | `640` |
-//! | `--half` | | Use FP16 inference | `false` |
-//! | `--save` | | Save annotated images | `false` |
-//! | `--show` | | Display results window | `false` |
+//! | `--iou` | | `IoU` threshold for NMS | `0.7` |
+//! | `--max-det` | | Maximum number of detections | `300` |
+//! | `--imgsz` | | Inference image size | Model metadata |
+//! | `--rect` | | Enable rectangular inference (minimal padding) | `true` |
+//! | `--batch` | | Batch size for inference | `1` |
+//! | `--half` | | Use FP16 half-precision inference | `false` |
+//! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
+//! | `--save-frames` | | Save individual frames for video input | `false` |
+//! | `--show` | | Display results in a window | `false` |
+//! | `--device` | | Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
+//! | `--verbose` | | Show verbose output | `true` |
+//! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!
 //! ## Task-Specific Examples
 //!
@@ -193,11 +209,6 @@
 //! # Intel OpenVINO
 //! cargo build --release --features openvino
 //! ```
-//!
-//! ## Results API
-//!
-//! The [`Results`] struct provides access to inference outputs:
-//!
 //!
 //! ## Results API
 //!
