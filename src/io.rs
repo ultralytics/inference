@@ -60,10 +60,8 @@ impl VideoWriter {
         // Ensure parent directory exists
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                std::io::Error::other(format!(
-                    "Failed to create directory {}: {e}",
-                    parent.display()
-                ))
+                let dir = parent.display();
+                std::io::Error::new(e.kind(), format!("Failed to create directory {dir}: {e}"))
             })?;
         }
 
