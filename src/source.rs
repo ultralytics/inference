@@ -452,8 +452,7 @@ impl SourceIterator {
             )));
         }
 
-        let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map_err(|e| InferenceError::IoError(e.to_string()))?
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
             .filter_map(std::result::Result::ok)
             .map(|entry| entry.path())
             .filter(|path| Self::is_image_file(path))
@@ -490,8 +489,7 @@ impl SourceIterator {
                 )));
             }
 
-            let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-                .map_err(|e| InferenceError::IoError(e.to_string()))?
+            let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
                 .filter_map(std::result::Result::ok)
                 .map(|entry| entry.path())
                 .filter(|path| {
