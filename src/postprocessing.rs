@@ -431,7 +431,6 @@ fn extract_detect_boxes(
             let row_ptr = unsafe { output.as_ptr().add(base + 4) };
             let mut best_score = conf_thresh;
             let mut best_class = 0;
-            let mut found = false;
 
             for c_idx in (0..num_classes).step_by(8) {
                 if num_classes - c_idx >= 8 {
@@ -443,7 +442,6 @@ fn extract_detect_boxes(
                             if s > best_score {
                                 best_score = s;
                                 best_class = c_idx + i;
-                                found = true;
                             }
                         }
                     }
@@ -453,13 +451,12 @@ fn extract_detect_boxes(
                         if s > best_score {
                             best_score = s;
                             best_class = i;
-                            found = true;
                         }
                     }
                 }
             }
 
-            if found {
+            if best_score > conf_thresh {
                 // Filter by class if specified
                 if !config.keep_class(best_class) {
                     continue;
