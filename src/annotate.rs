@@ -443,16 +443,10 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
                     Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
 
                 'placement: while attempts < max_attempts {
-                    let mut is_overlapping = false;
-                    for existing in &labels_rects {
-                        // Simple intersection check
-                        if rect_intersect(&current_rect, existing) {
-                            is_overlapping = true;
-                            break;
-                        }
-                    }
-
-                    if !is_overlapping {
+                    if !labels_rects
+                        .iter()
+                        .any(|existing| rect_intersect(&current_rect, existing))
+                    {
                         break 'placement;
                     }
 
@@ -707,16 +701,10 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
                     Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
 
                 'placement: while attempts < max_attempts {
-                    let mut is_overlapping = false;
-                    for existing in &labels_rects {
-                        // Simple intersection check
-                        if rect_intersect(&current_rect, existing) {
-                            is_overlapping = true;
-                            break;
-                        }
-                    }
-
-                    if !is_overlapping {
+                    if !labels_rects
+                        .iter()
+                        .any(|existing| rect_intersect(&current_rect, existing))
+                    {
                         break 'placement;
                     }
 
