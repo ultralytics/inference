@@ -379,18 +379,13 @@ mod tests {
     #[test]
     fn test_keep_class() {
         let config = InferenceConfig::default();
-        // Default: no filtering -> keep all
         assert!(config.keep_class(0));
         assert!(config.keep_class(100));
 
         let config_filtered = InferenceConfig::new().with_classes(vec![1, 3]);
-        // Class 1 is in list -> keep
         assert!(config_filtered.keep_class(1));
-        // Class 3 is in list -> keep
         assert!(config_filtered.keep_class(3));
-        // Class 0 is NOT in list -> filter out (keep = false)
         assert!(!config_filtered.keep_class(0));
-        // Class 2 is NOT in list -> filter out (keep = false)
         assert!(!config_filtered.keep_class(2));
     }
 }
