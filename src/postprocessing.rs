@@ -161,8 +161,8 @@ pub fn postprocess(
             }
         }
         Task::Classify => {
-            let (output, shape) = &outputs[0];
-            postprocess_classify(output, shape, names, orig_img, path, speed, inference_shape)
+            let (output, _) = &outputs[0];
+            postprocess_classify(output, names, orig_img, path, speed, inference_shape)
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];
@@ -346,14 +346,6 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
     }
 }
 
-/// Ultra-fast detection extraction - single-threaded tight loop.
-///
-/// Key optimizations:
-/// - No parallelization overhead (Rayon adds ~0.5ms for small workloads)
-/// - Pre-sized allocations
-/// - Minimal branching in hot loops
-/// - Direct unsafe indexing
-#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 #[derive(Clone, Copy)]
 struct Candidate {
     bbox: [f32; 4],
@@ -523,10 +515,6 @@ fn extract_detect_boxes(
     let mut suppressed = vec![false; n];
     let mut keep = Vec::with_capacity(max_det);
     let iou_v = f32x8::splat(iou_thresh);
-    // Build output array with kept detections
-    // let num_kept = keep_indices.len().min(config.max_det);
-    // let mut result = Array2::zeros((num_kept, 6));
-
     for i in 0..n {
         if suppressed[i] {
             continue;
@@ -1143,7 +1131,6 @@ fn postprocess_pose(
 /// # Arguments
 ///
 /// * `output` - Raw model output vector.
-/// * `_output_shape` - Output shape (unused).
 /// * `names` - Class name mapping.
 /// * `orig_img` - Original image.
 /// * `path` - Source path.
@@ -1155,7 +1142,6 @@ fn postprocess_pose(
 /// `Results` struct containing classification probabilities.
 fn postprocess_classify(
     output: &[f32],
-    _output_shape: &[usize],
     names: &HashMap<usize, String>,
     orig_img: Array3<u8>,
     path: String,
