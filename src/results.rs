@@ -1011,10 +1011,6 @@ mod tests {
         // Empty results
         let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
         assert!(results.is_empty());
-        // Verify empty output format
-        // verbose() returns "(no detections), " string if empty and probs is none
-        // We need to match that exactly or just assert it's empty-ish?
-        // implementation: return "(no detections), ".to_string();
         assert_eq!(results.verbose(), "(no detections), ");
     }
 }
