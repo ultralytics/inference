@@ -198,10 +198,7 @@ impl Results {
                 .top5()
                 .iter()
                 .map(|&i| {
-                    let name = self
-                        .names
-                        .get(&i)
-                        .map_or_else(|| i.to_string(), std::clone::Clone::clone);
+                    let name = self.names.get(&i).cloned().unwrap_or_else(|| i.to_string());
                     format!("{} {:.2}", name, probs.data[i])
                 })
                 .collect();
@@ -222,7 +219,8 @@ impl Results {
                 let name = self
                     .names
                     .get(class_id)
-                    .map_or_else(|| class_id.to_string(), std::clone::Clone::clone);
+                    .cloned()
+                    .unwrap_or_else(|| class_id.to_string());
                 let suffix = if *count > 1 { "s" } else { "" };
                 parts.push(format!("{count} {name}{suffix}"));
             }
@@ -1011,10 +1009,6 @@ mod tests {
         // Empty results
         let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
         assert!(results.is_empty());
-        // Verify empty output format
-        // verbose() returns "(no detections), " string if empty and probs is none
-        // We need to match that exactly or just assert it's empty-ish?
-        // implementation: return "(no detections), ".to_string();
         assert_eq!(results.verbose(), "(no detections), ");
     }
 }

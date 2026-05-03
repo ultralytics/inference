@@ -80,7 +80,6 @@ mod tests {
 
     #[test]
     fn test_verbosity_toggle() {
-        // Default is true
         set_verbose(true);
         assert!(is_verbose());
 

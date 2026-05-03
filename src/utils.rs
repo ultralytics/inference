@@ -314,21 +314,10 @@ mod tests {
         assert_eq!(pluralize("person"), "persons");
         assert_eq!(pluralize("bus"), "buses");
         assert_eq!(pluralize("match"), "matches");
-        assert_eq!(pluralize("box"), "boxes"); // box -> boxs (default rule?) wait, box ends with x, default logic:
-        // logic: ends_with 's', 'ch', 'sh' -> es.
-        // 'box' does NOT end with s/ch/sh. So 'boxs'?
-        // The implementation assumes 'x' is not handled specially?
-        // Let's check impl:
-        // } else if word.ends_with('y') && !word.ends_with("ey") && !word.ends_with("ay") {
-        //     format!("{}ies", &word[..word.len() - 1])
-        // } else {
-        //     format!("{word}s")
-        // }
-        // So 'box' -> 'boxs'. Correct relative to implementation, though technically wrong English.
-        // Let's test standard cases supported.
+        assert_eq!(pluralize("box"), "boxes");
         assert_eq!(pluralize("car"), "cars");
         assert_eq!(pluralize("baby"), "babies");
-        assert_eq!(pluralize("toy"), "toys"); // ends with y but 'oy' -> toys
+        assert_eq!(pluralize("toy"), "toys");
     }
 
     #[test]
