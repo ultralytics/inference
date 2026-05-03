@@ -198,10 +198,7 @@ impl Results {
                 .top5()
                 .iter()
                 .map(|&i| {
-                    let name = self
-                        .names
-                        .get(&i)
-                        .map_or_else(|| i.to_string(), std::clone::Clone::clone);
+                    let name = self.names.get(&i).cloned().unwrap_or_else(|| i.to_string());
                     format!("{} {:.2}", name, probs.data[i])
                 })
                 .collect();
@@ -222,7 +219,8 @@ impl Results {
                 let name = self
                     .names
                     .get(class_id)
-                    .map_or_else(|| class_id.to_string(), std::clone::Clone::clone);
+                    .cloned()
+                    .unwrap_or_else(|| class_id.to_string());
                 let suffix = if *count > 1 { "s" } else { "" };
                 parts.push(format!("{count} {name}{suffix}"));
             }
