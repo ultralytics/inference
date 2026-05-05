@@ -147,7 +147,7 @@ Results saved to runs/detect/predict1
 
 **With `--task` (auto-downloads the matching nano model):**
 
-```
+```bash
 # ultralytics-inference predict --task segment
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
