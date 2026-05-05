@@ -50,7 +50,7 @@ cargo install ultralytics-inference --features video
 cargo install ultralytics-inference --features "cuda,tensorrt"
 ```
 
-**Development install (latest unreleased code from GitHub):**
+### Development install
 
 ```bash
 # Install CLI directly from the git repository
