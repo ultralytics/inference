@@ -234,13 +234,17 @@ All YOLO11 and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five
 
 ### As a Rust Library
 
-Add to your `Cargo.toml`:
+Add to your `Cargo.toml` (choose one):
 
 ```toml
 # Stable release from crates.io
+[dependencies]
 ultralytics-inference = "0.0.11"
+```
 
-# Development version from GitHub
+```toml
+# Development version (latest unreleased code from GitHub)
+[dependencies]
 ultralytics-inference = { git = "https://github.com/ultralytics/inference.git" }
 ```
 
