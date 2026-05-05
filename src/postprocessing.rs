@@ -531,16 +531,7 @@ fn extract_detect_boxes(
         let mut j = i + 1;
         while j < n {
             if n - j >= 8 {
-                // Inline fast class and suppression check
-                let mut chunk_needs_processing = false;
-                for k in 0..8 {
-                    if candidates[j + k].class == ac && !suppressed[j + k] {
-                        chunk_needs_processing = true;
-                        break;
-                    }
-                }
-
-                if chunk_needs_processing {
+                if (0..8).any(|k| candidates[j + k].class == ac && !suppressed[j + k]) {
                     let bx1 = unsafe { (x1.as_ptr().add(j) as *const f32x8).read_unaligned() };
                     let by1 = unsafe { (y1.as_ptr().add(j) as *const f32x8).read_unaligned() };
                     let bx2 = unsafe { (x2.as_ptr().add(j) as *const f32x8).read_unaligned() };
