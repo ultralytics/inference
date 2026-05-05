@@ -11,11 +11,9 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
 [![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)](https://blog.rust-lang.org/)
 
-<!-- Enable After <releasing to Crates.io -->
-<!-- [![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
+[![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
 [![docs.rs](https://img.shields.io/docsrs/ultralytics-inference)](https://docs.rs/ultralytics-inference)
 ![Crates.io Total Downloads](https://img.shields.io/crates/d/ultralytics-inference)
--->
 
 ## ✨ Features
 
@@ -38,25 +36,33 @@ High-performance YOLO inference library written in Rust. This library provides a
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/ultralytics/inference.git
-cd inference
-
-# Build release binary (not installed globally)
-cargo build --release
-
-# Install CLI globally from this git checkout (Cargo default location)
-cargo install --path . --locked
+# Install CLI globally from crates.io
+cargo install ultralytics-inference
 
 # Install CLI globally with custom features
 # Minimal build (no default features)
-cargo install --path . --locked --no-default-features
+cargo install ultralytics-inference --no-default-features
 
 # Enable video support
-cargo install --path . --locked --features video
+cargo install ultralytics-inference --features video
 
 # Enable multiple accelerators
-cargo install --path . --locked --features "cuda,tensorrt"
+cargo install ultralytics-inference --features "cuda,tensorrt"
+```
+
+**Development install (latest unreleased code from GitHub):**
+
+```bash
+# Install CLI directly from the git repository
+cargo install --git https://github.com/ultralytics/inference.git ultralytics-inference
+
+# Or clone, build, and install from source
+git clone https://github.com/ultralytics/inference.git
+cd inference
+cargo build --release
+
+# Install from local checkout
+cargo install --path . --locked
 ```
 
 `cargo install` places binaries in Cargo's default bin directory:
@@ -231,7 +237,10 @@ All YOLO11 and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five
 Add to your `Cargo.toml`:
 
 ```toml
-[dependencies]
+# Stable release from crates.io
+ultralytics-inference = "0.0.11"
+
+# Development version from GitHub
 ultralytics-inference = { git = "https://github.com/ultralytics/inference.git" }
 ```
 
