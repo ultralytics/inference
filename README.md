@@ -11,11 +11,9 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
 [![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)](https://blog.rust-lang.org/)
 
-<!-- Enable After <releasing to Crates.io -->
-<!-- [![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
+[![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
 [![docs.rs](https://img.shields.io/docsrs/ultralytics-inference)](https://docs.rs/ultralytics-inference)
 ![Crates.io Total Downloads](https://img.shields.io/crates/d/ultralytics-inference)
--->
 
 ## ✨ Features
 
@@ -38,25 +36,33 @@ High-performance YOLO inference library written in Rust. This library provides a
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/ultralytics/inference.git
-cd inference
-
-# Build release binary (not installed globally)
-cargo build --release
-
-# Install CLI globally from this git checkout (Cargo default location)
-cargo install --path . --locked
+# Install CLI globally from crates.io
+cargo install ultralytics-inference
 
 # Install CLI globally with custom features
 # Minimal build (no default features)
-cargo install --path . --locked --no-default-features
+cargo install ultralytics-inference --no-default-features
 
 # Enable video support
-cargo install --path . --locked --features video
+cargo install ultralytics-inference --features video
 
 # Enable multiple accelerators
-cargo install --path . --locked --features "cuda,tensorrt"
+cargo install ultralytics-inference --features "cuda,tensorrt"
+```
+
+### Development install
+
+```bash
+# Install CLI directly from the git repository
+cargo install --git https://github.com/ultralytics/inference.git ultralytics-inference
+
+# Or clone, build, and install from source
+git clone https://github.com/ultralytics/inference.git
+cd inference
+cargo build --release
+
+# Install from local checkout
+cargo install --path . --locked
 ```
 
 `cargo install` places binaries in Cargo's default bin directory:
@@ -86,39 +92,39 @@ model.export(format="onnx")
 
 ```bash
 # With defaults (auto-downloads yolo26n.onnx and sample images)
-cargo run --release -- predict
+ultralytics-inference predict
 
 # Select task — auto-downloads the nano model for that task
-cargo run --release -- predict --task segment  # downloads yolo26n-seg.onnx
-cargo run --release -- predict --task pose     # downloads yolo26n-pose.onnx
-cargo run --release -- predict --task obb      # downloads yolo26n-obb.onnx
-cargo run --release -- predict --task classify # downloads yolo26n-cls.onnx
+ultralytics-inference predict --task segment  # downloads yolo26n-seg.onnx
+ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
+ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
+ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
 
 # With explicit model (task is read from model metadata)
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 # Auto-download any supported size (n/s/m/l/x)
-cargo run --release -- predict --model yolo26l.onnx --source image.jpg
-cargo run --release -- predict --model yolo11x-seg.onnx --source image.jpg
+ultralytics-inference predict --model yolo26l.onnx --source image.jpg
+ultralytics-inference predict --model yolo11x-seg.onnx --source image.jpg
 
 # On a directory of images
-cargo run --release -- predict --model yolo26n.onnx --source assets/
+ultralytics-inference predict --model yolo26n.onnx --source assets/
 
 # With custom thresholds
-cargo run --release -- predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
+ultralytics-inference predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
 
 # Filter by class IDs
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg --classes 0
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg --classes "0,1,2"
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes 0
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes "0,1,2"
 
 # With visualization and custom image size
-cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
+ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
 
 # Save individual frames for video input
-cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --save-frames
+ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
 # Rectangular inference
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg --rect
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 ```
 
 ### Example Output
@@ -141,7 +147,7 @@ Results saved to runs/detect/predict1
 
 **With `--task` (auto-downloads the matching nano model):**
 
-```
+```bash
 # ultralytics-inference predict --task segment
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
@@ -163,13 +169,13 @@ Results saved to runs/segment/predict1
 
 ```bash
 # Show help
-cargo run --release -- help
+ultralytics-inference help
 
 # Show version
-cargo run --release -- version
+ultralytics-inference version
 
 # Run inference
-cargo run --release -- predict --model <model.onnx> --source <source>
+ultralytics-inference predict --model <model.onnx> --source <source>
 ```
 
 **CLI Options:**
@@ -228,9 +234,16 @@ All YOLO11 and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five
 
 ### As a Rust Library
 
-Add to your `Cargo.toml`:
+Add to your `Cargo.toml` (choose one):
 
 ```toml
+# Stable release from crates.io
+[dependencies]
+ultralytics-inference = "0.0.11"
+```
+
+```toml
+# Development version (latest unreleased code from GitHub)
 [dependencies]
 ultralytics-inference = { git = "https://github.com/ultralytics/inference.git" }
 ```
@@ -319,7 +332,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🗂️ Project Structure
 
-```
+```text
 inference/
 ├── src/
 │   ├── lib.rs              # Library entry point and public exports
