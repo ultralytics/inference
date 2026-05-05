@@ -156,7 +156,7 @@ impl YOLOModel {
                 #[cfg(feature = "coreml")]
                 crate::Device::CoreMl | crate::Device::Mps => {
                     // Map both CoreML and MPS to CoreMLExecutionProvider
-                    eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
+                    eps.push(Self::build_coreml_ep(path));
                     provider_name = "CoreMLExecutionProvider";
                 }
                 #[cfg(feature = "tensorrt")]
@@ -224,7 +224,7 @@ impl YOLOModel {
 
             #[cfg(feature = "coreml")]
             {
-                eps.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
+                eps.push(Self::build_coreml_ep(path));
                 if provider_name == "CPUExecutionProvider" {
                     provider_name = "CoreMLExecutionProvider";
                 }
@@ -411,6 +411,25 @@ impl YOLOModel {
             .with_device_id(device_id)
             .with_tf32(true)
             .build()
+    }
+
+    #[cfg(feature = "coreml")]
+    fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
+        let mut ep = ort::execution_providers::CoreMLExecutionProvider::default();
+        if let Some(cache_base) = dirs::cache_dir() {
+            let stem = model_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("model");
+            let cache_dir = cache_base
+                .join("ultralytics-inference")
+                .join("coreml")
+                .join(stem);
+            if std::fs::create_dir_all(&cache_dir).is_ok() {
+                ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
+            }
+        }
+        ep.build()
     }
 
     /// Maximum allowed image dimension to prevent OOM during warmup.
