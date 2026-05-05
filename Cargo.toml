@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.10"
+version = "0.0.11"
 edition = "2024"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
@@ -59,7 +59,7 @@ lru = "^0.18"
 ndarray = { version = "^0.17", features = ["rayon"] }
 
 # ONNX Runtime 1.24.2 - using latest from GitHub for best performance
-ort = { git = "https://github.com/pykeio/ort.git", rev = "f085e4c2516901ee606d1e10022142afa9348bf1", default-features = false, features = [
+ort = { version = "2.0.0-rc.12", git = "https://github.com/pykeio/ort.git", rev = "f085e4c2516901ee606d1e10022142afa9348bf1", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",
@@ -126,7 +126,6 @@ armnn = ["ort/armnn"]       # ARM NN
 tvm = ["ort/tvm"]           # Apache TVM
 migraphx = ["ort/migraphx"] # AMD MIGraphX
 rknpu = ["ort/rknpu"]       # Rockchip NPU
-vitis = ["ort/vitis"]       # Xilinx Vitis AI
 cann = ["ort/cann"]         # Huawei CANN
 webgpu = ["ort/webgpu"]     # WebGPU
 azure = ["ort/azure"]       # Azure
