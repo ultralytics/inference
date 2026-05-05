@@ -332,7 +332,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🗂️ Project Structure
 
-```
+```text
 inference/
 ├── src/
 │   ├── lib.rs              # Library entry point and public exports
