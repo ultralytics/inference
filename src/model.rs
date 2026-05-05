@@ -417,14 +417,24 @@ impl YOLOModel {
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
         let mut ep = ort::execution_providers::CoreMLExecutionProvider::default();
         if let Some(cache_base) = dirs::cache_dir() {
-            let stem = model_path
+            let canonical = model_path
+                .canonicalize()
+                .unwrap_or_else(|_| model_path.to_path_buf());
+            let stem = canonical
                 .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("model");
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "model".to_owned());
+            let hash = canonical
+                .as_os_str()
+                .as_encoded_bytes()
+                .iter()
+                .fold(14_695_981_039_346_656_037u64, |h, &b| {
+                    h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
+                });
             let cache_dir = cache_base
                 .join("ultralytics-inference")
                 .join("coreml")
-                .join(stem);
+                .join(format!("{stem}_{hash:016x}"));
             if std::fs::create_dir_all(&cache_dir).is_ok() {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
