@@ -420,19 +420,16 @@ fn format_class_counts(
         return String::new();
     }
 
-    // Count detections per class
     let mut counts: HashMap<usize, usize> = HashMap::new();
     for i in 0..count {
         let class_id = cls[i] as usize;
         *counts.entry(class_id).or_insert(0) += 1;
     }
 
-    // Sort by class ID for consistent output
     let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
     sorted_counts.sort_by_key(|(class_id, _)| *class_id);
 
-    // Format each class count with pluralization
-    let parts: Vec<String> = sorted_counts
+    sorted_counts
         .iter()
         .map(|(class_id, count)| {
             let class_name = names.get(class_id).map_or("object", String::as_str);
@@ -443,9 +440,8 @@ fn format_class_counts(
             };
             format!("{count} {name}")
         })
-        .collect();
-
-    parts.join(", ")
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Format detection summary like "4 persons, 1 bus".
