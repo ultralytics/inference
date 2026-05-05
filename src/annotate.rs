@@ -133,11 +133,6 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
     }
 }
 
-/// Helper to check if a string contains non-ASCII characters
-const fn is_ascii(s: &str) -> bool {
-    s.is_ascii()
-}
-
 /// Annotate an image with detection boxes and labels
 #[must_use]
 pub fn annotate_image(
@@ -147,18 +142,7 @@ pub fn annotate_image(
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
 
-    // Check if any class name is non-ASCII to select font
-    let mut use_unicode_font = false;
-    if result.boxes.is_some() {
-        for name in result.names.values() {
-            if !is_ascii(name) {
-                use_unicode_font = true;
-                break;
-            }
-        }
-    }
-
-    let font_name = if use_unicode_font {
+    let font_name = if result.boxes.is_some() && result.names.values().any(|n| !n.is_ascii()) {
         "Arial.Unicode.ttf"
     } else {
         "Arial.ttf"
