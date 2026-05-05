@@ -92,39 +92,39 @@ model.export(format="onnx")
 
 ```bash
 # With defaults (auto-downloads yolo26n.onnx and sample images)
-cargo run --release -- predict
+ultralytics-inference predict
 
 # Select task — auto-downloads the nano model for that task
-cargo run --release -- predict --task segment  # downloads yolo26n-seg.onnx
-cargo run --release -- predict --task pose     # downloads yolo26n-pose.onnx
-cargo run --release -- predict --task obb      # downloads yolo26n-obb.onnx
-cargo run --release -- predict --task classify # downloads yolo26n-cls.onnx
+ultralytics-inference predict --task segment  # downloads yolo26n-seg.onnx
+ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
+ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
+ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
 
 # With explicit model (task is read from model metadata)
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 # Auto-download any supported size (n/s/m/l/x)
-cargo run --release -- predict --model yolo26l.onnx --source image.jpg
-cargo run --release -- predict --model yolo11x-seg.onnx --source image.jpg
+ultralytics-inference predict --model yolo26l.onnx --source image.jpg
+ultralytics-inference predict --model yolo11x-seg.onnx --source image.jpg
 
 # On a directory of images
-cargo run --release -- predict --model yolo26n.onnx --source assets/
+ultralytics-inference predict --model yolo26n.onnx --source assets/
 
 # With custom thresholds
-cargo run --release -- predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
+ultralytics-inference predict -m yolo26n.onnx -s image.jpg --conf 0.5 --iou 0.45
 
 # Filter by class IDs
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg --classes 0
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg --classes "0,1,2"
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes 0
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes "0,1,2"
 
 # With visualization and custom image size
-cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
+ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
 
 # Save individual frames for video input
-cargo run --release -- predict --model yolo26n.onnx --source video.mp4 --save-frames
+ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
 # Rectangular inference
-cargo run --release -- predict --model yolo26n.onnx --source image.jpg --rect
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 ```
 
 ### Example Output
@@ -169,13 +169,13 @@ Results saved to runs/segment/predict1
 
 ```bash
 # Show help
-cargo run --release -- help
+ultralytics-inference help
 
 # Show version
-cargo run --release -- version
+ultralytics-inference version
 
 # Run inference
-cargo run --release -- predict --model <model.onnx> --source <source>
+ultralytics-inference predict --model <model.onnx> --source <source>
 ```
 
 **CLI Options:**
