@@ -9,7 +9,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
 [![codecov](https://codecov.io/gh/ultralytics/inference/graph/badge.svg?token=AVE5n6yvnf)](https://codecov.io/gh/ultralytics/inference)
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
-[![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)](https://blog.rust-lang.org/)
+[![MSRV](https://img.shields.io/badge/rustc-1.88+-ab6000.svg)](https://blog.rust-lang.org/)
 
 [![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
 [![docs.rs](https://img.shields.io/docsrs/ultralytics-inference)](https://docs.rs/ultralytics-inference)
@@ -24,13 +24,13 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
 - ⬇️ **Auto Download** - Automatically downloads YOLO11 and YOLO26 ONNX models (all sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
-- 🪶 **Minimal Dependencies** - No PyTorch, no heavy ML frameworks - just 5 core crates
+- 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- [Rust 1.85+](https://rustup.rs/) (install via rustup, edition 2024 required)
+- [Rust 1.88+](https://rustup.rs/) (install via rustup)
 - A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo26n.pt format=onnx`)
 
 ### Installation
@@ -134,7 +134,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics 0.0.10 🚀 Rust ONNX FP32 CPU
+Ultralytics 0.0.12 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -152,7 +152,7 @@ Results saved to runs/detect/predict1
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics 0.0.10 🚀 Rust ONNX FP32 CPU
+Ultralytics 0.0.12 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -172,7 +172,7 @@ Results saved to runs/segment/predict1
 ultralytics-inference help
 
 # Show version
-ultralytics-inference version
+ultralytics-inference --version
 
 # Run inference
 ultralytics-inference predict --model <model.onnx> --source <source>
@@ -239,7 +239,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.11"
+ultralytics-inference = "0.0.12"
 ```
 
 ```toml
@@ -408,7 +408,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ## 📦 Dependencies
 
-One of the key benefits of this library is **minimal dependencies** - no PyTorch, TensorFlow, or heavy ML frameworks required.
+One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyTorch, TensorFlow, or Python runtime required.
 
 ### Core Dependencies (always included)
 
