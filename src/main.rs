@@ -16,6 +16,8 @@
 //! ultralytics-inference help
 //! ```
 
+#![allow(clippy::multiple_crate_versions)]
+
 use clap::Parser;
 
 use ultralytics_inference::cli::args::{Cli, Commands};

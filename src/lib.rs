@@ -1,6 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![allow(clippy::multiple_crate_versions)]
 
 //! # Ultralytics YOLO Inference Library
 //!
