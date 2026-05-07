@@ -13,7 +13,7 @@
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
     clippy::too_many_arguments,
-    clippy::too_many_lines,
+    clippy::too_many_lines
 )]
 
 use std::cell::RefCell;
