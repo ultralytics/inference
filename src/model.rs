@@ -422,8 +422,7 @@ impl YOLOModel {
                 .unwrap_or_else(|_| model_path.to_path_buf());
             let stem = canonical
                 .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "model".to_owned());
+                .map_or_else(|| "model".to_owned(), |s| s.to_string_lossy().into_owned());
             let hash = canonical
                 .as_os_str()
                 .as_encoded_bytes()
