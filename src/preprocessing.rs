@@ -14,12 +14,6 @@
     clippy::cast_possible_truncation,
     clippy::too_many_arguments,
     clippy::too_many_lines,
-    clippy::wildcard_imports,
-    clippy::ptr_as_ptr,
-    clippy::cast_lossless,
-    clippy::single_match_else,
-    clippy::suboptimal_flops,
-    clippy::manual_div_ceil
 )]
 
 use std::cell::RefCell;

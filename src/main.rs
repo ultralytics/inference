@@ -1,7 +1,5 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-#![allow(clippy::multiple_crate_versions)]
-
 //! Ultralytics YOLO Inference CLI
 //!
 //! A command-line interface for running YOLO model inference on images and videos.

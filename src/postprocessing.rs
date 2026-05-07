@@ -9,8 +9,6 @@
     unsafe_code,
     clippy::doc_markdown,
     clippy::too_many_lines,
-    clippy::if_not_else,
-    clippy::ptr_as_ptr,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
