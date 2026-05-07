@@ -29,7 +29,6 @@ use ultralytics_inference::logging::set_verbose;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     ultralytics_inference::io::init_logging();
 
-    // Initialize ONNX Runtime with verbose logging to debug execution provider issues
     #[cfg(debug_assertions)]
     let _ = ort::init().commit();
 
