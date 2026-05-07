@@ -73,7 +73,7 @@ cargo install --path . --locked
 Ensure this directory is in your `PATH`, then run from anywhere:
 
 ```bash
-ultralytics-inference --help
+ultralytics-inference help
 ```
 
 ### Export a YOLO Model to ONNX
@@ -172,11 +172,13 @@ Results saved to runs/segment/predict1
 ultralytics-inference help
 
 # Show version
-ultralytics-inference --version
+ultralytics-inference version
 
 # Run inference
 ultralytics-inference predict --model <model.onnx> --source <source>
 ```
+
+`--help` and `--version` are also supported as standard flag aliases.
 
 **CLI Options:**
 

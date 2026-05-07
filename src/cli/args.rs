@@ -51,6 +51,8 @@ pub struct Cli {
 pub enum Commands {
     /// Run inference on an image, video, or stream
     Predict(PredictArgs),
+    /// Print version information
+    Version,
 }
 
 /// Arguments for the predict command.
@@ -169,18 +171,17 @@ mod tests {
     #[test]
     fn test_predict_args_defaults() {
         let args = Cli::parse_from(["app", "predict", "--model", "yolo26n.onnx"]);
-        match args.command {
-            Commands::Predict(predict_args) => {
-                assert_eq!(predict_args.model, Some("yolo26n.onnx".to_string()));
-                assert!((predict_args.conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
-                assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
-                assert!(predict_args.rect);
-                assert_eq!(predict_args.max_det, 300);
-                assert!(!predict_args.half);
-                assert!(predict_args.verbose);
-                assert!(predict_args.source.is_none());
-            }
-        }
+        let Commands::Predict(predict_args) = args.command else {
+            panic!("expected predict command");
+        };
+        assert_eq!(predict_args.model, Some("yolo26n.onnx".to_string()));
+        assert!((predict_args.conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
+        assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
+        assert!(predict_args.rect);
+        assert_eq!(predict_args.max_det, 300);
+        assert!(!predict_args.half);
+        assert!(predict_args.verbose);
+        assert!(predict_args.source.is_none());
     }
 
     #[test]
@@ -197,13 +198,18 @@ mod tests {
             "--verbose",
             "false",
         ]);
-        match args.command {
-            Commands::Predict(predict_args) => {
-                assert_eq!(predict_args.model, Some("custom.onnx".to_string()));
-                assert_eq!(predict_args.source, Some("test.jpg".to_string()));
-                assert!((predict_args.conf - 0.8).abs() < f32::EPSILON);
-                assert!(!predict_args.verbose);
-            }
-        }
+        let Commands::Predict(predict_args) = args.command else {
+            panic!("expected predict command");
+        };
+        assert_eq!(predict_args.model, Some("custom.onnx".to_string()));
+        assert_eq!(predict_args.source, Some("test.jpg".to_string()));
+        assert!((predict_args.conf - 0.8).abs() < f32::EPSILON);
+        assert!(!predict_args.verbose);
+    }
+
+    #[test]
+    fn test_version_command() {
+        let args = Cli::parse_from(["app", "version"]);
+        assert!(matches!(args.command, Commands::Version));
     }
 }

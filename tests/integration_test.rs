@@ -6,7 +6,38 @@
 
 use ndarray::Array3;
 use std::collections::HashMap;
+use tempfile::tempdir;
+use ultralytics_inference::cli::args::PredictArgs;
+use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
+
+#[test]
+#[ignore = "downloads a YOLO model and sample image"]
+fn test_run_prediction_e2e() {
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n.onnx");
+
+    let args = PredictArgs {
+        model: Some(model_path.to_string_lossy().into_owned()),
+        task: None,
+        source: Some("https://ultralytics.com/images/bus.jpg".to_string()),
+        conf: 0.25,
+        iou: 0.45,
+        max_det: 300,
+        imgsz: Some(640),
+        rect: false,
+        batch: 1,
+        half: false,
+        save: false,
+        save_frames: false,
+        show: false,
+        device: None,
+        verbose: false,
+        classes: None,
+    };
+
+    run_prediction(&args);
+}
 
 #[test]
 fn test_inference_config_creation() {
@@ -121,8 +152,3 @@ fn test_speed_timing() {
     assert_eq!(speed.inference, Some(20.0));
     assert_eq!(speed.postprocess, Some(5.0));
 }
-
-// Note: Full integration tests with actual YOLO models require:
-// - A test ONNX model file
-// - Test images
-// These will be added in future test modules

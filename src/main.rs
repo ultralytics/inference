@@ -14,7 +14,7 @@
 //! ultralytics-inference predict --model yolo26n.onnx --source 0 --conf 0.5
 //! ultralytics-inference predict -m yolo26n.onnx -s assets/ --save --half
 //! ultralytics-inference predict -m yolo26n.onnx -s video.mp4 --imgsz 1280 --show
-//! ultralytics-inference --version
+//! ultralytics-inference version
 //! ultralytics-inference help
 //! ```
 
@@ -39,6 +39,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Predict(args) => {
             set_verbose(args.verbose);
             run_prediction(args);
+        }
+        Commands::Version => {
+            println!(
+                "{} {}",
+                ultralytics_inference::NAME,
+                ultralytics_inference::VERSION
+            );
         }
     }
     Ok(())
