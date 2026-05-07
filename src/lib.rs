@@ -104,6 +104,9 @@
 //!
 //! # Show help
 //! ultralytics-inference help
+//!
+//! # Show version
+//! ultralytics-inference version
 //! ```
 //!
 //! **CLI Options:**

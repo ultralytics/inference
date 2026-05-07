@@ -2,8 +2,9 @@
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.11"
+version = "0.0.12"
 edition = "2024"
+rust-version = "1.88"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
     "Onuralp Sezer <onuralp@ultralytics.com>",
@@ -15,16 +16,20 @@ documentation = "https://docs.rs/ultralytics-inference"
 homepage = "https://www.ultralytics.com"
 readme = "README.md"
 keywords = ["yolo", "ultralytics", "inference", "computer-vision", "ml"]
-categories = ["computer-vision", "science", "command-line-interface", "wasm"]
+categories = ["computer-vision", "science", "command-line-interface"]
+include = [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/LICENSE",
+    "/README.md",
+    "/src/**/*.rs",
+    "/tests/**/*.rs",
+]
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-targets = [
-    "x86_64-unknown-linux-gnu",
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [lints.rust]
 unsafe_code = "warn"
@@ -58,8 +63,8 @@ lru = "^0.18"
 # Numerical computing (must match ort's ndarray version 0.17)
 ndarray = { version = "^0.17", features = ["rayon"] }
 
-# ONNX Runtime 1.24.2 - using latest from GitHub for best performance
-ort = { version = "2.0.0-rc.12", git = "https://github.com/pykeio/ort.git", rev = "f085e4c2516901ee606d1e10022142afa9348bf1", default-features = false, features = [
+# ONNX Runtime 1.24.2
+ort = { version = "2.0.0-rc.12", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",

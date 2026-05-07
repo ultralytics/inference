@@ -2,7 +2,7 @@
 
 # Tests Directory (`tests/`)
 
-This directory contains Rust integration tests for the Ultralytics template crate. Keeping tests close to user-facing
+This directory contains Rust integration tests for the Ultralytics inference crate. Keeping tests close to user-facing
 behaviors helps ensure changes remain reliable and well-documented.
 
 ## 🧪 Overview

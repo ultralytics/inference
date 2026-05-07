@@ -115,6 +115,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
       - run: cargo test --no-default-features --features annotate
+      - run: cargo package --locked --list
       - run: cargo publish --dry-run --locked
 
   publish:

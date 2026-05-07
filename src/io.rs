@@ -154,7 +154,7 @@ impl SaveResults {
     /// * `save_dir` - Directory to save results.
     /// * `save_frames` - If true, force saving individual frames even for video sources.
     #[must_use]
-    #[allow(unused_variables)]
+    #[cfg_attr(not(feature = "video"), allow(unused_variables))]
     pub fn new(save_dir: PathBuf, save_frames: bool) -> Self {
         init_logging();
 

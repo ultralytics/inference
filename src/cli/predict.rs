@@ -51,10 +51,12 @@ pub fn run_prediction(args: &PredictArgs) {
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
-    let device: Option<crate::Device> = args
-        .device
-        .as_ref()
-        .map(|d| d.parse().expect("Invalid device"));
+    let device: Option<crate::Device> = args.device.as_deref().map(|d| {
+        d.parse().unwrap_or_else(|e| {
+            error!("Invalid device '{d}': {e}");
+            process::exit(1);
+        })
+    });
     #[cfg(feature = "visualize")]
     let show = args.show;
     if model_is_default && verbose {
@@ -165,7 +167,10 @@ pub fn run_prediction(args: &PredictArgs) {
             crate::task::Task::Obb => "runs/obb",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
-        fs::create_dir_all(&dir).expect("Failed to create save directory");
+        if let Err(e) = fs::create_dir_all(&dir) {
+            error!("Failed to create save directory '{dir}': {e}");
+            process::exit(1);
+        }
         Some(std::path::PathBuf::from(dir))
     } else {
         None
