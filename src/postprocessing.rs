@@ -380,49 +380,7 @@ fn extract_detect_boxes(
     let mut candidates: Vec<Candidate> = Vec::with_capacity(256);
 
     // Candidate Extraction
-    if !is_transposed {
-        // Layout [feat, pred] - Cache-friendly linear scan
-        let mut max_scores = vec![conf_thresh; num_predictions];
-        let mut max_classes = vec![0usize; num_predictions];
-
-        for c in 0..num_classes {
-            let offset = (4 + c) * num_predictions;
-            let class_scores = &output[offset..offset + num_predictions];
-            for (idx, &score) in class_scores.iter().enumerate() {
-                if score > max_scores[idx] {
-                    max_scores[idx] = score;
-                    max_classes[idx] = c;
-                }
-            }
-        }
-
-        for (idx, &score) in max_scores.iter().enumerate() {
-            if score > conf_thresh {
-                let best_class = max_classes[idx];
-
-                // Filter by class if specified
-                if !config.keep_class(best_class) {
-                    continue;
-                }
-
-                let cx = unsafe { *output.get_unchecked(idx) };
-                let cy = unsafe { *output.get_unchecked(num_predictions + idx) };
-                let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
-                let h = unsafe { *output.get_unchecked(3 * num_predictions + idx) };
-
-                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
-                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
-                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
-                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
-
-                candidates.push(Candidate {
-                    bbox: [x1, y1, x2, y2],
-                    score,
-                    class: best_class,
-                });
-            }
-        }
-    } else {
+    if is_transposed {
         // Layout [pred, feat] - Process 8 classes at once
         for idx in 0..num_predictions {
             let base = idx * feat_count;
@@ -433,7 +391,7 @@ fn extract_detect_boxes(
             for c_idx in (0..num_classes).step_by(8) {
                 if num_classes - c_idx >= 8 {
                     let scores: f32x8 =
-                        unsafe { (row_ptr.add(c_idx) as *const f32x8).read_unaligned() };
+                        unsafe { row_ptr.add(c_idx).cast::<f32x8>().read_unaligned() };
                     if scores.simd_gt(conf_v).any() {
                         for i in 0..8 {
                             let s = unsafe { *row_ptr.add(c_idx + i) };
@@ -473,6 +431,47 @@ fn extract_detect_boxes(
                 candidates.push(Candidate {
                     bbox: [x1, y1, x2, y2],
                     score: best_score,
+                    class: best_class,
+                });
+            }
+        }
+    } else {
+        // Layout [feat, pred] - Cache-friendly linear scan
+        let mut max_scores = vec![conf_thresh; num_predictions];
+        let mut max_classes = vec![0usize; num_predictions];
+
+        for c in 0..num_classes {
+            let offset = (4 + c) * num_predictions;
+            let class_scores = &output[offset..offset + num_predictions];
+            for (idx, &score) in class_scores.iter().enumerate() {
+                if score > max_scores[idx] {
+                    max_scores[idx] = score;
+                    max_classes[idx] = c;
+                }
+            }
+        }
+
+        for (idx, &score) in max_scores.iter().enumerate() {
+            if score > conf_thresh {
+                let best_class = max_classes[idx];
+
+                if !config.keep_class(best_class) {
+                    continue;
+                }
+
+                let cx = unsafe { *output.get_unchecked(idx) };
+                let cy = unsafe { *output.get_unchecked(num_predictions + idx) };
+                let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
+                let h = unsafe { *output.get_unchecked(3 * num_predictions + idx) };
+
+                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
+                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
+                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
+                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+
+                candidates.push(Candidate {
+                    bbox: [x1, y1, x2, y2],
+                    score,
                     class: best_class,
                 });
             }
@@ -530,11 +529,11 @@ fn extract_detect_boxes(
         while j < n {
             if n - j >= 8 {
                 if (0..8).any(|k| candidates[j + k].class == ac && !suppressed[j + k]) {
-                    let bx1 = unsafe { (x1.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let by1 = unsafe { (y1.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let bx2 = unsafe { (x2.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let by2 = unsafe { (y2.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let ba = unsafe { (areas.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let bx1 = unsafe { x1.as_ptr().add(j).cast::<f32x8>().read_unaligned() };
+                    let by1 = unsafe { y1.as_ptr().add(j).cast::<f32x8>().read_unaligned() };
+                    let bx2 = unsafe { x2.as_ptr().add(j).cast::<f32x8>().read_unaligned() };
+                    let by2 = unsafe { y2.as_ptr().add(j).cast::<f32x8>().read_unaligned() };
+                    let ba = unsafe { areas.as_ptr().add(j).cast::<f32x8>().read_unaligned() };
 
                     let ix1 = ax1.max(bx1);
                     let iy1 = ay1.max(by1);

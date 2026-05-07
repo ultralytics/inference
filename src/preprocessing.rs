@@ -139,9 +139,9 @@ pub fn preprocess_image_with_precision(
         calculate_letterbox_params(orig_width, orig_height, target_size, stride);
 
     // Zero-copy path: avoid to_rgb8() allocation when possible
-    let tensor = match image {
+    let tensor = if let DynamicImage::ImageRgb8(rgb) = image {
         // Fast path: already RGB8, use bytes directly without copy
-        DynamicImage::ImageRgb8(rgb) => fused_zerocopy_preprocess(
+        fused_zerocopy_preprocess(
             rgb.as_raw(),
             orig_width,
             orig_height,
@@ -150,21 +150,20 @@ pub fn preprocess_image_with_precision(
             pad_left,
             new_width,
             new_height,
-        ),
+        )
+    } else {
         // Fallback: convert to RGB8 (allocates)
-        _ => {
-            let src_rgb = image.to_rgb8();
-            fused_zerocopy_preprocess(
-                src_rgb.as_raw(),
-                orig_width,
-                orig_height,
-                target_size,
-                pad_top,
-                pad_left,
-                new_width,
-                new_height,
-            )
-        }
+        let src_rgb = image.to_rgb8();
+        fused_zerocopy_preprocess(
+            src_rgb.as_raw(),
+            orig_width,
+            orig_height,
+            target_size,
+            pad_top,
+            pad_left,
+            new_width,
+            new_height,
+        )
     };
 
     let tensor_f16 = if half {
@@ -209,12 +208,12 @@ fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Vec<XLutEntry> {
 
         let lut: Vec<XLutEntry> = (0..dst_w)
             .map(|dx| {
-                let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
+                let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0);
                 let x0 = sx.floor() as i32;
                 // Match OpenCV: cbuf[0] = saturate_cast<short>((1-fx)*SCALE),
                 //               cbuf[1] = SCALE - cbuf[0]
                 let fx_f = sx - x0 as f32;
-                let fx_inv = ((1.0 - fx_f) * SCALE_INT as f32 + 0.5) as i32;
+                let fx_inv = (1.0 - fx_f).mul_add(SCALE_INT as f32, 0.5) as i32;
                 let fx = SCALE_INT - fx_inv;
                 let x0c = x0.clamp(0, src_w_max) as usize * 3;
                 let x1c = (x0 + 1).clamp(0, src_w_max) as usize * 3;
@@ -241,7 +240,7 @@ fn fused_zerocopy_preprocess(
     new_width: u32,
     new_height: u32,
 ) -> Array4<f32> {
-    use rayon::prelude::*;
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
     use std::mem::MaybeUninit;
     use std::sync::atomic::{AtomicPtr, Ordering};
 
@@ -251,7 +250,7 @@ fn fused_zerocopy_preprocess(
 
     // ALLOCATE UNINITIALIZED: Saves ~0.2ms by not zeroing memory
     let mut tensor: Array4<MaybeUninit<f32>> = Array4::uninit((1, 3, dst_h, dst_w));
-    let out_ptr = tensor.as_mut_ptr() as *mut f32;
+    let out_ptr = tensor.as_mut_ptr().cast::<f32>();
 
     // Use AtomicPtr for thread-safe pointer sharing (each thread writes to disjoint rows)
     let atomic_ptr = AtomicPtr::new(out_ptr);
@@ -288,10 +287,10 @@ fn fused_zerocopy_preprocess(
             // Image row calculations - 11-bit fixed-point bilinear matching
             // OpenCV's INTER_LINEAR (INTER_RESIZE_COEF_BITS = 11).
             let img_dy = dy - pad_top_usize;
-            let sy = ((img_dy as f32 + 0.5) * scale_y - 0.5).max(0.0);
+            let sy = (img_dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0);
             let y0 = sy.floor() as i32;
             let fy_f = sy - y0 as f32;
-            let fy_inv = ((1.0 - fy_f) * SCALE_INT as f32 + 0.5) as i32;
+            let fy_inv = (1.0 - fy_f).mul_add(SCALE_INT as f32, 0.5) as i32;
             let fy = SCALE_INT - fy_inv;
 
             let y0c = y0.clamp(0, src_h_max) as usize;
@@ -327,24 +326,24 @@ fn fused_zerocopy_preprocess(
                 let p11 = src_ptr.add(row1_off + x1_off);
 
                 let out_x = pad_left_usize + img_dx;
-                *r_row.add(out_x) = ((*p00 as i32 * w00
-                    + *p10 as i32 * w10
-                    + *p01 as i32 * w01
-                    + *p11 as i32 * w11
+                *r_row.add(out_x) = ((i32::from(*p00) * w00
+                    + i32::from(*p10) * w10
+                    + i32::from(*p01) * w01
+                    + i32::from(*p11) * w11
                     + ROUND_BIAS)
                     >> SCALE_BITS_2X) as f32
                     * INV_255;
-                *g_row.add(out_x) = ((*p00.add(1) as i32 * w00
-                    + *p10.add(1) as i32 * w10
-                    + *p01.add(1) as i32 * w01
-                    + *p11.add(1) as i32 * w11
+                *g_row.add(out_x) = ((i32::from(*p00.add(1)) * w00
+                    + i32::from(*p10.add(1)) * w10
+                    + i32::from(*p01.add(1)) * w01
+                    + i32::from(*p11.add(1)) * w11
                     + ROUND_BIAS)
                     >> SCALE_BITS_2X) as f32
                     * INV_255;
-                *b_row.add(out_x) = ((*p00.add(2) as i32 * w00
-                    + *p10.add(2) as i32 * w10
-                    + *p01.add(2) as i32 * w01
-                    + *p11.add(2) as i32 * w11
+                *b_row.add(out_x) = ((i32::from(*p00.add(2)) * w00
+                    + i32::from(*p10.add(2)) * w10
+                    + i32::from(*p01.add(2)) * w01
+                    + i32::from(*p11.add(2)) * w11
                     + ROUND_BIAS)
                     >> SCALE_BITS_2X) as f32
                     * INV_255;
@@ -414,8 +413,8 @@ pub fn calculate_rect_size(
 
     // Round up to nearest multiple of stride
     let stride = stride as usize;
-    let rect_h = ((new_h + stride - 1) / stride) * stride;
-    let rect_w = ((new_w + stride - 1) / stride) * stride;
+    let rect_h = new_h.div_ceil(stride) * stride;
+    let rect_w = new_w.div_ceil(stride) * stride;
 
     (rect_h, rect_w)
 }
