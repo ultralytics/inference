@@ -523,12 +523,17 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 
 ## 💡 Contributing
 
-Ultralytics thrives on community collaboration! We deeply value your contributions.
+Ultralytics thrives on community collaboration, and we deeply value your contributions! Whether it's reporting bugs,
+suggesting features, or submitting code changes, your involvement is crucial.
 
 - **Report Issues**: Found a bug? [Open an issue](https://github.com/ultralytics/inference/issues)
 - **Feature Requests**: Have an idea? [Share it](https://github.com/ultralytics/inference/issues)
 - **Pull Requests**: Read our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) first
 - **Feedback**: Take our [Survey](https://www.ultralytics.com/survey?utm_source=github&utm_medium=social&utm_campaign=Survey)
+
+A heartfelt thank you 🙏 goes out to all our contributors! Your efforts help make Ultralytics tools better for everyone.
+
+[![Ultralytics open-source contributors](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
 
 ## 📄 License
 
