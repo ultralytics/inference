@@ -51,16 +51,12 @@ pub fn run_prediction(args: &PredictArgs) {
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
-    let device: Option<crate::Device> = match args.device.as_ref() {
-        Some(d) => match d.parse() {
-            Ok(device) => Some(device),
-            Err(e) => {
-                error!("Invalid device '{d}': {e}");
-                process::exit(1);
-            }
-        },
-        None => None,
-    };
+    let device: Option<crate::Device> = args.device.as_deref().map(|d| {
+        d.parse().unwrap_or_else(|e| {
+            error!("Invalid device '{d}': {e}");
+            process::exit(1);
+        })
+    });
     #[cfg(feature = "visualize")]
     let show = args.show;
     if model_is_default && verbose {
