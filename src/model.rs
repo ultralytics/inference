@@ -414,8 +414,38 @@ impl YOLOModel {
     }
 
     #[cfg(feature = "coreml")]
+    fn macos_version() -> Option<(u32, u32)> {
+        let out = std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()?;
+        let s = std::str::from_utf8(&out.stdout).ok()?.trim();
+        let mut p = s.split('.');
+        Some((
+            p.next()?.parse().ok()?,
+            p.next().unwrap_or("0").parse().ok()?,
+        ))
+    }
+
+    #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
-        let mut ep = ort::execution_providers::CoreMLExecutionProvider::default();
+        use ort::execution_providers::coreml::ModelFormat;
+        let format = match Self::macos_version() {
+            Some((major, _)) if major >= 12 => ModelFormat::MLProgram,
+            ver => {
+                let label = ver.map_or_else(
+                    || "unknown".to_owned(),
+                    |(maj, min)| format!("{maj}.{min} < 12"),
+                );
+                warn!(
+                    "WARNING ⚠️ macOS {label}: CoreML using NeuralNetwork format; FP16 models may fail."
+                );
+                ModelFormat::NeuralNetwork
+            }
+        };
+        let mut ep =
+            ort::execution_providers::CoreMLExecutionProvider::default().with_model_format(format);
+
         if let Some(cache_base) = dirs::cache_dir() {
             let canonical = model_path
                 .canonicalize()
@@ -430,10 +460,15 @@ impl YOLOModel {
                 .fold(14_695_981_039_346_656_037u64, |h, &b| {
                     h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
                 });
+            let format_suffix = if matches!(format, ModelFormat::MLProgram) {
+                "mlprogram"
+            } else {
+                "neuralnet"
+            };
             let cache_dir = cache_base
                 .join("ultralytics-inference")
                 .join("coreml")
-                .join(format!("{stem}_{hash:016x}"));
+                .join(format!("{stem}_{hash:016x}_{format_suffix}"));
             if std::fs::create_dir_all(&cache_dir).is_ok() {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
@@ -470,14 +505,25 @@ impl YOLOModel {
             )));
         }
 
-        if self.fp16_input {
-            // Use FP16 dummy input if model expects FP16
+        let warmup_result = if self.fp16_input {
             let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            self.run_inference_f16(&dummy_input)?;
+            self.run_inference_f16(&dummy_input)
         } else {
             let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            self.run_inference(&dummy_input)?;
+            self.run_inference(&dummy_input)
+        };
+
+        if let Err(e) = warmup_result {
+            let msg = e.to_string();
+            // CoreML + all-zeros input: GatherElements out-of-range in the DFL head is benign.
+            if self.execution_provider != "CoreMLExecutionProvider"
+                || !msg.contains("GatherElements")
+                || !msg.contains("Out of range")
+            {
+                return Err(e);
+            }
         }
+
         self.warmed_up = true;
         Ok(())
     }
