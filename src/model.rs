@@ -439,9 +439,7 @@ impl YOLOModel {
                 );
                 ModelFormat::NeuralNetwork
             }
-            None => {
-                ModelFormat::MLProgram
-            }
+            None => ModelFormat::MLProgram,
         };
         let mut ep =
             ort::execution_providers::CoreMLExecutionProvider::default().with_model_format(format);
