@@ -168,12 +168,12 @@ impl ModelMetadata {
 
         // Parse imgsz which can be a list like [640, 640]
         if let Some(imgsz_line) = yaml_str.lines().find(|l| l.contains("imgsz:")) {
-            metadata.imgsz = Self::parse_imgsz(yaml_str, imgsz_line)?;
+            metadata.imgsz = Self::parse_imgsz(yaml_str, imgsz_line);
         }
 
         // Parse names block if not already parsed inline
         if metadata.names.is_empty() {
-            metadata.names = Self::parse_names_block(yaml_str)?;
+            metadata.names = Self::parse_names_block(yaml_str);
         }
 
         Ok(metadata)
@@ -196,8 +196,7 @@ impl ModelMetadata {
     }
 
     /// Parse the imgsz field which can be a YAML list.
-    #[allow(clippy::unnecessary_wraps)]
-    fn parse_imgsz(yaml_str: &str, imgsz_line: &str) -> Result<Option<(usize, usize)>> {
+    fn parse_imgsz(yaml_str: &str, imgsz_line: &str) -> Option<(usize, usize)> {
         // Check if imgsz is on a single line like "imgsz: [640, 640]"
         if let Some(bracket_start) = imgsz_line.find('[')
             && let Some(bracket_end) = imgsz_line.find(']')
@@ -207,7 +206,7 @@ impl ModelMetadata {
                 .filter_map(|s| s.trim().parse().ok())
                 .collect();
             if values.len() >= 2 {
-                return Ok(Some((values[0], values[1])));
+                return Some((values[0], values[1]));
             }
         }
 
@@ -236,14 +235,14 @@ impl ModelMetadata {
         }
 
         if imgsz_values.len() >= 2 {
-            Ok(Some((imgsz_values[0], imgsz_values[1])))
+            Some((imgsz_values[0], imgsz_values[1]))
         } else {
-            Ok(None)
+            None
         }
     }
 
     /// Parse the names block from YAML or Python dict format.
-    fn parse_names_block(yaml_str: &str) -> Result<HashMap<usize, String>> {
+    fn parse_names_block(yaml_str: &str) -> HashMap<usize, String> {
         let mut names = HashMap::new();
 
         // First, try to find `names: {0: 'person', 1: 'bicycle', ...}` Python dict format
@@ -299,12 +298,11 @@ impl ModelMetadata {
             }
         }
 
-        Ok(names)
+        names
     }
 
     /// Parse a Python dict string like `0: 'person', 1: 'bicycle'`.
-    #[allow(clippy::unnecessary_wraps)]
-    fn parse_python_dict(dict_str: &str) -> Result<HashMap<usize, String>> {
+    fn parse_python_dict(dict_str: &str) -> HashMap<usize, String> {
         let mut names = HashMap::new();
 
         // Split by comma, but be careful with quotes
@@ -319,7 +317,7 @@ impl ModelMetadata {
             }
         }
 
-        Ok(names)
+        names
     }
 
     /// Get the number of classes in this model.

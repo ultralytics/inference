@@ -322,11 +322,10 @@ pub fn run_prediction(args: &PredictArgs) {
                         if save_dir.is_some() {
                             let annotated = annotate_image(img, &result, None);
 
-                            #[allow(clippy::collapsible_if)]
-                            if let Some(saver) = &mut result_saver {
-                                if let Err(e) = saver.save(is_video, meta, &annotated) {
-                                    error!("Failed to save result: {e}");
-                                }
+                            if let Some(saver) = &mut result_saver
+                                && let Err(e) = saver.save(is_video, meta, &annotated)
+                            {
+                                error!("Failed to save result: {e}");
                             }
                         }
 
@@ -385,11 +384,10 @@ pub fn run_prediction(args: &PredictArgs) {
         batch_processor.flush();
     }
 
-    #[allow(clippy::collapsible_if)]
-    if let Some(saver) = result_saver {
-        if let Err(e) = saver.finish() {
-            error!("Failed to finish saving: {e}");
-        }
+    if let Some(saver) = result_saver
+        && let Err(e) = saver.finish()
+    {
+        error!("Failed to finish saving: {e}");
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
