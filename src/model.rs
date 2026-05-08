@@ -433,13 +433,16 @@ impl YOLOModel {
             Some((major, _)) if major >= 12 => ModelFormat::MLProgram,
             Some((major, minor)) => {
                 warn!(
-                    "WARNING ⚠️ macOS {major}.{minor} detected — CoreML MLProgram requires \
-                     macOS 12+. Falling back to NeuralNetwork format. \
-                     FP16 ONNX models may fail; export with half=False to be safe."
+                    "WARNING ⚠️ macOS {major}.{minor} < 12: CoreML using NeuralNetwork format; FP16 models may fail."
                 );
                 ModelFormat::NeuralNetwork
             }
-            None => ModelFormat::MLProgram,
+            None => {
+                warn!(
+                    "WARNING ⚠️ macOS version unknown: CoreML using NeuralNetwork format; FP16 models may fail."
+                );
+                ModelFormat::NeuralNetwork
+            }
         };
         let mut ep =
             ort::execution_providers::CoreMLExecutionProvider::default().with_model_format(format);
@@ -503,7 +506,6 @@ impl YOLOModel {
         }
 
         let warmup_result = if self.fp16_input {
-            // Use FP16 dummy input if model expects FP16
             let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
             self.run_inference_f16(&dummy_input)
         } else {
@@ -513,9 +515,11 @@ impl YOLOModel {
 
         if let Err(e) = warmup_result {
             let msg = e.to_string();
-            // GatherElements out-of-range from an all-zeros dummy tensor is benign;
-            // real images produce valid indices. Any other error is a real failure.
-            if !msg.contains("GatherElements") || !msg.contains("Out of range") {
+            // CoreML + all-zeros input triggers GatherElements out-of-range in the DFL head;
+            // benign for warmup only. Propagate everything else unchanged.
+            let is_coreml = self.execution_provider == "CoreMLExecutionProvider";
+            let is_gather_oob = msg.contains("GatherElements") && msg.contains("Out of range");
+            if !is_coreml || !is_gather_oob {
                 return Err(e);
             }
         }
