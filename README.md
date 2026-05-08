@@ -9,11 +9,11 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
 [![codecov](https://codecov.io/gh/ultralytics/inference/graph/badge.svg?token=AVE5n6yvnf)](https://codecov.io/gh/ultralytics/inference)
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
-[![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 
-[![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
-[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference)](https://docs.rs/ultralytics-inference)
-![Crates.io Total Downloads](https://img.shields.io/crates/d/ultralytics-inference)
+[![Crates.io](https://img.shields.io/crates/v/ultralytics-inference?logo=rust&logoColor=white&label=crates.io&color=CE422B)](https://crates.io/crates/ultralytics-inference)
+[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs)](https://docs.rs/ultralytics-inference)
+[![Downloads](https://img.shields.io/crates/d/ultralytics-inference?logo=rust&logoColor=white&label=downloads&color=CE422B)](https://crates.io/crates/ultralytics-inference)
+[![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&logoColor=white&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 
 ## ✨ Features
 
