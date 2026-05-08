@@ -420,10 +420,11 @@ impl YOLOModel {
             .output()
             .ok()?;
         let s = std::str::from_utf8(&out.stdout).ok()?.trim();
-        let mut parts = s.split('.');
-        let major: u32 = parts.next()?.parse().ok()?;
-        let minor: u32 = parts.next().unwrap_or("0").parse().ok()?;
-        Some((major, minor))
+        let mut p = s.split('.');
+        Some((
+            p.next()?.parse().ok()?,
+            p.next().unwrap_or("0").parse().ok()?,
+        ))
     }
 
     #[cfg(feature = "coreml")]
@@ -431,15 +432,13 @@ impl YOLOModel {
         use ort::execution_providers::coreml::ModelFormat;
         let format = match Self::macos_version() {
             Some((major, _)) if major >= 12 => ModelFormat::MLProgram,
-            Some((major, minor)) => {
-                warn!(
-                    "WARNING ⚠️ macOS {major}.{minor} < 12: CoreML using NeuralNetwork format; FP16 models may fail."
+            ver => {
+                let label = ver.map_or_else(
+                    || "unknown".to_owned(),
+                    |(maj, min)| format!("{maj}.{min} < 12"),
                 );
-                ModelFormat::NeuralNetwork
-            }
-            None => {
                 warn!(
-                    "WARNING ⚠️ macOS version unknown: CoreML using NeuralNetwork format; FP16 models may fail."
+                    "WARNING ⚠️ macOS {label}: CoreML using NeuralNetwork format; FP16 models may fail."
                 );
                 ModelFormat::NeuralNetwork
             }
@@ -461,9 +460,10 @@ impl YOLOModel {
                 .fold(14_695_981_039_346_656_037u64, |h, &b| {
                     h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
                 });
-            let format_suffix = match format {
-                ModelFormat::MLProgram => "mlprogram",
-                ModelFormat::NeuralNetwork => "neuralnet",
+            let format_suffix = if matches!(format, ModelFormat::MLProgram) {
+                "mlprogram"
+            } else {
+                "neuralnet"
             };
             let cache_dir = cache_base
                 .join("ultralytics-inference")
@@ -515,11 +515,11 @@ impl YOLOModel {
 
         if let Err(e) = warmup_result {
             let msg = e.to_string();
-            // CoreML + all-zeros input triggers GatherElements out-of-range in the DFL head;
-            // benign for warmup only. Propagate everything else unchanged.
-            let is_coreml = self.execution_provider == "CoreMLExecutionProvider";
-            let is_gather_oob = msg.contains("GatherElements") && msg.contains("Out of range");
-            if !is_coreml || !is_gather_oob {
+            // CoreML + all-zeros input: GatherElements out-of-range in the DFL head is benign.
+            if self.execution_provider != "CoreMLExecutionProvider"
+                || !msg.contains("GatherElements")
+                || !msg.contains("Out of range")
+            {
                 return Err(e);
             }
         }
