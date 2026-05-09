@@ -10,7 +10,7 @@
 //! [![Downloads](https://img.shields.io/crates/d/ultralytics-inference?logo=rust&logoColor=white&label=downloads&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 //! [![License](https://img.shields.io/crates/l/ultralytics-inference.svg)](https://github.com/ultralytics/inference/blob/main/LICENSE)
 //! [![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&logoColor=white&color=CE422B)](https://crates.io/crates/ultralytics-inference)
-//! 
+//!
 //! High-performance YOLO model inference library written in Rust, providing a safe
 //! and efficient interface for running [Ultralytics](https://ultralytics.com) YOLO
 //! models on images, videos, and streams.
