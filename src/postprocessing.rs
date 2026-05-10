@@ -712,7 +712,7 @@ fn postprocess_segment(
     // output1: [1, nm, 160, 160] (protos)
 
     // Derive nm from the protos tensor so non-default prototype counts work correctly.
-    let num_masks = if shape1.len() >= 2 { shape1[1] } else { 32 };
+    let num_masks = if shape1.len() == 4 { shape1[1] } else { 32 };
     let expected_features = 4 + names.len() + num_masks;
 
     // Manual shape check
