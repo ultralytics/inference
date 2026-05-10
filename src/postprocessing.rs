@@ -708,12 +708,11 @@ fn postprocess_segment(
     let (output0, shape0) = &outputs[0];
     let (output1, shape1) = &outputs[1];
 
-    // output0: [1, 4 + nc + 32, 8400]
-    // output1: [1, 32, 160, 160] (protos)
+    // output0: [1, 4 + nc + nm, 8400]
+    // output1: [1, nm, 160, 160] (protos)
 
-    // 1. Process Detections
-    // Standard segmentation models use 32 mask prototypes
-    let num_masks = 32;
+    // Derive nm from the protos tensor so non-default prototype counts work correctly.
+    let num_masks = if shape1.len() == 4 { shape1[1] } else { 32 };
     let expected_features = 4 + names.len() + num_masks;
 
     // Manual shape check
@@ -799,7 +798,6 @@ fn postprocess_segment(
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
     let num_kept = keep_indices.len().min(config.max_det);
 
-    // 2. Extract Box Results
     let mut boxes_data = Array2::zeros((num_kept, 6));
     let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
 
@@ -822,7 +820,6 @@ fn postprocess_segment(
 
     results.boxes = Some(Boxes::new(boxes_data.clone(), preprocess.orig_shape));
 
-    // 3. Process Masks
     // Protos: [1, 32, 160, 160] -> [32, 25600]
     // Validate protos shape before indexing to prevent panic
     if shape1.len() < 4 {
