@@ -544,33 +544,6 @@ fn image_to_tensor_f16(image: &RgbImage) -> Array4<f16> {
     tensor
 }
 
-/// Convert a raw HWC u8 array to a normalized NCHW tensor.
-///
-/// # Arguments
-///
-/// * `image` - HWC array with shape (H, W, C) and u8 values.
-///
-/// # Returns
-///
-/// Array4 with shape (1, C, H, W) and values in [0, 1].
-#[must_use]
-pub fn array_to_tensor(image: &Array3<u8>) -> Array4<f32> {
-    let shape = image.shape();
-    let (height, width, channels) = (shape[0], shape[1], shape[2]);
-
-    let mut tensor = Array4::zeros((1, channels, height, width));
-
-    for y in 0..height {
-        for x in 0..width {
-            for c in 0..channels {
-                tensor[[0, c, y, x]] = f32::from(image[[y, x, c]]) / 255.0;
-            }
-        }
-    }
-
-    tensor
-}
-
 /// Convert a `DynamicImage` to an HWC ndarray.
 ///
 /// # Panics
