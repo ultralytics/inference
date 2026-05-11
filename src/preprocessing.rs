@@ -544,7 +544,6 @@ fn image_to_tensor_f16(image: &RgbImage) -> Array4<f16> {
     tensor
 }
 
-
 /// Convert a `DynamicImage` to an HWC ndarray.
 ///
 /// # Panics
