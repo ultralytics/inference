@@ -317,23 +317,34 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
     Err(last_err)
 }
 
+/// Append `.onnx` to extensionless paths and normalize case-variant extensions (e.g. `.ONNX`).
+/// Paths with any other extension (e.g. `.pt`) are returned unchanged.
+fn normalize_model_path(path: &Path) -> PathBuf {
+    match path.extension().and_then(|e| e.to_str()) {
+        None => {
+            let stem = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            path.with_file_name(format!("{stem}.onnx"))
+        }
+        Some(e) if e.eq_ignore_ascii_case("onnx") && e != "onnx" => {
+            let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+            path.with_file_name(format!("{stem}.onnx"))
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
 /// Attempt to download a model if it matches a known downloadable model.
 ///
 /// Supports all `YOLO26`, `YOLO11`, and `YOLOv8` ONNX models across sizes (n/s/m/l/x) and
 /// task variants (detect, segment, pose, obb, classify).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
-/// Returns the path to the downloaded model.
-#[allow(clippy::missing_errors_doc)]
+/// # Errors
+///
+/// Returns an error if the model name is not in the supported list, or if the download fails.
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
-
-    let normalized = if path.extension().and_then(|e| e.to_str()) == Some("onnx") {
-        path.to_path_buf()
-    } else {
-        let stem = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        path.with_file_name(format!("{stem}.onnx"))
-    };
+    let normalized = normalize_model_path(path);
 
     let filename = normalized
         .file_name()
@@ -397,15 +408,27 @@ mod tests {
     }
 
     #[test]
-    fn test_model_without_extension_is_normalized() {
-        let result = try_download_model("yolo26n");
-        if let Err(e) = result {
-            let msg = e.to_string();
-            assert!(
-                !msg.contains("Auto-download is supported for"),
-                "should have passed the name-check, got: {msg}"
-            );
-        }
+    fn test_normalize_model_path() {
+        // no extension -> append .onnx
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n")),
+            PathBuf::from("yolo26n.onnx")
+        );
+        // already .onnx -> unchanged
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n.onnx")),
+            PathBuf::from("yolo26n.onnx")
+        );
+        // case-variant .ONNX -> normalized to .onnx
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n.ONNX")),
+            PathBuf::from("yolo26n.onnx")
+        );
+        // unrelated extension -> preserved as-is (will fail name check later)
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n.pt")),
+            PathBuf::from("yolo26n.pt")
+        );
     }
 
     #[test]
