@@ -456,7 +456,7 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
-To build without annotation support (smaller binary):
+To build without annotation and visualization support (smaller binary):
 
 ```bash
 cargo build --release --no-default-features
