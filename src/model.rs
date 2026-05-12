@@ -154,8 +154,7 @@ impl YOLOModel {
                     provider_name = "CUDAExecutionProvider";
                 }
                 #[cfg(feature = "coreml")]
-                crate::Device::CoreMl | crate::Device::Mps => {
-                    // Map both CoreML and MPS to CoreMLExecutionProvider
+                crate::Device::CoreMl => {
                     eps.push(Self::build_coreml_ep(path));
                     provider_name = "CoreMLExecutionProvider";
                 }

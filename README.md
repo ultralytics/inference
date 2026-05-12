@@ -198,7 +198,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                          | `true`                                  |
 | `--save-frames` |       | Save individual frames for video                                                                         | `false`                                 |
 | `--show`        |       | Display results in a window                                                                              | `false`                                 |
-| `--device`      |       | Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)                             | `cpu`                                   |
+| `--device`      |       | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)                                  | `cpu`                                   |
 | `--verbose`     |       | Show verbose output                                                                                      | `true`                                  |
 | `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                              | all classes                             |
 
@@ -321,7 +321,7 @@ if let Some(ref boxes) = result.boxes {
 use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Select a device (e.g., CUDA, MPS, CPU)
+    // Select a device (e.g., CUDA, CoreML, CPU)
     let device = Device::Cuda(0);
 
     // Configure the model to use this device
@@ -350,7 +350,7 @@ inference/
 │   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb)
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch processing pipeline
-│   ├── device.rs           # Device enum (CPU, CUDA, MPS, CoreML, etc.)
+│   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)
 │   ├── download.rs         # Model and asset downloading
 │   ├── annotate.rs         # Image annotation (bounding boxes, masks, keypoints)
 │   ├── io.rs               # Result saving (images, videos)
