@@ -66,10 +66,10 @@ impl Task {
         }
     }
 
-    /// Default nano YOLO26 model filename for this task.
+    /// Default nano `YOLO26` model filename for this task.
     ///
     /// Used by the CLI to auto-pick a model when `--model` is omitted but `--task` is set.
-    /// YOLO26, YOLO11, and YOLOv8 variants are all auto-downloadable.
+    /// `YOLO26`, `YOLO11`, and `YOLOv8` variants are all auto-downloadable.
     ///
     /// ```
     /// use ultralytics_inference::Task;
