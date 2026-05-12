@@ -232,7 +232,7 @@ impl Default for SourceMeta {
 #[cfg(feature = "video")]
 use video_rs::ffmpeg;
 
-/// Custom `FFmpeg` video decoder using `SWS_BILINEAR` for YUV→RGB conversion.
+/// Custom `FFmpeg` video decoder using `SWS_BILINEAR` for YUV -> RGB conversion.
 ///
 /// `video-rs` defaults to `SWS_AREA`, which can produce slightly different
 /// pixel values during colorspace conversion. Those differences can affect

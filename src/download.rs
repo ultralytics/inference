@@ -32,6 +32,22 @@ fn downloadable_models() -> Vec<String> {
         .collect()
 }
 
+fn supported_models_help() -> String {
+    let variants_display = ["detect", "-seg", "-pose", "-obb", "-cls"];
+    let sizes_display = MODEL_SIZES.join(", ");
+    let variants_joined = variants_display.join(", ");
+
+    let family_lines: Vec<String> = MODEL_FAMILIES
+        .iter()
+        .map(|f| format!("    {f:<8} sizes: [{sizes_display}]  variants: [{variants_joined}]"))
+        .collect();
+
+    format!(
+        "Auto-download is supported for:\n{}\n\n  Usage:\n    ultralytics-inference predict --model yolo26n\n    ultralytics-inference predict --model yolo26n.onnx",
+        family_lines.join("\n")
+    )
+}
+
 const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
 const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
 const DEFAULT_BOATS_IMAGE_URL: &str = "https://ultralytics.com/images/boats.jpg";
@@ -301,29 +317,51 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
     Err(last_err)
 }
 
+/// Append `.onnx` to extensionless paths and normalize case-variant extensions (e.g. `.ONNX`).
+/// Paths with any other extension (e.g. `.pt`) are returned unchanged.
+fn normalize_model_path(path: &Path) -> PathBuf {
+    match path.extension().and_then(|e| e.to_str()) {
+        None => {
+            let stem = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            path.with_file_name(format!("{stem}.onnx"))
+        }
+        Some(e) if e.eq_ignore_ascii_case("onnx") && e != "onnx" => {
+            let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+            path.with_file_name(format!("{stem}.onnx"))
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
 /// Attempt to download a model if it matches a known downloadable model.
 ///
 /// Supports all `YOLO26`, `YOLO11`, and `YOLOv8` ONNX models across sizes (n/s/m/l/x) and
 /// task variants (detect, segment, pose, obb, classify).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
-/// Returns the path to the downloaded model.
-#[allow(clippy::missing_errors_doc)]
+/// # Errors
+///
+/// Returns an error if the model name is not in the supported list, or if the download fails.
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
-    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let normalized = normalize_model_path(path);
+
+    let filename = normalized
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
 
     let models = downloadable_models();
     if !models.iter().any(|m| m == filename) {
         return Err(InferenceError::ModelLoadError(format!(
-            "Model file not found: {}. Auto-download is supported for: {}",
+            "Model file not found: {}\n\n{}",
             path.display(),
-            models.join(", "),
+            supported_models_help(),
         )));
     }
 
-    download_file(&format!("{ASSETS_BASE_URL}/{filename}"), path)?;
-    Ok(path.to_path_buf())
+    download_file(&format!("{ASSETS_BASE_URL}/{filename}"), &normalized)?;
+    Ok(normalized)
 }
 
 /// Download an image from a URL to the current directory.
@@ -366,7 +404,31 @@ mod tests {
         let result = try_download_model("unknown_model.onnx");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("Auto-download is supported for"));
+        assert!(err.contains("Model file not found"));
+    }
+
+    #[test]
+    fn test_normalize_model_path() {
+        // no extension -> append .onnx
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n")),
+            PathBuf::from("yolo26n.onnx")
+        );
+        // already .onnx -> unchanged
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n.onnx")),
+            PathBuf::from("yolo26n.onnx")
+        );
+        // case-variant .ONNX -> normalized to .onnx
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n.ONNX")),
+            PathBuf::from("yolo26n.onnx")
+        );
+        // unrelated extension -> preserved as-is (will fail name check later)
+        assert_eq!(
+            normalize_model_path(Path::new("yolo26n.pt")),
+            PathBuf::from("yolo26n.pt")
+        );
     }
 
     #[test]
