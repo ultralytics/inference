@@ -15,7 +15,7 @@ use crate::error::{InferenceError, Result};
 const ASSETS_BASE_URL: &str = "https://github.com/ultralytics/assets/releases/download/v8.4.0";
 
 /// YOLO Model families, sizes, and variants supported for auto-download.
-const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11"];
+const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11", "yolov8"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 
@@ -303,7 +303,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
 /// Attempt to download a model if it matches a known downloadable model.
 ///
-/// Supports all YOLO26 and YOLO11 ONNX models across sizes (n/s/m/l/x) and
+/// Supports all `YOLO26`, `YOLO11`, and `YOLOv8` ONNX models across sizes (n/s/m/l/x) and
 /// task variants (detect, segment, pose, obb, classify).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///

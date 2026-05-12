@@ -19,7 +19,7 @@
 //!
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
-//! - **Supported YOLO Versions** - `YOLO11` and `YOLO26` (including YOLO26 end-to-end NMS-free exports)
+//! - **Supported YOLO Versions** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports)
 //! - **All Tasks** - Detection, segmentation, pose estimation, classification, and OBB
 //! - **Ultralytics API** - Results API matches the Python package for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
@@ -115,7 +115,7 @@
 //!
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
-//! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name | `yolo26n.onnx` |
+//! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO26/YOLO11/YOLOv8 name | `yolo26n.onnx` |
 //! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
