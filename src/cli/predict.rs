@@ -188,7 +188,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let device_str = {
         let provider = model.execution_provider();
         if provider.contains("CoreML") {
-            "MPS".to_string()
+            "CoreML".to_string()
         } else if provider.contains("CUDA") {
             "CUDA".to_string()
         } else if provider.contains("TensorRT") {
