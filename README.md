@@ -427,7 +427,7 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 | `lru`               | LRU cache for preprocessing LUT |
 | `wide`              | SIMD for fast preprocessing     |
 
-### Optional Dependencies (for `--save` feature)
+### Optional Dependencies (for the `annotate` feature)
 
 | Crate       | Purpose                        |
 | ----------- | ------------------------------ |
@@ -456,7 +456,7 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
-To build without annotation support (smaller binary):
+To build without annotation and visualization support (smaller binary):
 
 ```bash
 cargo build --release --no-default-features
