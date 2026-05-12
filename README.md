@@ -22,7 +22,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 🔧 **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
-- ⬇️ **Auto Download** - Automatically downloads YOLO11 and YOLO26 ONNX models (all sizes: n/s/m/l/x) when not found locally
+- ⬇️ **Auto Download** - Automatically downloads YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
@@ -103,9 +103,10 @@ ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
 # With explicit model (task is read from model metadata)
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
-# Auto-download any supported size (n/s/m/l/x)
+# Auto-download any supported size (n/s/m/l/x) across YOLO26, YOLO11, and YOLOv8
 ultralytics-inference predict --model yolo26l.onnx --source image.jpg
 ultralytics-inference predict --model yolo11x-seg.onnx --source image.jpg
+ultralytics-inference predict --model yolov8n.onnx --source image.jpg
 
 # On a directory of images
 ultralytics-inference predict --model yolo26n.onnx --source assets/
@@ -184,7 +185,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 | Option          | Short | Description                                                                                              | Default                                 |
 | --------------- | ----- | -------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name                                   | `yolo26n.onnx`                          |
+| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                            | `yolo26n.onnx`                          |
 | `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect`                                |
 | `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                       | `Task dependent Ultralytics URL assets` |
 | `--conf`        |       | Confidence threshold                                                                                     | `0.25`                                  |
@@ -216,12 +217,13 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **Auto-downloadable models:**
 
-All YOLO11 and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five task variants are supported for auto-download:
+All YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five task variants are supported for auto-download:
 
 | Family | Variants                                                                        |
 | ------ | ------------------------------------------------------------------------------- |
 | YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
 | YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
 
 **Source Options:**
 
@@ -513,7 +515,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Batch inference support
 - [x] Rectangular inference support and optimization
 - [x] Class filtering support
-- [x] Auto-download all YOLO11 and YOLO26 ONNX models (all sizes n/s/m/l/x, all tasks)
+- [x] Auto-download all YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes n/s/m/l/x, all tasks)
 - [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
 
 ### In Progress
