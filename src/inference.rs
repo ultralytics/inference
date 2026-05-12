@@ -241,7 +241,7 @@ impl InferenceConfig {
     ///
     /// # Arguments
     ///
-    /// * `device` - The device to use (e.g., CPU, CUDA, CoreML).
+    /// * `device` - The device to use (e.g., CPU, CUDA, `CoreML`).
     ///
     /// # Example
     ///

@@ -12,7 +12,7 @@ pub enum Device {
     /// CUDA (Compute Unified Device Architecture) for NVIDIA GPUs.
     /// The argument specifies the device index (e.g., 0 for the first GPU).
     Cuda(usize),
-    /// CoreML execution provider for Apple Silicon / macOS.
+    /// `CoreML` execution provider for Apple Silicon / macOS.
     CoreMl,
     /// `DirectML` (Direct Machine Learning) for Windows.
     /// The argument specifies the device index.
