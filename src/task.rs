@@ -47,7 +47,8 @@ impl Task {
         }
     }
 
-    /// ONNX filename suffix for this task, used to construct `yolo26n{suffix}.onnx`.
+    /// ONNX filename suffix for this task, used to construct `{family}n{suffix}.onnx`
+    /// (e.g. `yolo26n-seg.onnx`, `yolo11n-pose.onnx`, `yolov8n.onnx`).
     ///
     /// ```
     /// use ultralytics_inference::Task;
@@ -68,6 +69,7 @@ impl Task {
     /// Default nano YOLO26 model filename for this task.
     ///
     /// Used by the CLI to auto-pick a model when `--model` is omitted but `--task` is set.
+    /// YOLO26, YOLO11, and YOLOv8 variants are all auto-downloadable.
     ///
     /// ```
     /// use ultralytics_inference::Task;
