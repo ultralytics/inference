@@ -15,7 +15,7 @@ use crate::error::{InferenceError, Result};
 const ASSETS_BASE_URL: &str = "https://github.com/ultralytics/assets/releases/download/v8.4.0";
 
 /// YOLO Model families, sizes, and variants supported for auto-download.
-const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11"];
+const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11", "yolov8"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 
