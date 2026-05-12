@@ -427,7 +427,7 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 | `lru`               | LRU cache for preprocessing LUT |
 | `wide`              | SIMD for fast preprocessing     |
 
-### Optional Dependencies (for `--save` feature)
+### Optional Dependencies (for the `annotate` feature)
 
 | Crate       | Purpose                        |
 | ----------- | ------------------------------ |
