@@ -32,6 +32,22 @@ fn downloadable_models() -> Vec<String> {
         .collect()
 }
 
+fn supported_models_help() -> String {
+    let variants_display = ["detect", "-seg", "-pose", "-obb", "-cls"];
+    let sizes_display = MODEL_SIZES.join(", ");
+    let variants_joined = variants_display.join(", ");
+
+    let family_lines: Vec<String> = MODEL_FAMILIES
+        .iter()
+        .map(|f| format!("    {f:<8} sizes: [{sizes_display}]  variants: [{variants_joined}]"))
+        .collect();
+
+    format!(
+        "Auto-download is supported for:\n{}\n\n  Usage:\n    ultralytics-inference predict --model yolo26n\n    ultralytics-inference predict --model yolo26n.onnx",
+        family_lines.join("\n")
+    )
+}
+
 const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
 const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
 const DEFAULT_BOATS_IMAGE_URL: &str = "https://ultralytics.com/images/boats.jpg";
@@ -311,19 +327,30 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 #[allow(clippy::missing_errors_doc)]
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
-    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+    let normalized = if path.extension().and_then(|e| e.to_str()) == Some("onnx") {
+        path.to_path_buf()
+    } else {
+        let stem = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        path.with_file_name(format!("{stem}.onnx"))
+    };
+
+    let filename = normalized
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
 
     let models = downloadable_models();
     if !models.iter().any(|m| m == filename) {
         return Err(InferenceError::ModelLoadError(format!(
-            "Model file not found: {}. Auto-download is supported for: {}",
+            "Model file not found: {}\n\n{}",
             path.display(),
-            models.join(", "),
+            supported_models_help(),
         )));
     }
 
-    download_file(&format!("{ASSETS_BASE_URL}/{filename}"), path)?;
-    Ok(path.to_path_buf())
+    download_file(&format!("{ASSETS_BASE_URL}/{filename}"), &normalized)?;
+    Ok(normalized)
 }
 
 /// Download an image from a URL to the current directory.
@@ -366,7 +393,19 @@ mod tests {
         let result = try_download_model("unknown_model.onnx");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("Auto-download is supported for"));
+        assert!(err.contains("Model file not found"));
+    }
+
+    #[test]
+    fn test_model_without_extension_is_normalized() {
+        let result = try_download_model("yolo26n");
+        if let Err(e) = result {
+            let msg = e.to_string();
+            assert!(
+                !msg.contains("Auto-download is supported for"),
+                "should have passed the name-check, got: {msg}"
+            );
+        }
     }
 
     #[test]
