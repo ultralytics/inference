@@ -37,7 +37,7 @@ jobs:
 
       - name: Format
         run: cargo fmt --all -- --check
-      
+
       - name: Clippy (annotate feature)
         run: cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
 
