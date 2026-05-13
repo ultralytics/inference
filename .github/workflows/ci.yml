@@ -32,6 +32,9 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
       - name: Format
         run: cargo fmt --all -- --check
 
@@ -66,6 +69,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          # Key on ffmpeg version so each container gets its own cache
+          key: ffmpeg-${{ matrix.ffmpeg_version }}
+
       - name: Clippy (annotate + video)
         run: cargo clippy --all --features annotate,video -- -D warnings
 
@@ -81,10 +90,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install dependencies
-        run: brew install ffmpeg pkg-config
+        run: brew install ffmpeg
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Build (annotate + video features)
         run: cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
@@ -95,29 +107,44 @@ jobs:
     runs-on: windows-latest
 
     env:
-      FFMPEG_DOWNLOAD_URL: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z
+      FFMPEG_VERSION: "8.1.1"
+      FFMPEG_DOWNLOAD_URL: https://github.com/GyanD/codexffmpeg/releases/download/8.1.1/ffmpeg-8.1.1-full_build-shared.7z
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install dependencies
+      - name: Cache FFmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ffmpeg
+          key: windows-ffmpeg-${{ env.FFMPEG_VERSION }}
+
+      - name: Download FFmpeg
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
-          $VCINSTALLDIR = $(& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath)
-          Add-Content $env:GITHUB_ENV "LIBCLANG_PATH=${VCINSTALLDIR}\VC\Tools\LLVM\x64\bin"
           Invoke-WebRequest "${env:FFMPEG_DOWNLOAD_URL}" -OutFile ffmpeg-shared.7z
           7z x ffmpeg-shared.7z
           mkdir ffmpeg
           mv ffmpeg-*/* ffmpeg/
+
+      - name: Set FFmpeg environment variables
+        run: |
+          $VCINSTALLDIR = $(& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath)
+          Add-Content $env:GITHUB_ENV "LIBCLANG_PATH=${VCINSTALLDIR}\VC\Tools\LLVM\x64\bin"
           Add-Content $env:GITHUB_ENV "FFMPEG_DIR=${pwd}\ffmpeg"
           Add-Content $env:GITHUB_PATH "${pwd}\ffmpeg\bin"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
       - name: Build (annotate + video features)
         run: cargo build --features annotate,video
 
-  # Code coverage (runs on Ubuntu with FFmpeg 8 for full feature coverage)
+  # Code coverage (runs on Ubuntu with FFmpeg dev libs for full feature coverage)
   coverage:
     name: coverage
     runs-on: ubuntu-latest
@@ -131,6 +158,10 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
+
+      # Nightly toolchain version in rustc -V already gives this job a unique cache key
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@3235f8901fd37ffed0052b276cec25a362fb82e9 # v2.77.7
