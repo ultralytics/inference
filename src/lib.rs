@@ -301,6 +301,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Library name.
 pub const NAME: &str = env!("CARGO_PKG_NAME");
 
+/// Application display name.
+pub const DISPLAY_NAME: &str = "Ultralytics Inference";
+
 #[cfg(test)]
 mod tests {
     use super::*;
