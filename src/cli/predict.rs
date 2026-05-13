@@ -343,8 +343,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
                             if viewer.is_none() {
                                 viewer = Some(
-                                    Viewer::new(DISPLAY_NAME, view_width, view_height)
-                                        .unwrap(),
+                                    Viewer::new(DISPLAY_NAME, view_width, view_height).unwrap(),
                                 );
                             }
 
