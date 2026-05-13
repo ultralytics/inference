@@ -18,7 +18,7 @@ use crate::visualizer::Viewer;
 use image::GenericImageView;
 
 use crate::utils::pluralize;
-use crate::{InferenceConfig, Results, VERSION, YOLOModel};
+use crate::{DISPLAY_NAME, InferenceConfig, Results, VERSION, YOLOModel};
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
@@ -203,7 +203,7 @@ pub fn run_prediction(args: &PredictArgs) {
             "CPU".to_string()
         }
     };
-    println!("Ultralytics {VERSION} 🚀 Rust ONNX {precision} {device_str}");
+    println!("{DISPLAY_NAME} {VERSION} 🚀 Rust ONNX {precision} {device_str}");
     println!("Using ONNX Runtime {}", model.execution_provider());
 
     let imgsz = model.imgsz();
@@ -343,8 +343,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
                             if viewer.is_none() {
                                 viewer = Some(
-                                    Viewer::new("Ultralytics Inference", view_width, view_height)
-                                        .unwrap(),
+                                    Viewer::new(DISPLAY_NAME, view_width, view_height).unwrap(),
                                 );
                             }
 
