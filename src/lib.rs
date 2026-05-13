@@ -129,7 +129,7 @@
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--show` | | Display results in a window | `false` |
-//! | `--device` | | Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
+//! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!

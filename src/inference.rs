@@ -241,7 +241,7 @@ impl InferenceConfig {
     ///
     /// # Arguments
     ///
-    /// * `device` - The device to use (e.g., CPU, CUDA, MPS).
+    /// * `device` - The device to use (e.g., CPU, CUDA, `CoreML`).
     ///
     /// # Example
     ///
@@ -249,7 +249,7 @@ impl InferenceConfig {
     /// use ultralytics_inference::{InferenceConfig, Device};
     ///
     /// let config = InferenceConfig::new()
-    ///     .with_device(Device::Mps); // Use Apple Metal Performance Shaders
+    ///     .with_device(Device::CoreMl); // Use CoreML on Apple Silicon
     /// ```
     ///
     /// # Returns

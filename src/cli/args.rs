@@ -23,7 +23,7 @@ use clap::{Args, Parser, Subcommand};
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --show                 Display results in a window [default: false]
-    --device <DEVICE>      Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)
+    --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)
     --verbose              Show verbose output [default: true]
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
