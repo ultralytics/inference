@@ -1094,7 +1094,7 @@ impl YOLOModel {
         self.config
             .imgsz
             .or(self.metadata.imgsz)
-            .unwrap_or_else(|| match self.metadata.task {
+            .unwrap_or(match self.metadata.task {
                 Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
                 _ => InferenceConfig::DEFAULT_IMGSZ,
             })
