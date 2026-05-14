@@ -107,6 +107,10 @@ impl InferenceConfig {
     pub const DEFAULT_SAVE_FRAMES: bool = false;
     /// Default for rectangular (minimal padding) inference.
     pub const DEFAULT_RECT: bool = true;
+    /// Default input image size for standard YOLO models (height, width).
+    pub const DEFAULT_IMGSZ: (usize, usize) = (640, 640);
+    /// Default input image size for OBB models (height, width).
+    pub const DEFAULT_OBB_IMGSZ: (usize, usize) = (1024, 1024);
 
     /// Create a new configuration with default values.
     ///

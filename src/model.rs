@@ -343,8 +343,8 @@ impl YOLOModel {
         } else if is_dynamic {
             // Dynamic input without metadata -> apply robust defaults
             match metadata.task {
-                Task::Obb => (1024, 1024),
-                _ => (640, 640),
+                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
+                _ => InferenceConfig::DEFAULT_IMGSZ,
             }
         } else {
             // Static input without metadata -> try to read from tensor shape
@@ -362,7 +362,7 @@ impl YOLOModel {
                         None
                     }
                 })
-                .unwrap_or((640, 640))
+                .unwrap_or(InferenceConfig::DEFAULT_IMGSZ)
         };
 
         // Update config with resolved values
@@ -491,7 +491,7 @@ impl YOLOModel {
             .config
             .imgsz
             .or(self.metadata.imgsz)
-            .unwrap_or((640, 640));
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
 
         // Sanity check to prevent huge allocations from invalid imgsz
         if target_size.0 > Self::MAX_IMGSZ || target_size.1 > Self::MAX_IMGSZ {
@@ -686,7 +686,7 @@ impl YOLOModel {
             .config
             .imgsz
             .or(self.metadata.imgsz)
-            .unwrap_or((640, 640));
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
 
         // Check if target_size is divisible by stride (one-time warning logic per batch call)
         // We only warn if the configured size itself is not divisible.
@@ -1087,7 +1087,9 @@ impl YOLOModel {
     /// Get the model's input size.
     #[must_use]
     pub fn imgsz(&self) -> (usize, usize) {
-        self.metadata.imgsz.unwrap_or((640, 640))
+        self.metadata
+            .imgsz
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ)
     }
 
     /// Get the model's stride.
