@@ -349,6 +349,10 @@ impl YOLOModel {
         } else {
             // Static input without metadata -> try to read from tensor shape
             // Typically [1, 3, H, W]
+            let task_default = match metadata.task {
+                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
+                _ => InferenceConfig::DEFAULT_IMGSZ,
+            };
             input_info
                 .and_then(|i| {
                     if let ValueType::Tensor { shape, .. } = i.dtype() {
@@ -362,7 +366,7 @@ impl YOLOModel {
                         None
                     }
                 })
-                .unwrap_or(InferenceConfig::DEFAULT_IMGSZ)
+                .unwrap_or(task_default)
         };
 
         // Update config with resolved values
@@ -1087,9 +1091,13 @@ impl YOLOModel {
     /// Get the model's input size.
     #[must_use]
     pub fn imgsz(&self) -> (usize, usize) {
-        self.metadata
+        self.config
             .imgsz
-            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ)
+            .or(self.metadata.imgsz)
+            .unwrap_or_else(|| match self.metadata.task {
+                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
+                _ => InferenceConfig::DEFAULT_IMGSZ,
+            })
     }
 
     /// Get the model's stride.
