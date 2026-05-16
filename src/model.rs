@@ -1246,7 +1246,7 @@ mod tests {
         ));
     }
 
-    // Any unrecognised `CoreML` error must propagate.
+    // Any unrecognized `CoreML` error must propagate.
     #[test]
     fn test_warmup_unrecognised_coreml_error_propagates() {
         assert!(!is_benign_coreml_warmup_error(
