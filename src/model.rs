@@ -1149,7 +1149,7 @@ impl std::fmt::Debug for YOLOModel {
     }
 }
 
-/// Returns true if `err` is the benign GatherElements out-of-range error that CoreML produces
+/// Returns true if `err` is the benign `GatherElements` out-of-range error that `CoreML` produces
 /// on all-zeros dummy input (issue #148). All other errors, including `graph_input_cast_0`,
 /// must propagate so callers see real failures.
 fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
