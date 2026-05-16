@@ -32,11 +32,14 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Format
+        run: cargo fmt --all -- --check
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
-      - name: Format
-        run: cargo fmt --all -- --check
+      - name: Ensure toolchain
+        run: rustup show
 
       - name: Clippy (annotate feature)
         run: cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
@@ -75,6 +78,9 @@ jobs:
           # Key on ffmpeg version so each container gets its own cache
           key: ffmpeg-${{ matrix.ffmpeg_version }}
 
+      - name: Ensure toolchain
+        run: rustup show
+
       - name: Clippy (annotate + video)
         run: cargo clippy --all --features annotate,video -- -D warnings
 
@@ -97,6 +103,9 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Ensure toolchain
+        run: rustup show
 
       - name: Build (annotate + video features)
         run: cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
@@ -141,6 +150,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Ensure toolchain
+        run: rustup show
+
       - name: Build (annotate + video features)
         run: cargo build --features annotate,video
 
@@ -162,6 +174,9 @@ jobs:
       # Nightly toolchain version in rustc -V already gives this job a unique cache key
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Ensure toolchain
+        run: rustup show
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@184183c2401be73c3bf42c2e61268aa5855379c1 # v2.78.1
