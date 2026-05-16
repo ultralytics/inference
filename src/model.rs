@@ -155,8 +155,12 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "coreml")]
                 crate::Device::CoreMl => {
-                    eps.push(Self::build_coreml_ep(path));
-                    provider_name = "CoreMLExecutionProvider";
+                    if matches!(Self::macos_version(), Some((major, _)) if major < 11) {
+                        warn!("WARNING ⚠️  CoreML requires macOS 11+; falling back to CPU.");
+                    } else {
+                        eps.push(Self::build_coreml_ep(path));
+                        provider_name = "CoreMLExecutionProvider";
+                    }
                 }
                 #[cfg(feature = "tensorrt")]
                 crate::Device::TensorRt(i) => {
@@ -222,7 +226,7 @@ impl YOLOModel {
             }
 
             #[cfg(feature = "coreml")]
-            {
+            if !matches!(Self::macos_version(), Some((major, _)) if major < 11) {
                 eps.push(Self::build_coreml_ep(path));
                 if provider_name == "CPUExecutionProvider" {
                     provider_name = "CoreMLExecutionProvider";
@@ -433,9 +437,6 @@ impl YOLOModel {
     #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
         use ort::execution_providers::coreml::ModelFormat;
-        if matches!(Self::macos_version(), Some((major, _)) if major < 11) {
-            warn!("WARNING ⚠️  CoreML requires macOS 11+; falling back to CPU.");
-        }
         let format = ModelFormat::NeuralNetwork;
         let mut ep =
             ort::execution_providers::CoreMLExecutionProvider::default().with_model_format(format);
@@ -509,11 +510,7 @@ impl YOLOModel {
 
         if let Err(e) = warmup_result {
             let msg = e.to_string();
-            // CoreML + all-zeros input: GatherElements out-of-range in the DFL head is benign.
-            if self.execution_provider != "CoreMLExecutionProvider"
-                || !msg.contains("GatherElements")
-                || !msg.contains("Out of range")
-            {
+            if !is_benign_coreml_warmup_error(&self.execution_provider, &msg) {
                 return Err(e);
             }
         }
@@ -1152,6 +1149,15 @@ impl std::fmt::Debug for YOLOModel {
     }
 }
 
+/// Returns true if `err` is the benign GatherElements out-of-range error that CoreML produces
+/// on all-zeros dummy input (issue #148). All other errors, including `graph_input_cast_0`,
+/// must propagate so callers see real failures.
+fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
+    provider == "CoreMLExecutionProvider"
+        && msg.contains("GatherElements")
+        && msg.contains("Out of range")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1202,13 +1208,6 @@ mod tests {
             assert!(debug_str.contains("task"));
             assert!(debug_str.contains("num_classes"));
         }
-    }
-
-    // Mirrors the suppression condition in warmup() so we can test it without a real session.
-    fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
-        provider == "CoreMLExecutionProvider"
-            && msg.contains("GatherElements")
-            && msg.contains("Out of range")
     }
 
     // Issue #148 , PR #149: GatherElements out-of-range on an all-zeros dummy input is benign
