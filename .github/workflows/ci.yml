@@ -42,10 +42,25 @@ jobs:
         run: rustup show
 
       - name: Clippy (annotate feature)
+        if: matrix.os != 'macos-latest'
         run: cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
 
       - name: Tests (annotate feature)
+        if: matrix.os != 'macos-latest'
         run: cargo test --no-default-features --features annotate
+
+      # CoreML is macOS-only — covers issue #148 (GatherElements warmup) and graph_input_cast_0 fix
+      - name: Clippy (coreml + annotate)
+        if: matrix.os == 'macos-latest'
+        run: cargo clippy --all-targets --no-default-features --features "coreml,annotate" -- -D warnings
+
+      - name: Tests (coreml + annotate)
+        if: matrix.os == 'macos-latest'
+        run: cargo test --no-default-features --features "coreml,annotate"
+
+      - name: Integration tests (all, including ignored)
+        if: matrix.os == 'macos-latest'
+        run: cargo test --no-default-features --features "coreml,annotate" --test integration_test -- --include-ignored
 
   # Video feature tests for Linux - FFmpeg 7 and 8
   test-video:
