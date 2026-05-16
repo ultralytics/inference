@@ -1259,7 +1259,10 @@ mod tests {
     #[test]
     fn test_macos_version_parses_on_macos() {
         let version = YOLOModel::macos_version();
-        assert!(version.is_some(), "macos_version() must return Some on macOS");
+        assert!(
+            version.is_some(),
+            "macos_version() must return Some on macOS"
+        );
         let (major, _minor) = version.unwrap();
         assert!(major >= 10, "macOS major version should be >= 10");
     }
