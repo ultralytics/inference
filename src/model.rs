@@ -1211,8 +1211,8 @@ mod tests {
             && msg.contains("Out of range")
     }
 
-    // Issue #148 / PR #149: GatherElements out-of-range on an all-zeros dummy input is benign
-    // during CoreML warmup (the DFL head produces invalid gather indices for zero activations).
+    // Issue #148 , PR #149: GatherElements out-of-range on an all-zeros dummy input is benign
+    // during `CoreML` warmup (the DFL head produces invalid gather indices for zero activations).
     #[test]
     fn test_warmup_gather_elements_suppressed_for_coreml() {
         assert!(is_benign_coreml_warmup_error(
