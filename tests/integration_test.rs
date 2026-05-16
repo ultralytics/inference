@@ -13,7 +13,7 @@ use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
 #[cfg(feature = "coreml")]
 use ultralytics_inference::{Device, YOLOModel};
 
-/// End-to-end CoreML test covering two known regressions:
+/// End-to-end `CoreML` test covering two known regressions:
 ///
 /// 1. **Issue #148 / PR #149** — `GatherElements op: Out of range` during warmup.
 ///    `CoreML`'s DFL head produces out-of-range gather indices on an all-zeros dummy input.
