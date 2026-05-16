@@ -437,11 +437,11 @@ impl YOLOModel {
     #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
         use ort::execution_providers::coreml::ModelFormat;
-        // MLProgram (macOS 12+) causes ORT's CoreML EP to insert a FP32→FP16 cast node at
-        // graph input, renaming it from the ONNX name (e.g. "images") to "graph_input_cast_0".
-        // ORT then feeds the tensor by the original name, which CoreML can't find → crash.
-        // NeuralNetwork (Core ML 3, macOS 10.15+) avoids the rename and supports FP16 inputs
-        // natively — confirmed working with both FP32 and FP16 YOLO ONNX models on macOS 12+.
+        // `MLProgram` (macOS 12+) causes ORT's `CoreML` EP to insert a FP32→FP16 cast node at
+        // graph input, renaming it from the `ONNX` name (e.g. "images") to "graph_input_cast_0".
+        // ORT then feeds the tensor by the original name, which `CoreML` can't find → crash.
+        // `NeuralNetwork` (`CoreML` 3, macOS 10.15+) avoids the rename and supports FP16 inputs
+        // natively — confirmed working with both `FP32` and `FP16` `YOLO` `ONNX` models on macOS 12+.
         let format = ModelFormat::NeuralNetwork;
         let mut ep =
             ort::execution_providers::CoreMLExecutionProvider::default().with_model_format(format);
