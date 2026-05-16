@@ -1234,9 +1234,9 @@ mod tests {
         ));
     }
 
-    // graph_input_cast_0 is a real CoreML misconfiguration (MLProgram adds a cast node that
+    // graph_input_cast_0 is a real `CoreML` misconfiguration (MLProgram adds a cast node that
     // renames the ONNX input). It must propagate so the caller sees the failure.
-    // The fix (NeuralNetwork format) prevents this error from occurring at all, but it must
+    // The fix (`NeuralNetwork` format) prevents this error from occurring at all, but it must
     // never be silently swallowed if it somehow reappears.
     #[test]
     fn test_warmup_graph_input_cast_error_propagates() {
@@ -1246,12 +1246,12 @@ mod tests {
         ));
     }
 
-    // Any unrecognized CoreML error must propagate.
+    // Any unrecognised `CoreML` error must propagate.
     #[test]
     fn test_warmup_unrecognised_coreml_error_propagates() {
         assert!(!is_benign_coreml_warmup_error(
             "CoreMLExecutionProvider",
-            "Some unexpected CoreML error"
+            "Some unexpected `CoreML` error"
         ));
     }
 
