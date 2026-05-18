@@ -54,6 +54,29 @@ impl Speed {
     }
 }
 
+/// Per-pixel class label map for semantic segmentation.
+#[derive(Debug, Clone)]
+pub struct SemanticMask {
+    /// Class index for each pixel, shape [H, W].
+    pub data: Array2<u32>,
+    /// Original image shape (height, width).
+    pub orig_shape: (u32, u32),
+}
+
+impl SemanticMask {
+    /// Create a new `SemanticMask`.
+    #[must_use]
+    pub fn new(data: Array2<u32>, orig_shape: (u32, u32)) -> Self {
+        Self { data, orig_shape }
+    }
+
+    /// Get the original image shape (height, width).
+    #[must_use]
+    pub const fn orig_shape(&self) -> (u32, u32) {
+        self.orig_shape
+    }
+}
+
 /// Main results container for YOLO inference.
 ///
 /// Contains the original image, detection results (boxes, masks, keypoints, etc.), timing information, and metadata.
@@ -75,6 +98,8 @@ pub struct Results {
     pub probs: Option<Probs>,
     /// Oriented bounding boxes (if applicable).
     pub obb: Option<Obb>,
+    /// Semantic segmentation class map (if applicable).
+    pub semantic_mask: Option<SemanticMask>,
     /// Inference timing information.
     pub speed: Speed,
     /// Class ID to name mapping.
@@ -118,6 +143,7 @@ impl Results {
             keypoints: None,
             probs: None,
             obb: None,
+            semantic_mask: None,
             speed,
             names,
             path,
@@ -145,6 +171,9 @@ impl Results {
         }
         if let Some(ref obb) = self.obb {
             return obb.len();
+        }
+        if self.semantic_mask.is_some() {
+            return 1;
         }
         0
     }
