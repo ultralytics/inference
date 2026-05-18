@@ -21,11 +21,12 @@ use wide::{CmpGt, f32x8};
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
+use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Axis, Zip, s};
+use rayon::prelude::*;
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
-use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, Speed};
+use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
 use crate::utils::{nms_per_class, nms_rotated_per_class};
 
@@ -163,6 +164,10 @@ pub fn postprocess(
         Task::Classify => {
             let (output, _) = &outputs[0];
             postprocess_classify(output, names, orig_img, path, speed, inference_shape)
+        }
+        Task::SemSeg => {
+            let (output, shape) = &outputs[0];
+            postprocess_semseg(output, shape, names, orig_img, path, speed, inference_shape)
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];
@@ -1753,6 +1758,104 @@ fn postprocess_obb_end2end(
     let n = flat.len() / 7;
     let obb_data = Array2::from_shape_vec((n, 7), flat).expect("flat length matches (n, 7)");
     results.obb = Some(Obb::new(obb_data, preprocess.orig_shape));
+    results
+}
+
+/// Post-process semantic segmentation model output.
+///
+/// The model outputs raw logits of shape `[1, nc, lh, lw]` at the P3 scale
+/// (stride 8).  Postprocessing:
+/// 1. Crops bottom/right padding from logit space (non-centered letterbox).
+/// 2. Bilinear-upsamples each channel from the cropped logit size to the
+///    original image dimensions.
+/// 3. Takes argmax over the class channel to produce a `[H, W]` label map.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+fn postprocess_semseg(
+    output: &[f32],
+    shape: &[usize],
+    names: &HashMap<usize, String>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+) -> Results {
+    let mut results = Results::new(orig_img.clone(), path, names.clone(), speed, inference_shape);
+
+    if shape.len() < 4 || output.is_empty() {
+        return results;
+    }
+
+    let nc = shape[1];
+    let lh = shape[2];
+    let lw = shape[3];
+    let oh = orig_img.shape()[0];
+    let ow = orig_img.shape()[1];
+
+    if nc == 0 || lh == 0 || lw == 0 || oh == 0 || ow == 0 {
+        return results;
+    }
+
+    // Compute how much of the logit space covers the original image.
+    // Non-centered (top-left) letterbox: content starts at (0, 0).
+    let gain = (lh as f32 / oh as f32).min(lw as f32 / ow as f32);
+    let crop_h = (oh as f32 * gain).round() as usize;
+    let crop_w = (ow as f32 * gain).round() as usize;
+    let crop_h = crop_h.min(lh);
+    let crop_w = crop_w.min(lw);
+
+    // Bilinear upsample logits from (crop_h, crop_w) to (oh, ow), then argmax.
+    // Each output row is independent, so we parallelise over rows with rayon.
+    let scale_y = crop_h as f32 / oh as f32;
+    let scale_x = crop_w as f32 / ow as f32;
+
+    let mut class_map = Array2::<u32>::zeros((oh, ow));
+
+    class_map
+        .axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(dy, mut row)| {
+            let sy = ((dy as f32 + 0.5) * scale_y - 0.5).max(0.0);
+            let y0 = sy.floor() as usize;
+            let y1 = (y0 + 1).min(lh - 1);
+            let fy = sy - y0 as f32;
+            let fyi = 1.0 - fy;
+
+            for (dx, cell) in row.iter_mut().enumerate() {
+                let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
+                let x0 = sx.floor() as usize;
+                let x1 = (x0 + 1).min(lw - 1);
+                let fx = sx - x0 as f32;
+                let fxi = 1.0 - fx;
+
+                let w00 = fyi * fxi;
+                let w10 = fy * fxi;
+                let w01 = fyi * fx;
+                let w11 = fy * fx;
+
+                let mut best_cls = 0u32;
+                let mut best_val = f32::NEG_INFINITY;
+
+                for c in 0..nc {
+                    let base = c * lh * lw;
+                    let v = output[base + y0 * lw + x0] * w00
+                        + output[base + y1 * lw + x0] * w10
+                        + output[base + y0 * lw + x1] * w01
+                        + output[base + y1 * lw + x1] * w11;
+                    if v > best_val {
+                        best_val = v;
+                        best_cls = c as u32;
+                    }
+                }
+
+                *cell = best_cls;
+            }
+        });
+
+    results.semantic_mask = Some(SemanticMask::new(
+        class_map,
+        (oh as u32, ow as u32),
+    ));
     results
 }
 
