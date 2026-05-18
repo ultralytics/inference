@@ -162,6 +162,7 @@ pub fn annotate_image(
         .and_then(|data| FontRef::try_from_slice(data).ok());
 
     // Draw all annotations using helpers
+    draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref());
     draw_pose(&mut img, result, None, None, None);
     draw_obb(&mut img, result, font.as_ref());
@@ -250,6 +251,24 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
             {
                 img.put_pixel(x as u32, y as u32, color);
             }
+        }
+    }
+}
+
+/// Overlay semantic segmentation class colors at 50% alpha.
+fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
+    let Some(ref semantic_mask) = result.semantic_mask else {
+        return;
+    };
+    let (width, height) = img.dimensions();
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let class_id = semantic_mask.data[[y, x]] as usize;
+            let color = COLORS[class_id % COLORS.len()];
+            let pixel = img.get_pixel_mut(x as u32, y as u32);
+            pixel[0] = (pixel[0] / 2).saturating_add(color[0] / 2);
+            pixel[1] = (pixel[1] / 2).saturating_add(color[1] / 2);
+            pixel[2] = (pixel[2] / 2).saturating_add(color[2] / 2);
         }
     }
 }
