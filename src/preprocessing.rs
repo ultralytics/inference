@@ -95,6 +95,110 @@ pub struct PreprocessResult {
     pub padding: (f32, f32),
 }
 
+/// Preprocess an image for semantic segmentation inference.
+///
+/// Dynamic models: short-side scaling so the shorter dimension equals
+/// `target_size.0`, with stride-aligned padding appended at the bottom/right only.
+///
+/// Static models: fit-within-target letterbox to exactly `target_size` with
+/// top-left alignment (padding at the bottom/right only, matching Python's
+/// `center=False` letterbox).
+///
+/// # Arguments
+///
+/// * `image` - Input image.
+/// * `target_size` - `(height, width)` of the model input tensor.
+/// * `stride` - Model stride for padding alignment (typically 32).
+/// * `half` - If true, also generate an FP16 tensor.
+/// * `is_dynamic` - True for dynamic-shape ONNX; false for a fixed-shape export.
+///
+/// # Returns
+///
+/// Preprocessed tensor and transform information for post-processing.
+#[must_use]
+pub fn preprocess_image_semseg(
+    image: &DynamicImage,
+    target_size: (usize, usize),
+    stride: u32,
+    half: bool,
+    is_dynamic: bool,
+) -> PreprocessResult {
+    let (orig_width, orig_height) = image.dimensions();
+    let orig_shape = (orig_height, orig_width);
+    let stride_usize = stride as usize;
+
+    #[allow(clippy::cast_precision_loss)]
+    let orig_h = orig_height as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let orig_w = orig_width as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let (target_h_f, target_w_f) = (target_size.0 as f32, target_size.1 as f32);
+
+    let (target_size, new_h, new_w, scale) = if is_dynamic {
+        // Short-side scaling: scale so the shorter dimension equals target_size.0,
+        // then round the longer side up to the nearest stride multiple.
+        let scale = target_h_f / orig_h.min(orig_w);
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let (nh, nw) = if orig_h <= orig_w {
+            (target_size.0, (orig_w * scale).round() as usize)
+        } else {
+            ((orig_h * scale).round() as usize, target_size.0)
+        };
+        let ph = ((nh + stride_usize - 1) / stride_usize) * stride_usize;
+        let pw = ((nw + stride_usize - 1) / stride_usize) * stride_usize;
+        ((ph, pw), nh, nw, scale)
+    } else {
+        // Fit-within-target letterbox: scale to fit inside target_size,
+        // pad the remainder at the bottom/right only (center=False).
+        let scale = (target_h_f / orig_h).min(target_w_f / orig_w);
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let nh = (orig_h * scale).round() as usize;
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let nw = (orig_w * scale).round() as usize;
+        (target_size, nh, nw, scale)
+    };
+
+    let tensor = match image {
+        DynamicImage::ImageRgb8(rgb) => fused_zerocopy_preprocess(
+            rgb.as_raw(),
+            orig_width,
+            orig_height,
+            target_size,
+            0,
+            0,
+            new_w as u32,
+            new_h as u32,
+        ),
+        _ => {
+            let src_rgb = image.to_rgb8();
+            fused_zerocopy_preprocess(
+                src_rgb.as_raw(),
+                orig_width,
+                orig_height,
+                target_size,
+                0,
+                0,
+                new_w as u32,
+                new_h as u32,
+            )
+        }
+    };
+
+    let tensor_f16 = if half {
+        Some(tensor_f32_to_f16(&tensor))
+    } else {
+        None
+    };
+
+    PreprocessResult {
+        tensor,
+        tensor_f16,
+        orig_shape,
+        scale: (scale, scale),
+        padding: (0.0, 0.0),
+    }
+}
+
 /// Preprocess an image for YOLO inference.
 ///
 /// Performs letterbox resizing, BGR to RGB conversion (if needed),
