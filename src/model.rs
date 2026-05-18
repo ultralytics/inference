@@ -155,13 +155,12 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "coreml")]
                 crate::Device::CoreMl => {
-                    eps.push(Self::build_coreml_ep(path));
-                    provider_name = "CoreMLExecutionProvider";
-                }
-                #[cfg(feature = "coreml")]
-                crate::Device::Mps => {
-                    eps.push(Self::build_coreml_gpu_ep(path));
-                    provider_name = "CoreMLExecutionProvider";
+                    if matches!(Self::macos_version(), Some((major, _)) if major >= 11) {
+                        eps.push(Self::build_coreml_ep(path));
+                        provider_name = "CoreMLExecutionProvider";
+                    } else {
+                        warn!("WARNING ⚠️  CoreML requires macOS 11+; falling back to CPU.");
+                    }
                 }
                 #[cfg(feature = "tensorrt")]
                 crate::Device::TensorRt(i) => {
@@ -227,7 +226,7 @@ impl YOLOModel {
             }
 
             #[cfg(feature = "coreml")]
-            {
+            if matches!(Self::macos_version(), Some((major, _)) if major >= 11) {
                 eps.push(Self::build_coreml_ep(path));
                 if provider_name == "CPUExecutionProvider" {
                     provider_name = "CoreMLExecutionProvider";
@@ -348,12 +347,16 @@ impl YOLOModel {
         } else if is_dynamic {
             // Dynamic input without metadata -> apply robust defaults
             match metadata.task {
-                Task::Obb => (1024, 1024),
-                _ => (640, 640),
+                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
+                _ => InferenceConfig::DEFAULT_IMGSZ,
             }
         } else {
             // Static input without metadata -> try to read from tensor shape
             // Typically [1, 3, H, W]
+            let task_default = match metadata.task {
+                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
+                _ => InferenceConfig::DEFAULT_IMGSZ,
+            };
             input_info
                 .and_then(|i| {
                     if let ValueType::Tensor { shape, .. } = i.dtype() {
@@ -367,7 +370,7 @@ impl YOLOModel {
                         None
                     }
                 })
-                .unwrap_or((640, 640))
+                .unwrap_or(task_default)
         };
 
         // Update config with resolved values
@@ -418,29 +421,28 @@ impl YOLOModel {
     }
 
     #[cfg(feature = "coreml")]
+    fn macos_version() -> Option<(u32, u32)> {
+        let out = std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()?;
+        let s = std::str::from_utf8(&out.stdout).ok()?.trim();
+        let mut p = s.split('.');
+        Some((
+            p.next()?.parse().ok()?,
+            p.next().unwrap_or("0").parse().ok()?,
+        ))
+    }
+
+    #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
-        Self::build_coreml_ep_inner(model_path, false)
-    }
+        use ort::ep::coreml::ModelFormat;
 
-    #[cfg(feature = "coreml")]
-    fn build_coreml_gpu_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
-        Self::build_coreml_ep_inner(model_path, true)
-    }
-
-    #[cfg(feature = "coreml")]
-    fn build_coreml_ep_inner(model_path: &Path, gpu: bool) -> ort::execution_providers::ExecutionProviderDispatch {
-        use ort::ep::coreml::{ComputeUnits, ModelFormat, SpecializationStrategy};
-
+        // NeuralNetwork avoids the ORT CoreML EP input-rename bug that MLProgram triggers:
+        // MLProgram inserts a FP32→FP16 cast and renames "images" → "graph_input_cast_0",
+        // causing ORT's feed to fail at runtime.
         let mut ep = ort::execution_providers::CoreMLExecutionProvider::default()
-            .with_model_format(ModelFormat::MLProgram)
-            .with_specialization_strategy(SpecializationStrategy::FastPrediction)
-            .with_static_input_shapes(true);
-
-        if gpu {
-            ep = ep
-                .with_compute_units(ComputeUnits::CPUAndGPU)
-                .with_low_precision_accumulation_on_gpu(true);
-        }
+            .with_model_format(ModelFormat::NeuralNetwork);
 
         if let Some(cache_base) = dirs::cache_dir() {
             let canonical = model_path
@@ -448,8 +450,7 @@ impl YOLOModel {
                 .unwrap_or_else(|_| model_path.to_path_buf());
             let stem = canonical
                 .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "model".to_owned());
+                .map_or_else(|| "model".to_owned(), |s| s.to_string_lossy().into_owned());
             let hash = canonical
                 .as_os_str()
                 .as_encoded_bytes()
@@ -457,11 +458,10 @@ impl YOLOModel {
                 .fold(14_695_981_039_346_656_037u64, |h, &b| {
                     h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
                 });
-            let variant = if gpu { "gpu" } else { "ane" };
             let cache_dir = cache_base
                 .join("ultralytics-inference")
                 .join("coreml")
-                .join(format!("{stem}_{hash:016x}_{variant}"));
+                .join(format!("{stem}_{hash:016x}_neuralnet"));
             if std::fs::create_dir_all(&cache_dir).is_ok() {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
@@ -485,7 +485,7 @@ impl YOLOModel {
             .config
             .imgsz
             .or(self.metadata.imgsz)
-            .unwrap_or((640, 640));
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
 
         // Sanity check to prevent huge allocations from invalid imgsz
         if target_size.0 > Self::MAX_IMGSZ || target_size.1 > Self::MAX_IMGSZ {
@@ -498,14 +498,21 @@ impl YOLOModel {
             )));
         }
 
-        if self.fp16_input {
-            // Use FP16 dummy input if model expects FP16
+        let warmup_result = if self.fp16_input {
             let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            self.run_inference_f16(&dummy_input)?;
+            self.run_inference_f16(&dummy_input)
         } else {
             let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            self.run_inference(&dummy_input)?;
+            self.run_inference(&dummy_input)
+        };
+
+        if let Err(e) = warmup_result {
+            let msg = e.to_string();
+            if !is_benign_coreml_warmup_error(&self.execution_provider, &msg) {
+                return Err(e);
+            }
         }
+
         self.warmed_up = true;
         Ok(())
     }
@@ -669,7 +676,7 @@ impl YOLOModel {
             .config
             .imgsz
             .or(self.metadata.imgsz)
-            .unwrap_or((640, 640));
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
 
         // Check if target_size is divisible by stride (one-time warning logic per batch call)
         // We only warn if the configured size itself is not divisible.
@@ -1078,7 +1085,13 @@ impl YOLOModel {
     /// Get the model's input size.
     #[must_use]
     pub fn imgsz(&self) -> (usize, usize) {
-        self.metadata.imgsz.unwrap_or((640, 640))
+        self.config
+            .imgsz
+            .or(self.metadata.imgsz)
+            .unwrap_or(match self.metadata.task {
+                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
+                _ => InferenceConfig::DEFAULT_IMGSZ,
+            })
     }
 
     /// Get the model's stride.
@@ -1142,6 +1155,15 @@ impl std::fmt::Debug for YOLOModel {
     }
 }
 
+/// Returns true if `err` is the benign `GatherElements` out-of-range error that `CoreML` produces
+/// on all-zeros dummy input (issue #148). All other errors, including `graph_input_cast_0`,
+/// must propagate so callers see real failures.
+fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
+    provider == "CoreMLExecutionProvider"
+        && msg.contains("GatherElements")
+        && msg.contains("Out of range")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1192,5 +1214,61 @@ mod tests {
             assert!(debug_str.contains("task"));
             assert!(debug_str.contains("num_classes"));
         }
+    }
+
+    // Issue #148 , PR #149: GatherElements out-of-range on an all-zeros dummy input is benign
+    // during `CoreML` warmup (the DFL head produces invalid gather indices for zero activations).
+    #[test]
+    fn test_warmup_gather_elements_suppressed_for_coreml() {
+        assert!(is_benign_coreml_warmup_error(
+            "CoreMLExecutionProvider",
+            "GatherElements op: Out of range value in index tensor"
+        ));
+    }
+
+    // The same GatherElements error on CPU/CUDA is a real bug and must not be hidden.
+    #[test]
+    fn test_warmup_gather_elements_propagates_for_other_providers() {
+        assert!(!is_benign_coreml_warmup_error(
+            "CPUExecutionProvider",
+            "GatherElements op: Out of range value in index tensor"
+        ));
+        assert!(!is_benign_coreml_warmup_error(
+            "CUDAExecutionProvider",
+            "GatherElements op: Out of range value in index tensor"
+        ));
+    }
+
+    // graph_input_cast_0 is a real `CoreML` misconfiguration (MLProgram adds a cast node that
+    // renames the ONNX input). It must propagate so the caller sees the failure.
+    // The fix (`NeuralNetwork` format) prevents this error from occurring at all, but it must
+    // never be silently swallowed if it somehow reappears.
+    #[test]
+    fn test_warmup_graph_input_cast_error_propagates() {
+        assert!(!is_benign_coreml_warmup_error(
+            "CoreMLExecutionProvider",
+            "Feature graph_input_cast_0 is required but not specified"
+        ));
+    }
+
+    // Any unrecognized `CoreML` error must propagate.
+    #[test]
+    fn test_warmup_unrecognised_coreml_error_propagates() {
+        assert!(!is_benign_coreml_warmup_error(
+            "CoreMLExecutionProvider",
+            "Some unexpected `CoreML` error"
+        ));
+    }
+
+    #[cfg(all(feature = "coreml", target_os = "macos"))]
+    #[test]
+    fn test_macos_version_parses_on_macos() {
+        let version = YOLOModel::macos_version();
+        assert!(
+            version.is_some(),
+            "macos_version() must return Some on macOS"
+        );
+        let (major, _minor) = version.unwrap();
+        assert!(major >= 10, "macOS major version should be >= 10");
     }
 }

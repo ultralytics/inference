@@ -1,6 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 #![allow(clippy::multiple_crate_versions)]
+#![deny(dead_code)]
 
 //! Ultralytics YOLO Inference CLI
 //!
@@ -25,8 +26,7 @@ use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::logging::set_verbose;
 
 /// Entry point for the Ultralytics YOLO Inference CLI.
-#[allow(clippy::unnecessary_wraps)]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     ultralytics_inference::io::init_logging();
 
     #[cfg(debug_assertions)]
@@ -47,5 +47,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
-    Ok(())
 }

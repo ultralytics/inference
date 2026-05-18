@@ -599,6 +599,69 @@ fn extract_detect_boxes(
     result
 }
 
+/// Shared sigmoid -> resize -> bbox-mask pipeline used by both segment post-processors.
+///
+/// Applies sigmoid to `mask_flat`, resizes from the prototype grid (`mw×mh`) to the
+/// original image size (`ow×oh`) with a letterbox crop, then zeros pixels outside the
+/// bounding box stored in `box_data[0..4]` (x1, y1, x2, y2).
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+fn apply_mask_proto(
+    mut mask_out: ArrayViewMut2<f32>,
+    mask_flat: &ArrayView1<f32>,
+    box_data: &ArrayView1<f32>,
+    mw: usize,
+    mh: usize,
+    ow: u32,
+    oh: u32,
+    crop_x: f32,
+    crop_y: f32,
+    crop_w: f32,
+    crop_h: f32,
+) {
+    let mut resizer = Resizer::new();
+    let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
+
+    let f32_data: Vec<f32> = mask_flat
+        .iter()
+        .map(|&v| 1.0 / (1.0 + (-v).exp()))
+        .collect();
+    let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+    let Ok(src_image) =
+        Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32)
+    else {
+        return;
+    };
+
+    let mut dst_image = Image::new(ow, oh, PixelType::F32);
+    let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+        f64::from(crop_x.max(0.0)),
+        f64::from(crop_y.max(0.0)),
+        f64::from(crop_w.max(1.0).min(mw as f32)),
+        f64::from(crop_h.max(1.0).min(mh as f32)),
+    );
+    if resizer
+        .resize(&src_image, &mut dst_image, &options)
+        .is_err()
+    {
+        return;
+    }
+
+    let dst_slice: &[f32] = bytemuck::cast_slice(dst_image.buffer());
+    let x1 = box_data[0].max(0.0).min(ow as f32);
+    let y1 = box_data[1].max(0.0).min(oh as f32);
+    let x2 = box_data[2].max(0.0).min(ow as f32);
+    let y2 = box_data[3].max(0.0).min(oh as f32);
+
+    for y in 0..oh as usize {
+        for x in 0..ow as usize {
+            let val = dst_slice[y * ow as usize + x];
+            if x as f32 >= x1 && x as f32 <= x2 && y as f32 >= y1 && y as f32 <= y2 {
+                mask_out[[y, x]] = val;
+            }
+        }
+    }
+}
+
 /// Post-process segmentation model output.
 ///
 /// Generates bounding boxes and segmentation masks from the model output.
@@ -650,12 +713,11 @@ fn postprocess_segment(
     let (output0, shape0) = &outputs[0];
     let (output1, shape1) = &outputs[1];
 
-    // output0: [1, 4 + nc + 32, 8400]
-    // output1: [1, 32, 160, 160] (protos)
+    // output0: [1, 4 + nc + nm, 8400]
+    // output1: [1, nm, 160, 160] (protos)
 
-    // 1. Process Detections
-    // Standard segmentation models use 32 mask prototypes
-    let num_masks = 32;
+    // Derive nm from the protos tensor so non-default prototype counts work correctly.
+    let num_masks = if shape1.len() == 4 { shape1[1] } else { 32 };
     let expected_features = 4 + names.len() + num_masks;
 
     // Manual shape check
@@ -741,7 +803,6 @@ fn postprocess_segment(
     let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
     let num_kept = keep_indices.len().min(config.max_det);
 
-    // 2. Extract Box Results
     let mut boxes_data = Array2::zeros((num_kept, 6));
     let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
 
@@ -764,7 +825,6 @@ fn postprocess_segment(
 
     results.boxes = Some(Boxes::new(boxes_data.clone(), preprocess.orig_shape));
 
-    // 3. Process Masks
     // Protos: [1, 32, 160, 160] -> [32, 25600]
     // Validate protos shape before indexing to prevent panic
     if shape1.len() < 4 {
@@ -812,91 +872,14 @@ fn postprocess_segment(
     // Initialize output array
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
 
-    // Process each mask in parallel using Rayon and ndarray::Zip.
-    // Each thread handles resizing and cropping for one mask.
-    //
-    // Inputs:
-    // - mask_out: Mutable view into output masks array
-    // - mask_flat: Mask coefficients for the detection
-    // - box_data: Bounding box for the detection
     Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
         .and(boxes_data.outer_iter())
-        .par_for_each(
-            |mut mask_out: ArrayViewMut2<f32>,
-             mask_flat: ArrayView1<f32>,
-             box_data: ArrayView1<f32>| {
-                // Create a local resizer for each task (Resizer is not Sync)
-                let mut resizer = Resizer::new();
-                let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
-
-                // Sigmoid into a Vec<f32>
-                let f32_data: Vec<f32> = mask_flat
-                    .iter()
-                    .map(|&val| 1.0 / (1.0 + (-val).exp()))
-                    .collect();
-
-                // Use bytemuck for efficient f32->bytes conversion
-                let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-
-                // Create source image (160x160)
-                let src_image = match Image::from_vec_u8(
-                    mw as u32,
-                    mh as u32,
-                    src_bytes.to_vec(),
-                    PixelType::F32,
-                ) {
-                    Ok(img) => img,
-                    Err(_) => return, // Skip if creation fails
-                };
-
-                // Create dest image (orig_w x orig_h)
-                let mut dst_image = Image::new(ow, oh, PixelType::F32);
-
-                // Configure resize with crop
-                let safe_crop_x = f64::from(crop_x.max(0.0));
-                let safe_crop_y = f64::from(crop_y.max(0.0));
-                let safe_crop_w = f64::from(crop_w.max(1.0).min(mw as f32));
-                let safe_crop_h = f64::from(crop_h.max(1.0).min(mh as f32));
-
-                let options = ResizeOptions::new().resize_alg(resize_alg).crop(
-                    safe_crop_x,
-                    safe_crop_y,
-                    safe_crop_w,
-                    safe_crop_h,
-                );
-
-                // Handle resize errors gracefully
-                if resizer
-                    .resize(&src_image, &mut dst_image, &options)
-                    .is_err()
-                {
-                    return;
-                }
-
-                // Get resized data as f32 slice
-                let dst_bytes = dst_image.buffer();
-                let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
-
-                // Apply bbox cropping and store directly to output array
-                let x1 = box_data[0].max(0.0).min(ow as f32);
-                let y1 = box_data[1].max(0.0).min(oh as f32);
-                let x2 = box_data[2].max(0.0).min(ow as f32);
-                let y2 = box_data[3].max(0.0).min(oh as f32);
-
-                for y in 0..oh as usize {
-                    for x in 0..ow as usize {
-                        let val = dst_slice[y * ow as usize + x];
-                        let x_f = x as f32;
-                        let y_f = y as f32;
-                        // Apply bounding box mask: invalid pixels outside the box are zeroed.
-                        if x_f >= x1 && x_f <= x2 && y_f >= y1 && y_f <= y2 {
-                            mask_out[[y, x]] = val;
-                        }
-                    }
-                }
-            },
-        );
+        .par_for_each(|mask_out, mask_flat, box_data| {
+            apply_mask_proto(
+                mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+            );
+        });
 
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
@@ -1553,57 +1536,11 @@ fn postprocess_segment_end2end(
     Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
         .and(boxes_data.outer_iter())
-        .par_for_each(
-            |mut mask_out: ArrayViewMut2<f32>,
-             mask_flat: ArrayView1<f32>,
-             box_data: ArrayView1<f32>| {
-                let mut resizer = Resizer::new();
-                let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
-                let f32_data: Vec<f32> = mask_flat
-                    .iter()
-                    .map(|&v| 1.0 / (1.0 + (-v).exp()))
-                    .collect();
-                let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-                let src_image = match Image::from_vec_u8(
-                    mw as u32,
-                    mh as u32,
-                    src_bytes.to_vec(),
-                    PixelType::F32,
-                ) {
-                    Ok(i) => i,
-                    Err(_) => return,
-                };
-                let mut dst_image = Image::new(ow, oh, PixelType::F32);
-                let options = ResizeOptions::new().resize_alg(resize_alg).crop(
-                    f64::from(crop_x.max(0.0)),
-                    f64::from(crop_y.max(0.0)),
-                    f64::from(crop_w.max(1.0).min(mw as f32)),
-                    f64::from(crop_h.max(1.0).min(mh as f32)),
-                );
-                if resizer
-                    .resize(&src_image, &mut dst_image, &options)
-                    .is_err()
-                {
-                    return;
-                }
-                let dst_bytes = dst_image.buffer();
-                let dst_slice: &[f32] = bytemuck::cast_slice(dst_bytes);
-                let x1 = box_data[0].max(0.0).min(ow as f32);
-                let y1 = box_data[1].max(0.0).min(oh as f32);
-                let x2 = box_data[2].max(0.0).min(ow as f32);
-                let y2 = box_data[3].max(0.0).min(oh as f32);
-                for y in 0..oh as usize {
-                    for x in 0..ow as usize {
-                        let val = dst_slice[y * ow as usize + x];
-                        let xf = x as f32;
-                        let yf = y as f32;
-                        if xf >= x1 && xf <= x2 && yf >= y1 && yf <= y2 {
-                            mask_out[[y, x]] = val;
-                        }
-                    }
-                }
-            },
-        );
+        .par_for_each(|mask_out, mask_flat, box_data| {
+            apply_mask_proto(
+                mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+            );
+        });
 
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));

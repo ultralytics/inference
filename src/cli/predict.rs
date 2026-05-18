@@ -18,7 +18,7 @@ use crate::visualizer::Viewer;
 use image::GenericImageView;
 
 use crate::utils::pluralize;
-use crate::{InferenceConfig, Results, VERSION, YOLOModel};
+use crate::{DISPLAY_NAME, InferenceConfig, Results, VERSION, YOLOModel};
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
@@ -189,7 +189,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let device_str = {
         let provider = model.execution_provider();
         if provider.contains("CoreML") {
-            "MPS".to_string()
+            "CoreML".to_string()
         } else if provider.contains("CUDA") {
             "CUDA".to_string()
         } else if provider.contains("TensorRT") {
@@ -204,7 +204,7 @@ pub fn run_prediction(args: &PredictArgs) {
             "CPU".to_string()
         }
     };
-    println!("Ultralytics {VERSION} 🚀 Rust ONNX {precision} {device_str}");
+    println!("{DISPLAY_NAME} {VERSION} 🚀 Rust ONNX {precision} {device_str}");
     println!("Using ONNX Runtime {}", model.execution_provider());
 
     let imgsz = model.imgsz();
@@ -323,11 +323,10 @@ pub fn run_prediction(args: &PredictArgs) {
                         if save_dir.is_some() {
                             let annotated = annotate_image(img, &result, None);
 
-                            #[allow(clippy::collapsible_if)]
-                            if let Some(saver) = &mut result_saver {
-                                if let Err(e) = saver.save(is_video, meta, &annotated) {
-                                    error!("Failed to save result: {e}");
-                                }
+                            if let Some(saver) = &mut result_saver
+                                && let Err(e) = saver.save(is_video, meta, &annotated)
+                            {
+                                error!("Failed to save result: {e}");
                             }
                         }
 
@@ -345,8 +344,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
                             if viewer.is_none() {
                                 viewer = Some(
-                                    Viewer::new("Ultralytics Inference", view_width, view_height)
-                                        .unwrap(),
+                                    Viewer::new(DISPLAY_NAME, view_width, view_height).unwrap(),
                                 );
                             }
 
@@ -386,11 +384,10 @@ pub fn run_prediction(args: &PredictArgs) {
         batch_processor.flush();
     }
 
-    #[allow(clippy::collapsible_if)]
-    if let Some(saver) = result_saver {
-        if let Err(e) = saver.finish() {
-            error!("Failed to finish saving: {e}");
-        }
+    if let Some(saver) = result_saver
+        && let Err(e) = saver.finish()
+    {
+        error!("Failed to finish saving: {e}");
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)

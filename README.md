@@ -9,11 +9,11 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
 [![codecov](https://codecov.io/gh/ultralytics/inference/graph/badge.svg?token=AVE5n6yvnf)](https://codecov.io/gh/ultralytics/inference)
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
-[![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 
-[![Crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
-[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference)](https://docs.rs/ultralytics-inference)
-![Crates.io Total Downloads](https://img.shields.io/crates/d/ultralytics-inference)
+[![Crates.io](https://img.shields.io/crates/v/ultralytics-inference?logo=rust&logoColor=white&label=crates.io&color=CE422B)](https://crates.io/crates/ultralytics-inference)
+[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs)](https://docs.rs/ultralytics-inference)
+[![Downloads](https://img.shields.io/crates/d/ultralytics-inference?logo=rust&logoColor=white&label=downloads&color=CE422B)](https://crates.io/crates/ultralytics-inference)
+[![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&logoColor=white&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 
 ## ✨ Features
 
@@ -22,7 +22,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 🔧 **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
-- ⬇️ **Auto Download** - Automatically downloads YOLO11 and YOLO26 ONNX models (all sizes: n/s/m/l/x) when not found locally
+- ⬇️ **Auto Download** - Automatically downloads YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
@@ -103,9 +103,10 @@ ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
 # With explicit model (task is read from model metadata)
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
-# Auto-download any supported size (n/s/m/l/x)
+# Auto-download any supported size (n/s/m/l/x) across YOLO26, YOLO11, and YOLOv8
 ultralytics-inference predict --model yolo26l.onnx --source image.jpg
 ultralytics-inference predict --model yolo11x-seg.onnx --source image.jpg
+ultralytics-inference predict --model yolov8n.onnx --source image.jpg
 
 # On a directory of images
 ultralytics-inference predict --model yolo26n.onnx --source assets/
@@ -134,7 +135,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics 0.0.12 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.16 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -152,7 +153,7 @@ Results saved to runs/detect/predict1
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics 0.0.12 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.16 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -184,7 +185,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 | Option          | Short | Description                                                                                              | Default                                 |
 | --------------- | ----- | -------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name                                   | `yolo26n.onnx`                          |
+| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                            | `yolo26n.onnx`                          |
 | `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect`                                |
 | `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                       | `Task dependent Ultralytics URL assets` |
 | `--conf`        |       | Confidence threshold                                                                                     | `0.25`                                  |
@@ -197,7 +198,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                          | `true`                                  |
 | `--save-frames` |       | Save individual frames for video                                                                         | `false`                                 |
 | `--show`        |       | Display results in a window                                                                              | `false`                                 |
-| `--device`      |       | Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack)                             | `cpu`                                   |
+| `--device`      |       | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)                                  | `cpu`                                   |
 | `--verbose`     |       | Show verbose output                                                                                      | `true`                                  |
 | `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                              | all classes                             |
 
@@ -216,12 +217,13 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **Auto-downloadable models:**
 
-All YOLO11 and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five task variants are supported for auto-download:
+All YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five task variants are supported for auto-download:
 
 | Family | Variants                                                                        |
 | ------ | ------------------------------------------------------------------------------- |
 | YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
 | YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls` |
 
 **Source Options:**
 
@@ -241,7 +243,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.12"
+ultralytics-inference = "0.0.16"
 ```
 
 ```toml
@@ -319,7 +321,7 @@ if let Some(ref boxes) = result.boxes {
 use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Select a device (e.g., CUDA, MPS, CPU)
+    // Select a device (e.g., CUDA, CoreML, CPU)
     let device = Device::Cuda(0);
 
     // Configure the model to use this device
@@ -348,7 +350,7 @@ inference/
 │   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb)
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch processing pipeline
-│   ├── device.rs           # Device enum (CPU, CUDA, MPS, CoreML, etc.)
+│   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)
 │   ├── download.rs         # Model and asset downloading
 │   ├── annotate.rs         # Image annotation (bounding boxes, masks, keypoints)
 │   ├── io.rs               # Result saving (images, videos)
@@ -425,7 +427,7 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 | `lru`               | LRU cache for preprocessing LUT |
 | `wide`              | SIMD for fast preprocessing     |
 
-### Optional Dependencies (for `--save` feature)
+### Optional Dependencies (for the `annotate` feature)
 
 | Crate       | Purpose                        |
 | ----------- | ------------------------------ |
@@ -454,7 +456,7 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
-To build without annotation support (smaller binary):
+To build without annotation and visualization support (smaller binary):
 
 ```bash
 cargo build --release --no-default-features
@@ -513,7 +515,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Batch inference support
 - [x] Rectangular inference support and optimization
 - [x] Class filtering support
-- [x] Auto-download all YOLO11 and YOLO26 ONNX models (all sizes n/s/m/l/x, all tasks)
+- [x] Auto-download all YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes n/s/m/l/x, all tasks)
 - [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
 
 ### In Progress
@@ -523,19 +525,24 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 
 ## 💡 Contributing
 
-Ultralytics thrives on community collaboration! We deeply value your contributions.
+Ultralytics thrives on community collaboration, and we deeply value your contributions! Whether it's reporting bugs,
+suggesting features, or submitting code changes, your involvement is crucial.
 
 - **Report Issues**: Found a bug? [Open an issue](https://github.com/ultralytics/inference/issues)
 - **Feature Requests**: Have an idea? [Share it](https://github.com/ultralytics/inference/issues)
 - **Pull Requests**: Read our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) first
 - **Feedback**: Take our [Survey](https://www.ultralytics.com/survey?utm_source=github&utm_medium=social&utm_campaign=Survey)
 
-## 📄 License
+A heartfelt thank you 🙏 goes out to all our contributors! Your efforts help make Ultralytics tools better for everyone.
 
-Ultralytics offers two licensing options:
+[![Ultralytics open-source contributors](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
 
-- **AGPL-3.0 License**: Open-source license for students, researchers, and enthusiasts. See [LICENSE](LICENSE).
-- **Enterprise License**: For commercial applications. Contact [Ultralytics Licensing](https://www.ultralytics.com/license).
+## 📜 License
+
+Ultralytics offers two licensing options to suit different needs:
+
+- **AGPL-3.0 License**: This [OSI-approved](https://opensource.org/license/agpl-3.0) open-source license is perfect for students, researchers, and enthusiasts. It encourages open collaboration and knowledge sharing. See the [LICENSE](https://github.com/ultralytics/inference/blob/main/LICENSE) file for full details.
+- **Ultralytics Enterprise License**: Designed for commercial use, this license allows for the seamless integration of Ultralytics software and AI models into commercial products and services, bypassing the open-source requirements of AGPL-3.0. If your use case involves commercial deployment, please contact us via [Ultralytics Licensing](https://www.ultralytics.com/license).
 
 ## 📮 Contact
 

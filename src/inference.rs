@@ -107,6 +107,10 @@ impl InferenceConfig {
     pub const DEFAULT_SAVE_FRAMES: bool = false;
     /// Default for rectangular (minimal padding) inference.
     pub const DEFAULT_RECT: bool = true;
+    /// Default input image size for standard YOLO models (height, width).
+    pub const DEFAULT_IMGSZ: (usize, usize) = (640, 640);
+    /// Default input image size for OBB models (height, width).
+    pub const DEFAULT_OBB_IMGSZ: (usize, usize) = (1024, 1024);
 
     /// Create a new configuration with default values.
     ///
@@ -241,7 +245,7 @@ impl InferenceConfig {
     ///
     /// # Arguments
     ///
-    /// * `device` - The device to use (e.g., CPU, CUDA, MPS).
+    /// * `device` - The device to use (e.g., CPU, CUDA, `CoreML`).
     ///
     /// # Example
     ///
@@ -249,7 +253,7 @@ impl InferenceConfig {
     /// use ultralytics_inference::{InferenceConfig, Device};
     ///
     /// let config = InferenceConfig::new()
-    ///     .with_device(Device::Mps); // Use Apple Metal Performance Shaders
+    ///     .with_device(Device::CoreMl); // Use CoreML on Apple Silicon
     /// ```
     ///
     /// # Returns

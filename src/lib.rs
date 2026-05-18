@@ -1,13 +1,16 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 #![allow(clippy::multiple_crate_versions)]
+#![deny(dead_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! # Ultralytics YOLO Inference Library
 //!
 //! [![crates.io](https://img.shields.io/crates/v/ultralytics-inference.svg)](https://crates.io/crates/ultralytics-inference)
 //! [![docs.rs](https://docs.rs/ultralytics-inference/badge.svg)](https://docs.rs/ultralytics-inference)
+//! [![Downloads](https://img.shields.io/crates/d/ultralytics-inference?logo=rust&logoColor=white&label=downloads&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 //! [![License](https://img.shields.io/crates/l/ultralytics-inference.svg)](https://github.com/ultralytics/inference/blob/main/LICENSE)
+//! [![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&logoColor=white&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 //!
 //! High-performance YOLO model inference library written in Rust, providing a safe
 //! and efficient interface for running [Ultralytics](https://ultralytics.com) YOLO
@@ -17,7 +20,7 @@
 //!
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
-//! - **Supported YOLO Versions** - `YOLO11` and `YOLO26` (including YOLO26 end-to-end NMS-free exports)
+//! - **Supported YOLO Versions** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports)
 //! - **All Tasks** - Detection, segmentation, pose estimation, classification, and OBB
 //! - **Ultralytics API** - Results API matches the Python package for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
@@ -113,7 +116,7 @@
 //!
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
-//! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO11/YOLO26 name | `yolo26n.onnx` |
+//! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO26/YOLO11/YOLOv8 name | `yolo26n.onnx` |
 //! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
@@ -126,7 +129,7 @@
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--show` | | Display results in a window | `false` |
-//! | `--device` | | Device (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
+//! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!
@@ -297,6 +300,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Library name.
 pub const NAME: &str = env!("CARGO_PKG_NAME");
+
+/// Application display name.
+pub const DISPLAY_NAME: &str = "Ultralytics Inference";
 
 #[cfg(test)]
 mod tests {

@@ -12,9 +12,7 @@ pub enum Device {
     /// CUDA (Compute Unified Device Architecture) for NVIDIA GPUs.
     /// The argument specifies the device index (e.g., 0 for the first GPU).
     Cuda(usize),
-    /// MPS (Metal Performance Shaders) for Apple Silicon (macOS).
-    Mps,
-    /// `CoreML` (Apple Core Machine Learning).
+    /// `CoreML` execution provider for Apple Silicon / macOS.
     CoreMl,
     /// `DirectML` (Direct Machine Learning) for Windows.
     /// The argument specifies the device index.
@@ -36,7 +34,6 @@ impl fmt::Display for Device {
         match self {
             Self::Cpu => write!(f, "cpu"),
             Self::Cuda(i) => write!(f, "cuda:{i}"),
-            Self::Mps => write!(f, "mps"),
             Self::CoreMl => write!(f, "coreml"),
             Self::DirectMl(i) => write!(f, "directml:{i}"),
             Self::OpenVino => write!(f, "openvino"),
@@ -66,7 +63,6 @@ impl FromStr for Device {
         }
         match s.as_str() {
             "cpu" => Ok(Self::Cpu),
-            "mps" => Ok(Self::Mps),
             "coreml" => Ok(Self::CoreMl),
             "openvino" => Ok(Self::OpenVino),
             "xnnpack" => Ok(Self::Xnnpack),
@@ -92,7 +88,6 @@ mod tests {
         assert_eq!(Device::from_str("cuda").unwrap(), Device::Cuda(0));
         assert_eq!(Device::from_str("cuda:0").unwrap(), Device::Cuda(0));
         assert_eq!(Device::from_str("cuda:1").unwrap(), Device::Cuda(1));
-        assert_eq!(Device::from_str("mps").unwrap(), Device::Mps);
         assert_eq!(Device::from_str("coreml").unwrap(), Device::CoreMl);
         assert_eq!(Device::from_str("directml").unwrap(), Device::DirectMl(0));
         assert_eq!(Device::from_str("directml:1").unwrap(), Device::DirectMl(1));

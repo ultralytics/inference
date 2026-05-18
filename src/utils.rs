@@ -131,7 +131,7 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
     let mut keep = vec![];
     let mut suppressed = vec![false; boxes.len()];
 
-    for &i in &indices {
+    for (pos, &i) in indices.iter().enumerate() {
         if suppressed[i] {
             continue;
         }
@@ -139,14 +139,11 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
 
         let class_i = boxes[i].2;
 
-        for &j in &indices {
-            if !suppressed[j] && i != j {
-                // Only suppress boxes of the same class
-                if boxes[j].2 == class_i {
-                    let iou = calculate_iou(&boxes[i].0, &boxes[j].0);
-                    if iou > iou_threshold {
-                        suppressed[j] = true;
-                    }
+        for &j in &indices[pos + 1..] {
+            if !suppressed[j] && boxes[j].2 == class_i {
+                let iou = calculate_iou(&boxes[i].0, &boxes[j].0);
+                if iou > iou_threshold {
+                    suppressed[j] = true;
                 }
             }
         }
@@ -181,7 +178,7 @@ pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f3
     let mut keep = vec![];
     let mut suppressed = vec![false; boxes.len()];
 
-    for &i in &indices {
+    for (pos, &i) in indices.iter().enumerate() {
         if suppressed[i] {
             continue;
         }
@@ -189,8 +186,8 @@ pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f3
 
         let class_i = boxes[i].2;
 
-        for &j in &indices {
-            if !suppressed[j] && i != j && boxes[j].2 == class_i {
+        for &j in &indices[pos + 1..] {
+            if !suppressed[j] && boxes[j].2 == class_i {
                 let iou = calculate_probiou(&boxes[i].0, &boxes[j].0);
                 if iou > iou_threshold {
                     suppressed[j] = true;
