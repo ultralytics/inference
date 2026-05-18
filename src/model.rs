@@ -24,7 +24,7 @@ use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
     calculate_rect_size, image_to_array, preprocess_image_center_crop,
-    preprocess_image_with_precision,
+    preprocess_image_semseg, preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;
@@ -154,9 +154,13 @@ impl YOLOModel {
                     provider_name = "CUDAExecutionProvider";
                 }
                 #[cfg(feature = "coreml")]
-                crate::Device::CoreMl | crate::Device::Mps => {
-                    // Map both CoreML and MPS to CoreMLExecutionProvider
+                crate::Device::CoreMl => {
                     eps.push(Self::build_coreml_ep(path));
+                    provider_name = "CoreMLExecutionProvider";
+                }
+                #[cfg(feature = "coreml")]
+                crate::Device::Mps => {
+                    eps.push(Self::build_coreml_gpu_ep(path));
                     provider_name = "CoreMLExecutionProvider";
                 }
                 #[cfg(feature = "tensorrt")]
@@ -415,7 +419,29 @@ impl YOLOModel {
 
     #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
-        let mut ep = ort::execution_providers::CoreMLExecutionProvider::default();
+        Self::build_coreml_ep_inner(model_path, false)
+    }
+
+    #[cfg(feature = "coreml")]
+    fn build_coreml_gpu_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
+        Self::build_coreml_ep_inner(model_path, true)
+    }
+
+    #[cfg(feature = "coreml")]
+    fn build_coreml_ep_inner(model_path: &Path, gpu: bool) -> ort::execution_providers::ExecutionProviderDispatch {
+        use ort::ep::coreml::{ComputeUnits, ModelFormat, SpecializationStrategy};
+
+        let mut ep = ort::execution_providers::CoreMLExecutionProvider::default()
+            .with_model_format(ModelFormat::MLProgram)
+            .with_specialization_strategy(SpecializationStrategy::FastPrediction)
+            .with_static_input_shapes(true);
+
+        if gpu {
+            ep = ep
+                .with_compute_units(ComputeUnits::CPUAndGPU)
+                .with_low_precision_accumulation_on_gpu(true);
+        }
+
         if let Some(cache_base) = dirs::cache_dir() {
             let canonical = model_path
                 .canonicalize()
@@ -431,10 +457,11 @@ impl YOLOModel {
                 .fold(14_695_981_039_346_656_037u64, |h, &b| {
                     h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
                 });
+            let variant = if gpu { "gpu" } else { "ane" };
             let cache_dir = cache_base
                 .join("ultralytics-inference")
                 .join("coreml")
-                .join(format!("{stem}_{hash:016x}"));
+                .join(format!("{stem}_{hash:016x}_{variant}"));
             if std::fs::create_dir_all(&cache_dir).is_ok() {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
@@ -694,6 +721,14 @@ impl YOLOModel {
 
             let res = if self.metadata.task == Task::Classify {
                 preprocess_image_center_crop(image, current_target_size, self.fp16_input)
+            } else if self.metadata.task == Task::SemSeg {
+                preprocess_image_semseg(
+                    image,
+                    target_size,
+                    self.metadata.stride,
+                    self.fp16_input,
+                    self.is_dynamic,
+                )
             } else {
                 preprocess_image_with_precision(
                     image,
