@@ -31,6 +31,9 @@ pub enum Task {
     /// Oriented bounding box detection (OBB).
     /// Predicts rotated bounding boxes for objects, useful for aerial imagery etc.
     Obb,
+    /// Semantic segmentation.
+    /// Assigns a class label to every pixel in the image.
+    SemSeg,
 }
 
 impl Task {
@@ -44,6 +47,7 @@ impl Task {
             Self::Pose => "pose",
             Self::Classify => "classify",
             Self::Obb => "obb",
+            Self::SemSeg => "semseg",
         }
     }
 
@@ -62,6 +66,7 @@ impl Task {
             Self::Pose => "-pose",
             Self::Classify => "-cls",
             Self::Obb => "-obb",
+            Self::SemSeg => "-semseg",
         }
     }
 
@@ -108,6 +113,12 @@ impl Task {
     pub const fn has_obb(&self) -> bool {
         matches!(self, Self::Obb)
     }
+
+    /// Returns `true` only for the SemSeg task, which outputs a per-pixel class label map.
+    #[must_use]
+    pub const fn has_semantic_mask(&self) -> bool {
+        matches!(self, Self::SemSeg)
+    }
 }
 
 impl fmt::Display for Task {
@@ -126,6 +137,9 @@ impl FromStr for Task {
             "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
             "classify" | "classification" | "cls" => Ok(Self::Classify),
             "obb" | "oriented" => Ok(Self::Obb),
+            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => {
+                Ok(Self::SemSeg)
+            }
             _ => Err(TaskParseError(s.to_string())),
         }
     }
@@ -139,7 +153,7 @@ impl fmt::Display for TaskParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid task '{}', expected one of: detect, segment, pose, classify, obb",
+            "invalid task '{}', expected one of: detect, segment, pose, classify, obb, semseg",
             self.0
         )
     }
