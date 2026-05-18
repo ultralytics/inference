@@ -18,14 +18,22 @@ const ASSETS_BASE_URL: &str = "https://github.com/ultralytics/assets/releases/do
 const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
+/// Variants only available for the yolo26 family.
+const YOLO26_ONLY_VARIANTS: &[&str] = &["-semseg"];
 
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES
         .iter()
         .flat_map(|family| {
+            let extra: &[&str] = if *family == "yolo26" {
+                YOLO26_ONLY_VARIANTS
+            } else {
+                &[]
+            };
             MODEL_SIZES.iter().flat_map(move |size| {
                 MODEL_VARIANTS
                     .iter()
+                    .chain(extra.iter())
                     .map(move |variant| format!("{family}{size}{variant}.onnx"))
             })
         })
@@ -304,7 +312,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 /// Attempt to download a model if it matches a known downloadable model.
 ///
 /// Supports all YOLO26 and YOLO11 ONNX models across sizes (n/s/m/l/x) and
-/// task variants (detect, segment, pose, obb, classify).
+/// task variants (detect, segment, pose, obb, classify, semseg).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// Returns the path to the downloaded model.
