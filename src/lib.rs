@@ -21,7 +21,7 @@
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
 //! - **Supported YOLO Versions** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports)
-//! - **All Tasks** - Detection, segmentation, pose estimation, classification, and OBB
+//! - **All Tasks** - Detection, segmentation, pose estimation, classification, OBB, and semantic segmentation (YOLO26 only)
 //! - **Ultralytics API** - Results API matches the Python package for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
 //! - **Multiple Sources** - Images, directories, glob patterns, video, webcam, streams
@@ -117,7 +117,7 @@
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
 //! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO26/YOLO11/YOLOv8 name | `yolo26n.onnx` |
-//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`); selects nano model when `--model` is omitted | `detect` |
+//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semseg`\*); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
 //! | `--iou` | | `IoU` threshold for NMS | `0.7` |
@@ -132,6 +132,8 @@
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
+//!
+//! \* `semseg` (semantic segmentation) is YOLO26-only.
 //!
 //! ## Task-Specific Examples
 //!
@@ -152,6 +154,9 @@
 //!
 //! # Oriented Bounding Boxes
 //! yolo export model=yolo26n-obb.pt format=onnx
+//!
+//! # Semantic Segmentation (YOLO26 only)
+//! yolo export model=yolo26n-semseg.pt format=onnx
 //! ```
 //!
 //! The task is auto-detected from ONNX metadata:
@@ -179,6 +184,13 @@
 //! let results = model.predict("image.jpg")?;
 //! if let Some(ref probs) = results[0].probs {
 //!     println!("Top-1: class {} ({:.1}%)", probs.top1(), probs.top1conf() * 100.0);
+//! }
+//!
+//! // Semantic segmentation model (YOLO26 only) - returns a per-pixel class map
+//! let mut model = YOLOModel::load("yolo26n-semseg.onnx")?;
+//! let results = model.predict("image.jpg")?;
+//! if let Some(ref sem) = results[0].semantic_mask {
+//!     println!("Semantic mask shape: {:?}", sem.data.shape());
 //! }
 //! # Ok(())
 //! # }
