@@ -282,7 +282,7 @@ pub use device::Device;
 pub use error::{InferenceError, Result};
 pub use inference::InferenceConfig;
 pub use model::YOLOModel;
-pub use results::{Boxes, Keypoints, Masks, Obb, Probs, Results, Speed};
+pub use results::{Boxes, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 pub use source::{Source, SourceIterator, SourceMeta};
 pub use task::Task;
 
