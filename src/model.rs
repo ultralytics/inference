@@ -436,13 +436,15 @@ impl YOLOModel {
 
     #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
-        use ort::ep::coreml::ModelFormat;
+        use ort::ep::coreml::{ModelFormat, SpecializationStrategy};
 
-        // NeuralNetwork avoids the ORT CoreML EP input-rename bug that MLProgram triggers:
-        // MLProgram inserts a FP32→FP16 cast and renames "images" → "graph_input_cast_0",
-        // causing ORT's feed to fail at runtime.
+        // MLProgram with static input shapes and FastPrediction avoids the ORT CoreML EP
+        // input-rename bug: the rename ("images" -> "graph_input_cast_0") only occurs when
+        // CoreML inserts a dynamic FP32->FP16 cast, which static-shape specialization skips.
         let mut ep = ort::execution_providers::CoreMLExecutionProvider::default()
-            .with_model_format(ModelFormat::NeuralNetwork);
+            .with_model_format(ModelFormat::MLProgram)
+            .with_specialization_strategy(SpecializationStrategy::FastPrediction)
+            .with_static_input_shapes(true);
 
         if let Some(cache_base) = dirs::cache_dir() {
             let canonical = model_path
@@ -461,7 +463,7 @@ impl YOLOModel {
             let cache_dir = cache_base
                 .join("ultralytics-inference")
                 .join("coreml")
-                .join(format!("{stem}_{hash:016x}_neuralnet"));
+                .join(format!("{stem}_{hash:016x}_mlprogram"));
             if std::fs::create_dir_all(&cache_dir).is_ok() {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
