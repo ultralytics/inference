@@ -23,8 +23,8 @@ use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
-    calculate_rect_size, image_to_array, preprocess_image_center_crop,
-    preprocess_image_semseg, preprocess_image_with_precision,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_semseg,
+    preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;

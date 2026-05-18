@@ -1706,7 +1706,12 @@ fn postprocess_obb_end2end(
 /// 2. Bilinear-upsamples each channel from the cropped logit size to the
 ///    original image dimensions.
 /// 3. Takes argmax over the class channel to produce a `[H, W]` label map.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 fn postprocess_semseg(
     output: &[f32],
     shape: &[usize],
@@ -1716,7 +1721,13 @@ fn postprocess_semseg(
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img.clone(), path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(
+        orig_img.clone(),
+        path,
+        names.clone(),
+        speed,
+        inference_shape,
+    );
 
     if shape.len() < 4 || output.is_empty() {
         return results;
@@ -1789,10 +1800,7 @@ fn postprocess_semseg(
             }
         });
 
-    results.semantic_mask = Some(SemanticMask::new(
-        class_map,
-        (oh as u32, ow as u32),
-    ));
+    results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
     results
 }
 

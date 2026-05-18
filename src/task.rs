@@ -139,9 +139,7 @@ impl FromStr for Task {
             "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
             "classify" | "classification" | "cls" => Ok(Self::Classify),
             "obb" | "oriented" => Ok(Self::Obb),
-            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => {
-                Ok(Self::SemSeg)
-            }
+            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => Ok(Self::SemSeg),
             _ => Err(TaskParseError(s.to_string())),
         }
     }
