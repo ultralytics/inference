@@ -165,6 +165,7 @@ pub fn run_prediction(args: &PredictArgs) {
             crate::task::Task::Pose => "runs/pose",
             crate::task::Task::Classify => "runs/classify",
             crate::task::Task::Obb => "runs/obb",
+            crate::task::Task::SemSeg => "runs/semseg",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         if let Err(e) = fs::create_dir_all(&dir) {
