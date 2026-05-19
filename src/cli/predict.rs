@@ -6,7 +6,6 @@ use std::process;
 #[cfg(feature = "visualize")]
 use std::time::Duration;
 
-#[cfg(feature = "annotate")]
 use std::fs;
 
 #[cfg(feature = "annotate")]
@@ -48,6 +47,8 @@ pub fn run_prediction(args: &PredictArgs) {
     let imgsz = args.imgsz;
     let save = args.save;
     let save_frames = args.save_frames;
+    let save_semantic_mask = args.save_semantic_mask;
+    let semantic_mask_dir_override = args.semantic_mask_dir.clone();
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
@@ -173,6 +174,32 @@ pub fn run_prediction(args: &PredictArgs) {
             process::exit(1);
         }
         Some(std::path::PathBuf::from(dir))
+    } else {
+        None
+    };
+
+    let semantic_mask_dir: Option<std::path::PathBuf> = if save_semantic_mask {
+        let dir = semantic_mask_dir_override.map_or_else(
+            || {
+                #[cfg(feature = "annotate")]
+                {
+                    save_dir.as_ref().map_or_else(
+                        || std::path::PathBuf::from("runs/semseg/semantic_masks"),
+                        |d| d.join("semantic_masks"),
+                    )
+                }
+                #[cfg(not(feature = "annotate"))]
+                {
+                    std::path::PathBuf::from("runs/semseg/semantic_masks")
+                }
+            },
+            std::path::PathBuf::from,
+        );
+        if let Err(e) = fs::create_dir_all(&dir) {
+            error!("Failed to create semantic-mask directory '{}': {e}", dir.display());
+            process::exit(1);
+        }
+        Some(dir)
     } else {
         None
     };
@@ -317,6 +344,25 @@ pub fn run_prediction(args: &PredictArgs) {
                                 detection_summary,
                                 result.speed.inference.unwrap_or(0.0)
                             );
+                        }
+
+                        if let Some(ref cdir) = semantic_mask_dir
+                            && let Some(ref sm) = result.semantic_mask
+                        {
+                            let stem = std::path::Path::new(image_path).file_stem().map_or_else(
+                                || format!("frame_{}", meta.frame_idx),
+                                |s| s.to_string_lossy().into_owned(),
+                            );
+                            let out_path = cdir.join(format!("{stem}.png"));
+                            let (h, w) = (sm.data.shape()[0], sm.data.shape()[1]);
+                            let buf: Vec<u8> =
+                                sm.data.iter().map(|v| (*v).min(255) as u8).collect();
+                            if let Some(gray) =
+                                image::GrayImage::from_raw(w as u32, h as u32, buf)
+                                && let Err(e) = gray.save(&out_path)
+                            {
+                                error!("Failed to save semantic mask '{}': {e}", out_path.display());
+                            }
                         }
 
                         #[cfg(feature = "annotate")]
