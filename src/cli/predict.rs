@@ -157,8 +157,14 @@ pub fn run_prediction(args: &PredictArgs) {
         |s| crate::source::Source::from(s.as_str()),
     );
 
+    // Determine whether we need an incremented predict dir. `--save` always needs one;
+    // `--save-json` for semseg also needs one so PNG class maps land in <predictN>/results/
+    let need_predict_dir = save_json && model.task() == crate::task::Task::SemSeg;
     #[cfg(feature = "annotate")]
-    let save_dir = if save {
+    let need_predict_dir = save || need_predict_dir;
+
+    #[cfg(feature = "annotate")]
+    let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
         let parent_dir = match model.task() {
             crate::task::Task::Detect => "runs/detect",
             crate::task::Task::Segment => "runs/segment",
@@ -176,39 +182,31 @@ pub fn run_prediction(args: &PredictArgs) {
     } else {
         None
     };
-
-    // Matches Ultralytics' val.py for semseg: when --save-json is set, write per-image
-    // PNG class maps into `<save_dir>/results/<image_stem>.png`. Requires --save (which
-    // creates save_dir) and task == SemSeg; ignored otherwise.
-    #[cfg(feature = "annotate")]
-    let results_dir: Option<std::path::PathBuf> = if save_json
-        && model.task() == crate::task::Task::SemSeg
-    {
-        let dir = save_dir
-            .as_ref()
-            .map(|d| d.join("results"))
-            .unwrap_or_else(|| std::path::PathBuf::from("runs/semseg/results"));
-        if let Err(e) = fs::create_dir_all(&dir) {
-            error!("Failed to create results directory '{}': {e}", dir.display());
-            process::exit(1);
-        }
-        Some(dir)
-    } else {
-        None
-    };
+    // Without the `annotate` feature, `--save` is rejected below; classmap save still works.
     #[cfg(not(feature = "annotate"))]
-    let results_dir: Option<std::path::PathBuf> = if save_json
-        && model.task() == crate::task::Task::SemSeg
-    {
-        let dir = std::path::PathBuf::from("runs/semseg/results");
+    let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
+        let dir = std::path::PathBuf::from("runs/semseg/predict");
         if let Err(e) = fs::create_dir_all(&dir) {
-            error!("Failed to create results directory '{}': {e}", dir.display());
+            error!("Failed to create save directory '{}': {e}", dir.display());
             process::exit(1);
         }
         Some(dir)
     } else {
         None
     };
+
+    // `<save_dir>/results/<stem>.png` — matches `ops.scale_masks`-driven layout in val.py.
+    let results_dir: Option<std::path::PathBuf> = save_dir.as_ref().and_then(|d| {
+        if !save_json || model.task() != crate::task::Task::SemSeg {
+            return None;
+        }
+        let dir = d.join("results");
+        if let Err(e) = fs::create_dir_all(&dir) {
+            error!("Failed to create results directory '{}': {e}", dir.display());
+            process::exit(1);
+        }
+        Some(dir)
+    });
 
     #[cfg(not(feature = "annotate"))]
     if save {
