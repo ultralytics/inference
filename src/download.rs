@@ -41,7 +41,14 @@ fn downloadable_models() -> Vec<String> {
 }
 
 fn supported_models_help() -> String {
-    let variants_display = ["detect", "-seg", "-pose", "-obb", "-cls", "-sem (yolo26 only)"];
+    let variants_display = [
+        "detect",
+        "-seg",
+        "-pose",
+        "-obb",
+        "-cls",
+        "-sem (yolo26 only)",
+    ];
     let sizes_display = MODEL_SIZES.join(", ");
     let variants_joined = variants_display.join(", ");
 
