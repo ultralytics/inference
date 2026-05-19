@@ -16,6 +16,7 @@
 )]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use wide::{CmpGt, f32x8};
 
@@ -60,7 +61,7 @@ pub fn postprocess(
     task: Task,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
@@ -261,17 +262,17 @@ fn postprocess_detect(
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let nc = names.len();
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
-    let (num_classes, num_predictions, is_transposed) =
-        parse_detect_shape(output_shape, names.len());
+    let (num_classes, num_predictions, is_transposed) = parse_detect_shape(output_shape, nc);
 
     if output.is_empty() || num_predictions == 0 {
         return results;
@@ -695,13 +696,13 @@ fn postprocess_segment(
     outputs: Vec<(&[f32], Vec<usize>)>,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, Arc::clone(&names), speed, inference_shape);
 
     if outputs.len() < 2 {
         // Protos output missing - log warning for user visibility
@@ -920,13 +921,14 @@ fn postprocess_pose(
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let num_classes = names.len().max(1);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     // Standard COCO pose has 17 keypoints, each with (x, y, conf)
     let num_keypoints = 17;
@@ -934,7 +936,6 @@ fn postprocess_pose(
     let kpt_features = num_keypoints * kpt_dim; // 51
 
     // Pose typically has 1 class (person), so features = 4 + 1 + 51 = 56
-    let num_classes = names.len().max(1);
     let expected_features = 4 + num_classes + kpt_features;
 
     // Parse output shape
@@ -1120,13 +1121,13 @@ fn postprocess_pose(
 /// `Results` struct containing classification probabilities.
 fn postprocess_classify(
     output: &[f32],
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     if output.is_empty() {
         return results;
@@ -1182,17 +1183,17 @@ fn postprocess_obb(
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let num_classes = names.len().max(1);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     // OBB format: [xywh, class_scores..., rotation_angle]
     // features = 4 (bbox) + num_classes + 1 (angle)
-    let num_classes = names.len().max(1);
     let expected_features = 4 + num_classes + 1;
 
     // Parse output shape
@@ -1360,13 +1361,13 @@ fn postprocess_detect_end2end(
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     if output_shape.len() != 3 || output.is_empty() {
         return results;
@@ -1436,13 +1437,13 @@ fn postprocess_segment_end2end(
     outputs: Vec<(&[f32], Vec<usize>)>,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
     if outputs.len() < 2 {
         eprintln!(
             "WARNING ⚠️ End2end segmentation missing protos output (got {} outputs).",
@@ -1560,7 +1561,7 @@ fn postprocess_pose_end2end(
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
@@ -1568,7 +1569,7 @@ fn postprocess_pose_end2end(
     nk: usize,
     kpt_dim: usize,
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
     if output_shape.len() != 3 || output.is_empty() || nk == 0 || kpt_dim < 2 {
         return results;
     }
@@ -1646,13 +1647,13 @@ fn postprocess_obb_end2end(
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
     let mut flat: Vec<f32> = Vec::new();
 
     if output_shape.len() == 3 && !output.is_empty() {
@@ -2045,7 +2046,7 @@ mod tests {
             padding: (0.0, 0.0),
         };
         let config = InferenceConfig::default();
-        let names = HashMap::new();
+        let names = Arc::new(HashMap::new());
         let orig_img = ndarray::Array3::zeros((480, 640, 3));
 
         let results = postprocess_detect(
@@ -2053,7 +2054,7 @@ mod tests {
             &[1, 84, 0],
             &preprocess,
             &config,
-            &names,
+            names,
             orig_img,
             String::new(),
             Speed::default(),
@@ -2084,9 +2085,12 @@ mod tests {
             padding: (0.0, 0.0),
         };
         let config = InferenceConfig::default();
-        let mut names = HashMap::new();
-        names.insert(0, "class0".to_string());
-        names.insert(1, "class1".to_string());
+        let names = Arc::new({
+            let mut n = HashMap::new();
+            n.insert(0, "class0".to_string());
+            n.insert(1, "class1".to_string());
+            n
+        });
         let orig_img = ndarray::Array3::zeros((640, 640, 3));
 
         // This should not panic
@@ -2095,7 +2099,7 @@ mod tests {
             &[1, 84, 1],
             &preprocess,
             &config,
-            &names,
+            names,
             orig_img,
             String::new(),
             Speed::default(),
@@ -2121,7 +2125,7 @@ mod tests {
             padding: (0.0, 0.0),
         };
         let config = InferenceConfig::default();
-        let names = HashMap::new();
+        let names = Arc::new(HashMap::new());
         let orig_img = ndarray::Array3::zeros((640, 640, 3));
 
         // Empty shape should not panic
@@ -2130,7 +2134,7 @@ mod tests {
             &[],
             &preprocess,
             &config,
-            &names,
+            Arc::clone(&names),
             orig_img.clone(),
             String::new(),
             Speed::default(),
@@ -2144,7 +2148,7 @@ mod tests {
             &[100],
             &preprocess,
             &config,
-            &names,
+            Arc::clone(&names),
             orig_img,
             String::new(),
             Speed::default(),
@@ -2186,8 +2190,11 @@ mod tests {
             padding: (0.0, 0.0),
         };
         let config = InferenceConfig::default();
-        let mut names = HashMap::new();
-        names.insert(0, "person".to_string());
+        let names = Arc::new({
+            let mut n = HashMap::new();
+            n.insert(0, "person".to_string());
+            n
+        });
 
         // Shape [1, 56, 100]
         let results = postprocess_pose(
@@ -2195,7 +2202,7 @@ mod tests {
             &[1, num_features, num_preds],
             &preprocess,
             &config,
-            &names,
+            names,
             ndarray::Array3::zeros((640, 640, 3)),
             "test.jpg".to_string(),
             Speed::default(),
@@ -2244,8 +2251,11 @@ mod tests {
             padding: (0.0, 0.0),
         };
         let config = InferenceConfig::default();
-        let mut names = HashMap::new();
-        names.insert(0, "object".to_string());
+        let names = Arc::new({
+            let mut n = HashMap::new();
+            n.insert(0, "object".to_string());
+            n
+        });
 
         // Shape [1, 6, 100]
         let results = postprocess_obb(
@@ -2253,7 +2263,7 @@ mod tests {
             &[1, num_features, num_preds],
             &preprocess,
             &config,
-            &names,
+            names,
             ndarray::Array3::zeros((640, 640, 3)),
             "test.jpg".to_string(),
             Speed::default(),

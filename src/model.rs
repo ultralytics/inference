@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 use half::f16;
@@ -898,7 +899,7 @@ impl YOLOModel {
                     task,
                     &preprocess_res,
                     cfg,
-                    names,
+                    Arc::clone(names),
                     orig_img,
                     path,
                     speed,
@@ -960,7 +961,7 @@ impl YOLOModel {
                         let result = crate::postprocessing::postprocess_semantic_mask(
                             img_slice,
                             img_shape,
-                            names,
+                            Arc::clone(names),
                             orig_img,
                             path_i,
                             speed,
@@ -1263,8 +1264,8 @@ impl YOLOModel {
 
     /// Get the model's class names.
     #[must_use]
-    pub const fn names(&self) -> &HashMap<usize, String> {
-        &self.metadata.names
+    pub fn names(&self) -> &HashMap<usize, String> {
+        self.metadata.names.as_ref()
     }
 
     /// Get the number of classes.

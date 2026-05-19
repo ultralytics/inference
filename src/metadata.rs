@@ -6,6 +6,7 @@
 //! The metadata is stored as YAML in the ONNX model's custom metadata properties.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::error::{InferenceError, Result};
 use crate::task::Task;
@@ -41,7 +42,7 @@ pub struct ModelMetadata {
     /// Whether the model uses FP16 (half precision).
     pub half: bool,
     /// Class ID to class name mapping.
-    pub names: HashMap<usize, String>,
+    pub names: Arc<HashMap<usize, String>>,
     /// Whether the model was exported with end-to-end NMS-free output
     /// (YOLO26-style post-NMS output: `[B, max_det, 6+extra]`).
     pub end2end: bool,
@@ -97,6 +98,7 @@ impl ModelMetadata {
     /// Returns an error if the YAML is malformed or missing required fields.
     pub fn from_yaml_str(yaml_str: &str) -> Result<Self> {
         let mut metadata = Self::default();
+        let mut names: HashMap<usize, String> = HashMap::new();
 
         for line in yaml_str.lines() {
             let line = line.trim();
@@ -159,7 +161,7 @@ impl ModelMetadata {
                     _ => {
                         // Check for class name entries (numeric keys)
                         if let Ok(class_id) = key.trim().parse::<usize>() {
-                            metadata.names.insert(class_id, value.to_string());
+                            names.insert(class_id, value.to_string());
                         }
                     }
                 }
@@ -172,10 +174,11 @@ impl ModelMetadata {
         }
 
         // Parse names block if not already parsed inline
-        if metadata.names.is_empty() {
-            metadata.names = Self::parse_names_block(yaml_str);
+        if names.is_empty() {
+            names = Self::parse_names_block(yaml_str);
         }
 
+        metadata.names = Arc::new(names);
         Ok(metadata)
     }
 
@@ -374,7 +377,7 @@ impl Default for ModelMetadata {
             imgsz: None,
             channels: 3,
             half: false,
-            names: HashMap::new(),
+            names: Arc::new(HashMap::new()),
             end2end: false,
             kpt_shape: None,
         }

@@ -6,6 +6,7 @@
 
 use ndarray::Array3;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::tempdir;
 use ultralytics_inference::cli::args::PredictArgs;
 use ultralytics_inference::cli::predict::run_prediction;
@@ -133,7 +134,7 @@ fn test_boxes_conf_and_cls() {
 #[test]
 fn test_results_creation() {
     let orig_img = Array3::zeros((480, 640, 3));
-    let names = HashMap::new();
+    let names = Arc::new(HashMap::new());
     let speed = Speed::default();
 
     let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
@@ -148,7 +149,7 @@ fn test_results_creation() {
 #[test]
 fn test_results_with_boxes() {
     let orig_img = Array3::zeros((480, 640, 3));
-    let names = HashMap::new();
+    let names = Arc::new(HashMap::new());
     let speed = Speed::default();
 
     let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
@@ -164,7 +165,7 @@ fn test_results_with_boxes() {
 #[test]
 fn test_results_is_empty() {
     let orig_img = Array3::zeros((480, 640, 3));
-    let names = HashMap::new();
+    let names = Arc::new(HashMap::new());
     let speed = Speed::default();
 
     let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
