@@ -1756,7 +1756,7 @@ fn letterbox_crop_bounds(
 pub fn postprocess_semantic_mask(
     output: &[u8],
     shape: &[usize],
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
@@ -1764,7 +1764,7 @@ pub fn postprocess_semantic_mask(
 ) -> Results {
     let oh = orig_img.shape()[0];
     let ow = orig_img.shape()[1];
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     if shape.len() < 2 || output.is_empty() {
         return results;
@@ -1838,7 +1838,7 @@ pub fn postprocess_semantic_mask(
 fn postprocess_semseg(
     output: &[f32],
     shape: &[usize],
-    names: &HashMap<usize, String>,
+    names: Arc<HashMap<usize, String>>,
     orig_img: Array3<u8>,
     path: String,
     speed: Speed,
@@ -1846,7 +1846,7 @@ fn postprocess_semseg(
 ) -> Results {
     let oh = orig_img.shape()[0];
     let ow = orig_img.shape()[1];
-    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     if shape.len() < 4 || output.is_empty() {
         return results;
