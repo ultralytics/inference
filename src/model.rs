@@ -473,11 +473,7 @@ impl YOLOModel {
 
     /// Distribute the elapsed wall time since `start` evenly across every result in the
     /// batch and stamp it onto `res.speed.postprocess`. Shared by both postprocess closures.
-    fn apply_postprocess_time(
-        batch: &mut [Vec<Results>],
-        start: Instant,
-        n_images_f: f64,
-    ) {
+    fn apply_postprocess_time(batch: &mut [Vec<Results>], start: Instant, n_images_f: f64) {
         #[allow(clippy::cast_precision_loss)]
         let ms = start.elapsed().as_secs_f64() * 1000.0 / n_images_f;
         for img_results in batch {

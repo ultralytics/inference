@@ -202,7 +202,10 @@ pub fn run_prediction(args: &PredictArgs) {
         }
         let dir = d.join("results");
         if let Err(e) = fs::create_dir_all(&dir) {
-            error!("Failed to create results directory '{}': {e}", dir.display());
+            error!(
+                "Failed to create results directory '{}': {e}",
+                dir.display()
+            );
             process::exit(1);
         }
         Some(dir)
@@ -361,11 +364,13 @@ pub fn run_prediction(args: &PredictArgs) {
                             let (h, w) = (sm.data.shape()[0], sm.data.shape()[1]);
                             let buf: Vec<u8> =
                                 sm.data.iter().map(|v| (*v).min(255) as u8).collect();
-                            if let Some(gray) =
-                                image::GrayImage::from_raw(w as u32, h as u32, buf)
+                            if let Some(gray) = image::GrayImage::from_raw(w as u32, h as u32, buf)
                                 && let Err(e) = gray.save(&out_path)
                             {
-                                error!("Failed to save semantic mask '{}': {e}", out_path.display());
+                                error!(
+                                    "Failed to save semantic mask '{}': {e}",
+                                    out_path.display()
+                                );
                             }
                         }
 

@@ -1702,7 +1702,11 @@ fn postprocess_obb_end2end(
 /// cover the original image (oh, ow).
 ///
 /// Returns `(top, left, crop_h, crop_w)` or `None` if the crop is empty (degenerate input).
-#[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 fn letterbox_crop_bounds(
     lh: usize,
     lw: usize,

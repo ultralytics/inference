@@ -54,7 +54,6 @@ const INV_255: f32 = 1.0 / 255.0;
 /// Maximum LRU cache size for X coordinate LUTs.
 const LUT_CACHE_SIZE: usize = 8;
 
-
 /// X LUT entry: (`x0_byte_offset`, `x1_byte_offset`, 1-fx, fx) using 11-bit fixed-point
 /// weights matching `OpenCV`'s `INTER_LINEAR` coordinate mapping.
 type XLutEntry = (usize, usize, i32, i32);
@@ -144,9 +143,17 @@ pub fn preprocess_image_semseg(
         let pad_w = target_size.1.saturating_sub(nw);
         // Half-padding with biased rounding: `top = round(pad_h / 2 - 0.1)`. The -0.1
         // bias ensures odd total padding lands one extra pixel at the bottom/right.
-        #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_sign_loss,
+            clippy::cast_possible_truncation
+        )]
         let pad_top_u = ((pad_h as f32) / 2.0 - 0.1).round().max(0.0) as u32;
-        #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_sign_loss,
+            clippy::cast_possible_truncation
+        )]
         let pad_left_u = ((pad_w as f32) / 2.0 - 0.1).round().max(0.0) as u32;
         (target_size, nh, nw, scale, pad_top_u, pad_left_u)
     };
