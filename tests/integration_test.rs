@@ -15,11 +15,10 @@ use ultralytics_inference::{Device, YOLOModel};
 
 /// End-to-end `CoreML` test covering two known regressions:
 ///
-/// 1. **Issue #148 / PR #149** — `GatherElements op: Out of range` during warmup.
+/// 1. **Issue #148 / PR #149**: `GatherElements op: Out of range` during warmup.
 ///    `CoreML`'s DFL head produces out-of-range gather indices on an all-zeros dummy input.
-///    
 ///
-/// 2. **`graph_input_cast_0` crash** — `MLProgram` format causes ORT's `CoreML` EP to insert a
+/// 2. **`graph_input_cast_0` crash**: `MLProgram` format causes ORT's `CoreML` EP to insert a
 ///    cast node, renaming the ONNX input (e.g. `images`) to `graph_input_cast_0`. ORT then
 ///    feeds the tensor with the original name, which `CoreML` can't find.
 ///    The fix (`NeuralNetwork` format) avoids the rename entirely.
@@ -58,6 +57,7 @@ fn test_run_prediction_e2e() {
         half: false,
         save: false,
         save_frames: false,
+        save_json: false,
         show: false,
         device: None,
         verbose: false,
