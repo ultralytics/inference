@@ -1771,7 +1771,7 @@ pub fn postprocess_semantic_mask(
         return results;
     }
 
-    // Fast path: model output already at original resolution: just widen u8 -> u32.
+    // Model output already at original resolution: just widen u8 -> u32.
     if lh == oh && lw == ow {
         let mut class_map = Array2::<u32>::zeros((oh, ow));
         class_map
@@ -1857,7 +1857,7 @@ fn postprocess_semseg(
         return results;
     }
 
-    // Fast path: model output is already at orig_img resolution (no resize, no padding).
+    // Model output is already at orig_img resolution (no resize, no padding).
     // Avoids the CHW->HWC transpose and bilinear interpolation entirely: just argmax over
     // the class channel for each pixel. Hits when the export bakes a full-res upsample
     // into the ONNX graph and the input was the model's native rect shape.
