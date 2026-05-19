@@ -471,6 +471,22 @@ impl YOLOModel {
         ep.build()
     }
 
+    /// Distribute the elapsed wall time since `start` evenly across every result in the
+    /// batch and stamp it onto `res.speed.postprocess`. Shared by both postprocess closures.
+    fn apply_postprocess_time(
+        batch: &mut [Vec<Results>],
+        start: Instant,
+        n_images_f: f64,
+    ) {
+        #[allow(clippy::cast_precision_loss)]
+        let ms = start.elapsed().as_secs_f64() * 1000.0 / n_images_f;
+        for img_results in batch {
+            for res in img_results {
+                res.speed.postprocess = Some(ms);
+            }
+        }
+    }
+
     /// Concatenate per-image FP32 input tensors along the batch axis.
     fn concat_f32_batch(
         preprocessed: &[crate::preprocessing::PreprocessResult],
@@ -898,14 +914,7 @@ impl YOLOModel {
                 batch_results.push(vec![result]);
             }
 
-            #[allow(clippy::cast_precision_loss)]
-            let postprocess_time =
-                start_postprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
-            for img_results in &mut batch_results {
-                for res in img_results {
-                    res.speed.postprocess = Some(postprocess_time);
-                }
-            }
+            Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
             Ok(batch_results)
         };
 
@@ -946,15 +955,15 @@ impl YOLOModel {
                         let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
                         let elems_per_img = data.len() / actual_batch;
                         let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
-                        // 3-D shape per image: drop the batch dim.
-                        let img_shape: Vec<usize> = shape[1..].to_vec();
+                        // Per-image shape view (drops the batch dim). Zero-copy slice.
+                        let img_shape: &[usize] = &shape[1..];
 
                         let tensor_shape = preprocess_res.tensor.shape();
                         let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
                         let result = crate::postprocessing::postprocess_semantic_mask(
                             img_slice,
-                            &img_shape,
+                            img_shape,
                             names,
                             orig_img,
                             path_i,
@@ -964,14 +973,7 @@ impl YOLOModel {
                         batch_results.push(vec![result]);
                     }
 
-                    #[allow(clippy::cast_precision_loss)]
-                    let postprocess_time =
-                        start_postprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
-                    for v in &mut batch_results {
-                        for r in v {
-                            r.speed.postprocess = Some(postprocess_time);
-                        }
-                    }
+                    Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
                     Ok(())
                 },
             )?;
@@ -1131,43 +1133,41 @@ impl YOLOModel {
         inference_ms: f64,
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let mut owned_bufs: Vec<Vec<f32>> = Vec::new();
-        let mut shapes: Vec<Vec<usize>> = Vec::with_capacity(output_names.len());
-        let mut sources: Vec<(Option<usize>, *const f32, usize)> =
-            Vec::with_capacity(output_names.len());
+        // Holds each output as either a zero-copy borrow into the ORT buffer or, for f16
+        // outputs needing dtype conversion, an owned Vec<f32>. Vec reallocation moves the
+        // enum value but not the heap allocation behind `Vec<f32>`, so `.as_slice()` taken
+        // in the second pass is stable.
+        enum OutBuf<'a> {
+            Borrow(&'a [f32]),
+            Owned(Vec<f32>),
+        }
+        let mut bufs: Vec<(OutBuf<'_>, Vec<usize>)> = Vec::with_capacity(output_names.len());
         for output_name in output_names {
             let output = outputs.get(output_name.as_str()).ok_or_else(|| {
                 InferenceError::InferenceError(format!("Output '{output_name}' not found"))
             })?;
-            if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let (buf, shape) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
                 let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
-                sources.push((None, data.as_ptr(), data.len()));
-                shapes.push(shape_vec);
+                (OutBuf::Borrow(data), shape_vec)
             } else {
                 let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
                     InferenceError::InferenceError(format!("Failed to extract output: {e}"))
                 })?;
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
                 let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
-                let len = converted.len();
-                let idx = owned_bufs.len();
-                owned_bufs.push(converted);
-                sources.push((Some(idx), std::ptr::null(), len));
-                shapes.push(shape_vec);
-            }
+                (OutBuf::Owned(converted), shape_vec)
+            };
+            bufs.push((buf, shape));
         }
-        let views: Vec<(&[f32], Vec<usize>)> = sources
+        let views: Vec<(&[f32], Vec<usize>)> = bufs
             .iter()
-            .zip(shapes.iter())
-            .map(|((owned_idx, ptr, len), shape)| {
-                let slice: &[f32] = owned_idx.map_or_else(
-                    // SAFETY: ORT-owned buffer in `outputs` lives until caller returns.
-                    || unsafe { std::slice::from_raw_parts(*ptr, *len) },
-                    |i| owned_bufs[i].as_slice(),
-                );
-                (slice, shape.clone())
+            .map(|(b, s)| {
+                let slice: &[f32] = match b {
+                    OutBuf::Borrow(d) => d,
+                    OutBuf::Owned(v) => v.as_slice(),
+                };
+                (slice, s.clone())
             })
             .collect();
 
@@ -1205,29 +1205,21 @@ impl YOLOModel {
         inference_ms: f64,
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let mut shapes: Vec<Vec<usize>> = Vec::with_capacity(output_names.len());
-        let mut sources: Vec<(*const u8, usize)> = Vec::with_capacity(output_names.len());
-        for output_name in output_names {
-            let output = outputs.get(output_name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
-            })?;
-            let (shape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
-                InferenceError::InferenceError(format!("Failed to extract uint8 output: {e}"))
-            })?;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
-            sources.push((data.as_ptr(), data.len()));
-            shapes.push(shape_vec);
-        }
-        let views: Vec<(&[u8], Vec<usize>)> = sources
+        // All outputs are direct borrows from ORT — no fallback path, no unsafe needed.
+        let views: Vec<(&[u8], Vec<usize>)> = output_names
             .iter()
-            .zip(shapes.iter())
-            .map(|((ptr, len), shape)| {
-                // SAFETY: ORT-owned buffer in `outputs` lives until caller returns.
-                let slice: &[u8] = unsafe { std::slice::from_raw_parts(*ptr, *len) };
-                (slice, shape.clone())
+            .map(|name| {
+                let output = outputs.get(name.as_str()).ok_or_else(|| {
+                    InferenceError::InferenceError(format!("Output '{name}' not found"))
+                })?;
+                let (shape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
+                    InferenceError::InferenceError(format!("Failed to extract uint8 output: {e}"))
+                })?;
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                Ok((data, shape_vec))
             })
-            .collect();
+            .collect::<Result<_>>()?;
 
         cb(&views, inference_ms)
     }
