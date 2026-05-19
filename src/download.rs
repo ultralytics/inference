@@ -19,7 +19,7 @@ const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11", "yolov8"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 /// Variants only available for the yolo26 family.
-const YOLO26_ONLY_VARIANTS: &[&str] = &["-semseg"];
+const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem"];
 
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES

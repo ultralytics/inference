@@ -67,7 +67,7 @@ impl Task {
             Self::Pose => "-pose",
             Self::Classify => "-cls",
             Self::Obb => "-obb",
-            Self::SemSeg => "-semseg",
+            Self::SemSeg => "-sem",
         }
     }
 

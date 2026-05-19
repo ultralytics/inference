@@ -188,7 +188,7 @@
 //! }
 //!
 //! // Semantic segmentation model (YOLO26 only) - returns a per-pixel class map
-//! let mut model = YOLOModel::load("yolo26n-semseg.onnx")?;
+//! let mut model = YOLOModel::load("yolo26n-sem.onnx")?;
 //! let results = model.predict("image.jpg")?;
 //! if let Some(ref sem) = results[0].semantic_mask {
 //!     println!("Semantic mask shape: {:?}", sem.data.shape());
