@@ -86,8 +86,7 @@ pub struct PreprocessResult {
 /// `target_size.0`, with stride-aligned padding appended at the bottom/right only.
 ///
 /// Static models: fit-within-target letterbox to exactly `target_size` with
-/// centered alignment (padding split between both sides, default for
-/// `LetterBox(center=True)`).
+/// centered alignment (padding split evenly between both sides).
 ///
 /// # Arguments
 ///
@@ -135,7 +134,7 @@ pub fn preprocess_image_semseg(
         ((ph, pw), nh, nw, scale, 0u32, 0u32)
     } else {
         // Centered letterbox: scale to fit, split the remainder evenly between top/bottom
-        // and left/right (this is the predictor's default; matches `LetterBox(center=True)`).
+        // and left/right.
         let scale = (target_h_f / orig_h).min(target_w_f / orig_w);
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let nh = (orig_h * scale).round() as usize;
@@ -143,8 +142,8 @@ pub fn preprocess_image_semseg(
         let nw = (orig_w * scale).round() as usize;
         let pad_h = target_size.0.saturating_sub(nh);
         let pad_w = target_size.1.saturating_sub(nw);
-        // Use the same rounding rule as `cv2.copyMakeBorder` in `LetterBox.apply_image`:
-        // `top = round(dh - 0.1)` where dh = pad_h / 2 (float).
+        // Half-padding with biased rounding: `top = round(pad_h / 2 - 0.1)`. The -0.1
+        // bias ensures odd total padding lands one extra pixel at the bottom/right.
         #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let pad_top_u = ((pad_h as f32) / 2.0 - 0.1).round().max(0.0) as u32;
         #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]

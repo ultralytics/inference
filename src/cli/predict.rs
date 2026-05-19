@@ -195,7 +195,7 @@ pub fn run_prediction(args: &PredictArgs) {
         None
     };
 
-    // `<save_dir>/results/<stem>.png` — matches `ops.scale_masks`-driven layout in val.py.
+    // Per-image PNG class maps go in `<save_dir>/results/<stem>.png`.
     let results_dir: Option<std::path::PathBuf> = save_dir.as_ref().and_then(|d| {
         if !save_json || model.task() != crate::task::Task::SemSeg {
             return None;
