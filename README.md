@@ -357,7 +357,7 @@ inference/
 │   ├── postprocessing.rs   # Detection post-processing (NMS, decode, SIMD)
 │   ├── metadata.rs         # ONNX model metadata parsing
 │   ├── source.rs           # Input source handling (images, video, webcam)
-│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb)
+│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb, SemSeg)
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch processing pipeline
 │   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)
