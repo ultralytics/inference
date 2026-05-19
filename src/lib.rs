@@ -157,7 +157,7 @@
 //! yolo export model=yolo26n-obb.pt format=onnx
 //!
 //! # Semantic Segmentation (YOLO26 only)
-//! yolo export model=yolo26n-semseg.pt format=onnx
+//! yolo export model=yolo26n-sem.pt format=onnx
 //! ```
 //!
 //! The task is auto-detected from ONNX metadata:
