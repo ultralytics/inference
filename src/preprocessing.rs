@@ -570,12 +570,9 @@ fn calculate_letterbox_params(
     let pad_left = pad_w / 2;
     let pad_top = pad_h / 2;
 
-    // Use a uniform gain for coordinate back-projection.
-    // This matches Ultralytics `scale_boxes()`, which applies a single
-    // `gain = min(target_h / orig_h, target_w / orig_w)` to both axes.
-    // Per-axis gains (`new_w / orig_w`, `new_h / orig_h`) can diverge slightly
-    // after rounding `new_w`/`new_h`, leading to small box shifts and
-    // different NMS results.
+    // Use a single `gain = min(target_h / orig_h, target_w / orig_w)` on both axes for
+    // coordinate back-projection. Per-axis gains computed from rounded `new_w`/`new_h`
+    // can diverge slightly, shifting boxes and changing NMS results.
     (new_w, new_h, pad_left, pad_top, (scale, scale))
 }
 
@@ -822,7 +819,7 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     let resized_rgb = RgbImage::from_raw(safe_new_w, safe_new_h, resized_buffer)
         .expect("Failed to create resized buffer");
 
-    // Calculate crop offsets using Banker's Rounding (to match Python round())
+    // Calculate crop offsets using Banker's Rounding (round half to even).
     #[allow(clippy::cast_precision_loss)]
     let crop_x_float = (new_w.saturating_sub(target_w)) as f32 / 2.0;
     #[allow(clippy::cast_precision_loss)]
@@ -840,7 +837,6 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
 }
 
 /// Round float to nearest integer, rounding half to even (Banker's Rounding).
-/// This matches Python's `round()` behavior.
 fn bankers_round(v: f32) -> f32 {
     let n = v.floor();
     let d = v - n;
