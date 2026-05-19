@@ -94,7 +94,7 @@ model.export(format="onnx")
 # With defaults (auto-downloads yolo26n.onnx and sample images)
 ultralytics-inference predict
 
-# Select task — auto-downloads the nano model for that task
+# Select task: auto-downloads the nano model for that task
 ultralytics-inference predict --task segment  # downloads yolo26n-seg.onnx
 ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
 ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
@@ -127,6 +127,9 @@ ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-fra
 
 # Rectangular inference
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
+
+# Semantic segmentation: write per-image PNG class maps to runs/semseg/predictN/results/
+ultralytics-inference predict --task semseg --source cityscapes/ --save-json
 ```
 
 ### Example Output
@@ -198,6 +201,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--half`        |       | Use FP16 half-precision inference                                                                                    | `false`                                 |
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                      | `true`                                  |
 | `--save-frames` |       | Save individual frames for video                                                                                     | `false`                                 |
+| `--save-json`   |       | Save results to COCO JSON (detect/segment/pose) or PNG masks (semseg) for external evaluation                        | `false`                                 |
 | `--show`        |       | Display results in a window                                                                                          | `false`                                 |
 | `--device`      |       | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)                                              | `cpu`                                   |
 | `--verbose`     |       | Show verbose output                                                                                                  | `true`                                  |
