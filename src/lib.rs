@@ -78,7 +78,7 @@
 //! # Run with defaults (auto-downloads model and sample images)
 //! ultralytics-inference predict
 //!
-//! # Select task — auto-downloads the matching nano model
+//! # Select task: auto-downloads the matching nano model
 //! ultralytics-inference predict --task segment
 //! ultralytics-inference predict --task pose
 //! ultralytics-inference predict --task obb
