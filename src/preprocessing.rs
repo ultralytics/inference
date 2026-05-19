@@ -158,6 +158,39 @@ pub fn preprocess_image_semseg(
         (target_size, nh, nw, scale, pad_top_u, pad_left_u)
     };
 
+    build_preprocess_result(
+        image,
+        target_size,
+        new_w as u32,
+        new_h as u32,
+        pad_left,
+        pad_top,
+        (scale, scale),
+        orig_shape,
+        half,
+    )
+}
+
+/// Build a `PreprocessResult` from a resolved letterbox geometry.
+///
+/// Shared tail for `preprocess_image_semseg` and `preprocess_image_with_precision`:
+/// runs the fused zero-copy resize/pad/normalize, optionally produces an FP16 tensor,
+/// and packages the transform metadata. The caller is responsible for computing
+/// `target_size`, `new_w`/`new_h`, padding, and `scale` for its specific letterbox style.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+fn build_preprocess_result(
+    image: &DynamicImage,
+    target_size: (usize, usize),
+    new_w: u32,
+    new_h: u32,
+    pad_left: u32,
+    pad_top: u32,
+    scale: (f32, f32),
+    orig_shape: (u32, u32),
+    half: bool,
+) -> PreprocessResult {
+    let (orig_width, orig_height) = image.dimensions();
+
     let tensor = match image {
         DynamicImage::ImageRgb8(rgb) => fused_zerocopy_preprocess(
             rgb.as_raw(),
@@ -166,8 +199,8 @@ pub fn preprocess_image_semseg(
             target_size,
             pad_top,
             pad_left,
-            new_w as u32,
-            new_h as u32,
+            new_w,
+            new_h,
         ),
         _ => {
             let src_rgb = image.to_rgb8();
@@ -178,8 +211,8 @@ pub fn preprocess_image_semseg(
                 target_size,
                 pad_top,
                 pad_left,
-                new_w as u32,
-                new_h as u32,
+                new_w,
+                new_h,
             )
         }
     };
@@ -194,7 +227,7 @@ pub fn preprocess_image_semseg(
         tensor,
         tensor_f16,
         orig_shape,
-        scale: (scale, scale),
+        scale,
         padding: (pad_top as f32, pad_left as f32),
     }
 }
@@ -248,49 +281,17 @@ pub fn preprocess_image_with_precision(
     let (new_width, new_height, pad_left, pad_top, scale) =
         calculate_letterbox_params(orig_width, orig_height, target_size, stride);
 
-    // Zero-copy path: avoid to_rgb8() allocation when possible
-    let tensor = match image {
-        // Fast path: already RGB8, use bytes directly without copy
-        DynamicImage::ImageRgb8(rgb) => fused_zerocopy_preprocess(
-            rgb.as_raw(),
-            orig_width,
-            orig_height,
-            target_size,
-            pad_top,
-            pad_left,
-            new_width,
-            new_height,
-        ),
-        // Fallback: convert to RGB8 (allocates)
-        _ => {
-            let src_rgb = image.to_rgb8();
-            fused_zerocopy_preprocess(
-                src_rgb.as_raw(),
-                orig_width,
-                orig_height,
-                target_size,
-                pad_top,
-                pad_left,
-                new_width,
-                new_height,
-            )
-        }
-    };
-
-    let tensor_f16 = if half {
-        Some(tensor_f32_to_f16(&tensor))
-    } else {
-        None
-    };
-
-    PreprocessResult {
-        tensor,
-        tensor_f16,
-        orig_shape,
+    build_preprocess_result(
+        image,
+        target_size,
+        new_width,
+        new_height,
+        pad_left,
+        pad_top,
         scale,
-        #[allow(clippy::cast_precision_loss)]
-        padding: (pad_top as f32, pad_left as f32),
-    }
+        orig_shape,
+        half,
+    )
 }
 
 // ================================================================================================
