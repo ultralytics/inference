@@ -261,11 +261,11 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         return;
     };
     let (width, height) = img.dimensions();
-    for y in 0..height as usize {
-        for x in 0..width as usize {
-            let class_id = semantic_mask.data[[y, x]] as usize;
+    for y in 0..height {
+        for x in 0..width {
+            let class_id = semantic_mask.data[[y as usize, x as usize]] as usize;
             let color = COLORS[class_id % COLORS.len()];
-            let pixel = img.get_pixel_mut(x as u32, y as u32);
+            let pixel = img.get_pixel_mut(x, y);
             pixel[0] = (pixel[0] / 2).saturating_add(color[0] / 2);
             pixel[1] = (pixel[1] / 2).saturating_add(color[1] / 2);
             pixel[2] = (pixel[2] / 2).saturating_add(color[2] / 2);

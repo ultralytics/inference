@@ -1705,7 +1705,8 @@ fn postprocess_obb_end2end(
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::similar_names
 )]
 fn letterbox_crop_bounds(
     lh: usize,
@@ -1735,13 +1736,20 @@ fn letterbox_crop_bounds(
 /// native rect shape matches the source image (lh==oh && lw==ow), this is a single memcpy
 /// into the class map. For other aspect ratios we crop the centered letterbox padding
 /// and nearest-neighbour upsample to original image shape.
+///
+/// # Panics
+///
+/// Panics if the freshly-allocated `Array2<u32>` class map is not contiguous (cannot occur
+/// for `Array2::zeros` on standard layout).
 #[allow(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::similar_names,
+    clippy::implicit_hasher
 )]
-#[must_use] 
+#[must_use]
 pub fn postprocess_semantic_mask(
     output: &[u8],
     shape: &[usize],
@@ -1821,7 +1829,8 @@ pub fn postprocess_semantic_mask(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::similar_names
 )]
 fn postprocess_semseg(
     output: &[f32],
@@ -1960,8 +1969,7 @@ fn postprocess_semseg(
 
                 let mut best_cls = 0u32;
                 let mut best_val = f32::NEG_INFINITY;
-                for c in 0..nc {
-                    let v = vals[c];
+                for (c, &v) in vals.iter().take(nc).enumerate() {
                     if v > best_val {
                         best_val = v;
                         best_cls = c as u32;
