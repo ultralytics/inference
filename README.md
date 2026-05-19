@@ -352,7 +352,7 @@ inference/
 │   ├── lib.rs              # Library entry point and public exports
 │   ├── main.rs             # CLI application
 │   ├── model.rs            # YOLOModel - ONNX session and inference
-│   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb
+│   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask
 │   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize, SIMD)
 │   ├── postprocessing.rs   # Detection post-processing (NMS, decode, SIMD)
 │   ├── metadata.rs         # ONNX model metadata parsing
