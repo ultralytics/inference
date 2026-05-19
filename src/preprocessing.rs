@@ -30,10 +30,6 @@ use image::{DynamicImage, GenericImageView, RgbImage};
 use lru::LruCache;
 use ndarray::{Array3, Array4};
 
-// ================================================================================================
-// Constants
-// ================================================================================================
-
 /// Default letterbox padding color (gray).
 pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
 
@@ -58,27 +54,16 @@ const INV_255: f32 = 1.0 / 255.0;
 /// Maximum LRU cache size for X coordinate LUTs.
 const LUT_CACHE_SIZE: usize = 8;
 
-// ================================================================================================
-// Type Aliases
-// ================================================================================================
 
 /// X LUT entry: (`x0_byte_offset`, `x1_byte_offset`, 1-fx, fx) using 11-bit fixed-point
 /// weights matching `OpenCV`'s `INTER_LINEAR` coordinate mapping.
 type XLutEntry = (usize, usize, i32, i32);
 type XLutKey = (u32, u32);
 
-// ================================================================================================
-// Thread-Local State
-// ================================================================================================
-
 thread_local! {
     static X_LUT_CACHE: RefCell<LruCache<XLutKey, Vec<XLutEntry>>> =
         RefCell::new(LruCache::new(NonZeroUsize::new(LUT_CACHE_SIZE).unwrap()));
 }
-
-// ================================================================================================
-// Types
-// ================================================================================================
 
 /// Result of preprocessing an image, containing the tensor and transform info.
 #[derive(Debug, Clone)]
@@ -101,8 +86,8 @@ pub struct PreprocessResult {
 /// `target_size.0`, with stride-aligned padding appended at the bottom/right only.
 ///
 /// Static models: fit-within-target letterbox to exactly `target_size` with
-/// top-left alignment (padding at the bottom/right only, matching Python's
-/// `center=False` letterbox).
+/// centered alignment (padding split between both sides, default for
+/// `LetterBox(center=True)`).
 ///
 /// # Arguments
 ///
@@ -134,9 +119,10 @@ pub fn preprocess_image_semseg(
     #[allow(clippy::cast_precision_loss)]
     let (target_h_f, target_w_f) = (target_size.0 as f32, target_size.1 as f32);
 
-    let (target_size, new_h, new_w, scale) = if is_dynamic {
+    let (target_size, new_h, new_w, scale, pad_top, pad_left) = if is_dynamic {
         // Short-side scaling: scale so the shorter dimension equals target_size.0,
         // then round the longer side up to the nearest stride multiple.
+        // Dynamic mode places content at (0, 0): no padding to split.
         let scale = target_h_f / orig_h.min(orig_w);
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let (nh, nw) = if orig_h <= orig_w {
@@ -144,18 +130,26 @@ pub fn preprocess_image_semseg(
         } else {
             ((orig_h * scale).round() as usize, target_size.0)
         };
-        let ph = ((nh + stride_usize - 1) / stride_usize) * stride_usize;
-        let pw = ((nw + stride_usize - 1) / stride_usize) * stride_usize;
-        ((ph, pw), nh, nw, scale)
+        let ph = nh.div_ceil(stride_usize) * stride_usize;
+        let pw = nw.div_ceil(stride_usize) * stride_usize;
+        ((ph, pw), nh, nw, scale, 0u32, 0u32)
     } else {
-        // Fit-within-target letterbox: scale to fit inside target_size,
-        // pad the remainder at the bottom/right only (center=False).
+        // Centered letterbox: scale to fit, split the remainder evenly between top/bottom
+        // and left/right (this is the predictor's default; matches `LetterBox(center=True)`).
         let scale = (target_h_f / orig_h).min(target_w_f / orig_w);
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let nh = (orig_h * scale).round() as usize;
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let nw = (orig_w * scale).round() as usize;
-        (target_size, nh, nw, scale)
+        let pad_h = target_size.0.saturating_sub(nh);
+        let pad_w = target_size.1.saturating_sub(nw);
+        // Use the same rounding rule as `cv2.copyMakeBorder` in `LetterBox.apply_image`:
+        // `top = round(dh - 0.1)` where dh = pad_h / 2 (float).
+        #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let pad_top_u = ((pad_h as f32) / 2.0 - 0.1).round().max(0.0) as u32;
+        #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let pad_left_u = ((pad_w as f32) / 2.0 - 0.1).round().max(0.0) as u32;
+        (target_size, nh, nw, scale, pad_top_u, pad_left_u)
     };
 
     let tensor = match image {
@@ -164,8 +158,8 @@ pub fn preprocess_image_semseg(
             orig_width,
             orig_height,
             target_size,
-            0,
-            0,
+            pad_top,
+            pad_left,
             new_w as u32,
             new_h as u32,
         ),
@@ -176,8 +170,8 @@ pub fn preprocess_image_semseg(
                 orig_width,
                 orig_height,
                 target_size,
-                0,
-                0,
+                pad_top,
+                pad_left,
                 new_w as u32,
                 new_h as u32,
             )
@@ -195,7 +189,7 @@ pub fn preprocess_image_semseg(
         tensor_f16,
         orig_shape,
         scale: (scale, scale),
-        padding: (0.0, 0.0),
+        padding: (pad_top as f32, pad_left as f32),
     }
 }
 
