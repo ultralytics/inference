@@ -22,6 +22,7 @@ use clap::{Args, Parser, Subcommand};
     --half                 Use FP16 half-precision inference [default: false]
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
+    --save-json            Save semseg masks (PNG) / detect/segment/pose (COCO JSON) for eval
     --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)
     --verbose              Show verbose output [default: true]
@@ -107,6 +108,10 @@ pub struct PredictArgs {
     /// Save individual frames for video input (instead of video file)
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE_FRAMES)]
     pub save_frames: bool,
+
+    /// Save results to COCO JSON (detect/segment/pose) or PNG masks (semseg) for external evaluation
+    #[arg(long, default_value_t = false)]
+    pub save_json: bool,
 
     /// Display results in a window
     #[arg(long, default_value_t = false)]

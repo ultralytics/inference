@@ -47,8 +47,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let imgsz = args.imgsz;
     let save = args.save;
     let save_frames = args.save_frames;
-    let save_semantic_mask = args.save_semantic_mask;
-    let semantic_mask_dir_override = args.semantic_mask_dir.clone();
+    let save_json = args.save_json;
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
@@ -178,25 +177,32 @@ pub fn run_prediction(args: &PredictArgs) {
         None
     };
 
-    let semantic_mask_dir: Option<std::path::PathBuf> = if save_semantic_mask {
-        let dir = semantic_mask_dir_override.map_or_else(
-            || {
-                #[cfg(feature = "annotate")]
-                {
-                    save_dir.as_ref().map_or_else(
-                        || std::path::PathBuf::from("runs/semseg/semantic_masks"),
-                        |d| d.join("semantic_masks"),
-                    )
-                }
-                #[cfg(not(feature = "annotate"))]
-                {
-                    std::path::PathBuf::from("runs/semseg/semantic_masks")
-                }
-            },
-            std::path::PathBuf::from,
-        );
+    // Matches Ultralytics' val.py for semseg: when --save-json is set, write per-image
+    // PNG class maps into `<save_dir>/results/<image_stem>.png`. Requires --save (which
+    // creates save_dir) and task == SemSeg; ignored otherwise.
+    #[cfg(feature = "annotate")]
+    let results_dir: Option<std::path::PathBuf> = if save_json
+        && model.task() == crate::task::Task::SemSeg
+    {
+        let dir = save_dir
+            .as_ref()
+            .map(|d| d.join("results"))
+            .unwrap_or_else(|| std::path::PathBuf::from("runs/semseg/results"));
         if let Err(e) = fs::create_dir_all(&dir) {
-            error!("Failed to create semantic-mask directory '{}': {e}", dir.display());
+            error!("Failed to create results directory '{}': {e}", dir.display());
+            process::exit(1);
+        }
+        Some(dir)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "annotate"))]
+    let results_dir: Option<std::path::PathBuf> = if save_json
+        && model.task() == crate::task::Task::SemSeg
+    {
+        let dir = std::path::PathBuf::from("runs/semseg/results");
+        if let Err(e) = fs::create_dir_all(&dir) {
+            error!("Failed to create results directory '{}': {e}", dir.display());
             process::exit(1);
         }
         Some(dir)
@@ -346,7 +352,7 @@ pub fn run_prediction(args: &PredictArgs) {
                             );
                         }
 
-                        if let Some(ref cdir) = semantic_mask_dir
+                        if let Some(ref cdir) = results_dir
                             && let Some(ref sm) = result.semantic_mask
                         {
                             let stem = std::path::Path::new(image_path).file_stem().map_or_else(
