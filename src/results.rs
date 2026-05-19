@@ -6,6 +6,7 @@
 //! the Python API for easy migration and consistent usage patterns.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
@@ -78,7 +79,7 @@ pub struct Results {
     /// Inference timing information.
     pub speed: Speed,
     /// Class ID to name mapping.
-    pub names: HashMap<usize, String>,
+    pub names: Arc<HashMap<usize, String>>,
     /// Path to the source image/video.
     pub path: String,
 }
@@ -101,7 +102,7 @@ impl Results {
     pub fn new(
         orig_img: Array3<u8>,
         path: String,
-        names: HashMap<usize, String>,
+        names: Arc<HashMap<usize, String>>,
         speed: Speed,
         inference_shape: (u32, u32),
     ) -> Self {
@@ -1002,7 +1003,7 @@ mod tests {
     }
     #[test]
     fn test_results_verbose() {
-        let names = HashMap::from([(0, "person".to_string())]);
+        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
         let speed = Speed::default();
         let orig_img = Array3::zeros((100, 100, 3));
 

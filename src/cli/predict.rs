@@ -480,14 +480,15 @@ mod tests {
     use crate::results::{Boxes, Obb, Probs, Results, Speed};
     use ndarray::{Array2, Array3};
     use std::collections::HashMap;
+    use std::sync::Arc;
 
-    fn create_names() -> HashMap<usize, String> {
+    fn create_names() -> Arc<HashMap<usize, String>> {
         let mut names = HashMap::new();
         names.insert(0, "person".to_string());
         names.insert(1, "car".to_string());
         names.insert(2, "bus".to_string());
         names.insert(5, "bicycle".to_string());
-        names
+        Arc::new(names)
     }
 
     fn create_dummy_image() -> Array3<u8> {
@@ -614,12 +615,15 @@ mod tests {
         let data = ndarray::Array1::from_vec(vec![0.1, 0.7, 0.15, 0.03, 0.02]);
         let probs = Probs::new(data);
 
-        let mut names = HashMap::new();
-        names.insert(0, "cat".to_string());
-        names.insert(1, "dog".to_string());
-        names.insert(2, "bird".to_string());
-        names.insert(3, "fish".to_string());
-        names.insert(4, "hamster".to_string());
+        let names = Arc::new({
+            let mut n = HashMap::new();
+            n.insert(0, "cat".to_string());
+            n.insert(1, "dog".to_string());
+            n.insert(2, "bird".to_string());
+            n.insert(3, "fish".to_string());
+            n.insert(4, "hamster".to_string());
+            n
+        });
 
         let mut result = Results::new(
             create_dummy_image(),

@@ -859,6 +859,7 @@ mod tests {
     use crate::results::Speed;
     use ndarray::Array3;
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn test_get_class_color() {
@@ -885,7 +886,7 @@ mod tests {
 
         let orig_img = Array3::<u8>::zeros((100, 100, 3));
         let path = "test.jpg".to_string();
-        let names = HashMap::new();
+        let names = Arc::new(HashMap::new());
         let speed = Speed::new(0.0, 0.0, 0.0);
 
         // Correct constructor matching src/results.rs:101
