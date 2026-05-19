@@ -1698,14 +1698,102 @@ fn postprocess_obb_end2end(
     results
 }
 
+/// Post-process a semseg ONNX that has ArgMax + Cast(uint8) baked in.
+///
+/// Output shape is `[1, lh, lw] uint8`. For cityscapes-style inputs where the model's
+/// native rect shape matches the source image (lh==oh && lw==ow), this is a single memcpy
+/// into the class map. For other aspect ratios we crop the centered letterbox padding
+/// and nearest-neighbour upsample to original image shape.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+pub fn postprocess_semantic_mask(
+    output: &[u8],
+    shape: &[usize],
+    names: &HashMap<usize, String>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+) -> Results {
+    let oh = orig_img.shape()[0];
+    let ow = orig_img.shape()[1];
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
+
+    if shape.len() < 2 || output.is_empty() {
+        return results;
+    }
+    let (lh, lw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
+    if lh == 0 || lw == 0 || oh == 0 || ow == 0 {
+        return results;
+    }
+
+    // Fast path: model output already at original resolution: just widen u8 -> u32.
+    if lh == oh && lw == ow {
+        let mut class_map = Array2::<u32>::zeros((oh, ow));
+        class_map
+            .as_slice_mut()
+            .expect("contiguous")
+            .iter_mut()
+            .zip(output.iter())
+            .for_each(|(dst, &src)| *dst = u32::from(src));
+        results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+        return results;
+    }
+
+    // Slow path: crop centered letterbox padding in semantic-mask space, then NN upsample.
+    let gain = (lh as f32 / oh as f32).min(lw as f32 / ow as f32);
+    let pad_h_half = (lh as f32 - (oh as f32 * gain).round()) / 2.0;
+    let pad_w_half = (lw as f32 - (ow as f32 * gain).round()) / 2.0;
+    let top = (pad_h_half - 0.1).round().max(0.0) as usize;
+    let left = (pad_w_half - 0.1).round().max(0.0) as usize;
+    let bottom = lh.saturating_sub((pad_h_half + 0.1).round() as usize);
+    let right = lw.saturating_sub((pad_w_half + 0.1).round() as usize);
+    let crop_h = bottom.saturating_sub(top);
+    let crop_w = right.saturating_sub(left);
+    if crop_h == 0 || crop_w == 0 {
+        return results;
+    }
+
+    let scale_y = crop_h as f32 / oh as f32;
+    let scale_x = crop_w as f32 / ow as f32;
+    let crop_h_minus_1 = crop_h.saturating_sub(1);
+    let crop_w_minus_1 = crop_w.saturating_sub(1);
+    let x_lut: Vec<usize> = (0..ow)
+        .map(|dx| ((dx as f32 + 0.5) * scale_x) as usize)
+        .map(|sx| sx.min(crop_w_minus_1) + left)
+        .collect();
+
+    let mut class_map = Array2::<u32>::zeros((oh, ow));
+    class_map
+        .axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(dy, mut row)| {
+            let sy = (((dy as f32 + 0.5) * scale_y) as usize).min(crop_h_minus_1) + top;
+            let src_row_base = sy * lw;
+            for (dx, cell) in row.iter_mut().enumerate() {
+                *cell = u32::from(output[src_row_base + x_lut[dx]]);
+            }
+        });
+
+    results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+    results
+}
+
 /// Post-process semantic segmentation model output.
 ///
 /// The model outputs raw logits of shape `[1, nc, lh, lw]` at the P3 scale
-/// (stride 8).  Postprocessing:
-/// 1. Crops bottom/right padding from logit space (non-centered letterbox).
-/// 2. Bilinear-upsamples each channel from the cropped logit size to the
-///    original image dimensions.
-/// 3. Takes argmax over the class channel to produce a `[H, W]` label map.
+/// (stride 8). Pipeline:
+/// 1. Transpose CHW to HWC once (small: lh*lw*nc f32s) so per-pixel argmax is contiguous.
+/// 2. Bilinear-interpolate each output pixel's 4 source neighbours, fused with argmax
+///    over `nc` classes, producing the final class map in one pass.
+///
+/// Memory traffic per output pixel drops from 4*nc strided reads to 4*nc contiguous
+/// reads; the source channels for one source pixel fit in ~80 bytes (1-2 cache lines).
 #[allow(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
@@ -1721,13 +1809,9 @@ fn postprocess_semseg(
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(
-        orig_img.clone(),
-        path,
-        names.clone(),
-        speed,
-        inference_shape,
-    );
+    let oh = orig_img.shape()[0];
+    let ow = orig_img.shape()[1];
+    let mut results = Results::new(orig_img, path, names.clone(), speed, inference_shape);
 
     if shape.len() < 4 || output.is_empty() {
         return results;
@@ -1736,66 +1820,149 @@ fn postprocess_semseg(
     let nc = shape[1];
     let lh = shape[2];
     let lw = shape[3];
-    let oh = orig_img.shape()[0];
-    let ow = orig_img.shape()[1];
 
     if nc == 0 || lh == 0 || lw == 0 || oh == 0 || ow == 0 {
         return results;
     }
 
-    // Compute how much of the logit space covers the original image.
-    // Non-centered (top-left) letterbox: content starts at (0, 0).
-    let gain = (lh as f32 / oh as f32).min(lw as f32 / ow as f32);
-    let crop_h = (oh as f32 * gain).round() as usize;
-    let crop_w = (ow as f32 * gain).round() as usize;
-    let crop_h = crop_h.min(lh);
-    let crop_w = crop_w.min(lw);
+    // Fast path: model output is already at orig_img resolution (no resize, no padding).
+    // Avoids the CHW->HWC transpose and bilinear interpolation entirely: just argmax over
+    // the class channel for each pixel. Hits when the export bakes a full-res upsample
+    // into the ONNX graph and the input was the model's native rect shape.
+    if lh == oh && lw == ow {
+        let plane = lh * lw;
+        let mut class_map = Array2::<u32>::zeros((oh, ow));
+        class_map
+            .axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(dy, mut row)| {
+                for (dx, cell) in row.iter_mut().enumerate() {
+                    let pix_off = dy * lw + dx;
+                    let mut best_cls = 0u32;
+                    let mut best_val = f32::NEG_INFINITY;
+                    for c in 0..nc {
+                        let v = output[c * plane + pix_off];
+                        if v > best_val {
+                            best_val = v;
+                            best_cls = c as u32;
+                        }
+                    }
+                    *cell = best_cls;
+                }
+            });
+        results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+        return results;
+    }
 
-    // Bilinear upsample logits from (crop_h, crop_w) to (oh, ow), then argmax.
-    // Each output row is independent, so we parallelise over rows with rayon.
+    // Transpose CHW to HWC, padding nc up to a multiple of 8 with -INF so the per-pixel
+    // argmax can run as `n_chunks` SIMD f32x8 FMAs with no special-case for the tail.
+    let plane = lh * lw;
+    let nc_padded = nc.div_ceil(8) * 8;
+    let mut hwc = vec![f32::NEG_INFINITY; plane * nc_padded];
+    hwc.par_chunks_mut(lw * nc_padded)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for x in 0..lw {
+                let dst = x * nc_padded;
+                for c in 0..nc {
+                    row[dst + c] = output[c * plane + y * lw + x];
+                }
+                // Lanes nc..nc_padded remain f32::NEG_INFINITY (set at vec init).
+            }
+        });
+
+    // Crop centered letterbox padding using the same rounding rule as `scale_masks`:
+    //   gain = min(lh/oh, lw/ow)
+    //   pad_w, pad_h = lw - round(ow*gain), lh - round(oh*gain)    // total padding
+    //   if center: pad_w /= 2; pad_h /= 2                          // half on each side
+    //   top, left = round(pad_h - 0.1),  round(pad_w - 0.1)
+    //   bottom, right = lh - round(pad_h + 0.1), lw - round(pad_w + 0.1)
+    // Then upsample masks[..., top:bottom, left:right] to (oh, ow).
+    let gain = (lh as f32 / oh as f32).min(lw as f32 / ow as f32);
+    let pad_h_total = lh as f32 - (oh as f32 * gain).round();
+    let pad_w_total = lw as f32 - (ow as f32 * gain).round();
+    let pad_h_half = pad_h_total / 2.0;
+    let pad_w_half = pad_w_total / 2.0;
+    let top = (pad_h_half - 0.1).round().max(0.0) as usize;
+    let left = (pad_w_half - 0.1).round().max(0.0) as usize;
+    let bottom = lh.saturating_sub((pad_h_half + 0.1).round() as usize);
+    let right = lw.saturating_sub((pad_w_half + 0.1).round() as usize);
+    let crop_h = bottom.saturating_sub(top);
+    let crop_w = right.saturating_sub(left);
+
+    if crop_h == 0 || crop_w == 0 {
+        return results;
+    }
+
     let scale_y = crop_h as f32 / oh as f32;
     let scale_x = crop_w as f32 / ow as f32;
+    let lw_minus_1 = lw.saturating_sub(1);
+    let lh_minus_1 = lh.saturating_sub(1);
 
+    // Precompute source-x neighbours + weights once per output column (with left offset).
+    let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
+        .map(|dx| {
+            let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0) + left as f32;
+            let x0 = (sx.floor() as usize).min(lw_minus_1);
+            let x1 = (x0 + 1).min(lw_minus_1);
+            let fx = sx - x0 as f32;
+            (x0, x1, 1.0 - fx, fx)
+        })
+        .collect();
+
+    let n_chunks = nc_padded / 8;
     let mut class_map = Array2::<u32>::zeros((oh, ow));
-
     class_map
         .axis_iter_mut(Axis(0))
         .into_par_iter()
         .enumerate()
         .for_each(|(dy, mut row)| {
-            let sy = ((dy as f32 + 0.5) * scale_y - 0.5).max(0.0);
-            let y0 = sy.floor() as usize;
-            let y1 = (y0 + 1).min(lh - 1);
+            let sy = ((dy as f32 + 0.5) * scale_y - 0.5).max(0.0) + top as f32;
+            let y0 = (sy.floor() as usize).min(lh_minus_1);
+            let y1 = (y0 + 1).min(lh_minus_1);
             let fy = sy - y0 as f32;
             let fyi = 1.0 - fy;
 
-            for (dx, cell) in row.iter_mut().enumerate() {
-                let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
-                let x0 = sx.floor() as usize;
-                let x1 = (x0 + 1).min(lw - 1);
-                let fx = sx - x0 as f32;
-                let fxi = 1.0 - fx;
+            let row0_base = y0 * lw;
+            let row1_base = y1 * lw;
 
-                let w00 = fyi * fxi;
-                let w10 = fy * fxi;
-                let w01 = fyi * fx;
-                let w11 = fy * fx;
+            // Stack-allocated buffer for nc_padded f32 results per pixel.
+            let mut vals = [0.0f32; 32]; // nc_padded ≤ 32 for typical semseg models
+
+            for (dx, cell) in row.iter_mut().enumerate() {
+                let (x0, x1, fxi, fx) = x_lut[dx];
+
+                let w00_v = f32x8::splat(fyi * fxi);
+                let w10_v = f32x8::splat(fy * fxi);
+                let w01_v = f32x8::splat(fyi * fx);
+                let w11_v = f32x8::splat(fy * fx);
+
+                let off00 = (row0_base + x0) * nc_padded;
+                let off10 = (row1_base + x0) * nc_padded;
+                let off01 = (row0_base + x1) * nc_padded;
+                let off11 = (row1_base + x1) * nc_padded;
+
+                for k in 0..n_chunks {
+                    let lane = k * 8;
+                    let p00 = f32x8::from(&hwc[off00 + lane..off00 + lane + 8]);
+                    let p10 = f32x8::from(&hwc[off10 + lane..off10 + lane + 8]);
+                    let p01 = f32x8::from(&hwc[off01 + lane..off01 + lane + 8]);
+                    let p11 = f32x8::from(&hwc[off11 + lane..off11 + lane + 8]);
+                    let v = p00 * w00_v + p10 * w10_v + p01 * w01_v + p11 * w11_v;
+                    let arr = v.to_array();
+                    vals[lane..lane + 8].copy_from_slice(&arr);
+                }
 
                 let mut best_cls = 0u32;
                 let mut best_val = f32::NEG_INFINITY;
-
                 for c in 0..nc {
-                    let base = c * lh * lw;
-                    let v = output[base + y0 * lw + x0] * w00
-                        + output[base + y1 * lw + x0] * w10
-                        + output[base + y0 * lw + x1] * w01
-                        + output[base + y1 * lw + x1] * w11;
+                    let v = vals[c];
                     if v > best_val {
                         best_val = v;
                         best_cls = c as u32;
                     }
                 }
-
                 *cell = best_cls;
             }
         });
