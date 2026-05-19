@@ -22,7 +22,9 @@ use wide::{CmpGt, f32x8};
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Axis, Zip, s};
-use rayon::prelude::{IndexedParallelIterator, ParallelIterator, IntoParallelIterator, ParallelSliceMut};
+use rayon::prelude::{
+    IndexedParallelIterator, IntoParallelIterator, ParallelIterator, ParallelSliceMut,
+};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
