@@ -1698,6 +1698,33 @@ fn postprocess_obb_end2end(
     results
 }
 
+/// Compute the centered-letterbox crop bounds in model-output (lh, lw) space that
+/// cover the original image (oh, ow).
+///
+/// Returns `(top, left, crop_h, crop_w)` or `None` if the crop is empty (degenerate input).
+#[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+fn letterbox_crop_bounds(
+    lh: usize,
+    lw: usize,
+    oh: usize,
+    ow: usize,
+) -> Option<(usize, usize, usize, usize)> {
+    let gain = (lh as f32 / oh as f32).min(lw as f32 / ow as f32);
+    let pad_h_half = (lh as f32 - (oh as f32 * gain).round()) / 2.0;
+    let pad_w_half = (lw as f32 - (ow as f32 * gain).round()) / 2.0;
+    let top = (pad_h_half - 0.1).round().max(0.0) as usize;
+    let left = (pad_w_half - 0.1).round().max(0.0) as usize;
+    let bottom = lh.saturating_sub((pad_h_half + 0.1).round() as usize);
+    let right = lw.saturating_sub((pad_w_half + 0.1).round() as usize);
+    let crop_h = bottom.saturating_sub(top);
+    let crop_w = right.saturating_sub(left);
+    if crop_h == 0 || crop_w == 0 {
+        None
+    } else {
+        Some((top, left, crop_h, crop_w))
+    }
+}
+
 /// Post-process a semseg ONNX that has ArgMax + Cast(uint8) baked in.
 ///
 /// Output shape is `[1, lh, lw] uint8`. For cityscapes-style inputs where the model's
@@ -1745,18 +1772,9 @@ pub fn postprocess_semantic_mask(
     }
 
     // Slow path: crop centered letterbox padding in semantic-mask space, then NN upsample.
-    let gain = (lh as f32 / oh as f32).min(lw as f32 / ow as f32);
-    let pad_h_half = (lh as f32 - (oh as f32 * gain).round()) / 2.0;
-    let pad_w_half = (lw as f32 - (ow as f32 * gain).round()) / 2.0;
-    let top = (pad_h_half - 0.1).round().max(0.0) as usize;
-    let left = (pad_w_half - 0.1).round().max(0.0) as usize;
-    let bottom = lh.saturating_sub((pad_h_half + 0.1).round() as usize);
-    let right = lw.saturating_sub((pad_w_half + 0.1).round() as usize);
-    let crop_h = bottom.saturating_sub(top);
-    let crop_w = right.saturating_sub(left);
-    if crop_h == 0 || crop_w == 0 {
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
-    }
+    };
 
     let scale_y = crop_h as f32 / oh as f32;
     let scale_x = crop_w as f32 / ow as f32;
@@ -1872,29 +1890,10 @@ fn postprocess_semseg(
             }
         });
 
-    // Crop centered letterbox padding using the same rounding rule as `scale_masks`:
-    //   gain = min(lh/oh, lw/ow)
-    //   pad_w, pad_h = lw - round(ow*gain), lh - round(oh*gain)    // total padding
-    //   if center: pad_w /= 2; pad_h /= 2                          // half on each side
-    //   top, left = round(pad_h - 0.1),  round(pad_w - 0.1)
-    //   bottom, right = lh - round(pad_h + 0.1), lw - round(pad_w + 0.1)
-    // Then upsample masks[..., top:bottom, left:right] to (oh, ow).
-    let gain = (lh as f32 / oh as f32).min(lw as f32 / ow as f32);
-    let pad_h_total = lh as f32 - (oh as f32 * gain).round();
-    let pad_w_total = lw as f32 - (ow as f32 * gain).round();
-    let pad_h_half = pad_h_total / 2.0;
-    let pad_w_half = pad_w_total / 2.0;
-    let top = (pad_h_half - 0.1).round().max(0.0) as usize;
-    let left = (pad_w_half - 0.1).round().max(0.0) as usize;
-    let bottom = lh.saturating_sub((pad_h_half + 0.1).round() as usize);
-    let right = lw.saturating_sub((pad_w_half + 0.1).round() as usize);
-    let crop_h = bottom.saturating_sub(top);
-    let crop_w = right.saturating_sub(left);
-
-    if crop_h == 0 || crop_w == 0 {
+    // Crop centered letterbox padding, then bilinear-upsample crop to (oh, ow).
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
-    }
-
+    };
     let scale_y = crop_h as f32 / oh as f32;
     let scale_x = crop_w as f32 / ow as f32;
     let lw_minus_1 = lw.saturating_sub(1);
