@@ -261,11 +261,12 @@ fn postprocess_detect(
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, Arc::clone(&names), speed, inference_shape);
+    let nc = names.len();
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
     let (num_classes, num_predictions, is_transposed) =
-        parse_detect_shape(output_shape, names.len());
+        parse_detect_shape(output_shape, nc);
 
     if output.is_empty() || num_predictions == 0 {
         return results;
@@ -920,7 +921,8 @@ fn postprocess_pose(
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, Arc::clone(&names), speed, inference_shape);
+    let num_classes = names.len().max(1);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     // Standard COCO pose has 17 keypoints, each with (x, y, conf)
     let num_keypoints = 17;
@@ -928,7 +930,6 @@ fn postprocess_pose(
     let kpt_features = num_keypoints * kpt_dim; // 51
 
     // Pose typically has 1 class (person), so features = 4 + 1 + 51 = 56
-    let num_classes = names.len().max(1);
     let expected_features = 4 + num_classes + kpt_features;
 
     // Parse output shape
@@ -1182,11 +1183,11 @@ fn postprocess_obb(
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let mut results = Results::new(orig_img, path, Arc::clone(&names), speed, inference_shape);
+    let num_classes = names.len().max(1);
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     // OBB format: [xywh, class_scores..., rotation_angle]
     // features = 4 (bbox) + num_classes + 1 (angle)
-    let num_classes = names.len().max(1);
     let expected_features = 4 + num_classes + 1;
 
     // Parse output shape
