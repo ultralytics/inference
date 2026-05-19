@@ -41,7 +41,7 @@ fn downloadable_models() -> Vec<String> {
 }
 
 fn supported_models_help() -> String {
-    let variants_display = ["detect", "-seg", "-pose", "-obb", "-cls"];
+    let variants_display = ["detect", "-seg", "-pose", "-obb", "-cls", "-sem (yolo26 only)"];
     let sizes_display = MODEL_SIZES.join(", ");
     let variants_joined = variants_display.join(", ");
 
@@ -60,7 +60,7 @@ const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
 const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
 const DEFAULT_BOATS_IMAGE_URL: &str = "https://ultralytics.com/images/boats.jpg";
 
-/// Default image URLs for detection, segmentation, pose, and classification tasks.
+/// Default image URLs for detection, segmentation, pose, classification, and semseg tasks.
 pub const DEFAULT_IMAGES: &[&str] = &[DEFAULT_BUS_IMAGE_URL, DEFAULT_ZIDANE_IMAGE_URL];
 
 /// Default image URL for OBB (Oriented Bounding Box) tasks.
@@ -344,7 +344,7 @@ fn normalize_model_path(path: &Path) -> PathBuf {
 /// Attempt to download a model if it matches a known downloadable model.
 ///
 /// Supports all `YOLO26`, `YOLO11`, and `YOLOv8` ONNX models across sizes (n/s/m/l/x) and
-/// task variants (detect, segment, pose, obb, classify).
+/// task variants (detect, segment, pose, obb, classify, semseg).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// # Errors
