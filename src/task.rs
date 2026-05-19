@@ -86,7 +86,7 @@ impl Task {
         format!("yolo26n{}.onnx", self.model_suffix())
     }
 
-    /// Returns `true` when the task outputs bounding boxes — namely Detect, Segment, Pose, and Obb.
+    /// Returns `true` when the task outputs bounding boxes: Detect, Segment, Pose, and Obb.
     #[must_use]
     pub const fn has_boxes(&self) -> bool {
         matches!(self, Self::Detect | Self::Segment | Self::Pose | Self::Obb)
