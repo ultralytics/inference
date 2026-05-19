@@ -116,7 +116,7 @@ impl Task {
         matches!(self, Self::Obb)
     }
 
-    /// Returns `true` only for the SemSeg task, which outputs a per-pixel class label map.
+    /// Returns `true` only for the `SemSeg` task, which outputs a per-pixel class label map.
     #[must_use]
     pub const fn has_semantic_mask(&self) -> bool {
         matches!(self, Self::SemSeg)

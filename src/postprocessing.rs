@@ -22,7 +22,7 @@ use wide::{CmpGt, f32x8};
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Axis, Zip, s};
-use rayon::prelude::*;
+use rayon::prelude::{IndexedParallelIterator, ParallelIterator, IntoParallelIterator, ParallelSliceMut};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -1741,6 +1741,7 @@ fn letterbox_crop_bounds(
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation
 )]
+#[must_use] 
 pub fn postprocess_semantic_mask(
     output: &[u8],
     shape: &[usize],
@@ -1906,7 +1907,7 @@ fn postprocess_semseg(
     // Precompute source-x neighbours + weights once per output column (with left offset).
     let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
         .map(|dx| {
-            let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0) + left as f32;
+            let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
             let x0 = (sx.floor() as usize).min(lw_minus_1);
             let x1 = (x0 + 1).min(lw_minus_1);
             let fx = sx - x0 as f32;
@@ -1921,7 +1922,7 @@ fn postprocess_semseg(
         .into_par_iter()
         .enumerate()
         .for_each(|(dy, mut row)| {
-            let sy = ((dy as f32 + 0.5) * scale_y - 0.5).max(0.0) + top as f32;
+            let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
             let y0 = (sy.floor() as usize).min(lh_minus_1);
             let y1 = (y0 + 1).min(lh_minus_1);
             let fy = sy - y0 as f32;

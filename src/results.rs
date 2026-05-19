@@ -66,7 +66,7 @@ pub struct SemanticMask {
 impl SemanticMask {
     /// Create a new `SemanticMask`.
     #[must_use]
-    pub fn new(data: Array2<u32>, orig_shape: (u32, u32)) -> Self {
+    pub const fn new(data: Array2<u32>, orig_shape: (u32, u32)) -> Self {
         Self { data, orig_shape }
     }
 
