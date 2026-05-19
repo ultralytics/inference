@@ -471,6 +471,56 @@ impl YOLOModel {
         ep.build()
     }
 
+    /// Concatenate per-image FP32 input tensors along the batch axis.
+    fn concat_f32_batch(
+        preprocessed: &[crate::preprocessing::PreprocessResult],
+    ) -> Result<ndarray::Array4<f32>> {
+        let arrays: Vec<_> = preprocessed.iter().map(|r| r.tensor.view()).collect();
+        let batch = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to concatenate FP32 tensors: {e}"))
+        })?;
+        batch.into_dimensionality::<ndarray::Ix4>().map_err(|e| {
+            InferenceError::InferenceError(format!(
+                "Failed to convert concatenated tensor to 4D: {e}"
+            ))
+        })
+    }
+
+    /// Concatenate per-image FP16 input tensors along the batch axis.
+    fn concat_f16_batch(
+        preprocessed: &[crate::preprocessing::PreprocessResult],
+    ) -> Result<ndarray::Array4<f16>> {
+        let arrays: Vec<_> = preprocessed
+            .iter()
+            .map(|r| {
+                r.tensor_f16
+                    .as_ref()
+                    .expect("FP16 tensor should be available")
+                    .view()
+            })
+            .collect();
+        let batch = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to concatenate FP16 tensors: {e}"))
+        })?;
+        batch.into_dimensionality::<ndarray::Ix4>().map_err(|e| {
+            InferenceError::InferenceError(format!(
+                "Failed to convert concatenated tensor to 4D: {e}"
+            ))
+        })
+    }
+
+    /// Returns true when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only output is
+    /// a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction + CPU argmax for semseg.
+    fn has_semantic_mask_output(&self) -> bool {
+        let outs = self.session.outputs();
+        outs.len() == 1
+            && matches!(
+                outs[0].dtype(),
+                ValueType::Tensor { ty: ort::value::TensorElementType::Uint8, shape, .. }
+                    if shape.len() == 3
+            )
+    }
+
     /// Maximum allowed image dimension to prevent OOM during warmup.
     const MAX_IMGSZ: usize = 8192;
 
@@ -500,12 +550,33 @@ impl YOLOModel {
             )));
         }
 
-        let warmup_result = if self.fp16_input {
+        let warmup_result: Result<()> = if self.fp16_input {
             let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            self.run_inference_f16(&dummy_input)
+            Self::run_inference_f16_with(
+                &mut self.session,
+                &self.input_name,
+                &self.output_names,
+                &dummy_input,
+                |_outputs, _ms| Ok(()),
+            )
+        } else if self.has_semantic_mask_output() {
+            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
+            Self::run_inference_u8_with(
+                &mut self.session,
+                &self.input_name,
+                &self.output_names,
+                &dummy_input,
+                |_outputs, _ms| Ok(()),
+            )
         } else {
             let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            self.run_inference(&dummy_input)
+            Self::run_inference_with(
+                &mut self.session,
+                &self.input_name,
+                &self.output_names,
+                &dummy_input,
+                |_outputs, _ms| Ok(()),
+            )
         };
 
         if let Err(e) = warmup_result {
@@ -752,121 +823,186 @@ impl YOLOModel {
         let preprocess_time =
             start_preprocess.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
 
-        // Stack tensors
-        let start_inference = Instant::now();
-        let outputs = if self.fp16_input {
-            let mut arrays = Vec::with_capacity(images.len());
-            for res in &preprocessed_results {
-                arrays.push(
-                    res.tensor_f16
-                        .as_ref()
-                        .expect("FP16 tensor should be available")
-                        .view(),
-                );
-            }
-
-            // Concatenate along batch dimension (axis 0)
-            let batch_tensor = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
-                InferenceError::InferenceError(format!("Failed to concatenate FP16 tensors: {e}"))
-            })?;
-            // ndarray concatenate returns ArrayxD, we need Array4
-            let batch_tensor = batch_tensor
-                .into_dimensionality::<ndarray::Ix4>()
-                .map_err(|e| {
-                    InferenceError::InferenceError(format!(
-                        "Failed to convert concatenated tensor to 4D: {e}"
-                    ))
-                })?;
-
-            self.run_inference_f16(&batch_tensor)?
-        } else {
-            let mut arrays = Vec::with_capacity(images.len());
-            for res in &preprocessed_results {
-                arrays.push(res.tensor.view());
-            }
-            let batch_tensor = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
-                InferenceError::InferenceError(format!("Failed to concatenate FP32 tensors: {e}"))
-            })?;
-            let batch_tensor = batch_tensor
-                .into_dimensionality::<ndarray::Ix4>()
-                .map_err(|e| {
-                    InferenceError::InferenceError(format!(
-                        "Failed to convert concatenated tensor to 4D: {e}"
-                    ))
-                })?;
-
-            self.run_inference(&batch_tensor)?
-        };
+        // Postprocess driver: runs INSIDE the inference closure so we can read the
+        // ORT output buffers without copying. Returns the final batch_results.
+        let n_images = images.len();
         #[allow(clippy::cast_precision_loss)]
-        let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
+        let n_images_f = n_images as f64;
+        let task = self.metadata.task;
+        let names = &self.metadata.names;
+        let cfg = &self.config;
+        let end2end = self.metadata.end2end;
+        let kpt_shape = self.metadata.kpt_shape;
 
-        // Process each image's output
-        let mut image_arrays = Vec::with_capacity(images.len());
+        // Compute orig_img arrays now (cheap; no copy of pixels yet other than what image_to_array does).
+        let mut image_arrays = Vec::with_capacity(n_images);
         for image in images {
             image_arrays.push(image_to_array(image));
         }
+        // Move preprocessed_results into an Option so the closure can consume it.
+        let preprocessed_results_opt = std::cell::RefCell::new(Some(preprocessed_results));
+        let image_arrays_opt = std::cell::RefCell::new(Some(image_arrays));
+        let paths_ref = paths;
 
-        // Post-process
-        let start_postprocess = Instant::now();
+        let postprocess_cb = |outputs: &[(&[f32], Vec<usize>)],
+                              inference_ms_total: f64|
+         -> Result<Vec<Vec<Results>>> {
+            let inference_time = inference_ms_total / n_images_f;
+            let start_postprocess = Instant::now();
+            let preprocessed_results = preprocessed_results_opt
+                .borrow_mut()
+                .take()
+                .expect("preprocessed_results");
+            let image_arrays = image_arrays_opt.borrow_mut().take().expect("image_arrays");
 
-        let mut batch_results = Vec::with_capacity(images.len());
+            let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(n_images);
+            for (i, (orig_img, preprocess_res)) in image_arrays
+                .into_iter()
+                .zip(preprocessed_results)
+                .enumerate()
+            {
+                let path = paths_ref.get(i).cloned().unwrap_or_default();
+                let speed = Speed::new(preprocess_time, inference_time, 0.0);
 
-        // Process each image's output
-        for (i, (orig_img, preprocess_res)) in image_arrays
-            .into_iter()
-            .zip(preprocessed_results)
-            .enumerate()
-        {
-            let path = paths.get(i).cloned().unwrap_or_default();
-            let speed = Speed::new(preprocess_time, inference_time, 0.0);
+                let mut img_outputs = Vec::new();
+                for (data, shape) in outputs {
+                    let batch_size = shape[0];
+                    let actual_batch_size = if batch_size > 0 { batch_size } else { 1 };
+                    let total_elements = data.len();
+                    let elements_per_img = total_elements / actual_batch_size;
+                    let start = i * elements_per_img;
+                    let end = start + elements_per_img;
+                    let img_data = &data[start..end];
+                    let mut img_shape = shape.clone();
+                    img_shape[0] = 1;
+                    img_outputs.push((img_data, img_shape));
+                }
 
-            // Construct outputs for this single image
-            let mut img_outputs = Vec::new();
-            for (data, shape) in &outputs {
-                let batch_size = shape[0];
-                let actual_batch_size = if batch_size > 0 { batch_size } else { 1 };
-                let total_elements = data.len();
-                let elements_per_img = total_elements / actual_batch_size;
-                let start = i * elements_per_img;
-                let end = start + elements_per_img;
-                let img_data = &data[start..end];
-                let mut img_shape = shape.clone();
-                img_shape[0] = 1;
-                img_outputs.push((img_data, img_shape));
+                let tensor_shape = preprocess_res.tensor.shape();
+                let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
+
+                let result = postprocess(
+                    img_outputs,
+                    task,
+                    &preprocess_res,
+                    cfg,
+                    names,
+                    orig_img,
+                    path,
+                    speed,
+                    inference_shape,
+                    end2end,
+                    kpt_shape,
+                );
+
+                batch_results.push(vec![result]);
             }
 
-            let tensor_shape = preprocess_res.tensor.shape();
-            let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
-
-            let result = postprocess(
-                img_outputs,
-                self.metadata.task,
-                &preprocess_res,
-                &self.config,
-                &self.metadata.names,
-                orig_img,
-                path,
-                speed,
-                inference_shape,
-                self.metadata.end2end,
-                self.metadata.kpt_shape,
-            );
-
-            batch_results.push(vec![result]);
-        }
-
-        #[allow(clippy::cast_precision_loss)]
-        let postprocess_time =
-            start_postprocess.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
-
-        // Update postprocess time for all results
-        for img_results in &mut batch_results {
-            for res in img_results {
-                res.speed.postprocess = Some(postprocess_time);
+            #[allow(clippy::cast_precision_loss)]
+            let postprocess_time =
+                start_postprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
+            for img_results in &mut batch_results {
+                for res in img_results {
+                    res.speed.postprocess = Some(postprocess_time);
+                }
             }
+            Ok(batch_results)
+        };
+
+        if !self.fp16_input && self.has_semantic_mask_output() {
+            // Fast path: ONNX outputs a uint8 class map already (ArgMax baked in on GPU).
+            // Skip the f32 logit extraction + CPU argmax entirely; do a memcpy.
+            let batch_tensor = {
+                let pre_borrow = preprocessed_results_opt.borrow();
+                Self::concat_f32_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
+            };
+
+            let task = self.metadata.task;
+            let names = &self.metadata.names;
+            let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
+            let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
+            let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(n_images);
+
+            Self::run_inference_u8_with(
+                &mut self.session,
+                &self.input_name,
+                &self.output_names,
+                &batch_tensor,
+                |outputs, inference_ms_total| {
+                    debug_assert_eq!(task, crate::task::Task::SemSeg);
+                    let inference_time = inference_ms_total / n_images_f;
+                    let start_postprocess = std::time::Instant::now();
+
+                    for (i, (orig_img, preprocess_res)) in image_arrays
+                        .into_iter()
+                        .zip(preprocessed_results)
+                        .enumerate()
+                    {
+                        let path_i = paths_ref.get(i).cloned().unwrap_or_default();
+                        let speed = Speed::new(preprocess_time, inference_time, 0.0);
+
+                        // Build the per-image slice from the batch output.
+                        let (data, shape) = &outputs[0];
+                        let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
+                        let elems_per_img = data.len() / actual_batch;
+                        let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
+                        // 3-D shape per image: drop the batch dim.
+                        let img_shape: Vec<usize> = shape[1..].to_vec();
+
+                        let tensor_shape = preprocess_res.tensor.shape();
+                        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
+
+                        let result = crate::postprocessing::postprocess_semantic_mask(
+                            img_slice,
+                            &img_shape,
+                            names,
+                            orig_img,
+                            path_i,
+                            speed,
+                            inference_shape,
+                        );
+                        batch_results.push(vec![result]);
+                    }
+
+                    #[allow(clippy::cast_precision_loss)]
+                    let postprocess_time =
+                        start_postprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
+                    for v in &mut batch_results {
+                        for r in v {
+                            r.speed.postprocess = Some(postprocess_time);
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+            return Ok(batch_results);
         }
 
-        Ok(batch_results)
+        if self.fp16_input {
+            let batch_tensor = {
+                let pre_borrow = preprocessed_results_opt.borrow();
+                Self::concat_f16_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
+            };
+            Self::run_inference_f16_with(
+                &mut self.session,
+                &self.input_name,
+                &self.output_names,
+                &batch_tensor,
+                postprocess_cb,
+            )
+        } else {
+            let batch_tensor = {
+                let pre_borrow = preprocessed_results_opt.borrow();
+                Self::concat_f32_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
+            };
+            Self::run_inference_with(
+                &mut self.session,
+                &self.input_name,
+                &self.output_names,
+                &batch_tensor,
+                postprocess_cb,
+            )
+        }
     }
 
     /// Run inference on a raw array.
@@ -958,100 +1094,165 @@ impl YOLOModel {
         Ok(results_vec)
     }
 
-    /// Run the ONNX model inference with FP32 input.
-    fn run_inference(
-        &mut self,
+    /// Run ONNX inference with FP32 input, calling `cb` with zero-copy output views.
+    ///
+    /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
+    /// buffers (no extra Vec allocation), plus the measured `session.run()` time in ms.
+    /// This avoids a ~40 ms memcpy for large semseg outputs.
+    ///
+    /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
+    fn run_inference_with<R>(
+        session: &mut Session,
+        input_name: &str,
+        output_names: &[String],
         input: &ndarray::Array4<f32>,
-    ) -> Result<Vec<(Vec<f32>, Vec<usize>)>> {
-        // Ensure input is contiguous in memory (CowArray)
+        cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
+    ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-
-        // Create input tensor reference from ndarray view
         let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
             InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
         })?;
+        let inputs = ort::inputs![input_name => input_tensor];
 
-        // Run session - inputs! macro returns a Vec, not a Result
-        let inputs = ort::inputs![&self.input_name => input_tensor];
-
-        let outputs = self
-            .session
+        let t_run = std::time::Instant::now();
+        let outputs = session
             .run(inputs)
             .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
+        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
 
-        let mut results = Vec::new();
+        // Build zero-copy views (or owned buffers for f16 outputs that must be converted)
+        Self::extract_and_invoke(&outputs, output_names, inference_ms, cb)
+    }
 
-        for output_name in &self.output_names {
+    /// Build zero-copy slice views over ORT output tensors and call `cb`.
+    fn extract_and_invoke<R>(
+        outputs: &ort::session::SessionOutputs<'_>,
+        output_names: &[String],
+        inference_ms: f64,
+        cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
+    ) -> Result<R> {
+        let mut owned_bufs: Vec<Vec<f32>> = Vec::new();
+        let mut shapes: Vec<Vec<usize>> = Vec::with_capacity(output_names.len());
+        let mut sources: Vec<(Option<usize>, *const f32, usize)> =
+            Vec::with_capacity(output_names.len());
+        for output_name in output_names {
             let output = outputs.get(output_name.as_str()).ok_or_else(|| {
                 InferenceError::InferenceError(format!("Output '{output_name}' not found"))
             })?;
-
-            // Get output as f32 tensor - use try_extract_tensor which returns (shape, data)
-            let (shape, data) = output.try_extract_tensor::<f32>().map_err(|e| {
-                InferenceError::InferenceError(format!("Failed to extract output: {e}"))
-            })?;
-
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
-            let data_vec: Vec<f32> = data.to_vec();
-            results.push((data_vec, shape_vec));
+            if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                sources.push((None, data.as_ptr(), data.len()));
+                shapes.push(shape_vec);
+            } else {
+                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
+                    InferenceError::InferenceError(format!("Failed to extract output: {e}"))
+                })?;
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
+                let len = converted.len();
+                let idx = owned_bufs.len();
+                owned_bufs.push(converted);
+                sources.push((Some(idx), std::ptr::null(), len));
+                shapes.push(shape_vec);
+            }
         }
+        let views: Vec<(&[f32], Vec<usize>)> = sources
+            .iter()
+            .zip(shapes.iter())
+            .map(|((owned_idx, ptr, len), shape)| {
+                let slice: &[f32] = owned_idx.map_or_else(
+                    // SAFETY: ORT-owned buffer in `outputs` lives until caller returns.
+                    || unsafe { std::slice::from_raw_parts(*ptr, *len) },
+                    |i| owned_bufs[i].as_slice(),
+                );
+                (slice, shape.clone())
+            })
+            .collect();
 
-        Ok(results)
+        cb(&views, inference_ms)
     }
 
-    /// Run the ONNX model inference with FP16 input.
-    fn run_inference_f16(
-        &mut self,
-        input: &ndarray::Array4<f16>,
-    ) -> Result<Vec<(Vec<f32>, Vec<usize>)>> {
-        // Ensure input is contiguous in memory (CowArray)
+    /// Run ONNX inference with FP32 input where outputs are `uint8` tensors
+    /// (e.g. a semseg model that has ArgMax+Cast(uint8) baked in). Zero-copy.
+    fn run_inference_u8_with<R>(
+        session: &mut Session,
+        input_name: &str,
+        output_names: &[String],
+        input: &ndarray::Array4<f32>,
+        cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
+    ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+        })?;
+        let inputs = ort::inputs![input_name => input_tensor];
 
-        // Create input tensor reference from ndarray view
+        let t_run = std::time::Instant::now();
+        let outputs = session
+            .run(inputs)
+            .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
+        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
+
+        Self::extract_and_invoke_u8(&outputs, output_names, inference_ms, cb)
+    }
+
+    /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`.
+    fn extract_and_invoke_u8<R>(
+        outputs: &ort::session::SessionOutputs<'_>,
+        output_names: &[String],
+        inference_ms: f64,
+        cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
+    ) -> Result<R> {
+        let mut shapes: Vec<Vec<usize>> = Vec::with_capacity(output_names.len());
+        let mut sources: Vec<(*const u8, usize)> = Vec::with_capacity(output_names.len());
+        for output_name in output_names {
+            let output = outputs.get(output_name.as_str()).ok_or_else(|| {
+                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
+            })?;
+            let (shape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to extract uint8 output: {e}"))
+            })?;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+            sources.push((data.as_ptr(), data.len()));
+            shapes.push(shape_vec);
+        }
+        let views: Vec<(&[u8], Vec<usize>)> = sources
+            .iter()
+            .zip(shapes.iter())
+            .map(|((ptr, len), shape)| {
+                // SAFETY: ORT-owned buffer in `outputs` lives until caller returns.
+                let slice: &[u8] = unsafe { std::slice::from_raw_parts(*ptr, *len) };
+                (slice, shape.clone())
+            })
+            .collect();
+
+        cb(&views, inference_ms)
+    }
+
+    /// Run ONNX inference with FP16 input, zero-copy callback (FP16 outputs are converted).
+    fn run_inference_f16_with<R>(
+        session: &mut Session,
+        input_name: &str,
+        output_names: &[String],
+        input: &ndarray::Array4<f16>,
+        cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
+    ) -> Result<R> {
+        let input_contiguous = input.as_standard_layout();
         let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
             InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
         })?;
+        let inputs = ort::inputs![input_name => input_tensor];
 
-        // Run session
-        let inputs = ort::inputs![&self.input_name => input_tensor];
-
-        let outputs = self
-            .session
+        let t_run = std::time::Instant::now();
+        let outputs = session
             .run(inputs)
             .map_err(|e| InferenceError::InferenceError(format!("FP16 inference failed: {e}")))?;
+        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
 
-        let mut results = Vec::new();
-
-        for output_name in &self.output_names {
-            let output = outputs.get(output_name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
-            })?;
-
-            // Try to extract as f32 first (model may have FP32 output even with FP16 input)
-            // If that fails, extract as f16 and convert
-            let (shape_vec, data_vec) = if let Ok((shape, data)) =
-                output.try_extract_tensor::<f32>()
-            {
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
-                let data_vec: Vec<f32> = data.to_vec();
-                (shape_vec, data_vec)
-            } else {
-                // Extract as f16 and convert to f32 for postprocessing
-                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
-                    InferenceError::InferenceError(format!("Failed to extract FP16 output: {e}"))
-                })?;
-
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
-                let data_vec: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
-                (shape_vec, data_vec)
-            };
-            results.push((data_vec, shape_vec));
-        }
-
-        Ok(results)
+        Self::extract_and_invoke(&outputs, output_names, inference_ms, cb)
     }
 
     /// Get the model's task type as detected from ONNX metadata.
