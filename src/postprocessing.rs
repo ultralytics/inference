@@ -265,8 +265,7 @@ fn postprocess_detect(
     let mut results = Results::new(orig_img, path, names, speed, inference_shape);
 
     // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
-    let (num_classes, num_predictions, is_transposed) =
-        parse_detect_shape(output_shape, nc);
+    let (num_classes, num_predictions, is_transposed) = parse_detect_shape(output_shape, nc);
 
     if output.is_empty() || num_predictions == 0 {
         return results;
