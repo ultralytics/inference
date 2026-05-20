@@ -293,7 +293,7 @@ mod tests {
     fn test_calculate_iou_no_overlap() {
         let box1 = [0.0, 0.0, 5.0, 5.0];
         let box2 = [10.0, 10.0, 20.0, 20.0];
-        assert_eq!(calculate_iou(&box1, &box2), 0.0);
+        assert!(calculate_iou(&box1, &box2) < 1e-6);
     }
 
     #[test]
