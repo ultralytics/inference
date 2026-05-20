@@ -1944,7 +1944,7 @@ fn postprocess_semantic(
             let row1_base = y1 * lw;
 
             // Stack-allocated buffer for nc_padded f32 results per pixel.
-            let mut vals = [0.0f32; 32]; // nc_padded ≤ 32 for typical semseg models
+            let mut vals = [0.0f32; 32]; // nc_padded ≤ 32 for typical semantic segmentation models
 
             for (dx, cell) in row.iter_mut().enumerate() {
                 let (x0, x1, fxi, fx) = x_lut[dx];

@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(propagate_version = true)]
 #[command(after_help = r#"Predict Options:
     --model, -m <MODEL>    Path to ONNX model file [default: yolo26n.onnx]
-    --task <TASK>          Task type: detect, segment, pose, obb, classify, semseg [default: detect]
+    --task <TASK>          Task type: detect, segment, pose, obb, classify, semantic [default: detect]
                            Selects the matching nano model when --model is omitted
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
@@ -22,7 +22,7 @@ use clap::{Args, Parser, Subcommand};
     --half                 Use FP16 half-precision inference [default: false]
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
-    --save-json            Save semseg masks (PNG) / detect/segment/pose (COCO JSON) for eval
+    --save-json            Save semantic segmentation masks (PNG) / detect/segment/pose (COCO JSON) for eval
     --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)
     --verbose              Show verbose output [default: true]
@@ -34,7 +34,7 @@ Examples:
     ultralytics-inference predict --task pose
     ultralytics-inference predict --task obb --source aerial.jpg
     ultralytics-inference predict --task classify --source image.jpg
-    ultralytics-inference predict --task semseg --source image.jpg
+    ultralytics-inference predict --task semantic --source image.jpg
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
@@ -66,7 +66,7 @@ pub struct PredictArgs {
     pub model: Option<String>,
 
     /// Task type; selects nano model for auto-download when --model is omitted
-    /// (detect, segment, pose, obb, classify, semseg)
+    /// (detect, segment, pose, obb, classify, semantic)
     #[arg(long)]
     pub task: Option<Task>,
 
@@ -110,7 +110,7 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE_FRAMES)]
     pub save_frames: bool,
 
-    /// Save results to COCO JSON (detect/segment/pose) or PNG masks (semseg) for external evaluation
+    /// Save results to COCO JSON (detect/segment/pose) or PNG masks (semantic) for external evaluation
     #[arg(long, default_value_t = false)]
     pub save_json: bool,
 

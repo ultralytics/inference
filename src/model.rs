@@ -24,7 +24,7 @@ use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
-    calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_semseg,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_semantic,
     preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
@@ -523,7 +523,7 @@ impl YOLOModel {
     }
 
     /// Returns true when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only output is
-    /// a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction + CPU argmax for semseg.
+    /// a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction + CPU argmax for semantic segmentation.
     fn has_semantic_mask_output(&self) -> bool {
         let outs = self.session.outputs();
         outs.len() == 1
@@ -815,7 +815,7 @@ impl YOLOModel {
             let res = if self.metadata.task == Task::Classify {
                 preprocess_image_center_crop(image, current_target_size, self.fp16_input)
             } else if self.metadata.task == Task::Semantic {
-                preprocess_image_semseg(
+                preprocess_image_semantic(
                     image,
                     target_size,
                     self.metadata.stride,
@@ -1097,7 +1097,7 @@ impl YOLOModel {
     ///
     /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
     /// buffers (no extra Vec allocation), plus the measured `session.run()` time in ms.
-    /// This avoids a ~40 ms memcpy for large semseg outputs.
+    /// This avoids a ~40 ms memcpy for large semantic segmentation outputs.
     ///
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
     fn run_inference_with<R>(
@@ -1172,7 +1172,7 @@ impl YOLOModel {
     }
 
     /// Run ONNX inference with FP32 input where outputs are `uint8` tensors
-    /// (e.g. a semseg model that has ArgMax+Cast(uint8) baked in). Zero-copy.
+    /// (e.g. a semantic segmentation model that has ArgMax+Cast(uint8) baked in). Zero-copy.
     fn run_inference_u8_with<R>(
         session: &mut Session,
         input_name: &str,

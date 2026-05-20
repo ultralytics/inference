@@ -351,7 +351,7 @@ fn normalize_model_path(path: &Path) -> PathBuf {
 /// Attempt to download a model if it matches a known downloadable model.
 ///
 /// Supports all `YOLO26`, `YOLO11`, and `YOLOv8` ONNX models across sizes (n/s/m/l/x) and
-/// task variants (detect, segment, pose, obb, classify, semseg).
+/// task variants (detect, segment, pose, obb, classify, semantic).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// # Errors

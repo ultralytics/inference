@@ -117,7 +117,7 @@
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
 //! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO26/YOLO11/YOLOv8 name | `yolo26n.onnx` |
-//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semseg`\*); selects nano model when `--model` is omitted | `detect` |
+//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
 //! | `--iou` | | `IoU` threshold for NMS | `0.7` |
@@ -128,13 +128,13 @@
 //! | `--half` | | Use FP16 half-precision inference | `false` |
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
-//! | `--save-json` | | Save results to COCO JSON (detect/segment/pose) or PNG masks (semseg) for external evaluation | `false` |
+//! | `--save-json` | | Save results to COCO JSON (detect/segment/pose) or PNG masks (semantic) for external evaluation | `false` |
 //! | `--show` | | Display results in a window | `false` |
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!
-//! \* `semseg` (semantic segmentation) is YOLO26-only.
+//! \* `semantic` (semantic segmentation) is YOLO26-only.
 //!
 //! ## Task-Specific Examples
 //!

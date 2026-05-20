@@ -158,7 +158,7 @@ pub fn run_prediction(args: &PredictArgs) {
     );
 
     // Determine whether we need an incremented predict dir. `--save` always needs one;
-    // `--save-json` for semseg also needs one so PNG class maps land in <predictN>/results/
+    // `--save-json` for semantic segmentation also needs one so PNG class maps land in <predictN>/results/
     let need_predict_dir = save_json && model.task() == crate::task::Task::Semantic;
     #[cfg(feature = "annotate")]
     let need_predict_dir = save || need_predict_dir;
@@ -171,7 +171,7 @@ pub fn run_prediction(args: &PredictArgs) {
             crate::task::Task::Pose => "runs/pose",
             crate::task::Task::Classify => "runs/classify",
             crate::task::Task::Obb => "runs/obb",
-            crate::task::Task::Semantic => "runs/semseg",
+            crate::task::Task::Semantic => "runs/semantic",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -185,7 +185,7 @@ pub fn run_prediction(args: &PredictArgs) {
     // Without the `annotate` feature, `--save` is rejected below; classmap save still works.
     #[cfg(not(feature = "annotate"))]
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
-        let dir = std::path::PathBuf::from("runs/semseg/predict");
+        let dir = std::path::PathBuf::from("runs/semantic/predict");
         if let Err(e) = fs::create_dir_all(&dir) {
             error!("Failed to create save directory '{}': {e}", dir.display());
             process::exit(1);
