@@ -1733,7 +1733,7 @@ fn letterbox_crop_bounds(
     }
 }
 
-/// Post-process a semseg ONNX that has ArgMax + Cast(uint8) baked in.
+/// Post-process a Semantic Segmentation ONNX that has ArgMax + Cast(uint8) baked in.
 ///
 /// Output shape is `[1, lh, lw] uint8`. For cityscapes-style inputs where the model's
 /// native rect shape matches the source image (lh==oh && lw==ow), this is a single memcpy
