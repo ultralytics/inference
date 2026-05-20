@@ -119,7 +119,7 @@ impl Task {
     /// Returns `true` only for the `SemSeg` task, which outputs a per-pixel class label map.
     #[must_use]
     pub const fn has_semantic_mask(&self) -> bool {
-        matches!(self, Self::SemSeg)
+        matches!(self, Self::Semantic)
     }
 }
 
@@ -139,7 +139,7 @@ impl FromStr for Task {
             "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
             "classify" | "classification" | "cls" => Ok(Self::Classify),
             "obb" | "oriented" => Ok(Self::Obb),
-            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => Ok(Self::SemSeg),
+            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => Ok(Self::Semantic),
             _ => Err(TaskParseError(s.to_string())),
         }
     }
@@ -153,7 +153,7 @@ impl fmt::Display for TaskParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid task '{}', expected one of: detect, segment, pose, classify, obb, semseg",
+            "invalid task '{}', expected one of: detect, segment, pose, classify, obb, semantic",
             self.0
         )
     }

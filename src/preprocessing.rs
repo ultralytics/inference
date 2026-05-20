@@ -99,7 +99,7 @@ pub struct PreprocessResult {
 ///
 /// Preprocessed tensor and transform information for post-processing.
 #[must_use]
-pub fn preprocess_image_semseg(
+pub fn preprocess_image_semantic(
     image: &DynamicImage,
     target_size: (usize, usize),
     stride: u32,
@@ -173,7 +173,7 @@ pub fn preprocess_image_semseg(
 
 /// Build a `PreprocessResult` from a resolved letterbox geometry.
 ///
-/// Shared tail for `preprocess_image_semseg` and `preprocess_image_with_precision`:
+/// Shared tail for `preprocess_image_semantic` and `preprocess_image_with_precision`:
 /// runs the fused zero-copy resize/pad/normalize, optionally produces an FP16 tensor,
 /// and packages the transform metadata. The caller is responsible for computing
 /// `target_size`, `new_w`/`new_h`, padding, and `scale` for its specific letterbox style.

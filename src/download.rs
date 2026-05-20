@@ -67,7 +67,7 @@ const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
 const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
 const DEFAULT_BOATS_IMAGE_URL: &str = "https://ultralytics.com/images/boats.jpg";
 
-/// Default image URLs for detection, segmentation, pose, classification, and semseg tasks.
+/// Default image URLs for detection, segmentation, pose, classification, and semantic tasks.
 pub const DEFAULT_IMAGES: &[&str] = &[DEFAULT_BUS_IMAGE_URL, DEFAULT_ZIDANE_IMAGE_URL];
 
 /// Default image URL for OBB (Oriented Bounding Box) tasks.
