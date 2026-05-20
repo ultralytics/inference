@@ -99,7 +99,7 @@ ultralytics-inference predict --task segment  # downloads yolo26n-seg.onnx
 ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
 ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
 ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
-ultralytics-inference predict --task semseg   # downloads yolo26n-sem.onnx (YOLO26 only)
+ultralytics-inference predict --task semantic  # downloads yolo26n-sem.onnx (YOLO26 only)
 
 # With explicit model (task is read from model metadata)
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
@@ -128,8 +128,8 @@ ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-fra
 # Rectangular inference
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 
-# Semantic segmentation: write per-image PNG class maps to runs/semseg/predictN/results/
-ultralytics-inference predict --task semseg --source cityscapes/ --save-json
+# Semantic segmentation: write per-image PNG class maps to runs/semantic/predictN/results/
+ultralytics-inference predict --task semantic --source cityscapes/ --save-json
 ```
 
 ### Example Output
@@ -190,7 +190,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | Option          | Short | Description                                                                                                          | Default                                 |
 | --------------- | ----- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                        | `yolo26n.onnx`                          |
-| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semseg`\*); selects nano model when `--model` is omitted | `detect`                                |
+| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*); selects nano model when `--model` is omitted | `detect`                                |
 | `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                   | `Task dependent Ultralytics URL assets` |
 | `--conf`        |       | Confidence threshold                                                                                                 | `0.25`                                  |
 | `--iou`         |       | IoU threshold for NMS                                                                                                | `0.7`                                   |
@@ -201,7 +201,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--half`        |       | Use FP16 half-precision inference                                                                                    | `false`                                 |
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                      | `true`                                  |
 | `--save-frames` |       | Save individual frames for video                                                                                     | `false`                                 |
-| `--save-json`   |       | Save results to COCO JSON (detect/segment/pose) or PNG masks (semseg) for external evaluation                        | `false`                                 |
+| `--save-json`   |       | Save results to COCO JSON (detect/segment/pose) or PNG masks (semantic) for external evaluation                      | `false`                                 |
 | `--show`        |       | Display results in a window                                                                                          | `false`                                 |
 | `--device`      |       | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)                                              | `cpu`                                   |
 | `--verbose`     |       | Show verbose output                                                                                                  | `true`                                  |
@@ -216,12 +216,12 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `predict --task pose`                             | `yolo26n-pose.onnx`     | Nano pose model, auto-downloaded                                    |
 | `predict --task obb`                              | `yolo26n-obb.onnx`      | Nano OBB model, auto-downloaded                                     |
 | `predict --task classify`                         | `yolo26n-cls.onnx`      | Nano classify model, auto-downloaded                                |
-| `predict --task semseg`                           | `yolo26n-sem.onnx`\*    | Nano semseg model, auto-downloaded (YOLO26 only)                    |
+| `predict --task semantic`                         | `yolo26n-sem.onnx`\*    | Nano semantic segmentation model, auto-downloaded (YOLO26 only)     |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`      | Task read from model metadata                                       |
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`      | `--task` matches metadata, proceeds normally                        |
 | `predict --task segment --model yolo26n.onnx`     | error                   | `--task` conflicts with model metadata (`detect`), exits with error |
 
-\* `semseg` (semantic segmentation) is YOLO26-only.
+\* `semantic` (semantic segmentation) is YOLO26-only. The alias `semseg` is also accepted for backward compatibility.
 
 **Auto-downloadable models:**
 
@@ -357,7 +357,7 @@ inference/
 │   ├── postprocessing.rs   # Detection post-processing (NMS, decode, SIMD)
 │   ├── metadata.rs         # ONNX model metadata parsing
 │   ├── source.rs           # Input source handling (images, video, webcam)
-│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb, SemSeg)
+│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb, Semantic)
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch processing pipeline
 │   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)
