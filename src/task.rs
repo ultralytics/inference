@@ -116,7 +116,7 @@ impl Task {
         matches!(self, Self::Obb)
     }
 
-    /// Returns `true` only for the `SemSeg` task, which outputs a per-pixel class label map.
+    /// Returns `true` only for the `Semantic` task, which outputs a per-pixel class label map.
     #[must_use]
     pub const fn has_semantic_mask(&self) -> bool {
         matches!(self, Self::Semantic)
@@ -139,7 +139,9 @@ impl FromStr for Task {
             "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
             "classify" | "classification" | "cls" => Ok(Self::Classify),
             "obb" | "oriented" => Ok(Self::Obb),
-            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => Ok(Self::Semantic),
+            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => {
+                Ok(Self::Semantic)
+            }
             _ => Err(TaskParseError(s.to_string())),
         }
     }
@@ -173,17 +175,25 @@ mod tests {
         assert_eq!("classify".parse::<Task>().unwrap(), Task::Classify);
         assert_eq!("obb".parse::<Task>().unwrap(), Task::Obb);
 
+        assert_eq!("semantic".parse::<Task>().unwrap(), Task::Semantic);
+
         // Alternative names
         assert_eq!("detection".parse::<Task>().unwrap(), Task::Detect);
         assert_eq!("segmentation".parse::<Task>().unwrap(), Task::Segment);
         assert_eq!("keypoints".parse::<Task>().unwrap(), Task::Pose);
         assert_eq!("cls".parse::<Task>().unwrap(), Task::Classify);
+        assert_eq!("semseg".parse::<Task>().unwrap(), Task::Semantic);
+        assert_eq!(
+            "semantic_segmentation".parse::<Task>().unwrap(),
+            Task::Semantic
+        );
     }
 
     #[test]
     fn test_task_display() {
         assert_eq!(Task::Detect.to_string(), "detect");
         assert_eq!(Task::Segment.to_string(), "segment");
+        assert_eq!(Task::Semantic.to_string(), "semantic");
     }
 
     #[test]
@@ -194,5 +204,7 @@ mod tests {
         assert!(Task::Pose.has_keypoints());
         assert!(Task::Classify.has_probs());
         assert!(Task::Obb.has_obb());
+        assert!(Task::Semantic.has_semantic_mask());
+        assert!(!Task::Detect.has_semantic_mask());
     }
 }
