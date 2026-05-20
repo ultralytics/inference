@@ -62,6 +62,10 @@ fn get_covariance_params(w: f32, h: f32, angle: f32) -> (f32, f32, f32) {
 ///
 /// * `box1` - [cx, cy, w, h, angle]
 /// * `box2` - [cx, cy, w, h, angle]
+///
+/// # Returns
+///
+/// `ProbIoU` value between 0.0 and 1.0
 #[must_use]
 pub fn calculate_probiou(box1: &[f32; 5], box2: &[f32; 5]) -> f32 {
     let eps = 1e-7;
@@ -102,6 +106,48 @@ pub fn calculate_probiou(box1: &[f32; 5], box2: &[f32; 5]) -> f32 {
     1.0 - hd
 }
 
+/// Shared per-class NMS implementation used by axis-aligned and rotated boxes.
+///
+/// `overlap` computes the IoU-like suppression score for the task-specific box type.
+/// The public wrappers keep task-specific signatures while sharing the score sorting,
+/// class filtering, and suppression loop.
+fn nms_by_class<T>(
+    boxes: &[(T, f32, usize)],
+    iou_threshold: f32,
+    overlap: impl Fn(&T, &T) -> f32,
+) -> Vec<usize> {
+    if boxes.is_empty() {
+        return vec![];
+    }
+
+    // Sort by score (descending)
+    let mut indices: Vec<usize> = (0..boxes.len()).collect();
+    indices.sort_by(|&a, &b| boxes[b].1.partial_cmp(&boxes[a].1).unwrap());
+
+    let mut keep = vec![];
+    let mut suppressed = vec![false; boxes.len()];
+
+    for (pos, &i) in indices.iter().enumerate() {
+        if suppressed[i] {
+            continue;
+        }
+        keep.push(i);
+
+        let class_i = boxes[i].2;
+
+        for &j in &indices[pos + 1..] {
+            if !suppressed[j] && boxes[j].2 == class_i {
+                let iou = overlap(&boxes[i].0, &boxes[j].0);
+                if iou > iou_threshold {
+                    suppressed[j] = true;
+                }
+            }
+        }
+    }
+
+    keep
+}
+
 /// Per-class Non-Maximum Suppression (NMS) for filtering overlapping detections
 ///
 /// Only suppresses boxes within the same class, matching Ultralytics behavior.
@@ -120,36 +166,7 @@ pub fn calculate_probiou(box1: &[f32; 5], box2: &[f32; 5]) -> f32 {
 /// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
 #[must_use]
 pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Vec<usize> {
-    if boxes.is_empty() {
-        return vec![];
-    }
-
-    // Sort by score (descending)
-    let mut indices: Vec<usize> = (0..boxes.len()).collect();
-    indices.sort_by(|&a, &b| boxes[b].1.partial_cmp(&boxes[a].1).unwrap());
-
-    let mut keep = vec![];
-    let mut suppressed = vec![false; boxes.len()];
-
-    for (pos, &i) in indices.iter().enumerate() {
-        if suppressed[i] {
-            continue;
-        }
-        keep.push(i);
-
-        let class_i = boxes[i].2;
-
-        for &j in &indices[pos + 1..] {
-            if !suppressed[j] && boxes[j].2 == class_i {
-                let iou = calculate_iou(&boxes[i].0, &boxes[j].0);
-                if iou > iou_threshold {
-                    suppressed[j] = true;
-                }
-            }
-        }
-    }
-
-    keep
+    nms_by_class(boxes, iou_threshold, calculate_iou)
 }
 
 /// Rotated Per-class Non-Maximum Suppression (NMS) using `ProbIoU`
@@ -161,45 +178,29 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
 /// # Arguments
 ///
 /// * `boxes` - Vector of rotated bounding boxes: [cx, cy, w, h, angle], score, `class_id`
-/// * `iou_threshold` - `IoU` threshold
+/// * `iou_threshold` - `IoU` threshold for suppression
+///
+/// # Returns
+///
+/// Indices of boxes to keep
+///
 /// # Panics
 ///
 /// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
 #[must_use]
 pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f32) -> Vec<usize> {
-    if boxes.is_empty() {
-        return vec![];
-    }
-
-    // Sort by score (descending)
-    let mut indices: Vec<usize> = (0..boxes.len()).collect();
-    indices.sort_by(|&a, &b| boxes[b].1.partial_cmp(&boxes[a].1).unwrap());
-
-    let mut keep = vec![];
-    let mut suppressed = vec![false; boxes.len()];
-
-    for (pos, &i) in indices.iter().enumerate() {
-        if suppressed[i] {
-            continue;
-        }
-        keep.push(i);
-
-        let class_i = boxes[i].2;
-
-        for &j in &indices[pos + 1..] {
-            if !suppressed[j] && boxes[j].2 == class_i {
-                let iou = calculate_probiou(&boxes[i].0, &boxes[j].0);
-                if iou > iou_threshold {
-                    suppressed[j] = true;
-                }
-            }
-        }
-    }
-
-    keep
+    nms_by_class(boxes, iou_threshold, calculate_probiou)
 }
 
 /// Simple pluralization for common COCO class names.
+///
+/// # Arguments
+///
+/// * `word` - Singular noun to pluralize
+///
+/// # Returns
+///
+/// Plural form of the word
 #[must_use]
 pub fn pluralize(word: &str) -> String {
     match word {
@@ -283,6 +284,33 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_iou_full_overlap() {
+        let box1 = [0.0, 0.0, 10.0, 10.0];
+        assert!((calculate_iou(&box1, &box1) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_iou_no_overlap() {
+        let box1 = [0.0, 0.0, 5.0, 5.0];
+        let box2 = [10.0, 10.0, 20.0, 20.0];
+        assert!(calculate_iou(&box1, &box2) < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_probiou_identical() {
+        // eps terms in the formula prevent reaching exactly 1.0; expect near-perfect overlap
+        let box1 = [5.0, 5.0, 4.0, 2.0, 0.0];
+        assert!(calculate_probiou(&box1, &box1) > 0.999);
+    }
+
+    #[test]
+    fn test_calculate_probiou_distant() {
+        let box1 = [0.0, 0.0, 2.0, 2.0, 0.0];
+        let box2 = [1000.0, 1000.0, 2.0, 2.0, 0.0];
+        assert!(calculate_probiou(&box1, &box2) < 0.01);
+    }
+
+    #[test]
     fn test_nms_per_class() {
         // Two overlapping boxes of different classes should both be kept
         let boxes = vec![
@@ -305,6 +333,26 @@ mod tests {
         let keep = nms_per_class(&boxes, 0.5);
         assert_eq!(keep.len(), 1);
         assert!(keep.contains(&0)); // Keep higher score box
+    }
+
+    #[test]
+    fn test_nms_rotated_per_class_keeps_all_different_classes() {
+        let boxes = vec![
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 1), // same position, different class
+        ];
+        let keep = nms_rotated_per_class(&boxes, 0.5);
+        assert_eq!(keep.len(), 2);
+    }
+
+    #[test]
+    fn test_nms_rotated_per_class_suppresses_same_class() {
+        let boxes = vec![
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 0), // identical box, same class, lower score
+        ];
+        let keep = nms_rotated_per_class(&boxes, 0.5);
+        assert_eq!(keep.len(), 1);
     }
     #[test]
     fn test_pluralize() {
