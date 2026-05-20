@@ -1823,7 +1823,7 @@ pub fn postprocess_semantic_mask(
 /// The model outputs raw logits of shape `[1, nc, lh, lw]` at the P3 scale
 /// (stride 8). Pipeline:
 /// 1. Transpose CHW to HWC once (small: lh*lw*nc f32s) so per-pixel argmax is contiguous.
-/// 2. Bilinear-interpolate each output pixel's 4 source neighbours, fused with argmax
+/// 2. Bilinear-interpolate each output pixel's 4 source neighbors, fused with argmax
 ///    over `nc` classes, producing the final class map in one pass.
 ///
 /// Memory traffic per output pixel drops from 4*nc strided reads to 4*nc contiguous
@@ -1916,7 +1916,7 @@ fn postprocess_semantic(
     let lw_minus_1 = lw.saturating_sub(1);
     let lh_minus_1 = lh.saturating_sub(1);
 
-    // Precompute source-x neighbours + weights once per output column (with left offset).
+    // Precompute source-x neighbors + weights once per output column (with left offset).
     let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
         .map(|dx| {
             let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
