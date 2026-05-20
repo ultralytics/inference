@@ -964,8 +964,7 @@ impl YOLOModel {
                             let img_shape: &[usize] = &shape[1..];
 
                             let tensor_shape = preprocess_res.tensor.shape();
-                            let inference_shape =
-                                (tensor_shape[2] as u32, tensor_shape[3] as u32);
+                            let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
                             let result = crate::postprocessing::postprocess_semantic_mask(
                                 img_slice,
