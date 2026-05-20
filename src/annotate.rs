@@ -270,6 +270,90 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
     }
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::too_many_arguments
+)]
+fn draw_label(
+    img: &mut image::RgbImage,
+    font: &FontRef,
+    occupied: &mut Vec<Rect>,
+    label: &str,
+    color: Rgb<u8>,
+    font_scale: f32,
+    anchor_x: i32,
+    anchor_y: i32,
+    top_fallback_y: i32,
+) {
+    let (width, height) = img.dimensions();
+    let scale = PxScale::from(font_scale);
+    let scaled_font = font.as_scaled(scale);
+    let text_w = label
+        .chars()
+        .map(|c| scaled_font.h_advance(scaled_font.glyph_id(c)))
+        .sum::<f32>()
+        .ceil() as i32;
+    let text_h = scale.y.ceil() as i32;
+
+    let mut text_x = anchor_x;
+    let mut text_y = anchor_y - text_h;
+
+    if text_y < 0 {
+        text_y = top_fallback_y;
+    }
+    if text_x < 0 {
+        text_x = 0;
+    }
+    if text_x + text_w >= width as i32 {
+        text_x = width as i32 - text_w - 1;
+    }
+    if text_y + text_h >= height as i32 {
+        text_y = height as i32 - text_h - 1;
+    }
+
+    let mut attempts = 0;
+    let max_attempts = 10;
+    let mut current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+
+    while attempts < max_attempts {
+        if !occupied
+            .iter()
+            .any(|existing| rect_intersect(&current_rect, existing))
+        {
+            break;
+        }
+
+        text_y += text_h;
+        if text_y + text_h >= height as i32 {
+            text_y = anchor_y - text_h;
+            if text_y < 0 {
+                text_y = top_fallback_y;
+            }
+            text_x += 10;
+            if text_x + text_w >= width as i32 {
+                break;
+            }
+        }
+
+        current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
+        attempts += 1;
+    }
+
+    occupied.push(current_rect);
+
+    if text_x >= 0
+        && text_y >= 0
+        && text_x + text_w < width as i32
+        && text_y + text_h < height as i32
+    {
+        draw_filled_rect_mut(img, current_rect, color);
+        let text_color = get_text_color(color);
+        draw_text_mut(img, text_color, text_x, text_y, scale, font, label);
+    }
+}
+
 /// Draw object detection results (boxes and masks)
 #[allow(
     clippy::cast_possible_truncation,
@@ -400,91 +484,18 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             let class_name = result.names.get(&class_id).map_or("object", String::as_str);
             let label = format!(" {class_name} {confidence:.2} ");
 
-            if let Some(ref f) = font {
-                let scale = PxScale::from(font_scale);
-                let scaled_font = f.as_scaled(scale);
-                let mut text_w = 0.0;
-                for c in label.chars() {
-                    text_w += scaled_font.h_advance(scaled_font.glyph_id(c));
-                }
-                let text_w = text_w.ceil() as i32;
-                let text_h = scale.y.ceil() as i32;
-
-                // Smart label placement
-                // Default: above the box
-                let mut text_x = x1;
-                let mut text_y = y1 - text_h;
-
-                // If label is out of image (top), move inside
-                if text_y < 0 {
-                    text_y = y1;
-                }
-
-                // If label is out of image (left), move right
-                if text_x < 0 {
-                    text_x = 0;
-                }
-
-                // If label is out of image (right), move left
-                if text_x + text_w >= width as i32 {
-                    text_x = width as i32 - text_w - 1;
-                }
-
-                // Check bounds one last time (bottom)
-                if text_y + text_h >= height as i32 {
-                    text_y = height as i32 - text_h - 1;
-                }
-
-                // Overlap avoidance
-                // Check against existing labels. If overlap, move down.
-                let mut attempts = 0;
-                let max_attempts = 10;
-                let mut current_rect =
-                    Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-
-                'placement: while attempts < max_attempts {
-                    if !labels_rects
-                        .iter()
-                        .any(|existing| rect_intersect(&current_rect, existing))
-                    {
-                        break 'placement;
-                    }
-
-                    // Move down
-                    text_y += text_h; // stack below
-
-                    // Check bounds again
-                    if text_y + text_h >= height as i32 {
-                        // Reached bottom, maybe try moving right?
-                        // For now just stop here or loop around?
-                        // Let's try moving x a bit and resetting y
-                        text_y = y1 - text_h;
-                        if text_y < 0 {
-                            text_y = y1;
-                        }
-                        text_x += 10; // Shift right slightly
-                        if text_x + text_w >= width as i32 {
-                            // Screen full, just give up and draw wherever
-                            break 'placement;
-                        }
-                    }
-
-                    current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-                    attempts += 1;
-                }
-
-                // Add to occupied list
-                labels_rects.push(current_rect);
-
-                if text_x >= 0
-                    && text_y >= 0
-                    && text_x + text_w < width as i32
-                    && text_y + text_h < height as i32
-                {
-                    draw_filled_rect_mut(img, current_rect, color);
-                    let text_color = get_text_color(color);
-                    draw_text_mut(img, text_color, text_x, text_y, scale, f, &label);
-                }
+            if let Some(f) = font {
+                draw_label(
+                    img,
+                    f,
+                    &mut labels_rects,
+                    &label,
+                    color,
+                    font_scale,
+                    x1,
+                    y1,
+                    y1,
+                );
             }
         }
     }
@@ -663,80 +674,18 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
             let class_name = result.names.get(&class_id).map_or("object", String::as_str);
             let label = format!(" {} {:.2} ", class_name, conf[i]);
 
-            if let Some(ref f) = font {
-                let scale = PxScale::from(font_scale);
-                let scaled_font = f.as_scaled(scale);
-                let mut text_w = 0.0;
-                for c in label.chars() {
-                    text_w += scaled_font.h_advance(scaled_font.glyph_id(c));
-                }
-                let text_w = text_w.ceil() as i32;
-                let text_h = scale.y.ceil() as i32;
-
-                // Smart label placement
-                // Default: at the first corner (usually top-left-ish)
-                let mut text_x = corners[[i, 0, 0]] as i32;
-                let mut text_y = (corners[[i, 0, 1]] as i32 - text_h).max(0);
-
-                // If label is out of image (left), move right
-                if text_x < 0 {
-                    text_x = 0;
-                }
-
-                // If label is out of image (right), move left
-                if text_x + text_w >= width as i32 {
-                    text_x = width as i32 - text_w - 1;
-                }
-
-                // Check bounds one last time (bottom)
-                if text_y + text_h >= height as i32 {
-                    text_y = height as i32 - text_h - 1;
-                }
-
-                // Overlap avoidance
-                // Check against existing labels. If overlap, move down.
-                let mut attempts = 0;
-                let max_attempts = 10;
-                let mut current_rect =
-                    Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-
-                'placement: while attempts < max_attempts {
-                    if !labels_rects
-                        .iter()
-                        .any(|existing| rect_intersect(&current_rect, existing))
-                    {
-                        break 'placement;
-                    }
-
-                    // Move down
-                    text_y += text_h; // stack below
-
-                    // Check bounds again
-                    if text_y + text_h >= height as i32 {
-                        // Reached bottom, try resetting y and moving x
-                        text_y = (corners[[i, 0, 1]] as i32 - text_h).max(0);
-                        text_x += 10; // Shift right
-                        if text_x + text_w >= width as i32 {
-                            break 'placement;
-                        }
-                    }
-
-                    current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-                    attempts += 1;
-                }
-
-                // Add to occupied list
-                labels_rects.push(current_rect);
-
-                if text_x >= 0
-                    && text_y >= 0
-                    && text_x + text_w < width as i32
-                    && text_y + text_h < height as i32
-                {
-                    draw_filled_rect_mut(img, current_rect, color);
-                    let text_color = get_text_color(color);
-                    draw_text_mut(img, text_color, text_x, text_y, scale, f, &label);
-                }
+            if let Some(f) = font {
+                draw_label(
+                    img,
+                    f,
+                    &mut labels_rects,
+                    &label,
+                    color,
+                    font_scale,
+                    corners[[i, 0, 0]] as i32,
+                    corners[[i, 0, 1]] as i32,
+                    0,
+                );
             }
         }
     }
