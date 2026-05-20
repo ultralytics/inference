@@ -904,4 +904,32 @@ mod tests {
         assert!((clipped[2] - 640.0).abs() < 1e-6);
         assert!((clipped[3] - 480.0).abs() < 1e-6);
     }
+
+    #[test]
+    fn test_preprocess_image_semantic_dynamic_no_padding() {
+        // 480×640 image, target=1024, is_dynamic=true.
+        // Short-side=480 → scale=1024/480; content at (0,0), no centered padding.
+        let img = image::DynamicImage::new_rgb8(640, 480);
+        let res = preprocess_image_semantic(&img, (1024, 1024), 32, false, true);
+        assert_eq!(res.padding, (0.0, 0.0), "dynamic path must have no padding");
+        assert_eq!(res.orig_shape, (480, 640));
+        let (_, _, h, w) = res.tensor.dim();
+        assert_eq!(h % 32, 0, "height must be stride-aligned");
+        assert_eq!(w % 32, 0, "width must be stride-aligned");
+        assert_eq!(h, 1024, "short side should map to target");
+    }
+
+    #[test]
+    fn test_preprocess_image_semantic_static_centered_letterbox() {
+        // 480×640 wide image, target=1024×1024, is_dynamic=false.
+        // Scale = min(1024/480, 1024/640) = 1024/640 = 1.6; nh=768, nw=1024, pad_top≈128.
+        let img = image::DynamicImage::new_rgb8(640, 480);
+        let res = preprocess_image_semantic(&img, (1024, 1024), 32, false, false);
+        let (_, _, h, w) = res.tensor.dim();
+        assert_eq!(h, 1024);
+        assert_eq!(w, 1024);
+        // Wide image: horizontal padding is 0, vertical padding is non-zero.
+        assert_eq!(res.padding.1, 0.0, "wide image: no left padding");
+        assert!(res.padding.0 > 0.0, "wide image: top padding expected");
+    }
 }

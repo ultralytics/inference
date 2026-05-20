@@ -1860,22 +1860,19 @@ fn postprocess_semantic(
         let plane = lh * lw;
         let mut buf = vec![0u32; oh * ow];
         // Load one source row per class at a time so each row fits in cache.
-        buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+        // Scratch buffer shared across all rows a given thread processes; one allocation per thread.
+    buf.par_chunks_mut(ow)
+        .enumerate()
+        .for_each_with(vec![0.0f32; lw], |best_vals, (dy, row)| {
             if nc == 1 {
                 let src = &output[dy * lw..(dy + 1) * lw];
                 for (cell, &v) in row.iter_mut().zip(src.iter()) {
                     *cell = u32::from(v > 0.0);
                 }
             } else {
-                // Initialize with class 0 values.
+                // Seed best_vals with class 0; row is already zeroed (best_cls = 0).
                 let src0 = &output[dy * lw..(dy + 1) * lw];
-                let mut best_vals: Vec<f32> = src0.to_vec();
-                // best_cls starts at 0 (implicit in the u32 buf zeros)
-                for (cell, &v) in row.iter_mut().zip(src0.iter()) {
-                    *cell = 0;
-                    let _ = v; // best_vals already has class 0
-                }
-                // Each subsequent class: read its row contiguously, update argmax.
+                best_vals.copy_from_slice(src0);
                 for c in 1..nc {
                     let src_c = &output[c * plane + dy * lw..c * plane + (dy + 1) * lw];
                     for ((cell, best), &v) in
@@ -2531,6 +2528,47 @@ mod tests {
         assert_eq!(sm.data.shape(), &[oh, ow]);
         for &val in &sm.data {
             assert_eq!(val, 7, "expected class 7 but got {val}");
+        }
+    }
+
+    #[test]
+    fn test_postprocess_semantic_batch_slice_per_image() {
+        // Simulate the batch-loop slicing in model.rs for a 2-image batch.
+        // Image 0: class 1 wins everywhere. Image 1: class 2 wins everywhere.
+        // Each image is 2×2 with nc=3 logits; batch output is nc*oh*ow per image.
+        let (oh, ow, nc) = (2, 2, 3);
+        let plane = oh * ow;
+        let elems_per_img = nc * plane;
+
+        let mut batch = vec![0.0f32; 2 * elems_per_img];
+        // Image 0 at offset 0: class 1 wins (logit 0.9 at channel 1).
+        for px in 0..plane {
+            batch[plane + px] = 0.9;
+        }
+        // Image 1 at offset elems_per_img: class 2 wins (logit 0.9 at channel 2).
+        for px in 0..plane {
+            batch[elems_per_img + 2 * plane + px] = 0.9;
+        }
+
+        for (i, expected_cls) in [(0usize, 1u32), (1, 2)] {
+            let start = i * elems_per_img;
+            let slice = &batch[start..start + elems_per_img];
+            let result = postprocess_semantic(
+                slice,
+                &[1, nc, oh, ow],
+                make_names(nc),
+                ndarray::Array3::zeros((oh, ow, 3)),
+                String::new(),
+                Speed::default(),
+                (oh as u32, ow as u32),
+            );
+            let sm = result.semantic_mask.unwrap();
+            for &val in &sm.data {
+                assert_eq!(
+                    val, expected_cls,
+                    "image {i}: expected class {expected_cls} but got {val}"
+                );
+            }
         }
     }
 }

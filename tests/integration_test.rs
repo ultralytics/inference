@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 use ultralytics_inference::cli::args::PredictArgs;
 use ultralytics_inference::cli::predict::run_prediction;
+use ultralytics_inference::task::Task;
 use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
 #[cfg(feature = "coreml")]
 use ultralytics_inference::{Device, YOLOModel};
@@ -66,6 +67,96 @@ fn test_run_prediction_e2e() {
     };
 
     run_prediction(&args);
+}
+
+#[test]
+#[ignore = "downloads yolo26n-sem.onnx from GitHub releases; requires network"]
+fn test_auto_download_semantic_model() {
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-sem.onnx");
+    let result = ultralytics_inference::download::try_download_model(&model_path);
+    assert!(result.is_ok(), "download should succeed: {:?}", result.err());
+    assert!(
+        model_path.exists(),
+        "yolo26n-sem.onnx should be present after auto-download"
+    );
+    let size = std::fs::metadata(&model_path).unwrap().len();
+    assert!(size > 1_000_000, "downloaded file should be a real model (>1 MB), got {size} bytes");
+}
+
+#[test]
+#[ignore = "downloads a YOLO semantic model and sample image"]
+fn test_run_prediction_e2e_semantic() {
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-sem.onnx");
+
+    let args = PredictArgs {
+        model: Some(model_path.to_string_lossy().into_owned()),
+        task: Some(Task::Semantic),
+        source: Some("https://ultralytics.com/images/bus.jpg".to_string()),
+        conf: 0.25,
+        iou: 0.45,
+        max_det: 300,
+        imgsz: Some(640),
+        rect: false,
+        batch: 1,
+        half: false,
+        save: false,
+        save_frames: false,
+        save_json: false,
+        show: false,
+        device: None,
+        verbose: false,
+        classes: None,
+    };
+
+    run_prediction(&args);
+}
+
+#[test]
+#[ignore = "downloads a YOLO semantic model and sample image; writes class-map PNG to runs/"]
+fn test_semantic_save_class_map() {
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-sem.onnx");
+
+    let args = PredictArgs {
+        model: Some(model_path.to_string_lossy().into_owned()),
+        task: Some(Task::Semantic),
+        source: Some("https://ultralytics.com/images/bus.jpg".to_string()),
+        conf: 0.25,
+        iou: 0.45,
+        max_det: 300,
+        imgsz: Some(640),
+        rect: false,
+        batch: 1,
+        half: false,
+        save: false,
+        save_frames: false,
+        save_json: true,
+        show: false,
+        device: None,
+        verbose: false,
+        classes: None,
+    };
+
+    run_prediction(&args);
+
+    // Verify a results/ dir was created under runs/semantic/predict*/
+    let runs_dir = std::path::Path::new("runs").join("semantic");
+    assert!(
+        runs_dir.exists(),
+        "runs/semantic/ should exist after save_json=true for semantic task"
+    );
+    let results_png_exists = std::fs::read_dir(&runs_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .any(|predict_dir| predict_dir.path().join("results").join("bus.png").exists());
+    assert!(
+        results_png_exists,
+        "class-map PNG should be written to runs/semantic/predict*/results/bus.png"
+    );
 }
 
 #[test]
