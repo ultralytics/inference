@@ -139,7 +139,7 @@ impl FromStr for Task {
             "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
             "classify" | "classification" | "cls" => Ok(Self::Classify),
             "obb" | "oriented" => Ok(Self::Obb),
-            "semantic" | "semantic_segmentation" | "semseg" => Ok(Self::Semantic),
+            "semantic" | "semantic_segmentation" => Ok(Self::Semantic),
             _ => Err(TaskParseError(s.to_string())),
         }
     }
@@ -184,8 +184,6 @@ mod tests {
             "semantic_segmentation".parse::<Task>().unwrap(),
             Task::Semantic
         );
-        // PT/ONNX files exported before the rename still embed task=semseg
-        assert_eq!("semseg".parse::<Task>().unwrap(), Task::Semantic);
     }
 
     #[test]
