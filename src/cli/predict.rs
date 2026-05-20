@@ -359,9 +359,11 @@ pub fn run_prediction(args: &PredictArgs) {
                         {
                             // For video/webcam sources every frame shares the same path stem,
                             // so append the frame index to avoid overwriting earlier frames.
-                            let base_stem = std::path::Path::new(image_path)
-                                .file_stem()
-                                .map_or_else(|| "frame".to_owned(), |s| s.to_string_lossy().into_owned());
+                            let base_stem =
+                                std::path::Path::new(image_path).file_stem().map_or_else(
+                                    || "frame".to_owned(),
+                                    |s| s.to_string_lossy().into_owned(),
+                                );
                             let stem = if meta.total_frames == Some(1) {
                                 base_stem
                             } else {
