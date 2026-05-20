@@ -563,7 +563,16 @@ impl YOLOModel {
             )));
         }
 
-        let warmup_result: Result<()> = if self.fp16_input {
+        let warmup_result: Result<()> = if self.fp16_input && self.has_semantic_mask_output() {
+            let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
+            Self::run_inference_f16_u8_with(
+                &mut self.session,
+                &self.input_name,
+                &self.output_names,
+                &dummy_input,
+                |_outputs, _ms| Ok(()),
+            )
+        } else if self.fp16_input {
             let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
             Self::run_inference_f16_with(
                 &mut self.session,
@@ -915,9 +924,73 @@ impl YOLOModel {
             Ok(batch_results)
         };
 
-        if !self.fp16_input && self.has_semantic_mask_output() {
-            // Fast path: ONNX outputs a uint8 class map already (ArgMax baked in on GPU).
-            // Skip the f32 logit extraction + CPU argmax entirely; do a memcpy.
+        if self.has_semantic_mask_output() {
+            // Fast path: the exported ONNX graph already contains ArgMax+Cast(uint8) nodes,
+            // so ONNX Runtime returns a uint8 class map directly (no f32 logits, no CPU argmax).
+            // Works for both FP32 and FP16 model inputs.
+            if self.fp16_input {
+                let batch_tensor = {
+                    let pre_borrow = preprocessed_results_opt.borrow();
+                    Self::concat_f16_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
+                };
+                let task = self.metadata.task;
+                let names = &self.metadata.names;
+                let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
+                let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
+                let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(n_images);
+
+                Self::run_inference_f16_u8_with(
+                    &mut self.session,
+                    &self.input_name,
+                    &self.output_names,
+                    &batch_tensor,
+                    |outputs, inference_ms_total| {
+                        debug_assert_eq!(task, crate::task::Task::Semantic);
+                        let inference_time = inference_ms_total / n_images_f;
+                        let start_postprocess = std::time::Instant::now();
+
+                        for (i, (orig_img, preprocess_res)) in image_arrays
+                            .into_iter()
+                            .zip(preprocessed_results)
+                            .enumerate()
+                        {
+                            let path_i = paths_ref.get(i).cloned().unwrap_or_default();
+                            let speed = Speed::new(preprocess_time, inference_time, 0.0);
+
+                            let (data, shape) = &outputs[0];
+                            let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
+                            let elems_per_img = data.len() / actual_batch;
+                            let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
+                            let img_shape: &[usize] = &shape[1..];
+
+                            let tensor_shape = preprocess_res.tensor.shape();
+                            let inference_shape =
+                                (tensor_shape[2] as u32, tensor_shape[3] as u32);
+
+                            let result = crate::postprocessing::postprocess_semantic_mask(
+                                img_slice,
+                                img_shape,
+                                Arc::clone(names),
+                                orig_img,
+                                path_i,
+                                speed,
+                                inference_shape,
+                            );
+                            batch_results.push(vec![result]);
+                        }
+
+                        Self::apply_postprocess_time(
+                            &mut batch_results,
+                            start_postprocess,
+                            n_images_f,
+                        );
+                        Ok(())
+                    },
+                )?;
+                return Ok(batch_results);
+            }
+
+            // Same fast path for FP32 input models.
             let batch_tensor = {
                 let pre_borrow = preprocessed_results_opt.borrow();
                 Self::concat_f32_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
@@ -1219,6 +1292,32 @@ impl YOLOModel {
             .collect::<Result<_>>()?;
 
         cb(&views, inference_ms)
+    }
+
+    /// Run ONNX inference with FP16 input where outputs are `uint8` tensors
+    /// (e.g. a semantic segmentation model with FP16 input that has ArgMax+Cast(uint8) baked in).
+    fn run_inference_f16_u8_with<R>(
+        session: &mut Session,
+        input_name: &str,
+        output_names: &[String],
+        input: &ndarray::Array4<f16>,
+        cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
+    ) -> Result<R> {
+        let input_contiguous = input.as_standard_layout();
+        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
+            InferenceError::InferenceError(format!(
+                "Failed to create FP16 input tensor for u8 output: {e}"
+            ))
+        })?;
+        let inputs = ort::inputs![input_name => input_tensor];
+
+        let t_run = std::time::Instant::now();
+        let outputs = session.run(inputs).map_err(|e| {
+            InferenceError::InferenceError(format!("FP16->u8 inference failed: {e}"))
+        })?;
+        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
+
+        Self::extract_and_invoke_u8(&outputs, output_names, inference_ms, cb)
     }
 
     /// Run ONNX inference with FP16 input, zero-copy callback (FP16 outputs are converted).
