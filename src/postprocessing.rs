@@ -2308,20 +2308,20 @@ mod tests {
         let plane = oh * ow;
         let mut output = vec![0.0f32; nc * plane];
         // pixel (0,0): class 2 wins
-        output[0 * plane] = 0.1;
-        output[1 * plane] = 0.2;
+        output[0] = 0.1;
+        output[plane] = 0.2;
         output[2 * plane] = 0.9;
         // pixel (0,1): class 0 wins
-        output[0 * plane + 1] = 0.8;
-        output[1 * plane + 1] = 0.1;
+        output[1] = 0.8;
+        output[plane + 1] = 0.1;
         output[2 * plane + 1] = 0.1;
         // pixel (1,0): class 1 wins
-        output[0 * plane + 2] = 0.3;
-        output[1 * plane + 2] = 0.7;
+        output[2] = 0.3;
+        output[plane + 2] = 0.7;
         output[2 * plane + 2] = 0.2;
         // pixel (1,1): class 0 wins
-        output[0 * plane + 3] = 0.5;
-        output[1 * plane + 3] = 0.3;
+        output[3] = 0.5;
+        output[plane + 3] = 0.3;
         output[2 * plane + 3] = 0.3;
 
         let result = postprocess_semantic(
@@ -2398,7 +2398,7 @@ mod tests {
             (oh as u32, ow as u32),
         );
         let sm = result.semantic_mask.unwrap();
-        for &val in sm.data.iter() {
+        for &val in &sm.data {
             assert_eq!(val, 32);
         }
     }
@@ -2455,7 +2455,7 @@ mod tests {
         );
         let sm = result.semantic_mask.unwrap();
         assert_eq!(sm.data.shape(), &[oh, ow]);
-        for &val in sm.data.iter() {
+        for &val in &sm.data {
             assert_eq!(val, 32);
         }
     }
@@ -2552,7 +2552,7 @@ mod tests {
         );
         let sm = result.semantic_mask.unwrap();
         assert_eq!(sm.data.shape(), &[oh, ow]);
-        for &val in sm.data.iter() {
+        for &val in &sm.data {
             assert_eq!(val, 7, "expected class 7 but got {val}");
         }
     }
