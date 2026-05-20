@@ -1874,16 +1874,21 @@ fn postprocess_semantic(
             .for_each(|(dy, mut row)| {
                 for (dx, cell) in row.iter_mut().enumerate() {
                     let pix_off = dy * lw + dx;
-                    let mut best_cls = 0u32;
-                    let mut best_val = f32::NEG_INFINITY;
-                    for c in 0..nc {
-                        let v = output[c * plane + pix_off];
-                        if v > best_val {
-                            best_val = v;
-                            best_cls = c as u32;
+                    *cell = if nc == 1 {
+                        // Binary segmentation: single logit channel, class 1 if logit > 0.
+                        u32::from(output[pix_off] > 0.0)
+                    } else {
+                        let mut best_cls = 0u32;
+                        let mut best_val = f32::NEG_INFINITY;
+                        for c in 0..nc {
+                            let v = output[c * plane + pix_off];
+                            if v > best_val {
+                                best_val = v;
+                                best_cls = c as u32;
+                            }
                         }
-                    }
-                    *cell = best_cls;
+                        best_cls
+                    };
                 }
             });
         results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
@@ -1943,8 +1948,8 @@ fn postprocess_semantic(
             let row0_base = y0 * lw;
             let row1_base = y1 * lw;
 
-            // Stack-allocated buffer for nc_padded f32 results per pixel.
-            let mut vals = [0.0f32; 32]; // nc_padded ≤ 32 for typical semantic segmentation models
+            // Per-row buffer; reused across pixels to avoid per-pixel heap allocation.
+            let mut vals = vec![0.0f32; nc_padded];
 
             for (dx, cell) in row.iter_mut().enumerate() {
                 let (x0, x1, fxi, fx) = x_lut[dx];
@@ -1970,15 +1975,20 @@ fn postprocess_semantic(
                     vals[lane..lane + 8].copy_from_slice(&arr);
                 }
 
-                let mut best_cls = 0u32;
-                let mut best_val = f32::NEG_INFINITY;
-                for (c, &v) in vals.iter().take(nc).enumerate() {
-                    if v > best_val {
-                        best_val = v;
-                        best_cls = c as u32;
+                *cell = if nc == 1 {
+                    // Binary segmentation: single logit channel, class 1 if logit > 0.
+                    u32::from(vals[0] > 0.0)
+                } else {
+                    let mut best_cls = 0u32;
+                    let mut best_val = f32::NEG_INFINITY;
+                    for (c, &v) in vals.iter().take(nc).enumerate() {
+                        if v > best_val {
+                            best_val = v;
+                            best_cls = c as u32;
+                        }
                     }
-                }
-                *cell = best_cls;
+                    best_cls
+                };
             }
         });
 
