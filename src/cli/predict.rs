@@ -369,12 +369,11 @@ pub fn run_prediction(args: &PredictArgs) {
                                     "Semantic class IDs exceed 255 (max={max_id}); saving 16-bit PNG: {}",
                                     out_path.display()
                                 );
-                                let buf: Vec<u16> =
-                                    sm.data.iter().map(|&v| v as u16).collect();
-                                if let Some(img16) = image::ImageBuffer::<
-                                    image::Luma<u16>,
-                                    Vec<u16>,
-                                >::from_raw(w as u32, h as u32, buf)
+                                let buf: Vec<u16> = sm.data.iter().map(|&v| v as u16).collect();
+                                if let Some(img16) =
+                                    image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(
+                                        w as u32, h as u32, buf,
+                                    )
                                     && let Err(e) = img16.save(&out_path)
                                 {
                                     error!(
@@ -383,8 +382,7 @@ pub fn run_prediction(args: &PredictArgs) {
                                     );
                                 }
                             } else {
-                                let buf: Vec<u8> =
-                                    sm.data.iter().map(|&v| v as u8).collect();
+                                let buf: Vec<u8> = sm.data.iter().map(|&v| v as u8).collect();
                                 if let Some(gray) =
                                     image::GrayImage::from_raw(w as u32, h as u32, buf)
                                     && let Err(e) = gray.save(&out_path)
