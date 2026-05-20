@@ -9,7 +9,8 @@ use std::time::Duration;
 use std::fs;
 
 #[cfg(feature = "annotate")]
-use crate::annotate::{annotate_image, find_next_run_dir};
+use crate::annotate::annotate_image;
+use crate::io::find_next_run_dir;
 
 #[cfg(feature = "visualize")]
 use crate::visualizer::Viewer;
@@ -185,7 +186,7 @@ pub fn run_prediction(args: &PredictArgs) {
     // Without the `annotate` feature, `--save` is rejected below; classmap save still works.
     #[cfg(not(feature = "annotate"))]
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
-        let dir = std::path::PathBuf::from("runs/semantic/predict");
+        let dir = std::path::PathBuf::from(find_next_run_dir("runs/semantic", "predict"));
         if let Err(e) = fs::create_dir_all(&dir) {
             error!("Failed to create save directory '{}': {e}", dir.display());
             process::exit(1);
@@ -356,10 +357,16 @@ pub fn run_prediction(args: &PredictArgs) {
                         if let Some(ref cdir) = results_dir
                             && let Some(ref sm) = result.semantic_mask
                         {
-                            let stem = std::path::Path::new(image_path).file_stem().map_or_else(
-                                || format!("frame_{}", meta.frame_idx),
-                                |s| s.to_string_lossy().into_owned(),
-                            );
+                            // For video/webcam sources every frame shares the same path stem,
+                            // so append the frame index to avoid overwriting earlier frames.
+                            let base_stem = std::path::Path::new(image_path)
+                                .file_stem()
+                                .map_or_else(|| "frame".to_owned(), |s| s.to_string_lossy().into_owned());
+                            let stem = if meta.total_frames == Some(1) {
+                                base_stem
+                            } else {
+                                format!("{base_stem}_{:06}", meta.frame_idx)
+                            };
                             let out_path = cdir.join(format!("{stem}.png"));
                             let (h, w) = (sm.data.shape()[0], sm.data.shape()[1]);
                             let max_id = sm.data.iter().copied().max().unwrap_or(0);

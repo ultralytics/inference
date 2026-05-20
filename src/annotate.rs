@@ -29,24 +29,7 @@ pub const fn get_class_color(class_id: usize) -> Rgb<u8> {
 /// Find the next available run directory (predict, predict2, predict3, etc.)
 #[must_use]
 pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
-    let base_path = Path::new(base);
-
-    // First try without number
-    let first = base_path.join(prefix);
-    if !first.exists() {
-        return first.to_string_lossy().to_string();
-    }
-
-    // Try with incrementing numbers
-    for i in 2.. {
-        let numbered = base_path.join(format!("{prefix}{i}"));
-        if !numbered.exists() {
-            return numbered.to_string_lossy().to_string();
-        }
-    }
-
-    // Fallback (should never reach here)
-    base_path.join(prefix).to_string_lossy().to_string()
+    crate::io::find_next_run_dir(base, prefix)
 }
 
 /// Load image helper to bypass zune-jpeg stride issues

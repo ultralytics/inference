@@ -30,6 +30,23 @@ pub fn init_logging() {
     });
 }
 
+/// Return the next available run directory, e.g. `runs/detect/predict`, then `predict2`, `predict3`, ...
+#[must_use]
+pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
+    let base_path = Path::new(base);
+    let first = base_path.join(prefix);
+    if !first.exists() {
+        return first.to_string_lossy().into_owned();
+    }
+    for i in 2.. {
+        let numbered = base_path.join(format!("{prefix}{i}"));
+        if !numbered.exists() {
+            return numbered.to_string_lossy().into_owned();
+        }
+    }
+    first.to_string_lossy().into_owned()
+}
+
 /// A wrapper around `video-rs` encoder to simplify video saving.
 #[cfg(feature = "video")]
 pub struct VideoWriter {
