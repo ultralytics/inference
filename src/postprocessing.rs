@@ -1861,31 +1861,32 @@ fn postprocess_semantic(
         let mut buf = vec![0u32; oh * ow];
         // Load one source row per class at a time so each row fits in cache.
         // Scratch buffer shared across all rows a given thread processes; one allocation per thread.
-    buf.par_chunks_mut(ow)
-        .enumerate()
-        .for_each_with(vec![0.0f32; lw], |best_vals, (dy, row)| {
-            if nc == 1 {
-                let src = &output[dy * lw..(dy + 1) * lw];
-                for (cell, &v) in row.iter_mut().zip(src.iter()) {
-                    *cell = u32::from(v > 0.0);
-                }
-            } else {
-                // Seed best_vals with class 0; row is already zeroed (best_cls = 0).
-                let src0 = &output[dy * lw..(dy + 1) * lw];
-                best_vals.copy_from_slice(src0);
-                for c in 1..nc {
-                    let src_c = &output[c * plane + dy * lw..c * plane + (dy + 1) * lw];
-                    for ((cell, best), &v) in
-                        row.iter_mut().zip(best_vals.iter_mut()).zip(src_c.iter())
-                    {
-                        if v > *best {
-                            *best = v;
-                            *cell = c as u32;
+        buf.par_chunks_mut(ow).enumerate().for_each_with(
+            vec![0.0f32; lw],
+            |best_vals, (dy, row)| {
+                if nc == 1 {
+                    let src = &output[dy * lw..(dy + 1) * lw];
+                    for (cell, &v) in row.iter_mut().zip(src.iter()) {
+                        *cell = u32::from(v > 0.0);
+                    }
+                } else {
+                    // Seed best_vals with class 0; row is already zeroed (best_cls = 0).
+                    let src0 = &output[dy * lw..(dy + 1) * lw];
+                    best_vals.copy_from_slice(src0);
+                    for c in 1..nc {
+                        let src_c = &output[c * plane + dy * lw..c * plane + (dy + 1) * lw];
+                        for ((cell, best), &v) in
+                            row.iter_mut().zip(best_vals.iter_mut()).zip(src_c.iter())
+                        {
+                            if v > *best {
+                                *best = v;
+                                *cell = c as u32;
+                            }
                         }
                     }
                 }
-            }
-        });
+            },
+        );
         let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
         results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
         return results;

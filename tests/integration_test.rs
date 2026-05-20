@@ -75,13 +75,20 @@ fn test_auto_download_semantic_model() {
     let temp_dir = tempdir().expect("temp dir should be created");
     let model_path = temp_dir.path().join("yolo26n-sem.onnx");
     let result = ultralytics_inference::download::try_download_model(&model_path);
-    assert!(result.is_ok(), "download should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "download should succeed: {:?}",
+        result.err()
+    );
     assert!(
         model_path.exists(),
         "yolo26n-sem.onnx should be present after auto-download"
     );
     let size = std::fs::metadata(&model_path).unwrap().len();
-    assert!(size > 1_000_000, "downloaded file should be a real model (>1 MB), got {size} bytes");
+    assert!(
+        size > 1_000_000,
+        "downloaded file should be a real model (>1 MB), got {size} bytes"
+    );
 }
 
 #[test]
