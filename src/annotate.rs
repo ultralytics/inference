@@ -248,14 +248,24 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         return;
     };
     let (width, height) = img.dimensions();
-    for y in 0..height {
-        for x in 0..width {
-            let class_id = semantic_mask.data[[y as usize, x as usize]] as usize;
-            let color = COLORS[class_id % COLORS.len()];
-            let pixel = img.get_pixel_mut(x, y);
-            pixel[0] = (pixel[0] / 2).saturating_add(color[0] / 2);
-            pixel[1] = (pixel[1] / 2).saturating_add(color[1] / 2);
-            pixel[2] = (pixel[2] / 2).saturating_add(color[2] / 2);
+    let w = width as usize;
+    let mask_data = semantic_mask
+        .data
+        .as_slice()
+        .expect("semantic mask must be contiguous");
+    let pixels = img.as_flat_samples_mut();
+    let buf = pixels.samples;
+    let n_colors = COLORS.len();
+    for y in 0..height as usize {
+        let mask_row = y * w;
+        let img_row = y * w * 3;
+        for x in 0..w {
+            let class_id = mask_data[mask_row + x] as usize;
+            let color = COLORS[class_id % n_colors];
+            let p = img_row + x * 3;
+            buf[p] = (buf[p] / 2).saturating_add(color[0] / 2);
+            buf[p + 1] = (buf[p + 1] / 2).saturating_add(color[1] / 2);
+            buf[p + 2] = (buf[p + 2] / 2).saturating_add(color[2] / 2);
         }
     }
 }

@@ -22,10 +22,8 @@ use wide::{CmpGt, f32x8};
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Axis, Zip, s};
-use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, ParallelIterator, ParallelSliceMut,
-};
+use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
+use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -1776,13 +1774,11 @@ pub fn postprocess_semantic_mask(
 
     // Model output already at original resolution: just widen u8 -> u32.
     if lh == oh && lw == ow {
-        let mut class_map = Array2::<u32>::zeros((oh, ow));
-        class_map
-            .as_slice_mut()
-            .expect("contiguous")
-            .iter_mut()
-            .zip(output.iter())
-            .for_each(|(dst, &src)| *dst = u32::from(src));
+        let mut buf = vec![0u32; oh * ow];
+        for (dst, &src) in buf.iter_mut().zip(output.iter()) {
+            *dst = u32::from(src);
+        }
+        let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
         results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
         return results;
     }
@@ -1801,19 +1797,15 @@ pub fn postprocess_semantic_mask(
         .map(|sx| sx.min(crop_w_minus_1) + left)
         .collect();
 
-    let mut class_map = Array2::<u32>::zeros((oh, ow));
-    class_map
-        .axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .enumerate()
-        .for_each(|(dy, mut row)| {
-            let sy = (((dy as f32 + 0.5) * scale_y) as usize).min(crop_h_minus_1) + top;
-            let src_row_base = sy * lw;
-            for (dx, cell) in row.iter_mut().enumerate() {
-                *cell = u32::from(output[src_row_base + x_lut[dx]]);
-            }
-        });
-
+    let mut buf = vec![0u32; oh * ow];
+    buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+        let sy = (((dy as f32 + 0.5) * scale_y) as usize).min(crop_h_minus_1) + top;
+        let src_row_base = sy * lw;
+        for (dx, cell) in row.iter_mut().enumerate() {
+            *cell = u32::from(output[src_row_base + x_lut[dx]]);
+        }
+    });
+    let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
     results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
     results
 }
@@ -1866,53 +1858,44 @@ fn postprocess_semantic(
     // into the ONNX graph and the input was the model's native rect shape.
     if lh == oh && lw == ow {
         let plane = lh * lw;
-        let mut class_map = Array2::<u32>::zeros((oh, ow));
-        class_map
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(dy, mut row)| {
-                for (dx, cell) in row.iter_mut().enumerate() {
-                    let pix_off = dy * lw + dx;
-                    *cell = if nc == 1 {
-                        // Binary segmentation: single logit channel, class 1 if logit > 0.
-                        u32::from(output[pix_off] > 0.0)
-                    } else {
-                        let mut best_cls = 0u32;
-                        let mut best_val = f32::NEG_INFINITY;
-                        for c in 0..nc {
-                            let v = output[c * plane + pix_off];
-                            if v > best_val {
-                                best_val = v;
-                                best_cls = c as u32;
-                            }
-                        }
-                        best_cls
-                    };
+        let mut buf = vec![0u32; oh * ow];
+        // Load one source row per class at a time so each row fits in cache.
+        buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+            if nc == 1 {
+                let src = &output[dy * lw..(dy + 1) * lw];
+                for (cell, &v) in row.iter_mut().zip(src.iter()) {
+                    *cell = u32::from(v > 0.0);
                 }
-            });
+            } else {
+                // Initialize with class 0 values.
+                let src0 = &output[dy * lw..(dy + 1) * lw];
+                let mut best_vals: Vec<f32> = src0.to_vec();
+                // best_cls starts at 0 (implicit in the u32 buf zeros)
+                for (cell, &v) in row.iter_mut().zip(src0.iter()) {
+                    *cell = 0;
+                    let _ = v; // best_vals already has class 0
+                }
+                // Each subsequent class: read its row contiguously, update argmax.
+                for c in 1..nc {
+                    let src_c = &output[c * plane + dy * lw..c * plane + (dy + 1) * lw];
+                    for ((cell, best), &v) in
+                        row.iter_mut().zip(best_vals.iter_mut()).zip(src_c.iter())
+                    {
+                        if v > *best {
+                            *best = v;
+                            *cell = c as u32;
+                        }
+                    }
+                }
+            }
+        });
+        let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
         results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
         return results;
     }
 
-    // Transpose CHW to HWC, padding nc up to a multiple of 8 with -INF so the per-pixel
-    // argmax can run as `n_chunks` SIMD f32x8 FMAs with no special-case for the tail.
-    let plane = lh * lw;
-    let nc_padded = nc.div_ceil(8) * 8;
-    let mut hwc = vec![f32::NEG_INFINITY; plane * nc_padded];
-    hwc.par_chunks_mut(lw * nc_padded)
-        .enumerate()
-        .for_each(|(y, row)| {
-            for x in 0..lw {
-                let dst = x * nc_padded;
-                for c in 0..nc {
-                    row[dst + c] = output[c * plane + y * lw + x];
-                }
-                // Lanes nc..nc_padded remain f32::NEG_INFINITY (set at vec init).
-            }
-        });
-
     // Crop centered letterbox padding, then bilinear-upsample crop to (oh, ow).
+    let plane = lh * lw;
     let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
     };
@@ -1921,7 +1904,7 @@ fn postprocess_semantic(
     let lw_minus_1 = lw.saturating_sub(1);
     let lh_minus_1 = lh.saturating_sub(1);
 
-    // Precompute source-x neighbors + weights once per output column (with left offset).
+    // Precompute source-x neighbors + weights once per output column.
     let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
         .map(|dx| {
             let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
@@ -1932,66 +1915,60 @@ fn postprocess_semantic(
         })
         .collect();
 
-    let n_chunks = nc_padded / 8;
-    let mut class_map = Array2::<u32>::zeros((oh, ow));
-    class_map
-        .axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .enumerate()
-        .for_each(|(dy, mut row)| {
-            let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
-            let y0 = (sy.floor() as usize).min(lh_minus_1);
-            let y1 = (y0 + 1).min(lh_minus_1);
-            let fy = sy - y0 as f32;
-            let fyi = 1.0 - fy;
+    // Bilinear upsample and argmax directly on CHW data, skipping the transpose.
+    // Reads are strided (one plane apart per class) but avoids transposing 39M floats.
+    let mut buf = vec![0u32; oh * ow];
+    buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+        let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
+        let y0 = (sy.floor() as usize).min(lh_minus_1);
+        let y1 = (y0 + 1).min(lh_minus_1);
+        let fy = sy - y0 as f32;
+        let fyi = 1.0 - fy;
 
-            let row0_base = y0 * lw;
-            let row1_base = y1 * lw;
+        let row0_base = y0 * lw;
+        let row1_base = y1 * lw;
 
-            // Per-row buffer; reused across pixels to avoid per-pixel heap allocation.
-            let mut vals = vec![0.0f32; nc_padded];
+        for (dx, cell) in row.iter_mut().enumerate() {
+            let (x0, x1, fxi, fx) = x_lut[dx];
+            let w00 = fyi * fxi;
+            let w10 = fy * fxi;
+            let w01 = fyi * fx;
+            let w11 = fy * fx;
 
-            for (dx, cell) in row.iter_mut().enumerate() {
-                let (x0, x1, fxi, fx) = x_lut[dx];
-
-                let w00_v = f32x8::splat(fyi * fxi);
-                let w10_v = f32x8::splat(fy * fxi);
-                let w01_v = f32x8::splat(fyi * fx);
-                let w11_v = f32x8::splat(fy * fx);
-
-                let off00 = (row0_base + x0) * nc_padded;
-                let off10 = (row1_base + x0) * nc_padded;
-                let off01 = (row0_base + x1) * nc_padded;
-                let off11 = (row1_base + x1) * nc_padded;
-
-                for k in 0..n_chunks {
-                    let lane = k * 8;
-                    let p00 = f32x8::from(&hwc[off00 + lane..off00 + lane + 8]);
-                    let p10 = f32x8::from(&hwc[off10 + lane..off10 + lane + 8]);
-                    let p01 = f32x8::from(&hwc[off01 + lane..off01 + lane + 8]);
-                    let p11 = f32x8::from(&hwc[off11 + lane..off11 + lane + 8]);
-                    let v = p00 * w00_v + p10 * w10_v + p01 * w01_v + p11 * w11_v;
-                    let arr = v.to_array();
-                    vals[lane..lane + 8].copy_from_slice(&arr);
-                }
-
-                *cell = if nc == 1 {
-                    // Binary segmentation: single logit channel, class 1 if logit > 0.
-                    u32::from(vals[0] > 0.0)
-                } else {
-                    let mut best_cls = 0u32;
-                    let mut best_val = f32::NEG_INFINITY;
-                    for (c, &v) in vals.iter().take(nc).enumerate() {
-                        if v > best_val {
-                            best_val = v;
-                            best_cls = c as u32;
-                        }
+            *cell = if nc == 1 {
+                let base = 0;
+                let v = output[base + row1_base + x1].mul_add(
+                    w11,
+                    output[base + row0_base + x1].mul_add(
+                        w01,
+                        output[base + row1_base + x0]
+                            .mul_add(w10, output[base + row0_base + x0] * w00),
+                    ),
+                );
+                u32::from(v > 0.0)
+            } else {
+                let mut best_cls = 0u32;
+                let mut best_val = f32::NEG_INFINITY;
+                for c in 0..nc {
+                    let base = c * plane;
+                    let v = output[base + row1_base + x1].mul_add(
+                        w11,
+                        output[base + row0_base + x1].mul_add(
+                            w01,
+                            output[base + row1_base + x0]
+                                .mul_add(w10, output[base + row0_base + x0] * w00),
+                        ),
+                    );
+                    if v > best_val {
+                        best_val = v;
+                        best_cls = c as u32;
                     }
-                    best_cls
-                };
-            }
-        });
-
+                }
+                best_cls
+            };
+        }
+    });
+    let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
     results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
     results
 }

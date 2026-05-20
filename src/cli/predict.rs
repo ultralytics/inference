@@ -535,6 +535,16 @@ fn format_class_counts(
 /// Format detection summary like "4 persons, 1 bus".
 #[allow(clippy::option_if_let_else)]
 fn format_detection_summary(result: &Results) -> String {
+    // Semantic segmentation: report unique class count present in the mask.
+    if let Some(ref sm) = result.semantic_mask {
+        let mut seen = std::collections::HashSet::new();
+        for &v in &sm.data {
+            seen.insert(v);
+        }
+        let n = seen.len();
+        return format!("{n} {}", if n == 1 { "class" } else { "classes" });
+    }
+
     let summary = if let Some(ref boxes) = result.boxes {
         format_class_counts(&boxes.cls(), boxes.len(), &result.names)
     } else if let Some(ref obb) = result.obb {
