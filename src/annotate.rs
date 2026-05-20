@@ -254,7 +254,12 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
     }
 }
 
-#[allow(clippy::cast_sign_loss, clippy::too_many_arguments)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::too_many_arguments
+)]
 fn draw_label(
     img: &mut image::RgbImage,
     font: &FontRef,
@@ -463,7 +468,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             let class_name = result.names.get(&class_id).map_or("object", String::as_str);
             let label = format!(" {class_name} {confidence:.2} ");
 
-            if let Some(ref f) = font {
+            if let Some(f) = font {
                 draw_label(
                     img,
                     f,
@@ -653,7 +658,7 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
             let class_name = result.names.get(&class_id).map_or("object", String::as_str);
             let label = format!(" {} {:.2} ", class_name, conf[i]);
 
-            if let Some(ref f) = font {
+            if let Some(f) = font {
                 draw_label(
                     img,
                     f,
