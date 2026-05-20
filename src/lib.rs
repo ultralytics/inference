@@ -247,10 +247,10 @@
 //! | [`results`] | Output types ([`Results`], [`Boxes`], [`Masks`], etc.) |
 //! | [`inference`] | [`InferenceConfig`] for customizing inference settings |
 //! | [`source`] | Input source handling ([`Source`], [`SourceIterator`]) |
-//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Pose, etc.) |
+//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Pose, Classify, Obb, Semantic) |
 //! | [`mod@error`] | Error types ([`InferenceError`], [`Result`]) |
 //! | [`preprocessing`] | Image preprocessing utilities |
-//! | [`postprocessing`] | Detection post-processing (NMS, decode) |
+//! | [`postprocessing`] | Post-processing for all tasks (NMS/decode for detection; argmax for semantic segmentation) |
 //! | [`metadata`] | ONNX model metadata parsing |
 //!
 //! ## Feature Flags

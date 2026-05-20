@@ -133,7 +133,8 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
     }
 }
 
-/// Annotate an image with detection boxes and labels
+/// Annotate an image with detection boxes, instance masks, keypoints, OBB boxes, classification
+/// labels, or a semantic segmentation overlay depending on the result type.
 #[must_use]
 pub fn annotate_image(
     image: &DynamicImage,
@@ -255,7 +256,10 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
     }
 }
 
-/// Overlay semantic segmentation class colors at 50% alpha.
+/// Overlay semantic segmentation class colors at 50% alpha onto `img`.
+///
+/// Each pixel is colorized using `COLORS[class_id % COLORS.len()]` blended 50/50 with
+/// the original pixel. A no-op when `result.semantic_mask` is `None`.
 fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
     let Some(ref semantic_mask) = result.semantic_mask else {
         return;

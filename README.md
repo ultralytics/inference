@@ -354,7 +354,7 @@ inference/
 │   ├── model.rs            # YOLOModel - ONNX session and inference
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask
 │   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize, SIMD)
-│   ├── postprocessing.rs   # Detection post-processing (NMS, decode, SIMD)
+│   ├── postprocessing.rs   # Post-processing for all tasks (NMS/decode for detection, argmax for semantic segmentation)
 │   ├── metadata.rs         # ONNX model metadata parsing
 │   ├── source.rs           # Input source handling (images, video, webcam)
 │   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb, Semantic)
@@ -362,7 +362,7 @@ inference/
 │   ├── batch.rs            # Batch processing pipeline
 │   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)
 │   ├── download.rs         # Model and asset downloading
-│   ├── annotate.rs         # Image annotation (bounding boxes, masks, keypoints)
+│   ├── annotate.rs         # Image annotation (bounding boxes, instance masks, keypoints, semantic overlay)
 │   ├── io.rs               # Result saving (images, videos)
 │   ├── logging.rs          # Logging macros
 │   ├── error.rs            # Error types
@@ -514,10 +514,10 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 
 ### Completed
 
-- [x] Detection, Segmentation, Pose, Classification, OBB inference
+- [x] Detection, Segmentation, Pose, Classification, OBB, and Semantic Segmentation inference
 - [x] ONNX model metadata parsing (auto-detect classes, task, imgsz)
 - [x] Hardware acceleration support (CUDA, TensorRT, CoreML, OpenVINO, XNNPACK)
-- [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`)
+- [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`, `SemanticMask`)
 - [x] Multiple input sources (images, directories, globs, URLs)
 - [x] Video file support and webcam/RTSP streaming
 - [x] Image annotation and visualization
