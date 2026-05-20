@@ -929,7 +929,7 @@ mod tests {
         assert_eq!(h, 1024);
         assert_eq!(w, 1024);
         // Wide image: horizontal padding is 0, vertical padding is non-zero.
-        assert_eq!(res.padding.1, 0.0, "wide image: no left padding");
+        assert!(res.padding.1.abs() < 1e-6, "wide image: no left padding");
         assert!(res.padding.0 > 0.0, "wide image: top padding expected");
     }
 }

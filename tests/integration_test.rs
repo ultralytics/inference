@@ -158,7 +158,7 @@ fn test_semantic_save_class_map() {
         .ok()
         .into_iter()
         .flatten()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .any(|predict_dir| predict_dir.path().join("results").join("bus.png").exists());
     assert!(
         results_png_exists,
