@@ -139,9 +139,7 @@ impl FromStr for Task {
             "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
             "classify" | "classification" | "cls" => Ok(Self::Classify),
             "obb" | "oriented" => Ok(Self::Obb),
-            "semseg" | "semantic" | "semantic_segmentation" | "semsegmentation" => {
-                Ok(Self::Semantic)
-            }
+            "semantic" | "semantic_segmentation" => Ok(Self::Semantic),
             _ => Err(TaskParseError(s.to_string())),
         }
     }
@@ -182,7 +180,6 @@ mod tests {
         assert_eq!("segmentation".parse::<Task>().unwrap(), Task::Segment);
         assert_eq!("keypoints".parse::<Task>().unwrap(), Task::Pose);
         assert_eq!("cls".parse::<Task>().unwrap(), Task::Classify);
-        assert_eq!("semseg".parse::<Task>().unwrap(), Task::Semantic);
         assert_eq!(
             "semantic_segmentation".parse::<Task>().unwrap(),
             Task::Semantic

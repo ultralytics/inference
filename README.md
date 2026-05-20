@@ -221,7 +221,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`      | `--task` matches metadata, proceeds normally                        |
 | `predict --task segment --model yolo26n.onnx`     | error                   | `--task` conflicts with model metadata (`detect`), exits with error |
 
-\* `semantic` (semantic segmentation) is YOLO26-only. The alias `semseg` is also accepted for backward compatibility.
+\* `semantic` (semantic segmentation) is YOLO26-only.
 
 **Auto-downloadable models:**
 
