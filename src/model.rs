@@ -814,7 +814,7 @@ impl YOLOModel {
 
             let res = if self.metadata.task == Task::Classify {
                 preprocess_image_center_crop(image, current_target_size, self.fp16_input)
-            } else if self.metadata.task == Task::SemSeg {
+            } else if self.metadata.task == Task::Semantic {
                 preprocess_image_semseg(
                     image,
                     target_size,
@@ -935,7 +935,7 @@ impl YOLOModel {
                 &self.output_names,
                 &batch_tensor,
                 |outputs, inference_ms_total| {
-                    debug_assert_eq!(task, crate::task::Task::SemSeg);
+                    debug_assert_eq!(task, crate::task::Task::Semantic);
                     let inference_time = inference_ms_total / n_images_f;
                     let start_postprocess = std::time::Instant::now();
 

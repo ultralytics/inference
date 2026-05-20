@@ -159,7 +159,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
     // Determine whether we need an incremented predict dir. `--save` always needs one;
     // `--save-json` for semseg also needs one so PNG class maps land in <predictN>/results/
-    let need_predict_dir = save_json && model.task() == crate::task::Task::SemSeg;
+    let need_predict_dir = save_json && model.task() == crate::task::Task::Semantic;
     #[cfg(feature = "annotate")]
     let need_predict_dir = save || need_predict_dir;
 
@@ -171,7 +171,7 @@ pub fn run_prediction(args: &PredictArgs) {
             crate::task::Task::Pose => "runs/pose",
             crate::task::Task::Classify => "runs/classify",
             crate::task::Task::Obb => "runs/obb",
-            crate::task::Task::SemSeg => "runs/semseg",
+            crate::task::Task::Semantic => "runs/semseg",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -197,7 +197,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
     // Per-image PNG class maps go in `<save_dir>/results/<stem>.png`.
     let results_dir: Option<std::path::PathBuf> = save_dir.as_ref().and_then(|d| {
-        if !save_json || model.task() != crate::task::Task::SemSeg {
+        if !save_json || model.task() != crate::task::Task::Semantic {
             return None;
         }
         let dir = d.join("results");

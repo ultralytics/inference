@@ -168,9 +168,9 @@ pub fn postprocess(
             let (output, _) = &outputs[0];
             postprocess_classify(output, names, orig_img, path, speed, inference_shape)
         }
-        Task::SemSeg => {
+        Task::Semantic => {
             let (output, shape) = &outputs[0];
-            postprocess_semseg(output, shape, names, orig_img, path, speed, inference_shape)
+            postprocess_semantic(output, shape, names, orig_img, path, speed, inference_shape)
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];
@@ -1835,7 +1835,7 @@ pub fn postprocess_semantic_mask(
     clippy::cast_possible_truncation,
     clippy::similar_names
 )]
-fn postprocess_semseg(
+fn postprocess_semantic(
     output: &[f32],
     shape: &[usize],
     names: Arc<HashMap<usize, String>>,

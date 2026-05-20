@@ -33,7 +33,7 @@ pub enum Task {
     Obb,
     /// Semantic segmentation.
     /// Assigns a class label to every pixel in the image.
-    SemSeg,
+    Semantic,
 }
 
 impl Task {
@@ -47,7 +47,7 @@ impl Task {
             Self::Pose => "pose",
             Self::Classify => "classify",
             Self::Obb => "obb",
-            Self::SemSeg => "semseg",
+            Self::Semantic => "semantic",
         }
     }
 
@@ -67,7 +67,7 @@ impl Task {
             Self::Pose => "-pose",
             Self::Classify => "-cls",
             Self::Obb => "-obb",
-            Self::SemSeg => "-sem",
+            Self::Semantic => "-sem",
         }
     }
 
