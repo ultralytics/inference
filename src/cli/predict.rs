@@ -362,15 +362,38 @@ pub fn run_prediction(args: &PredictArgs) {
                             );
                             let out_path = cdir.join(format!("{stem}.png"));
                             let (h, w) = (sm.data.shape()[0], sm.data.shape()[1]);
-                            let buf: Vec<u8> =
-                                sm.data.iter().map(|v| (*v).min(255) as u8).collect();
-                            if let Some(gray) = image::GrayImage::from_raw(w as u32, h as u32, buf)
-                                && let Err(e) = gray.save(&out_path)
-                            {
-                                error!(
-                                    "Failed to save semantic mask '{}': {e}",
+                            let max_id = sm.data.iter().copied().max().unwrap_or(0);
+                            if max_id > 255 {
+                                // Class IDs exceed 8-bit range; save as 16-bit grayscale PNG.
+                                warn!(
+                                    "Semantic class IDs exceed 255 (max={max_id}); saving 16-bit PNG: {}",
                                     out_path.display()
                                 );
+                                let buf: Vec<u16> =
+                                    sm.data.iter().map(|&v| v as u16).collect();
+                                if let Some(img16) = image::ImageBuffer::<
+                                    image::Luma<u16>,
+                                    Vec<u16>,
+                                >::from_raw(w as u32, h as u32, buf)
+                                    && let Err(e) = img16.save(&out_path)
+                                {
+                                    error!(
+                                        "Failed to save semantic mask '{}': {e}",
+                                        out_path.display()
+                                    );
+                                }
+                            } else {
+                                let buf: Vec<u8> =
+                                    sm.data.iter().map(|&v| v as u8).collect();
+                                if let Some(gray) =
+                                    image::GrayImage::from_raw(w as u32, h as u32, buf)
+                                    && let Err(e) = gray.save(&out_path)
+                                {
+                                    error!(
+                                        "Failed to save semantic mask '{}': {e}",
+                                        out_path.display()
+                                    );
+                                }
                             }
                         }
 
