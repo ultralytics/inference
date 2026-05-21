@@ -19,14 +19,20 @@ use std::path::{Path, PathBuf};
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
-/// Get color for a class ID
+/// Return the RGB color assigned to a class ID.
+///
+/// Cycles through the 20-entry Ultralytics palette so every class gets a
+/// distinct, repeating color regardless of how many classes the model has.
 #[must_use]
 pub const fn get_class_color(class_id: usize) -> Rgb<u8> {
     let color = COLORS[class_id % COLORS.len()];
     Rgb(color)
 }
 
-/// Find the next available run directory (predict, predict2, predict3, etc.)
+/// Return the next unused run directory under `base` with the given `prefix`.
+///
+/// Tries `<base>/<prefix>` first, then `<base>/<prefix>2`, `<base>/<prefix>3`, and so on
+/// until a path that does not yet exist is found.
 #[must_use]
 pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
     let base_path = Path::new(base);
@@ -49,7 +55,15 @@ pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
     base_path.join(prefix).to_string_lossy().to_string()
 }
 
-/// Load image helper to bypass zune-jpeg stride issues
+/// Load an image from `path`, working around a zune-jpeg stride bug for JPEG files.
+///
+/// JPEG files are decoded with `jpeg_decoder` directly to avoid a stride mismatch
+/// that can corrupt images decoded through the default image crate backend.
+/// All other formats fall through to `image::open`.
+///
+/// # Errors
+///
+/// Returns an [`image::ImageError`] if the file cannot be opened or decoded.
 #[allow(clippy::missing_errors_doc)]
 pub fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
     let path_obj = Path::new(path);
@@ -85,7 +99,11 @@ pub fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
     // Fallback
     image::open(path)
 }
-/// Check if font exists locally or download it
+/// Return the local path to `font`, downloading it from the Ultralytics asset CDN if absent.
+///
+/// Fonts are cached in the platform config directory (`~/.config/Ultralytics/` on Linux,
+/// `~/Library/Application Support/Ultralytics/` on macOS). Returns `None` if the directory
+/// cannot be created or the download fails.
 #[must_use]
 pub fn check_font(font: &str) -> Option<PathBuf> {
     let font_name = Path::new(font).file_name()?.to_string_lossy();
@@ -133,7 +151,18 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
     }
 }
 
-/// Annotate an image with detection boxes and labels
+/// Overlay inference results onto `image` and return the annotated copy.
+///
+/// Draws whichever result types are present: detection boxes with instance masks,
+/// pose skeletons, oriented bounding boxes, and classification probabilities.
+/// The font (Arial or Arial Unicode for non-ASCII names) is downloaded on first use
+/// and cached locally.
+///
+/// # Arguments
+///
+/// * `image` - Source image to annotate.
+/// * `result` - Inference results produced by the model.
+/// * `top_k` - Maximum number of classification labels to show. Defaults to 5 when `None`.
 #[must_use]
 pub fn annotate_image(
     image: &DynamicImage,
@@ -170,7 +199,15 @@ pub fn annotate_image(
     DynamicImage::ImageRgb8(img)
 }
 
-/// Draw a line segment on an image
+/// Draw a thick line segment between two points using Bresenham's algorithm.
+///
+/// # Arguments
+///
+/// * `img` - Target image to draw on.
+/// * `x1`, `y1` - Start point coordinates.
+/// * `x2`, `y2` - End point coordinates.
+/// * `color` - RGB color of the line.
+/// * `thickness` - Line width in pixels; 1 draws a single-pixel line.
 #[allow(
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
@@ -229,7 +266,16 @@ fn draw_line_segment(
     }
 }
 
-/// Draw a filled circle on an image
+/// Draw a filled circle centered at `(cx, cy)` with the given `radius`.
+///
+/// Pixels outside the image bounds are silently skipped.
+///
+/// # Arguments
+///
+/// * `img` - Target image to draw on.
+/// * `cx`, `cy` - Center of the circle in pixel coordinates.
+/// * `radius` - Radius in pixels.
+/// * `color` - RGB fill color.
 #[allow(
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
@@ -254,6 +300,23 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
     }
 }
 
+/// Draw a class label with a filled background rectangle, avoiding overlap with previously placed labels.
+///
+/// The label is positioned above `(anchor_x, anchor_y)`. If that position would clip
+/// the top edge, the label falls back to `top_fallback_y`. Up to 10 downward shifts
+/// are attempted to avoid collision with rectangles already in `occupied`.
+///
+/// # Arguments
+///
+/// * `img` - Target image to draw on.
+/// * `font` - Loaded font used for measuring and rendering glyphs.
+/// * `occupied` - Running list of already-placed label rectangles; updated in place.
+/// * `label` - Text to render inside the background box.
+/// * `color` - Background fill color; text color is chosen automatically for contrast.
+/// * `font_scale` - Font size in pixels.
+/// * `anchor_x` - Horizontal anchor: left edge of the associated bounding box.
+/// * `anchor_y` - Vertical anchor: top edge of the associated bounding box.
+/// * `top_fallback_y` - Y position to use when the label would clip above the image.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -338,7 +401,17 @@ fn draw_label(
     }
 }
 
-/// Draw object detection results (boxes and masks)
+/// Draw detection boxes, optional instance masks, and class labels onto `img`.
+///
+/// Instance masks are blended at 30% opacity before boxes are drawn on top.
+/// Labels are positioned above each box; overlap between labels is resolved
+/// by shifting downward up to 10 times.
+///
+/// # Arguments
+///
+/// * `img` - Target image to draw on.
+/// * `result` - Inference results; only `boxes` and `masks` fields are read.
+/// * `font` - Optional loaded font; labels are skipped when `None`.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -485,7 +558,10 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
     }
 }
 
-/// Calculate appropriate text color (black or white) based on background luminance
+/// Return black or white, choosing whichever contrasts better with `bg`.
+///
+/// Uses the ITU-R BT.601 luminance formula. Backgrounds with luminance above 150
+/// get black text; darker backgrounds get white text.
 fn get_text_color(bg: Rgb<u8>) -> Rgb<u8> {
     let r = f32::from(bg.0[0]);
     let g = f32::from(bg.0[1]);
@@ -501,6 +577,7 @@ fn get_text_color(bg: Rgb<u8>) -> Rgb<u8> {
         Rgb([255, 255, 255]) // White text for dark backgrounds
     }
 }
+/// Return `true` if rectangles `r1` and `r2` overlap.
 fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
     let r1_left = r1.left();
     let r1_right = r1.right();
@@ -615,7 +692,16 @@ fn draw_pose(
     }
 }
 
-/// Draw oriented bounding boxes (OBB)
+/// Draw oriented bounding boxes and class labels onto `img`.
+///
+/// Each box is drawn as four line segments connecting its rotated corners.
+/// Labels are positioned at the first corner of each box.
+///
+/// # Arguments
+///
+/// * `img` - Target image to draw on.
+/// * `result` - Inference results; only the `obb` field is read.
+/// * `font` - Optional loaded font; labels are skipped when `None`.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -674,7 +760,17 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
         }
     }
 }
-/// Draw a transparent rectangle on an image
+/// Blend a solid color rectangle over a region of `img` at the given `alpha` opacity.
+///
+/// Pixels outside the image bounds are silently skipped. `alpha` is clamped to `[0.0, 1.0]`.
+///
+/// # Arguments
+///
+/// * `img` - Target image to blend onto.
+/// * `x`, `y` - Top-left corner of the rectangle in pixel coordinates.
+/// * `w`, `h` - Width and height of the rectangle in pixels.
+/// * `color` - Blend color.
+/// * `alpha` - Opacity; 0.0 is fully transparent, 1.0 is fully opaque.
 #[allow(
     clippy::many_single_char_names,
     clippy::cast_possible_truncation,
@@ -724,7 +820,17 @@ fn draw_transparent_rect(
     }
 }
 
-/// Draw classification results
+/// Draw top-k classification probabilities onto `img` with a semi-transparent backing box.
+///
+/// Classes with a score below 0.01 are omitted. The list is rendered at the top-left
+/// corner with a 40% opacity black background to keep text readable over any image content.
+///
+/// # Arguments
+///
+/// * `img` - Target image to draw on.
+/// * `result` - Inference results; only the `probs` field is read.
+/// * `font` - Optional loaded font; output is skipped when `None`.
+/// * `top_k` - Maximum number of class entries to display.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
