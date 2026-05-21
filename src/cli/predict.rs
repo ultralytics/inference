@@ -158,6 +158,13 @@ pub fn run_prediction(args: &PredictArgs) {
         |s| crate::source::Source::from(s.as_str()),
     );
 
+    if save_json && model.task() != crate::task::Task::Semantic {
+        warn!(
+            "--save-json is currently supported only for semantic segmentation; ignoring for task '{}'.",
+            model.task()
+        );
+    }
+
     // Determine whether we need an incremented predict dir. `--save` always needs one;
     // `--save-json` for semantic segmentation also needs one so PNG class maps land in <predictN>/results/
     let need_predict_dir = save_json && model.task() == crate::task::Task::Semantic;
@@ -196,7 +203,7 @@ pub fn run_prediction(args: &PredictArgs) {
         None
     };
 
-    // Per-image PNG class maps go in `<save_dir>/results/<stem>.png`.
+    // Per-image semantic class maps go in `<save_dir>/results/<stem>.png`.
     let results_dir: Option<std::path::PathBuf> = save_dir.as_ref().and_then(|d| {
         if !save_json || model.task() != crate::task::Task::Semantic {
             return None;
@@ -276,6 +283,7 @@ pub fn run_prediction(args: &PredictArgs) {
     #[cfg(feature = "annotate")]
     let mut result_saver = save_dir
         .as_ref()
+        .filter(|_| save)
         .map(|d| crate::io::SaveResults::new(d.clone(), save_frames));
     #[cfg(not(feature = "annotate"))]
     let mut result_saver: Option<crate::io::SaveResults> = None;

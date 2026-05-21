@@ -128,7 +128,7 @@
 //! | `--half` | | Use FP16 half-precision inference | `false` |
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
-//! | `--save-json` | | Save results to COCO JSON (detect/segment/pose) or PNG masks (semantic) for external evaluation | `false` |
+//! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
 //! | `--show` | | Display results in a window | `false` |
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |

@@ -824,4 +824,17 @@ mod tests {
         assert!(res.padding.1.abs() < 1e-6, "wide image: no left padding");
         assert!(res.padding.0 > 0.0, "wide image: top padding expected");
     }
+
+    #[test]
+    fn test_preprocess_image_rect_uses_centered_letterbox() {
+        // Mirrors Ultralytics LetterBox((1024, 1024), auto=True, stride=32) for a 333×640 image:
+        // resized content is 533×1024 and centered in a 544×1024 rect with 5/6 vertical padding.
+        let img = image::DynamicImage::new_rgb8(640, 333);
+        let rect_size = calculate_rect_size(640, 333, (1024, 1024), 32);
+        assert_eq!(rect_size, (544, 1024));
+        let res = preprocess_image_with_precision(&img, rect_size, 32, false);
+        let (_, _, h, w) = res.tensor.dim();
+        assert_eq!((h, w), rect_size);
+        assert_eq!(res.padding, (5.0, 0.0));
+    }
 }
