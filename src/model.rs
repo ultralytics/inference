@@ -24,7 +24,7 @@ use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
-    calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_semantic,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop,
     preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
@@ -823,14 +823,6 @@ impl YOLOModel {
 
             let res = if self.metadata.task == Task::Classify {
                 preprocess_image_center_crop(image, current_target_size, self.fp16_input)
-            } else if self.metadata.task == Task::Semantic {
-                preprocess_image_semantic(
-                    image,
-                    target_size,
-                    self.metadata.stride,
-                    self.fp16_input,
-                    self.is_dynamic,
-                )
             } else {
                 preprocess_image_with_precision(
                     image,

@@ -405,7 +405,7 @@ pub fn run_prediction(args: &PredictArgs) {
                         }
 
                         #[cfg(feature = "annotate")]
-                        if save_dir.is_some() {
+                        if save {
                             let annotated = annotate_image(img, &result, None);
 
                             if let Some(saver) = &mut result_saver

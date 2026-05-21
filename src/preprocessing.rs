@@ -79,104 +79,10 @@ pub struct PreprocessResult {
     pub padding: (f32, f32),
 }
 
-/// Preprocess an image for semantic segmentation inference.
-///
-/// Dynamic models: short-side scaling so the shorter dimension equals
-/// `target_size.0`, with stride-aligned padding appended at the bottom/right only.
-///
-/// Static models: fit-within-target letterbox to exactly `target_size` with
-/// centered alignment (padding split evenly between both sides).
-///
-/// # Arguments
-///
-/// * `image` - Input image.
-/// * `target_size` - `(height, width)` of the model input tensor.
-/// * `stride` - Model stride for padding alignment (typically 32).
-/// * `half` - If true, also generate an FP16 tensor.
-/// * `is_dynamic` - True for dynamic-shape ONNX; false for a fixed-shape export.
-///
-/// # Returns
-///
-/// Preprocessed tensor and transform information for post-processing.
-#[must_use]
-pub fn preprocess_image_semantic(
-    image: &DynamicImage,
-    target_size: (usize, usize),
-    stride: u32,
-    half: bool,
-    is_dynamic: bool,
-) -> PreprocessResult {
-    let (orig_width, orig_height) = image.dimensions();
-    let orig_shape = (orig_height, orig_width);
-    let stride_usize = stride as usize;
-
-    #[allow(clippy::cast_precision_loss)]
-    let orig_h = orig_height as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let orig_w = orig_width as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let (target_h_f, target_w_f) = (target_size.0 as f32, target_size.1 as f32);
-
-    let (target_size, new_h, new_w, scale, pad_top, pad_left) = if is_dynamic {
-        // Short-side scaling: scale so the shorter dimension equals target_size.0,
-        // then round the longer side up to the nearest stride multiple.
-        // Dynamic mode places content at (0, 0): no padding to split.
-        let scale = target_h_f / orig_h.min(orig_w);
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let (nh, nw) = if orig_h <= orig_w {
-            (target_size.0, (orig_w * scale).round() as usize)
-        } else {
-            ((orig_h * scale).round() as usize, target_size.0)
-        };
-        let ph = nh.div_ceil(stride_usize) * stride_usize;
-        let pw = nw.div_ceil(stride_usize) * stride_usize;
-        ((ph, pw), nh, nw, scale, 0u32, 0u32)
-    } else {
-        // Centered letterbox: scale to fit, split the remainder evenly between top/bottom
-        // and left/right.
-        let scale = (target_h_f / orig_h).min(target_w_f / orig_w);
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let nh = (orig_h * scale).round() as usize;
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let nw = (orig_w * scale).round() as usize;
-        let pad_h = target_size.0.saturating_sub(nh);
-        let pad_w = target_size.1.saturating_sub(nw);
-        // Half-padding with biased rounding: `top = round(pad_h / 2 - 0.1)`. The -0.1
-        // bias ensures odd total padding lands one extra pixel at the bottom/right.
-        #[allow(
-            clippy::cast_precision_loss,
-            clippy::cast_sign_loss,
-            clippy::cast_possible_truncation
-        )]
-        let pad_top_u = ((pad_h as f32) / 2.0 - 0.1).round().max(0.0) as u32;
-        #[allow(
-            clippy::cast_precision_loss,
-            clippy::cast_sign_loss,
-            clippy::cast_possible_truncation
-        )]
-        let pad_left_u = ((pad_w as f32) / 2.0 - 0.1).round().max(0.0) as u32;
-        (target_size, nh, nw, scale, pad_top_u, pad_left_u)
-    };
-
-    build_preprocess_result(
-        image,
-        target_size,
-        new_w as u32,
-        new_h as u32,
-        pad_left,
-        pad_top,
-        (scale, scale),
-        orig_shape,
-        half,
-    )
-}
-
 /// Build a `PreprocessResult` from a resolved letterbox geometry.
 ///
-/// Shared tail for `preprocess_image_semantic` and `preprocess_image_with_precision`:
-/// runs the fused zero-copy resize/pad/normalize, optionally produces an FP16 tensor,
-/// and packages the transform metadata. The caller is responsible for computing
-/// `target_size`, `new_w`/`new_h`, padding, and `scale` for its specific letterbox style.
+/// Runs the fused zero-copy resize/pad/normalize, optionally produces an FP16 tensor,
+/// and packages the transform metadata.
 #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
 fn build_preprocess_result(
     image: &DynamicImage,
@@ -906,25 +812,11 @@ mod tests {
     }
 
     #[test]
-    fn test_preprocess_image_semantic_dynamic_no_padding() {
-        // 480×640 image, target=1024, is_dynamic=true.
-        // Short-side=480 → scale=1024/480; content at (0,0), no centered padding.
-        let img = image::DynamicImage::new_rgb8(640, 480);
-        let res = preprocess_image_semantic(&img, (1024, 1024), 32, false, true);
-        assert_eq!(res.padding, (0.0, 0.0), "dynamic path must have no padding");
-        assert_eq!(res.orig_shape, (480, 640));
-        let (_, _, h, w) = res.tensor.dim();
-        assert_eq!(h % 32, 0, "height must be stride-aligned");
-        assert_eq!(w % 32, 0, "width must be stride-aligned");
-        assert_eq!(h, 1024, "short side should map to target");
-    }
-
-    #[test]
-    fn test_preprocess_image_semantic_static_centered_letterbox() {
+    fn test_preprocess_image_static_centered_letterbox() {
         // 480×640 wide image, target=1024×1024, is_dynamic=false.
         // Scale = min(1024/480, 1024/640) = 1024/640 = 1.6; nh=768, nw=1024, pad_top≈128.
         let img = image::DynamicImage::new_rgb8(640, 480);
-        let res = preprocess_image_semantic(&img, (1024, 1024), 32, false, false);
+        let res = preprocess_image_with_precision(&img, (1024, 1024), 32, false);
         let (_, _, h, w) = res.tensor.dim();
         assert_eq!(h, 1024);
         assert_eq!(w, 1024);
