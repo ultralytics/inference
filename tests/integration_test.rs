@@ -20,10 +20,9 @@ use ultralytics_inference::{Device, YOLOModel};
 /// 1. **Issue #148 / PR #149**: `GatherElements op: Out of range` during warmup.
 ///    `CoreML`'s DFL head produces out-of-range gather indices on an all-zeros dummy input.
 ///
-/// 2. **`graph_input_cast_0` crash**: `MLProgram` format causes ORT's `CoreML` EP to insert a
-///    cast node, renaming the ONNX input (e.g. `images`) to `graph_input_cast_0`. ORT then
-///    feeds the tensor with the original name, which `CoreML` can't find.
-///    The fix (`NeuralNetwork` format) avoids the rename entirely.
+/// 2. **`graph_input_cast_0` crash**: `CoreML` must not rename the ONNX input
+///    (e.g. `images`) to an internal cast node that ORT cannot feed. The current
+///    `MLProgram` path uses static input shapes and `FastPrediction` to avoid that cast.
 #[cfg(feature = "coreml")]
 #[test]
 #[ignore = "downloads a YOLO model; requires CoreML (macOS only)"]
@@ -35,7 +34,7 @@ fn test_coreml_model_loads_and_warms_up() {
     let mut model = YOLOModel::load_with_config(model_path.to_string_lossy().as_ref(), config)
         .expect("CoreML model should load");
 
-    // warmup() must succeed: graph_input_cast_0 errors are gone (`NeuralNetwork` format fix)
+    // warmup() must succeed: graph_input_cast_0 errors are gone (static-shape MLProgram path)
     // and GatherElements out-of-range is tolerated (issue #148 fix).
     model.warmup().expect("CoreML warmup should not fail");
 }
