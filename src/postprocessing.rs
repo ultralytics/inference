@@ -1740,7 +1740,7 @@ fn letterbox_crop_bounds(
 ///
 /// # Panics
 ///
-/// Panics if the freshly-allocated `Array2<u32>` class map is not contiguous (cannot occur
+/// Panics if the freshly-allocated `Array2<u16>` class map is not contiguous (cannot occur
 /// for `Array2::zeros` on standard layout).
 #[allow(
     clippy::too_many_arguments,
@@ -1772,11 +1772,11 @@ pub fn postprocess_semantic_mask(
         return results;
     }
 
-    // Model output already at original resolution: just widen u8 -> u32.
+    // Model output already at original resolution: just widen u8 -> u16.
     if lh == oh && lw == ow {
-        let mut buf = vec![0u32; oh * ow];
+        let mut buf = vec![0u16; oh * ow];
         for (dst, &src) in buf.iter_mut().zip(output.iter()) {
-            *dst = u32::from(src);
+            *dst = u16::from(src);
         }
         let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
         results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
@@ -1797,12 +1797,12 @@ pub fn postprocess_semantic_mask(
         .map(|sx| sx.min(crop_w_minus_1) + left)
         .collect();
 
-    let mut buf = vec![0u32; oh * ow];
+    let mut buf = vec![0u16; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
         let sy = (((dy as f32 + 0.5) * scale_y) as usize).min(crop_h_minus_1) + top;
         let src_row_base = sy * lw;
         for (dx, cell) in row.iter_mut().enumerate() {
-            *cell = u32::from(output[src_row_base + x_lut[dx]]);
+            *cell = u16::from(output[src_row_base + x_lut[dx]]);
         }
     });
     let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
@@ -1848,7 +1848,7 @@ fn postprocess_semantic(
     let lh = shape[2];
     let lw = shape[3];
 
-    if nc == 0 || lh == 0 || lw == 0 || oh == 0 || ow == 0 {
+    if nc == 0 || nc > usize::from(u16::MAX) + 1 || lh == 0 || lw == 0 || oh == 0 || ow == 0 {
         return results;
     }
 
@@ -1858,7 +1858,7 @@ fn postprocess_semantic(
     // into the ONNX graph and the input was the model's native rect shape.
     if lh == oh && lw == ow {
         let plane = lh * lw;
-        let mut buf = vec![0u32; oh * ow];
+        let mut buf = vec![0u16; oh * ow];
         // Load one source row per class at a time so each row fits in cache.
         // Scratch buffer shared across all rows a given thread processes; one allocation per thread.
         buf.par_chunks_mut(ow).enumerate().for_each_with(
@@ -1867,7 +1867,7 @@ fn postprocess_semantic(
                 if nc == 1 {
                     let src = &output[dy * lw..(dy + 1) * lw];
                     for (cell, &v) in row.iter_mut().zip(src.iter()) {
-                        *cell = u32::from(v > 0.0);
+                        *cell = u16::from(v > 0.0);
                     }
                 } else {
                     // Seed best_vals with class 0; row is already zeroed (best_cls = 0).
@@ -1880,7 +1880,7 @@ fn postprocess_semantic(
                         {
                             if v > *best {
                                 *best = v;
-                                *cell = c as u32;
+                                *cell = c as u16;
                             }
                         }
                     }
@@ -1915,7 +1915,7 @@ fn postprocess_semantic(
 
     // Bilinear upsample and argmax directly on CHW data, skipping the transpose.
     // Reads are strided (one plane apart per class) but avoids transposing 39M floats.
-    let mut buf = vec![0u32; oh * ow];
+    let mut buf = vec![0u16; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
         let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
         let y0 = (sy.floor() as usize).min(lh_minus_1);
@@ -1943,9 +1943,9 @@ fn postprocess_semantic(
                             .mul_add(w10, output[base + row0_base + x0] * w00),
                     ),
                 );
-                u32::from(v > 0.0)
+                u16::from(v > 0.0)
             } else {
-                let mut best_cls = 0u32;
+                let mut best_cls = 0u16;
                 let mut best_val = f32::NEG_INFINITY;
                 for c in 0..nc {
                     let base = c * plane;
@@ -1959,7 +1959,7 @@ fn postprocess_semantic(
                     );
                     if v > best_val {
                         best_val = v;
-                        best_cls = c as u32;
+                        best_cls = c as u16;
                     }
                 }
                 best_cls
@@ -2466,7 +2466,7 @@ mod tests {
 
     #[test]
     fn test_postprocess_semantic_mask_passthrough() {
-        // Pre-argmaxed u8 output at native resolution: values map 1:1 to u32 class map.
+        // Pre-argmaxed u8 output at native resolution: values map 1:1 to u16 class map.
         let (oh, ow) = (2, 3);
         let output: Vec<u8> = vec![0, 5, 3, 7, 2, 19];
         let result = postprocess_semantic_mask(
@@ -2551,7 +2551,7 @@ mod tests {
             batch[elems_per_img + 2 * plane + px] = 0.9;
         }
 
-        for (i, expected_cls) in [(0usize, 1u32), (1, 2)] {
+        for (i, expected_cls) in [(0usize, 1u16), (1, 2)] {
             let start = i * elems_per_img;
             let slice = &batch[start..start + elems_per_img];
             let result = postprocess_semantic(

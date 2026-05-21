@@ -165,13 +165,13 @@ pub fn run_prediction(args: &PredictArgs) {
         );
     }
 
-    // Determine whether we need an incremented predict dir. `--save` always needs one;
-    // `--save-json` for semantic segmentation also needs one so PNG class maps land in <predictN>/results/
+    // Determine whether we need an incremented predict dir. `--save` always needs one
+    // when annotation support is compiled in; semantic class-map export also needs one.
+    #[cfg(feature = "annotate")]
+    let need_predict_dir = save || (save_json && model.task() == crate::task::Task::Semantic);
+    #[cfg(not(feature = "annotate"))]
     let need_predict_dir = save_json && model.task() == crate::task::Task::Semantic;
-    #[cfg(feature = "annotate")]
-    let need_predict_dir = save || need_predict_dir;
 
-    #[cfg(feature = "annotate")]
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
         let parent_dir = match model.task() {
             crate::task::Task::Detect => "runs/detect",
@@ -187,18 +187,6 @@ pub fn run_prediction(args: &PredictArgs) {
             process::exit(1);
         }
         Some(std::path::PathBuf::from(dir))
-    } else {
-        None
-    };
-    // Without the `annotate` feature, `--save` is rejected below; classmap save still works.
-    #[cfg(not(feature = "annotate"))]
-    let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
-        let dir = std::path::PathBuf::from(find_next_run_dir("runs/semantic", "predict"));
-        if let Err(e) = fs::create_dir_all(&dir) {
-            error!("Failed to create save directory '{}': {e}", dir.display());
-            process::exit(1);
-        }
-        Some(dir)
     } else {
         None
     };
@@ -386,7 +374,7 @@ pub fn run_prediction(args: &PredictArgs) {
                                     "Semantic class IDs exceed 255 (max={max_id}); saving 16-bit PNG: {}",
                                     out_path.display()
                                 );
-                                let buf: Vec<u16> = sm.data.iter().map(|&v| v as u16).collect();
+                                let buf: Vec<u16> = sm.data.iter().copied().collect();
                                 if let Some(img16) =
                                     image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(
                                         w as u32, h as u32, buf,
@@ -545,11 +533,7 @@ fn format_class_counts(
 fn format_detection_summary(result: &Results) -> String {
     // Semantic segmentation: report unique class count present in the mask.
     if let Some(ref sm) = result.semantic_mask {
-        let mut seen = std::collections::HashSet::new();
-        for &v in &sm.data {
-            seen.insert(v);
-        }
-        let n = seen.len();
+        let n = sm.classes_present();
         return format!("{n} {}", if n == 1 { "class" } else { "classes" });
     }
 
@@ -581,7 +565,7 @@ fn format_detection_summary(result: &Results) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::results::{Boxes, Obb, Probs, Results, Speed};
+    use crate::results::{Boxes, Obb, Probs, Results, SemanticMask, Speed};
     use ndarray::{Array2, Array3};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -665,6 +649,24 @@ mod tests {
 
         let summary = format_detection_summary(&result);
         assert_eq!(summary, "(no detections)");
+    }
+
+    #[test]
+    fn test_format_summary_semantic_mask() {
+        let mut result = Results::new(
+            create_dummy_image(),
+            "test.jpg".to_string(),
+            create_names(),
+            Speed::default(),
+            (640, 640),
+        );
+        result.semantic_mask = Some(SemanticMask::new(
+            Array2::from_shape_vec((2, 3), vec![0u16, 1, 1, 2, 2, 2]).unwrap(),
+            (2, 3),
+        ));
+
+        let summary = format_detection_summary(&result);
+        assert_eq!(summary, "3 classes");
     }
 
     /// Test `format_detection_summary` with OBB detections.
