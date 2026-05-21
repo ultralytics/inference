@@ -1731,70 +1731,6 @@ fn letterbox_crop_bounds(
     }
 }
 
-#[derive(Clone, Copy)]
-struct SemanticGeometry {
-    oh: usize,
-    ow: usize,
-    lh: usize,
-    lw: usize,
-}
-
-#[derive(Clone, Copy)]
-struct SemanticCrop {
-    top: usize,
-    left: usize,
-    crop_h: usize,
-    crop_w: usize,
-    scale_y: f32,
-    scale_x: f32,
-}
-
-fn semantic_geometry(
-    shape: &[usize],
-    output_is_empty: bool,
-    orig_img: &Array3<u8>,
-    min_shape_len: usize,
-) -> Option<SemanticGeometry> {
-    if output_is_empty || shape.len() < min_shape_len {
-        return None;
-    }
-    let oh = orig_img.shape()[0];
-    let ow = orig_img.shape()[1];
-    let (lh, lw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
-    if lh == 0 || lw == 0 || oh == 0 || ow == 0 {
-        None
-    } else {
-        Some(SemanticGeometry { oh, ow, lh, lw })
-    }
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn semantic_crop(geo: SemanticGeometry) -> Option<SemanticCrop> {
-    let (top, left, crop_h, crop_w) = letterbox_crop_bounds(geo.lh, geo.lw, geo.oh, geo.ow)?;
-    Some(SemanticCrop {
-        top,
-        left,
-        crop_h,
-        crop_w,
-        scale_y: crop_h as f32 / geo.oh as f32,
-        scale_x: crop_w as f32 / geo.ow as f32,
-    })
-}
-
-fn semantic_results_with_mask(
-    orig_img: Array3<u8>,
-    path: String,
-    names: Arc<HashMap<usize, String>>,
-    speed: Speed,
-    inference_shape: (u32, u32),
-    class_map: Array2<u32>,
-    orig_shape: (u32, u32),
-) -> Results {
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
-    results.semantic_mask = Some(SemanticMask::new(class_map, orig_shape));
-    results
-}
-
 /// Post-process a Semantic Segmentation ONNX that has ArgMax + Cast(uint8) baked in.
 ///
 /// Output shape is `[1, lh, lw] uint8`. For cityscapes-style inputs where the model's
@@ -1824,61 +1760,54 @@ pub fn postprocess_semantic_mask(
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let Some(geo) = semantic_geometry(shape, output.is_empty(), &orig_img, 2) else {
-        return Results::new(orig_img, path, names, speed, inference_shape);
-    };
-    let orig_shape = (geo.oh as u32, geo.ow as u32);
+    let oh = orig_img.shape()[0];
+    let ow = orig_img.shape()[1];
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+
+    if shape.len() < 2 || output.is_empty() {
+        return results;
+    }
+    let (lh, lw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
+    if lh == 0 || lw == 0 || oh == 0 || ow == 0 {
+        return results;
+    }
 
     // Model output already at original resolution: just widen u8 -> u32.
-    if geo.lh == geo.oh && geo.lw == geo.ow {
-        let mut buf = vec![0u32; geo.oh * geo.ow];
+    if lh == oh && lw == ow {
+        let mut buf = vec![0u32; oh * ow];
         for (dst, &src) in buf.iter_mut().zip(output.iter()) {
             *dst = u32::from(src);
         }
-        let class_map = Array2::from_shape_vec((geo.oh, geo.ow), buf).expect("shape matches");
-        return semantic_results_with_mask(
-            orig_img,
-            path,
-            names,
-            speed,
-            inference_shape,
-            class_map,
-            orig_shape,
-        );
+        let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
+        results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+        return results;
     }
 
     // Slow path: crop centered letterbox padding in semantic-mask space, then NN upsample.
-    let Some(crop) = semantic_crop(geo) else {
-        return Results::new(orig_img, path, names, speed, inference_shape);
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
+        return results;
     };
 
-    let crop_h_minus_1 = crop.crop_h.saturating_sub(1);
-    let crop_w_minus_1 = crop.crop_w.saturating_sub(1);
-    let x_lut: Vec<usize> = (0..geo.ow)
-        .map(|dx| ((dx as f32 + 0.5) * crop.scale_x) as usize)
-        .map(|sx| sx.min(crop_w_minus_1) + crop.left)
+    let scale_y = crop_h as f32 / oh as f32;
+    let scale_x = crop_w as f32 / ow as f32;
+    let crop_h_minus_1 = crop_h.saturating_sub(1);
+    let crop_w_minus_1 = crop_w.saturating_sub(1);
+    let x_lut: Vec<usize> = (0..ow)
+        .map(|dx| ((dx as f32 + 0.5) * scale_x) as usize)
+        .map(|sx| sx.min(crop_w_minus_1) + left)
         .collect();
 
-    let mut buf = vec![0u32; geo.oh * geo.ow];
-    buf.par_chunks_mut(geo.ow)
-        .enumerate()
-        .for_each(|(dy, row)| {
-            let sy = (((dy as f32 + 0.5) * crop.scale_y) as usize).min(crop_h_minus_1) + crop.top;
-            let src_row_base = sy * geo.lw;
-            for (dx, cell) in row.iter_mut().enumerate() {
-                *cell = u32::from(output[src_row_base + x_lut[dx]]);
-            }
-        });
-    let class_map = Array2::from_shape_vec((geo.oh, geo.ow), buf).expect("shape matches");
-    semantic_results_with_mask(
-        orig_img,
-        path,
-        names,
-        speed,
-        inference_shape,
-        class_map,
-        orig_shape,
-    )
+    let mut buf = vec![0u32; oh * ow];
+    buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+        let sy = (((dy as f32 + 0.5) * scale_y) as usize).min(crop_h_minus_1) + top;
+        let src_row_base = sy * lw;
+        for (dx, cell) in row.iter_mut().enumerate() {
+            *cell = u32::from(output[src_row_base + x_lut[dx]]);
+        }
+    });
+    let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
+    results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+    results
 }
 
 /// Post-process semantic segmentation model output.
@@ -1907,39 +1836,45 @@ fn postprocess_semantic(
     speed: Speed,
     inference_shape: (u32, u32),
 ) -> Results {
-    let Some(geo) = semantic_geometry(shape, output.is_empty(), &orig_img, 4) else {
-        return Results::new(orig_img, path, names, speed, inference_shape);
-    };
+    let oh = orig_img.shape()[0];
+    let ow = orig_img.shape()[1];
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+
+    if shape.len() < 4 || output.is_empty() {
+        return results;
+    }
 
     let nc = shape[1];
-    if nc == 0 {
-        return Results::new(orig_img, path, names, speed, inference_shape);
+    let lh = shape[2];
+    let lw = shape[3];
+
+    if nc == 0 || lh == 0 || lw == 0 || oh == 0 || ow == 0 {
+        return results;
     }
-    let orig_shape = (geo.oh as u32, geo.ow as u32);
 
     // Model output is already at orig_img resolution (no resize, no padding).
     // Avoids the CHW->HWC transpose and bilinear interpolation entirely: just argmax over
     // the class channel for each pixel. Hits when the export bakes a full-res upsample
     // into the ONNX graph and the input was the model's native rect shape.
-    if geo.lh == geo.oh && geo.lw == geo.ow {
-        let plane = geo.lh * geo.lw;
-        let mut buf = vec![0u32; geo.oh * geo.ow];
+    if lh == oh && lw == ow {
+        let plane = lh * lw;
+        let mut buf = vec![0u32; oh * ow];
         // Load one source row per class at a time so each row fits in cache.
         // Scratch buffer shared across all rows a given thread processes; one allocation per thread.
-        buf.par_chunks_mut(geo.ow).enumerate().for_each_with(
-            vec![0.0f32; geo.lw],
+        buf.par_chunks_mut(ow).enumerate().for_each_with(
+            vec![0.0f32; lw],
             |best_vals, (dy, row)| {
                 if nc == 1 {
-                    let src = &output[dy * geo.lw..(dy + 1) * geo.lw];
+                    let src = &output[dy * lw..(dy + 1) * lw];
                     for (cell, &v) in row.iter_mut().zip(src.iter()) {
                         *cell = u32::from(v > 0.0);
                     }
                 } else {
                     // Seed best_vals with class 0; row is already zeroed (best_cls = 0).
-                    let src0 = &output[dy * geo.lw..(dy + 1) * geo.lw];
+                    let src0 = &output[dy * lw..(dy + 1) * lw];
                     best_vals.copy_from_slice(src0);
                     for c in 1..nc {
-                        let src_c = &output[c * plane + dy * geo.lw..c * plane + (dy + 1) * geo.lw];
+                        let src_c = &output[c * plane + dy * lw..c * plane + (dy + 1) * lw];
                         for ((cell, best), &v) in
                             row.iter_mut().zip(best_vals.iter_mut()).zip(src_c.iter())
                         {
@@ -1952,30 +1887,25 @@ fn postprocess_semantic(
                 }
             },
         );
-        let class_map = Array2::from_shape_vec((geo.oh, geo.ow), buf).expect("shape matches");
-        return semantic_results_with_mask(
-            orig_img,
-            path,
-            names,
-            speed,
-            inference_shape,
-            class_map,
-            orig_shape,
-        );
+        let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
+        results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+        return results;
     }
 
     // Crop centered letterbox padding, then bilinear-upsample crop to (oh, ow).
-    let plane = geo.lh * geo.lw;
-    let Some(crop) = semantic_crop(geo) else {
-        return Results::new(orig_img, path, names, speed, inference_shape);
+    let plane = lh * lw;
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
+        return results;
     };
-    let lw_minus_1 = geo.lw.saturating_sub(1);
-    let lh_minus_1 = geo.lh.saturating_sub(1);
+    let scale_y = crop_h as f32 / oh as f32;
+    let scale_x = crop_w as f32 / ow as f32;
+    let lw_minus_1 = lw.saturating_sub(1);
+    let lh_minus_1 = lh.saturating_sub(1);
 
     // Precompute source-x neighbors + weights once per output column.
-    let x_lut: Vec<(usize, usize, f32, f32)> = (0..geo.ow)
+    let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
         .map(|dx| {
-            let sx = (dx as f32 + 0.5).mul_add(crop.scale_x, -0.5).max(0.0) + crop.left as f32;
+            let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
             let x0 = (sx.floor() as usize).min(lw_minus_1);
             let x1 = (x0 + 1).min(lw_minus_1);
             let fx = sx - x0 as f32;
@@ -1985,28 +1915,40 @@ fn postprocess_semantic(
 
     // Bilinear upsample and argmax directly on CHW data, skipping the transpose.
     // Reads are strided (one plane apart per class) but avoids transposing 39M floats.
-    let mut buf = vec![0u32; geo.oh * geo.ow];
-    buf.par_chunks_mut(geo.ow)
-        .enumerate()
-        .for_each(|(dy, row)| {
-            let sy = (dy as f32 + 0.5).mul_add(crop.scale_y, -0.5).max(0.0) + crop.top as f32;
-            let y0 = (sy.floor() as usize).min(lh_minus_1);
-            let y1 = (y0 + 1).min(lh_minus_1);
-            let fy = sy - y0 as f32;
-            let fyi = 1.0 - fy;
+    let mut buf = vec![0u32; oh * ow];
+    buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+        let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
+        let y0 = (sy.floor() as usize).min(lh_minus_1);
+        let y1 = (y0 + 1).min(lh_minus_1);
+        let fy = sy - y0 as f32;
+        let fyi = 1.0 - fy;
 
-            let row0_base = y0 * geo.lw;
-            let row1_base = y1 * geo.lw;
+        let row0_base = y0 * lw;
+        let row1_base = y1 * lw;
 
-            for (dx, cell) in row.iter_mut().enumerate() {
-                let (x0, x1, fxi, fx) = x_lut[dx];
-                let w00 = fyi * fxi;
-                let w10 = fy * fxi;
-                let w01 = fyi * fx;
-                let w11 = fy * fx;
+        for (dx, cell) in row.iter_mut().enumerate() {
+            let (x0, x1, fxi, fx) = x_lut[dx];
+            let w00 = fyi * fxi;
+            let w10 = fy * fxi;
+            let w01 = fyi * fx;
+            let w11 = fy * fx;
 
-                *cell = if nc == 1 {
-                    let base = 0;
+            *cell = if nc == 1 {
+                let base = 0;
+                let v = output[base + row1_base + x1].mul_add(
+                    w11,
+                    output[base + row0_base + x1].mul_add(
+                        w01,
+                        output[base + row1_base + x0]
+                            .mul_add(w10, output[base + row0_base + x0] * w00),
+                    ),
+                );
+                u32::from(v > 0.0)
+            } else {
+                let mut best_cls = 0u32;
+                let mut best_val = f32::NEG_INFINITY;
+                for c in 0..nc {
+                    let base = c * plane;
                     let v = output[base + row1_base + x1].mul_add(
                         w11,
                         output[base + row0_base + x1].mul_add(
@@ -2015,39 +1957,18 @@ fn postprocess_semantic(
                                 .mul_add(w10, output[base + row0_base + x0] * w00),
                         ),
                     );
-                    u32::from(v > 0.0)
-                } else {
-                    let mut best_cls = 0u32;
-                    let mut best_val = f32::NEG_INFINITY;
-                    for c in 0..nc {
-                        let base = c * plane;
-                        let v = output[base + row1_base + x1].mul_add(
-                            w11,
-                            output[base + row0_base + x1].mul_add(
-                                w01,
-                                output[base + row1_base + x0]
-                                    .mul_add(w10, output[base + row0_base + x0] * w00),
-                            ),
-                        );
-                        if v > best_val {
-                            best_val = v;
-                            best_cls = c as u32;
-                        }
+                    if v > best_val {
+                        best_val = v;
+                        best_cls = c as u32;
                     }
-                    best_cls
-                };
-            }
-        });
-    let class_map = Array2::from_shape_vec((geo.oh, geo.ow), buf).expect("shape matches");
-    semantic_results_with_mask(
-        orig_img,
-        path,
-        names,
-        speed,
-        inference_shape,
-        class_map,
-        orig_shape,
-    )
+                }
+                best_cls
+            };
+        }
+    });
+    let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
+    results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+    results
 }
 
 #[cfg(test)]
