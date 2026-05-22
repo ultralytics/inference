@@ -18,7 +18,7 @@ use ort::value::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
 
-use crate::download::try_download_model;
+use crate::download::{DEFAULT_IMAGES, download_image, try_download_model};
 use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
@@ -29,7 +29,7 @@ use crate::preprocessing::{
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;
-use crate::warn;
+use crate::{verbose, warn};
 
 /// YOLO model for inference.
 ///
@@ -720,16 +720,43 @@ impl YOLOModel {
     ///
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        // Delegate to predict_internal with single image
-        // We pass local slice of references to avoid cloning images
         let images = [image];
         let paths = [path];
-
-        // predict_internal returns Vec<Vec<Results>>
-        // We take the first (and only) element
         let mut results = self.predict_internal(&images, &paths)?;
+        let results = results.pop().unwrap_or_default();
 
-        Ok(results.pop().unwrap_or_default())
+        if let Some(result) = results.first() {
+            let shape = result.inference_shape();
+            verbose!(
+                "image 1/1 {}: {}x{} {}, {:.1}ms",
+                result.path,
+                shape.0,
+                shape.1,
+                result.detection_summary(),
+                result.speed.inference.unwrap_or(0.0)
+            );
+        }
+
+        Ok(results)
+    }
+
+    /// Run inference on the default Ultralytics sample images.
+    ///
+    /// Downloads default `bus.jpg` and `zidane.jpg` if not present, then runs inference on both.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the download or inference fails.
+    pub fn predict_default(&mut self) -> Result<Vec<Results>> {
+        let mut all_results = Vec::new();
+        for url in DEFAULT_IMAGES {
+            let path = download_image(url)?;
+            let results = self.predict(&path)?;
+            if let Some(result) = results.into_iter().next() {
+                all_results.push(result);
+            }
+        }
+        Ok(all_results)
     }
 
     /// Run inference on a batch of `DynamicImage`s.
