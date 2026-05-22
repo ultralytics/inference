@@ -18,7 +18,7 @@ use ort::value::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
 
-use crate::download::try_download_model;
+use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_download_model};
 use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
@@ -29,7 +29,7 @@ use crate::preprocessing::{
 };
 use crate::results::{Results, Speed};
 use crate::task::Task;
-use crate::warn;
+use crate::{verbose, warn};
 
 /// YOLO model for inference.
 ///
@@ -563,43 +563,12 @@ impl YOLOModel {
             )));
         }
 
-        let warmup_result: Result<()> = if self.fp16_input && self.has_semantic_mask_output() {
-            let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_f16_u8_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else if self.fp16_input {
-            let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_f16_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else if self.has_semantic_mask_output() {
-            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_u8_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else {
-            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        };
+        let warmup_result = Self::run_warmup(
+            &mut self.session,
+            &self.input_name,
+            self.fp16_input,
+            target_size,
+        );
 
         if let Err(e) = warmup_result {
             let msg = e.to_string();
@@ -720,16 +689,48 @@ impl YOLOModel {
     ///
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        // Delegate to predict_internal with single image
-        // We pass local slice of references to avoid cloning images
         let images = [image];
         let paths = [path];
-
-        // predict_internal returns Vec<Vec<Results>>
-        // We take the first (and only) element
         let mut results = self.predict_internal(&images, &paths)?;
+        let results = results.pop().unwrap_or_default();
 
-        Ok(results.pop().unwrap_or_default())
+        if let Some(result) = results.first() {
+            let shape = result.inference_shape();
+            verbose!(
+                "image 1/1 {}: {}x{} {}, {:.1}ms",
+                result.path,
+                shape.0,
+                shape.1,
+                result.detection_summary(),
+                result.speed.inference.unwrap_or(0.0)
+            );
+        }
+
+        Ok(results)
+    }
+
+    /// Run inference on the default Ultralytics sample images.
+    ///
+    /// Downloads default `bus.jpg` and `zidane.jpg` if not present, then runs inference on both.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the download or inference fails.
+    pub fn predict_default(&mut self) -> Result<Vec<Results>> {
+        let urls: &[&str] = if self.task() == crate::task::Task::Obb {
+            &[DEFAULT_OBB_IMAGE]
+        } else {
+            DEFAULT_IMAGES
+        };
+        let mut all_results = Vec::new();
+        for url in urls {
+            let path = download_image(url)?;
+            let results = self.predict(&path)?;
+            if let Some(result) = results.into_iter().next() {
+                all_results.push(result);
+            }
+        }
+        Ok(all_results)
     }
 
     /// Run inference on a batch of `DynamicImage`s.
@@ -1157,6 +1158,50 @@ impl YOLOModel {
         Ok(results_vec)
     }
 
+    /// Run the ORT session, returning outputs and measured inference time in ms.
+    ///
+    /// Run a single forward pass for warmup, discarding outputs.
+    ///
+    fn run_warmup(
+        session: &mut Session,
+        input_name: &str,
+        fp16_input: bool,
+        size: (usize, usize),
+    ) -> Result<()> {
+        let (h, w) = size;
+        if fp16_input {
+            let dummy = ndarray::Array4::<f16>::zeros((1, 3, h, w));
+            let cont = dummy.as_standard_layout();
+            let tensor = TensorRef::from_array_view(&cont).map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
+            })?;
+            Self::run_timed(session, ort::inputs![input_name => tensor])?;
+        } else {
+            let dummy = ndarray::Array4::<f32>::zeros((1, 3, h, w));
+            let cont = dummy.as_standard_layout();
+            let tensor = TensorRef::from_array_view(cont.view()).map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+            })?;
+            Self::run_timed(session, ort::inputs![input_name => tensor])?;
+        }
+        Ok(())
+    }
+
+    /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
+    fn run_timed<'s>(
+        session: &'s mut Session,
+        inputs: Vec<(
+            std::borrow::Cow<'_, str>,
+            ort::session::SessionInputValue<'_>,
+        )>,
+    ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
+        let t = Instant::now();
+        let outputs = session
+            .run(inputs)
+            .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
+        Ok((outputs, t.elapsed().as_secs_f64() * 1000.0))
+    }
+
     /// Run ONNX inference with FP32 input, calling `cb` with zero-copy output views.
     ///
     /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
@@ -1175,16 +1220,8 @@ impl YOLOModel {
         let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
             InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
         })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session
-            .run(inputs)
-            .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        // Build zero-copy views (or owned buffers for f16 outputs that must be converted)
-        Self::extract_and_invoke(&outputs, output_names, inference_ms, cb)
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
     /// Build zero-copy slice views over ORT output tensors and call `cb`.
@@ -1248,15 +1285,8 @@ impl YOLOModel {
         let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
             InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
         })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session
-            .run(inputs)
-            .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        Self::extract_and_invoke_u8(&outputs, output_names, inference_ms, cb)
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
     /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`.
@@ -1296,19 +1326,10 @@ impl YOLOModel {
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
         let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!(
-                "Failed to create FP16 input tensor for u8 output: {e}"
-            ))
+            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
         })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session.run(inputs).map_err(|e| {
-            InferenceError::InferenceError(format!("FP16->u8 inference failed: {e}"))
-        })?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        Self::extract_and_invoke_u8(&outputs, output_names, inference_ms, cb)
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
     /// Run ONNX inference with FP16 input, zero-copy callback (FP16 outputs are converted).
@@ -1323,15 +1344,8 @@ impl YOLOModel {
         let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
             InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
         })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session
-            .run(inputs)
-            .map_err(|e| InferenceError::InferenceError(format!("FP16 inference failed: {e}")))?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        Self::extract_and_invoke(&outputs, output_names, inference_ms, cb)
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
     /// Get the model's task type as detected from ONNX metadata.

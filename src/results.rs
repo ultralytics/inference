@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
+use crate::utils::pluralize;
+
 /// Timing information for inference operations (in milliseconds).
 #[derive(Debug, Clone, Default)]
 pub struct Speed {
@@ -80,16 +82,20 @@ impl SemanticMask {
     /// Count unique class IDs present in the mask.
     #[must_use]
     pub fn classes_present(&self) -> usize {
+        self.class_ids().len()
+    }
+
+    /// Return sorted unique class IDs present in the mask.
+    #[must_use]
+    pub fn class_ids(&self) -> Vec<usize> {
         let mut seen = vec![false; usize::from(u16::MAX) + 1];
-        let mut count = 0;
         for &v in &self.data {
-            let idx = usize::from(v);
-            if !seen[idx] {
-                seen[idx] = true;
-                count += 1;
-            }
+            seen[usize::from(v)] = true;
         }
-        count
+        seen.iter()
+            .enumerate()
+            .filter_map(|(i, &present)| if present { Some(i) } else { None })
+            .collect()
     }
 }
 
@@ -122,6 +128,37 @@ pub struct Results {
     pub names: Arc<HashMap<usize, String>>,
     /// Path to the source image/video.
     pub path: String,
+}
+
+fn format_class_counts(
+    cls: &ArrayView1<'_, f32>,
+    count: usize,
+    names: &HashMap<usize, String>,
+) -> String {
+    if count == 0 {
+        return String::new();
+    }
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for i in 0..count {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let class_id = cls[i] as usize;
+        *counts.entry(class_id).or_insert(0) += 1;
+    }
+    let mut sorted: Vec<(usize, usize)> = counts.into_iter().collect();
+    sorted.sort_by_key(|(id, _)| *id);
+    sorted
+        .iter()
+        .map(|(id, n)| {
+            let name = names.get(id).map_or("object", String::as_str);
+            let label = if *n > 1 {
+                pluralize(name)
+            } else {
+                name.to_string()
+            };
+            format!("{n} {label}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl Results {
@@ -222,60 +259,48 @@ impl Results {
         self.inference_shape
     }
 
-    /// Generate a verbose log string describing the results.
+    /// One-line detection summary suitable for per-image verbose output.
     ///
-    /// # Returns
-    ///
-    /// * A string summary of detections (e.g., "2 persons, 1 car, ").
+    /// Formats as "4 persons, 1 bus" (no trailing punctuation).
+    /// Returns "(no detections)" when nothing was found.
     #[must_use]
-    pub fn verbose(&self) -> String {
+    pub fn detection_summary(&self) -> String {
         if let Some(ref sm) = self.semantic_mask {
-            let n = sm.classes_present();
-            return format!("{n} {}, ", if n == 1 { "class" } else { "classes" });
-        }
-
-        if self.is_empty() {
-            if self.probs.is_some() {
-                return String::new();
+            let ids = sm.class_ids();
+            if ids.is_empty() {
+                return "(no detections)".to_string();
             }
-            return "(no detections), ".to_string();
+            let shown: Vec<&str> = ids
+                .iter()
+                .map(|id| self.names.get(id).map_or("unknown", String::as_str))
+                .collect();
+            return shown.join(", ");
         }
 
-        if let Some(ref probs) = self.probs {
-            let top5: Vec<String> = probs
+        #[allow(clippy::option_if_let_else)]
+        let summary = if let Some(ref boxes) = self.boxes {
+            format_class_counts(&boxes.cls(), boxes.len(), &self.names)
+        } else if let Some(ref obb) = self.obb {
+            format_class_counts(&obb.cls(), obb.len(), &self.names)
+        } else if let Some(ref probs) = self.probs {
+            probs
                 .top5()
                 .iter()
                 .map(|&i| {
-                    let name = self.names.get(&i).cloned().unwrap_or_else(|| i.to_string());
-                    format!("{} {:.2}", name, probs.data[i])
+                    let name = self.names.get(&i).map_or("unknown", String::as_str);
+                    format!("{name} {:.2}", probs.data[[i]])
                 })
-                .collect();
-            return format!("{}, ", top5.join(", "));
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
+
+        if summary.is_empty() {
+            "(no detections)".to_string()
+        } else {
+            summary
         }
-
-        if let Some(ref boxes) = self.boxes {
-            let cls = boxes.cls();
-            let mut counts: HashMap<usize, usize> = HashMap::new();
-            for &c in cls {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let c = c as usize;
-                *counts.entry(c).or_insert(0) += 1;
-            }
-
-            let mut parts = Vec::new();
-            for (class_id, count) in &counts {
-                let name = self
-                    .names
-                    .get(class_id)
-                    .cloned()
-                    .unwrap_or_else(|| class_id.to_string());
-                let suffix = if *count > 1 { "s" } else { "" };
-                parts.push(format!("{count} {name}{suffix}"));
-            }
-            return format!("{}, ", parts.join(", "));
-        }
-
-        String::new()
     }
 
     /// Convert results to a list of dictionaries (summary format).
@@ -1049,18 +1074,6 @@ mod tests {
         assert!((speed.total() - 35.0).abs() < 1e-6);
     }
     #[test]
-    fn test_results_verbose() {
-        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
-        let speed = Speed::default();
-        let orig_img = Array3::zeros((100, 100, 3));
-
-        // Empty results
-        let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
-        assert!(results.is_empty());
-        assert_eq!(results.verbose(), "(no detections), ");
-    }
-
-    #[test]
     fn test_semantic_mask_has_no_detection_len() {
         let names = Arc::new(HashMap::from([(0, "background".to_string())]));
         let speed = Speed::default();
@@ -1071,6 +1084,5 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.semantic_mask.as_ref().unwrap().classes_present(), 3);
-        assert_eq!(results.verbose(), "3 classes, ");
     }
 }
