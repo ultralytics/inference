@@ -563,27 +563,9 @@ impl YOLOModel {
             )));
         }
 
-        let warmup_result: Result<()> = if self.fp16_input && self.has_semantic_mask_output() {
-            let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_f16_u8_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else if self.fp16_input {
+        let warmup_result: Result<()> = if self.fp16_input {
             let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
             Self::run_inference_f16_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else if self.has_semantic_mask_output() {
-            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_u8_with(
                 &mut self.session,
                 &self.input_name,
                 &self.output_names,
