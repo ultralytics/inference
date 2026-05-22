@@ -107,7 +107,13 @@ fn build_preprocess_result(
         }
         _ => {
             let src_rgb = image.to_rgb8();
-            fused_zerocopy_preprocess(src_rgb.as_raw(), orig_width, orig_height, target_size, &geom)
+            fused_zerocopy_preprocess(
+                src_rgb.as_raw(),
+                orig_width,
+                orig_height,
+                target_size,
+                &geom,
+            )
         }
     };
 
@@ -234,7 +240,12 @@ fn fused_zerocopy_preprocess(
     use std::mem::MaybeUninit;
     use std::sync::atomic::{AtomicPtr, Ordering};
 
-    let LetterboxGeometry { new_w: new_width, new_h: new_height, pad_left, pad_top } = *geom;
+    let LetterboxGeometry {
+        new_w: new_width,
+        new_h: new_height,
+        pad_left,
+        pad_top,
+    } = *geom;
 
     let (dst_h, dst_w) = target_size;
     let channel_size = dst_h * dst_w;
@@ -461,7 +472,15 @@ fn calculate_letterbox_params(
     // Use a single `gain = min(target_h / orig_h, target_w / orig_w)` on both axes for
     // coordinate back-projection. Per-axis gains computed from rounded `new_w`/`new_h`
     // can diverge slightly, shifting boxes and changing NMS results.
-    (LetterboxGeometry { new_w, new_h, pad_left, pad_top }, (scale, scale))
+    (
+        LetterboxGeometry {
+            new_w,
+            new_h,
+            pad_left,
+            pad_top,
+        },
+        (scale, scale),
+    )
 }
 
 /// Convert an RGB image to a normalized NCHW tensor (FP32).
