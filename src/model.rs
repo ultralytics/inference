@@ -1194,7 +1194,10 @@ impl YOLOModel {
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
     fn run_timed<'s>(
         session: &'s mut Session,
-        inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)>,
+        inputs: Vec<(
+            std::borrow::Cow<'_, str>,
+            ort::session::SessionInputValue<'_>,
+        )>,
     ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
         let t = Instant::now();
         let outputs = session
@@ -1218,8 +1221,9 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view())
-            .map_err(|e| InferenceError::InferenceError(format!("Failed to create input tensor: {e}")))?;
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+        })?;
         let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
         Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
@@ -1282,8 +1286,9 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view())
-            .map_err(|e| InferenceError::InferenceError(format!("Failed to create input tensor: {e}")))?;
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+        })?;
         let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
         Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
@@ -1324,8 +1329,9 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous)
-            .map_err(|e| InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}")))?;
+        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
+        })?;
         let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
         Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
@@ -1339,8 +1345,9 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous)
-            .map_err(|e| InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}")))?;
+        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
+        })?;
         let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
         Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
