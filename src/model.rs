@@ -1157,6 +1157,20 @@ impl YOLOModel {
         Ok(results_vec)
     }
 
+    /// Run the ORT session, returning outputs and measured inference time in ms.
+    ///
+    /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
+    fn run_timed<'s>(
+        session: &'s mut Session,
+        inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)>,
+    ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
+        let t = Instant::now();
+        let outputs = session
+            .run(inputs)
+            .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
+        Ok((outputs, t.elapsed().as_secs_f64() * 1000.0))
+    }
+
     /// Run ONNX inference with FP32 input, calling `cb` with zero-copy output views.
     ///
     /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
@@ -1172,19 +1186,10 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-        })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session
-            .run(inputs)
-            .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        // Build zero-copy views (or owned buffers for f16 outputs that must be converted)
-        Self::extract_and_invoke(&outputs, output_names, inference_ms, cb)
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view())
+            .map_err(|e| InferenceError::InferenceError(format!("Failed to create input tensor: {e}")))?;
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
     /// Build zero-copy slice views over ORT output tensors and call `cb`.
@@ -1245,18 +1250,10 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-        })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session
-            .run(inputs)
-            .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        Self::extract_and_invoke_u8(&outputs, output_names, inference_ms, cb)
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view())
+            .map_err(|e| InferenceError::InferenceError(format!("Failed to create input tensor: {e}")))?;
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
     /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`.
@@ -1295,20 +1292,10 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!(
-                "Failed to create FP16 input tensor for u8 output: {e}"
-            ))
-        })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session.run(inputs).map_err(|e| {
-            InferenceError::InferenceError(format!("FP16->u8 inference failed: {e}"))
-        })?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        Self::extract_and_invoke_u8(&outputs, output_names, inference_ms, cb)
+        let input_tensor = TensorRef::from_array_view(&input_contiguous)
+            .map_err(|e| InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}")))?;
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
     /// Run ONNX inference with FP16 input, zero-copy callback (FP16 outputs are converted).
@@ -1320,18 +1307,10 @@ impl YOLOModel {
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
         let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
-        })?;
-        let inputs = ort::inputs![input_name => input_tensor];
-
-        let t_run = std::time::Instant::now();
-        let outputs = session
-            .run(inputs)
-            .map_err(|e| InferenceError::InferenceError(format!("FP16 inference failed: {e}")))?;
-        let inference_ms = t_run.elapsed().as_secs_f64() * 1000.0;
-
-        Self::extract_and_invoke(&outputs, output_names, inference_ms, cb)
+        let input_tensor = TensorRef::from_array_view(&input_contiguous)
+            .map_err(|e| InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}")))?;
+        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
     /// Get the model's task type as detected from ONNX metadata.
