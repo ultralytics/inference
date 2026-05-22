@@ -18,7 +18,7 @@ use ort::value::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
 
-use crate::download::{DEFAULT_IMAGES, download_image, try_download_model};
+use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_download_model};
 use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
 use crate::metadata::ModelMetadata;
@@ -748,8 +748,13 @@ impl YOLOModel {
     ///
     /// Returns an error if the download or inference fails.
     pub fn predict_default(&mut self) -> Result<Vec<Results>> {
+        let urls: &[&str] = if self.task() == crate::task::Task::Obb {
+            &[DEFAULT_OBB_IMAGE]
+        } else {
+            DEFAULT_IMAGES
+        };
         let mut all_results = Vec::new();
-        for url in DEFAULT_IMAGES {
+        for url in urls {
             let path = download_image(url)?;
             let results = self.predict(&path)?;
             if let Some(result) = results.into_iter().next() {

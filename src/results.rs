@@ -325,6 +325,9 @@ impl Results {
     pub fn detection_summary(&self) -> String {
         if let Some(ref sm) = self.semantic_mask {
             let ids = sm.class_ids();
+            if ids.is_empty() {
+                return "(no detections)".to_string();
+            }
             let shown: Vec<&str> = ids
                 .iter()
                 .take(MAX_SEMANTIC_SHOWN)
