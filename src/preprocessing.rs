@@ -12,8 +12,6 @@
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
     clippy::wildcard_imports,
     clippy::ptr_as_ptr,
     clippy::cast_lossless,
@@ -79,18 +77,24 @@ pub struct PreprocessResult {
     pub padding: (f32, f32),
 }
 
-/// Build a `PreprocessResult` from a resolved letterbox geometry.
-///
-/// Runs the fused zero-copy resize/pad/normalize, optionally produces an FP16 tensor,
-/// and packages the transform metadata.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
-fn build_preprocess_result(
-    image: &DynamicImage,
-    target_size: (usize, usize),
+/// Geometry parameters resolved by letterbox layout.
+#[derive(Clone, Copy)]
+struct LetterboxGeometry {
     new_w: u32,
     new_h: u32,
     pad_left: u32,
     pad_top: u32,
+}
+
+/// Build a `PreprocessResult` from a resolved letterbox geometry.
+///
+/// Runs the fused zero-copy resize/pad/normalize, optionally produces an FP16 tensor,
+/// and packages the transform metadata.
+#[allow(clippy::cast_precision_loss)]
+fn build_preprocess_result(
+    image: &DynamicImage,
+    target_size: (usize, usize),
+    geom: LetterboxGeometry,
     scale: (f32, f32),
     orig_shape: (u32, u32),
     half: bool,
@@ -98,16 +102,9 @@ fn build_preprocess_result(
     let (orig_width, orig_height) = image.dimensions();
 
     let tensor = match image {
-        DynamicImage::ImageRgb8(rgb) => fused_zerocopy_preprocess(
-            rgb.as_raw(),
-            orig_width,
-            orig_height,
-            target_size,
-            pad_top,
-            pad_left,
-            new_w,
-            new_h,
-        ),
+        DynamicImage::ImageRgb8(rgb) => {
+            fused_zerocopy_preprocess(rgb.as_raw(), orig_width, orig_height, target_size, &geom)
+        }
         _ => {
             let src_rgb = image.to_rgb8();
             fused_zerocopy_preprocess(
@@ -115,10 +112,7 @@ fn build_preprocess_result(
                 orig_width,
                 orig_height,
                 target_size,
-                pad_top,
-                pad_left,
-                new_w,
-                new_h,
+                &geom,
             )
         }
     };
@@ -134,7 +128,7 @@ fn build_preprocess_result(
         tensor_f16,
         orig_shape,
         scale,
-        padding: (pad_top as f32, pad_left as f32),
+        padding: (geom.pad_top as f32, geom.pad_left as f32),
     }
 }
 
@@ -183,21 +177,8 @@ pub fn preprocess_image_with_precision(
     let (orig_width, orig_height) = image.dimensions();
     let orig_shape = (orig_height, orig_width);
 
-    // Calculate letterbox dimensions
-    let (new_width, new_height, pad_left, pad_top, scale) =
-        calculate_letterbox_params(orig_width, orig_height, target_size, stride);
-
-    build_preprocess_result(
-        image,
-        target_size,
-        new_width,
-        new_height,
-        pad_left,
-        pad_top,
-        scale,
-        orig_shape,
-        half,
-    )
+    let (geom, scale) = calculate_letterbox_params(orig_width, orig_height, target_size, stride);
+    build_preprocess_result(image, target_size, geom, scale, orig_shape, half)
 }
 
 // ================================================================================================
@@ -253,14 +234,18 @@ fn fused_zerocopy_preprocess(
     src_w: u32,
     src_h: u32,
     target_size: (usize, usize),
-    pad_top: u32,
-    pad_left: u32,
-    new_width: u32,
-    new_height: u32,
+    geom: &LetterboxGeometry,
 ) -> Array4<f32> {
     use rayon::prelude::*;
     use std::mem::MaybeUninit;
     use std::sync::atomic::{AtomicPtr, Ordering};
+
+    let LetterboxGeometry {
+        new_w: new_width,
+        new_h: new_height,
+        pad_left,
+        pad_top,
+    } = *geom;
 
     let (dst_h, dst_w) = target_size;
     let channel_size = dst_h * dst_w;
@@ -461,7 +446,7 @@ fn calculate_letterbox_params(
     orig_height: u32,
     target_size: (usize, usize),
     _stride: u32,
-) -> (u32, u32, u32, u32, (f32, f32)) {
+) -> (LetterboxGeometry, (f32, f32)) {
     #[allow(clippy::cast_precision_loss)]
     let (target_h, target_w) = (target_size.0 as f32, target_size.1 as f32);
     #[allow(clippy::cast_precision_loss)]
@@ -487,7 +472,15 @@ fn calculate_letterbox_params(
     // Use a single `gain = min(target_h / orig_h, target_w / orig_w)` on both axes for
     // coordinate back-projection. Per-axis gains computed from rounded `new_w`/`new_h`
     // can diverge slightly, shifting boxes and changing NMS results.
-    (new_w, new_h, pad_left, pad_top, (scale, scale))
+    (
+        LetterboxGeometry {
+            new_w,
+            new_h,
+            pad_left,
+            pad_top,
+        },
+        (scale, scale),
+    )
 }
 
 /// Convert an RGB image to a normalized NCHW tensor (FP32).
@@ -768,22 +761,21 @@ mod tests {
 
     #[test]
     fn test_letterbox_params_square() {
-        let (new_w, new_h, pad_left, pad_top, _scale) =
-            calculate_letterbox_params(640, 640, (640, 640), 32);
+        let (geom, _scale) = calculate_letterbox_params(640, 640, (640, 640), 32);
 
-        assert_eq!(new_w, 640);
-        assert_eq!(new_h, 640);
-        assert_eq!(pad_left, 0);
-        assert_eq!(pad_top, 0);
+        assert_eq!(geom.new_w, 640);
+        assert_eq!(geom.new_h, 640);
+        assert_eq!(geom.pad_left, 0);
+        assert_eq!(geom.pad_top, 0);
     }
 
     #[test]
     fn test_letterbox_params_wide() {
-        let (new_w, new_h, _, _, _) = calculate_letterbox_params(1280, 720, (640, 640), 32);
+        let (geom, _) = calculate_letterbox_params(1280, 720, (640, 640), 32);
 
         // Wide image should be scaled down with height padded
-        assert!(new_w <= 640);
-        assert!(new_h <= 640);
+        assert!(geom.new_w <= 640);
+        assert!(geom.new_h <= 640);
     }
 
     #[test]
