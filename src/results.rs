@@ -130,8 +130,6 @@ pub struct Results {
     pub path: String,
 }
 
-const MAX_SEMANTIC_SHOWN: usize = 4;
-
 fn format_class_counts(
     cls: &ArrayView1<'_, f32>,
     count: usize,
@@ -330,15 +328,9 @@ impl Results {
             }
             let shown: Vec<&str> = ids
                 .iter()
-                .take(MAX_SEMANTIC_SHOWN)
                 .map(|id| self.names.get(id).map_or("unknown", String::as_str))
                 .collect();
-            let extra = ids.len().saturating_sub(MAX_SEMANTIC_SHOWN);
-            return if extra > 0 {
-                format!("{} (+{extra} more)", shown.join(", "))
-            } else {
-                shown.join(", ")
-            };
+            return shown.join(", ");
         }
 
         #[allow(clippy::option_if_let_else)]
