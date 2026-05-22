@@ -1,7 +1,5 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-use std::collections::HashMap;
-
 use std::process;
 #[cfg(feature = "visualize")]
 use std::time::Duration;
@@ -17,7 +15,6 @@ use crate::visualizer::Viewer;
 #[cfg(feature = "visualize")]
 use image::GenericImageView;
 
-use crate::utils::pluralize;
 use crate::{DISPLAY_NAME, InferenceConfig, Results, VERSION, YOLOModel};
 
 use crate::batch::BatchProcessor;
@@ -495,71 +492,8 @@ pub fn run_prediction(args: &PredictArgs) {
 
 /// Count detections per class and format as summary string (e.g., "4 persons, 1 bus").
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn format_class_counts(
-    cls: &ndarray::ArrayView1<'_, f32>,
-    count: usize,
-    names: &HashMap<usize, String>,
-) -> String {
-    if count == 0 {
-        return String::new();
-    }
-
-    let mut counts: HashMap<usize, usize> = HashMap::new();
-    for i in 0..count {
-        let class_id = cls[i] as usize;
-        *counts.entry(class_id).or_insert(0) += 1;
-    }
-
-    let mut sorted_counts: Vec<(usize, usize)> = counts.into_iter().collect();
-    sorted_counts.sort_by_key(|(class_id, _)| *class_id);
-
-    sorted_counts
-        .iter()
-        .map(|(class_id, count)| {
-            let class_name = names.get(class_id).map_or("object", String::as_str);
-            let name = if *count > 1 {
-                pluralize(class_name)
-            } else {
-                class_name.to_string()
-            };
-            format!("{count} {name}")
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Format detection summary like "4 persons, 1 bus".
-#[allow(clippy::option_if_let_else)]
 fn format_detection_summary(result: &Results) -> String {
-    // Semantic segmentation: report unique class count present in the mask.
-    if let Some(ref sm) = result.semantic_mask {
-        let n = sm.classes_present();
-        return format!("{n} {}", if n == 1 { "class" } else { "classes" });
-    }
-
-    let summary = if let Some(ref boxes) = result.boxes {
-        format_class_counts(&boxes.cls(), boxes.len(), &result.names)
-    } else if let Some(ref obb) = result.obb {
-        format_class_counts(&obb.cls(), obb.len(), &result.names)
-    } else if let Some(ref probs) = result.probs {
-        let top5 = probs.top5();
-        let parts: Vec<String> = top5
-            .iter()
-            .map(|&i| {
-                let name = result.names.get(&i).map_or("unknown", String::as_str);
-                format!("{} {:.2}", name, probs.data[[i]])
-            })
-            .collect();
-        parts.join(", ")
-    } else {
-        String::new()
-    };
-
-    if summary.is_empty() {
-        "(no detections)".to_string()
-    } else {
-        summary
-    }
+    result.detection_summary()
 }
 
 #[cfg(test)]
@@ -666,7 +600,7 @@ mod tests {
         ));
 
         let summary = format_detection_summary(&result);
-        assert_eq!(summary, "3 classes");
+        assert_eq!(summary, "person, car, bus");
     }
 
     /// Test `format_detection_summary` with OBB detections.
