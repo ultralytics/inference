@@ -259,62 +259,6 @@ impl Results {
         self.inference_shape
     }
 
-    /// Generate a verbose log string describing the results.
-    ///
-    /// # Returns
-    ///
-    /// * A string summary of detections (e.g., "2 persons, 1 car, ").
-    #[must_use]
-    pub fn verbose(&self) -> String {
-        if let Some(ref sm) = self.semantic_mask {
-            let n = sm.classes_present();
-            return format!("{n} {}, ", if n == 1 { "class" } else { "classes" });
-        }
-
-        if self.is_empty() {
-            if self.probs.is_some() {
-                return String::new();
-            }
-            return "(no detections), ".to_string();
-        }
-
-        if let Some(ref probs) = self.probs {
-            let top5: Vec<String> = probs
-                .top5()
-                .iter()
-                .map(|&i| {
-                    let name = self.names.get(&i).cloned().unwrap_or_else(|| i.to_string());
-                    format!("{} {:.2}", name, probs.data[i])
-                })
-                .collect();
-            return format!("{}, ", top5.join(", "));
-        }
-
-        if let Some(ref boxes) = self.boxes {
-            let cls = boxes.cls();
-            let mut counts: HashMap<usize, usize> = HashMap::new();
-            for &c in cls {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let c = c as usize;
-                *counts.entry(c).or_insert(0) += 1;
-            }
-
-            let mut parts = Vec::new();
-            for (class_id, count) in &counts {
-                let name = self
-                    .names
-                    .get(class_id)
-                    .cloned()
-                    .unwrap_or_else(|| class_id.to_string());
-                let suffix = if *count > 1 { "s" } else { "" };
-                parts.push(format!("{count} {name}{suffix}"));
-            }
-            return format!("{}, ", parts.join(", "));
-        }
-
-        String::new()
-    }
-
     /// One-line detection summary suitable for per-image verbose output.
     ///
     /// Formats as "4 persons, 1 bus" (no trailing punctuation).
@@ -1130,18 +1074,6 @@ mod tests {
         assert!((speed.total() - 35.0).abs() < 1e-6);
     }
     #[test]
-    fn test_results_verbose() {
-        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
-        let speed = Speed::default();
-        let orig_img = Array3::zeros((100, 100, 3));
-
-        // Empty results
-        let results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (640, 640));
-        assert!(results.is_empty());
-        assert_eq!(results.verbose(), "(no detections), ");
-    }
-
-    #[test]
     fn test_semantic_mask_has_no_detection_len() {
         let names = Arc::new(HashMap::from([(0, "background".to_string())]));
         let speed = Speed::default();
@@ -1152,6 +1084,5 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.semantic_mask.as_ref().unwrap().classes_present(), 3);
-        assert_eq!(results.verbose(), "3 classes, ");
     }
 }
