@@ -563,43 +563,12 @@ impl YOLOModel {
             )));
         }
 
-        let warmup_result: Result<()> = if self.fp16_input && self.has_semantic_mask_output() {
-            let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_f16_u8_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else if self.fp16_input {
-            let dummy_input = ndarray::Array4::<f16>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_f16_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else if self.has_semantic_mask_output() {
-            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_u8_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        } else {
-            let dummy_input = ndarray::Array4::<f32>::zeros((1, 3, target_size.0, target_size.1));
-            Self::run_inference_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &dummy_input,
-                |_outputs, _ms| Ok(()),
-            )
-        };
+        let warmup_result = Self::run_warmup(
+            &mut self.session,
+            &self.input_name,
+            self.fp16_input,
+            target_size,
+        );
 
         if let Err(e) = warmup_result {
             let msg = e.to_string();
@@ -1191,6 +1160,33 @@ impl YOLOModel {
 
     /// Run the ORT session, returning outputs and measured inference time in ms.
     ///
+    /// Run a single forward pass for warmup, discarding outputs.
+    ///
+    fn run_warmup(
+        session: &mut Session,
+        input_name: &str,
+        fp16_input: bool,
+        size: (usize, usize),
+    ) -> Result<()> {
+        let (h, w) = size;
+        if fp16_input {
+            let dummy = ndarray::Array4::<f16>::zeros((1, 3, h, w));
+            let cont = dummy.as_standard_layout();
+            let tensor = TensorRef::from_array_view(&cont).map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
+            })?;
+            Self::run_timed(session, ort::inputs![input_name => tensor])?;
+        } else {
+            let dummy = ndarray::Array4::<f32>::zeros((1, 3, h, w));
+            let cont = dummy.as_standard_layout();
+            let tensor = TensorRef::from_array_view(cont.view()).map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+            })?;
+            Self::run_timed(session, ort::inputs![input_name => tensor])?;
+        }
+        Ok(())
+    }
+
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
     fn run_timed<'s>(
         session: &'s mut Session,
