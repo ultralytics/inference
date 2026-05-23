@@ -113,11 +113,16 @@ jobs:
       - name: Install dependencies
         run: brew install ffmpeg
 
+      - name: Capture FFmpeg version for cache key
+        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg | awk '{print $2}')" >> $GITHUB_ENV
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}
 
       - name: Ensure toolchain
         run: rustup show
