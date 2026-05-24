@@ -190,25 +190,25 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option          | Short | Description                                                                                                            | Default                                 |
-| --------------- | ----- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                          | `yolo26n.onnx`                          |
-| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*); selects nano model when `--model` is omitted | `detect`                                |
-| `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                     | `Task dependent Ultralytics URL assets` |
-| `--conf`        |       | Confidence threshold                                                                                                   | `0.25`                                  |
-| `--iou`         |       | IoU threshold for NMS                                                                                                  | `0.7`                                   |
-| `--max-det`     |       | Maximum number of detections                                                                                           | `300`                                   |
-| `--imgsz`       |       | Inference image size                                                                                                   | `Model metadata`                        |
-| `--rect`        |       | Enable rectangular inference (minimal padding)                                                                         | `true`                                  |
-| `--batch`       |       | Batch size for inference                                                                                               | `1`                                     |
-| `--half`        |       | Use FP16 half-precision inference                                                                                      | `false`                                 |
-| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                        | `true`                                  |
-| `--save-frames` |       | Save individual frames for video input (instead of video file)                                                         | `false`                                 |
-| `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                      | `false`                                 |
-| `--show`        |       | Display results in a window                                                                                            | `false`                                 |
+| Option          | Short | Description                                                                                                                                                                    | Default                                 |
+| --------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                                                                                  | `yolo26n.onnx`                          |
+| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*); selects nano model when `--model` is omitted                                                         | `detect`                                |
+| `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                                                                             | `Task dependent Ultralytics URL assets` |
+| `--conf`        |       | Confidence threshold                                                                                                                                                           | `0.25`                                  |
+| `--iou`         |       | IoU threshold for NMS                                                                                                                                                          | `0.7`                                   |
+| `--max-det`     |       | Maximum number of detections                                                                                                                                                   | `300`                                   |
+| `--imgsz`       |       | Inference image size                                                                                                                                                           | `Model metadata`                        |
+| `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                 | `true`                                  |
+| `--batch`       |       | Batch size for inference                                                                                                                                                       | `1`                                     |
+| `--half`        |       | Use FP16 half-precision inference                                                                                                                                              | `false`                                 |
+| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                | `true`                                  |
+| `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                 | `false`                                 |
+| `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                              | `false`                                 |
+| `--show`        |       | Display results in a window                                                                                                                                                    | `false`                                 |
 | `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                   |
-| `--verbose`     |       | Show verbose output                                                                                                    | `true`                                  |
-| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                            | all classes                             |
+| `--verbose`     |       | Show verbose output                                                                                                                                                            | `true`                                  |
+| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                    | all classes                             |
 
 **Task and Model Resolution:**
 
@@ -437,7 +437,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `amd`       | Convenience: ROCm + MIGraphX                    |
 | `intel`     | Convenience: OpenVINO + oneDNN                  |
 | `mobile`    | Convenience: NNAPI + CoreML + QNN               |
-| `all`       | Convenience: annotate + visualize + video                                          |
+| `all`       | Convenience: annotate + visualize + video       |
 
 ## 📦 Dependencies
 
