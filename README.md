@@ -81,7 +81,9 @@ ultralytics-inference help
 ```bash
 # Using Ultralytics CLI
 yolo export model=yolo26n.pt format=onnx
+```
 
+```python
 # Or with Python
 from ultralytics import YOLO
 model = YOLO("yolo26n.pt")
@@ -200,10 +202,10 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--batch`       |       | Batch size for inference                                                                                               | `1`                                     |
 | `--half`        |       | Use FP16 half-precision inference                                                                                      | `false`                                 |
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                        | `true`                                  |
-| `--save-frames` |       | Save individual frames for video                                                                                       | `false`                                 |
+| `--save-frames` |       | Save individual frames for video input (instead of video file)                                                         | `false`                                 |
 | `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                      | `false`                                 |
 | `--show`        |       | Display results in a window                                                                                            | `false`                                 |
-| `--device`      |       | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)                                                | `cpu`                                   |
+| `--device`      |       | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)                                        | `cpu`                                   |
 | `--verbose`     |       | Show verbose output                                                                                                    | `true`                                  |
 | `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                            | all classes                             |
 
@@ -405,20 +407,36 @@ cargo build --release --features "cuda,tensorrt"
 
 **Available Features:**
 
-| Feature    | Description                       |
-| ---------- | --------------------------------- |
-| `cuda`     | NVIDIA CUDA support               |
-| `tensorrt` | NVIDIA TensorRT optimization      |
-| `coreml`   | Apple CoreML (macOS/iOS)          |
-| `openvino` | Intel OpenVINO                    |
-| `onednn`   | Intel oneDNN                      |
-| `rocm`     | AMD ROCm                          |
-| `directml` | DirectML (Windows)                |
-| `nnapi`    | Android Neural Networks API       |
-| `xnnpack`  | XNNPACK (cross-platform)          |
-| `nvidia`   | Convenience: CUDA + TensorRT      |
-| `intel`    | Convenience: OpenVINO + oneDNN    |
-| `mobile`   | Convenience: NNAPI + CoreML + QNN |
+Default features (enabled unless `--no-default-features` is passed): `annotate`, `visualize`.
+
+| Feature      | Description                                              |
+| ------------ | -------------------------------------------------------- |
+| `annotate`   | Image annotation for `--save` (default)                  |
+| `visualize`  | Real-time window display for `--show` (default)          |
+| `video`      | Video file decoding/encoding (requires FFmpeg)           |
+| `cuda`       | NVIDIA CUDA support                                      |
+| `tensorrt`   | NVIDIA TensorRT optimization                             |
+| `coreml`     | Apple CoreML (macOS/iOS)                                 |
+| `openvino`   | Intel OpenVINO                                           |
+| `onednn`     | Intel oneDNN                                             |
+| `rocm`       | AMD ROCm                                                 |
+| `migraphx`   | AMD MIGraphX                                             |
+| `directml`   | DirectML (Windows)                                       |
+| `nnapi`      | Android Neural Networks API                              |
+| `qnn`        | Qualcomm Neural Networks                                 |
+| `xnnpack`    | XNNPACK (cross-platform)                                 |
+| `acl`        | ARM Compute Library                                      |
+| `armnn`      | ARM NN                                                   |
+| `tvm`        | Apache TVM                                               |
+| `rknpu`      | Rockchip NPU                                             |
+| `cann`       | Huawei CANN                                              |
+| `webgpu`     | WebGPU                                                   |
+| `azure`      | Azure                                                    |
+| `nvidia`     | Convenience: CUDA + TensorRT                             |
+| `amd`        | Convenience: ROCm + MIGraphX                             |
+| `intel`      | Convenience: OpenVINO + oneDNN                           |
+| `mobile`     | Convenience: NNAPI + CoreML + QNN                        |
+| `all`        | Convenience: annotate + video                            |
 
 ## 📦 Dependencies
 
