@@ -267,9 +267,9 @@
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
 //! | `openvino` | Intel `OpenVINO` |
 //! | `onednn` | Intel oneDNN |
-//! | `rocm` | AMD ROCm |
-//! | `migraphx` | AMD MIGraphX |
-//! | `directml` | DirectML (Windows) |
+//! | `rocm` | AMD `ROCm` |
+//! | `migraphx` | AMD `MIGraphX` |
+//! | `directml` | `DirectML` (Windows) |
 //! | `nnapi` | Android Neural Networks API |
 //! | `qnn` | Qualcomm Neural Networks |
 //! | `xnnpack` | XNNPACK (cross-platform) |
