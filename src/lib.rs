@@ -255,15 +255,36 @@
 //!
 //! ## Feature Flags
 //!
+//! Default features (enabled unless `--no-default-features` is passed): `annotate`, `visualize`.
+//!
 //! | Feature | Description |
 //! |---------|-------------|
-//! | `annotate` | Image annotation support (default) |
-//! | `visualize` | Real-time window display (default) |
-//! | `video` | Video file support (`FFmpeg`) |
+//! | `annotate` | Image annotation for `--save` (default) |
+//! | `visualize` | Real-time window display for `--show` (default) |
+//! | `video` | Video file decoding/encoding (requires `FFmpeg`) |
 //! | `cuda` | NVIDIA CUDA acceleration |
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
 //! | `openvino` | Intel `OpenVINO` |
+//! | `onednn` | Intel oneDNN |
+//! | `rocm` | AMD ROCm |
+//! | `migraphx` | AMD MIGraphX |
+//! | `directml` | DirectML (Windows) |
+//! | `nnapi` | Android Neural Networks API |
+//! | `qnn` | Qualcomm Neural Networks |
+//! | `xnnpack` | XNNPACK (cross-platform) |
+//! | `acl` | ARM Compute Library |
+//! | `armnn` | ARM NN |
+//! | `tvm` | Apache TVM |
+//! | `rknpu` | Rockchip NPU |
+//! | `cann` | Huawei CANN |
+//! | `webgpu` | WebGPU |
+//! | `azure` | Azure |
+//! | `nvidia` | Convenience: `cuda` + `tensorrt` |
+//! | `amd` | Convenience: `rocm` + `migraphx` |
+//! | `intel` | Convenience: `openvino` + `onednn` |
+//! | `mobile` | Convenience: `nnapi` + `coreml` + `qnn` |
+//! | `all` | Convenience: `annotate` + `visualize` + `video` |
 //!
 //! ## License
 //!

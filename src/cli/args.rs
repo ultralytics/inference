@@ -141,6 +141,10 @@ pub struct PredictArgs {
 
 /// Parse class IDs from various formats: `"1,2,3"`, `"[1,2,3]"`, `"(1,2,3)"`
 ///
+/// # Returns
+///
+/// A `Vec<usize>` of parsed class IDs, or an empty vec if the input is blank.
+///
 /// # Errors
 ///
 /// Returns a `String` error message if any segment of the string cannot be parsed as a `usize`.
