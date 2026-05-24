@@ -166,7 +166,20 @@
 //! use ultralytics_inference::YOLOModel;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // Segmentation model - returns masks
+//! // Detection model - returns bounding boxes
+//! let mut model = YOLOModel::load("yolo26n.onnx")?;
+//! let results = model.predict("image.jpg")?;
+//! if let Some(ref boxes) = results[0].boxes {
+//!     println!("Found {} detections", boxes.len());
+//!     for i in 0..boxes.len() {
+//!         let cls = boxes.cls()[i] as usize;
+//!         let conf = boxes.conf()[i];
+//!         let name = results[0].names.get(&cls).map(|s| s.as_str()).unwrap_or("unknown");
+//!         println!("  {} {:.2}", name, conf);
+//!     }
+//! }
+//!
+//! // Segmentation model - returns instance masks
 //! let mut model = YOLOModel::load("yolo26n-seg.onnx")?;
 //! let results = model.predict("image.jpg")?;
 //! if let Some(ref masks) = results[0].masks {
@@ -178,6 +191,19 @@
 //! let results = model.predict("image.jpg")?;
 //! if let Some(ref keypoints) = results[0].keypoints {
 //!     println!("Found {} poses", keypoints.len());
+//! }
+//!
+//! // OBB model - returns oriented bounding boxes
+//! let mut model = YOLOModel::load("yolo26n-obb.onnx")?;
+//! let results = model.predict("image.jpg")?;
+//! if let Some(ref obb) = results[0].obb {
+//!     println!("Found {} oriented boxes", obb.len());
+//!     for i in 0..obb.len() {
+//!         let conf = obb.conf()[i];
+//!         let cls = obb.cls()[i] as usize;
+//!         let name = results[0].names.get(&cls).map(|s| s.as_str()).unwrap_or("unknown");
+//!         println!("  {} {:.2}", name, conf);
+//!     }
 //! }
 //!
 //! // Classification model - returns probabilities
