@@ -4,7 +4,7 @@
 name = "ultralytics-inference"
 version = "0.0.17"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 authors = [
     "Glenn Jocher <glenn.jocher@ultralytics.com>",
     "Onuralp Sezer <onuralp@ultralytics.com>",
