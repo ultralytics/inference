@@ -86,6 +86,7 @@ yolo export model=yolo26n.pt format=onnx
 ```python
 # Or with Python
 from ultralytics import YOLO
+
 model = YOLO("yolo26n.pt")
 model.export(format="onnx")
 ```
@@ -409,34 +410,34 @@ cargo build --release --features "cuda,tensorrt"
 
 Default features (enabled unless `--no-default-features` is passed): `annotate`, `visualize`.
 
-| Feature      | Description                                              |
-| ------------ | -------------------------------------------------------- |
-| `annotate`   | Image annotation for `--save` (default)                  |
-| `visualize`  | Real-time window display for `--show` (default)          |
-| `video`      | Video file decoding/encoding (requires FFmpeg)           |
-| `cuda`       | NVIDIA CUDA support                                      |
-| `tensorrt`   | NVIDIA TensorRT optimization                             |
-| `coreml`     | Apple CoreML (macOS/iOS)                                 |
-| `openvino`   | Intel OpenVINO                                           |
-| `onednn`     | Intel oneDNN                                             |
-| `rocm`       | AMD ROCm                                                 |
-| `migraphx`   | AMD MIGraphX                                             |
-| `directml`   | DirectML (Windows)                                       |
-| `nnapi`      | Android Neural Networks API                              |
-| `qnn`        | Qualcomm Neural Networks                                 |
-| `xnnpack`    | XNNPACK (cross-platform)                                 |
-| `acl`        | ARM Compute Library                                      |
-| `armnn`      | ARM NN                                                   |
-| `tvm`        | Apache TVM                                               |
-| `rknpu`      | Rockchip NPU                                             |
-| `cann`       | Huawei CANN                                              |
-| `webgpu`     | WebGPU                                                   |
-| `azure`      | Azure                                                    |
-| `nvidia`     | Convenience: CUDA + TensorRT                             |
-| `amd`        | Convenience: ROCm + MIGraphX                             |
-| `intel`      | Convenience: OpenVINO + oneDNN                           |
-| `mobile`     | Convenience: NNAPI + CoreML + QNN                        |
-| `all`        | Convenience: annotate + video                            |
+| Feature     | Description                                     |
+| ----------- | ----------------------------------------------- |
+| `annotate`  | Image annotation for `--save` (default)         |
+| `visualize` | Real-time window display for `--show` (default) |
+| `video`     | Video file decoding/encoding (requires FFmpeg)  |
+| `cuda`      | NVIDIA CUDA support                             |
+| `tensorrt`  | NVIDIA TensorRT optimization                    |
+| `coreml`    | Apple CoreML (macOS/iOS)                        |
+| `openvino`  | Intel OpenVINO                                  |
+| `onednn`    | Intel oneDNN                                    |
+| `rocm`      | AMD ROCm                                        |
+| `migraphx`  | AMD MIGraphX                                    |
+| `directml`  | DirectML (Windows)                              |
+| `nnapi`     | Android Neural Networks API                     |
+| `qnn`       | Qualcomm Neural Networks                        |
+| `xnnpack`   | XNNPACK (cross-platform)                        |
+| `acl`       | ARM Compute Library                             |
+| `armnn`     | ARM NN                                          |
+| `tvm`       | Apache TVM                                      |
+| `rknpu`     | Rockchip NPU                                    |
+| `cann`      | Huawei CANN                                     |
+| `webgpu`    | WebGPU                                          |
+| `azure`     | Azure                                           |
+| `nvidia`    | Convenience: CUDA + TensorRT                    |
+| `amd`       | Convenience: ROCm + MIGraphX                    |
+| `intel`     | Convenience: OpenVINO + oneDNN                  |
+| `mobile`    | Convenience: NNAPI + CoreML + QNN               |
+| `all`       | Convenience: annotate + video                   |
 
 ## 📦 Dependencies
 
