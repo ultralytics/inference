@@ -206,7 +206,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save-frames` |       | Save individual frames for video input (instead of video file)                                                         | `false`                                 |
 | `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                      | `false`                                 |
 | `--show`        |       | Display results in a window                                                                                            | `false`                                 |
-| `--device`      |       | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)                                        | `cpu`                                   |
+| `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                   |
 | `--verbose`     |       | Show verbose output                                                                                                    | `true`                                  |
 | `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                            | all classes                             |
 
@@ -437,7 +437,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `amd`       | Convenience: ROCm + MIGraphX                    |
 | `intel`     | Convenience: OpenVINO + oneDNN                  |
 | `mobile`    | Convenience: NNAPI + CoreML + QNN               |
-| `all`       | Convenience: annotate + video                   |
+| `all`       | Convenience: annotate + visualize + video                                          |
 
 ## 📦 Dependencies
 
