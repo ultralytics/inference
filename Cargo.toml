@@ -26,8 +26,14 @@ include = [
     "/tests/**/*.rs",
 ]
 
+# NOTE: do not use `all-features = true` here. It would enable `cuda-preprocess`,
+# which pulls in `cudarc` with `cuda-version-from-build-system`; that build script
+# shells out to `nvcc`, which docs.rs builders do not provide, failing the docs
+# build. The GPU features gate no public API in this crate (the cuda-preprocess
+# module is crate-private and `with_cuda_preprocess` is always compiled), so this
+# explicit set documents the entire public surface.
 [package.metadata.docs.rs]
-all-features = true
+features = ["annotate", "visualize", "video"]
 rustdoc-args = ["--cfg", "docsrs"]
 targets = ["x86_64-unknown-linux-gnu"]
 
@@ -81,7 +87,7 @@ dirs = "^6.0"
 rayon = "^1.12"
 bytemuck = { version = "^1.25", features = ["derive"] }
 
-cudarc = { version = "0.19", optional = true, default-features = false, features = [
+cudarc = { version = "0.19.7", optional = true, default-features = false, features = [
     "driver",
     "nvrtc",
     "dynamic-loading",
