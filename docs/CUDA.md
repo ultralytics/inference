@@ -84,6 +84,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The first run builds and caches a TensorRT engine at `<model_dir>/.trt_cache/<model_stem>_fp16/` (one-time cost, ~1–3 minutes for medium models). Subsequent runs are instant.
 
+### ⏳ First-run engine build (warm-up) time
+
+The TensorRT EP compiles a hardware-specific engine the **first time a given
+model + input shape + precision is loaded**. This happens *during model load*
+(inside `YOLOModel::load*`), and it can take from tens of seconds to several
+minutes — it is **not** a hang. Rough guide (Ada-class GPU, `opt-level 5`):
+
+| Model input | Approx. first-build time |
+|---|---|
+| 640×640 (detect/seg/pose) | ~30 s – 1 min |
+| 1024×1024 (OBB) / 1024×2048 (semantic) | ~2 – 5 min |
+
+What to expect and how to avoid surprises:
+
+- **It's cached.** Builds are written to `<model_dir>/.trt_cache/<stem>_{fp16,fp32}/`
+  (engine **and** timing cache). Later loads of the same model reuse them and
+  start in seconds. **Keep `.trt_cache/` between runs** (don't delete it / add it
+  to `.gitignore`, not to clean builds) to avoid paying the cost again.
+- **Cache is keyed to the build context.** A new engine is built whenever the
+  model file, GPU/driver/TensorRT version, precision (`--half`), or **input
+  shape** changes. **Dynamic-shape models rebuild per new input size** — feed a
+  consistent size (the fast path uses the model's resolved `imgsz`) to keep it
+  to a single cached engine.
+- **Warm up before timing.** The first `predict*` call also triggers an
+  inference-time warm-up. Always discard the first few iterations when
+  benchmarking (the examples do this).
+- **Pre-build in deployment.** Run one inference at startup (or ship a populated
+  `.trt_cache/`) so the first user request isn't stuck behind a multi-minute
+  build.
+
+> **Note on `.engine` files:** this crate runs models through ONNX Runtime's
+> TensorRT EP, which consumes **ONNX** and compiles/caches the engine internally.
+> You cannot load a standalone `.engine` file directly (that needs the native
+> TensorRT runtime); the `.trt_cache/` engine is an internal ORT artifact.
+
 ### `cuda-preprocess` feature
 
 No separate type or API. With the feature compiled in and a CUDA/TensorRT
