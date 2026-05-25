@@ -42,14 +42,14 @@ extern "C" __global__ void preprocess(
     const unsigned char* __restrict__ src,
     int src_h, int src_w,
     float* __restrict__ dst,
-    int dst_size,
+    int dst_h, int dst_w,
     float scale,
     int pad_x, int pad_y,
     int bgr_in)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= dst_size || y >= dst_size) return;
+    if (x >= dst_w || y >= dst_h) return;
 
     int rx = x - pad_x;
     int ry = y - pad_y;
@@ -94,8 +94,8 @@ extern "C" __global__ void preprocess(
         b = (w00 * p00[ib] + w01 * p01[ib] + w10 * p10[ib] + w11 * p11[ib]) * inv255;
     }
 
-    int hw = dst_size * dst_size;
-    int idx = y * dst_size + x;
+    int hw = dst_h * dst_w;
+    int idx = y * dst_w + x;
     dst[0 * hw + idx] = r;
     dst[1 * hw + idx] = g;
     dst[2 * hw + idx] = b;
@@ -158,21 +158,23 @@ pub(crate) struct CudaPreprocessor {
     frame_dev: CudaSlice<u8>,
     frame_dev_capacity: usize,
 
-    /// Persistent device buffer for the model input tensor (3*H*W f32).
+    /// Persistent device buffer for the model input tensor (`3 * dst_h * dst_w` f32).
     /// Pointer is stable for the buffer's lifetime — cached so callers can
     /// hand it to ORT via `TensorRefMut::from_raw` without re-querying.
     input_dev: CudaSlice<f32>,
     input_dev_ptr: u64,
 
-    dst_size: usize,
+    /// Model input height/width (letterbox target). May be non-square.
+    dst_h: usize,
+    dst_w: usize,
 }
 
 impl CudaPreprocessor {
     /// Phase-2 init: NVRTC-compile the preprocess kernel and pre-allocate the
-    /// device input buffer (`3 * dst_size^2` f32). Reuses the context+stream
+    /// device input buffer (`3 * dst_h * dst_w` f32). Reuses the context+stream
     /// from [`CudaStreamHandle::open`] so ORT and this preprocessor share the
     /// same compute stream.
-    pub(crate) fn finalize(handle: CudaStreamHandle, dst_size: usize) -> Result<Self> {
+    pub(crate) fn finalize(handle: CudaStreamHandle, dst_h: usize, dst_w: usize) -> Result<Self> {
         let CudaStreamHandle { ctx, stream } = handle;
 
         let ptx = compile_ptx_with_opts(KERNEL_SRC, cudarc::nvrtc::CompileOptions::default())
@@ -184,7 +186,7 @@ impl CudaPreprocessor {
             .load_function("preprocess")
             .map_err(|e| InferenceError::ModelLoadError(format!("load_function: {e:?}")))?;
 
-        let input_elems = 3 * dst_size * dst_size;
+        let input_elems = 3 * dst_h * dst_w;
         let input_dev = stream
             .alloc_zeros::<f32>(input_elems)
             .map_err(|e| InferenceError::ModelLoadError(format!("alloc input_dev: {e:?}")))?;
@@ -205,19 +207,20 @@ impl CudaPreprocessor {
             frame_dev_capacity: 1,
             input_dev,
             input_dev_ptr,
-            dst_size,
+            dst_h,
+            dst_w,
         })
     }
 
-    /// Device pointer of the model input buffer (`3 * dst_size^2` f32),
+    /// Device pointer of the model input buffer (`3 * dst_h * dst_w` f32),
     /// stable for the lifetime of this preprocessor.
     pub(crate) const fn input_dev_ptr(&self) -> u64 {
         self.input_dev_ptr
     }
 
-    /// Square model input edge (H == W).
-    pub(crate) const fn dst_size(&self) -> usize {
-        self.dst_size
+    /// Model input dimensions `(height, width)` — may be non-square.
+    pub(crate) const fn dst_hw(&self) -> (usize, usize) {
+        (self.dst_h, self.dst_w)
     }
 
     /// H2D-copy the source frame, launch the fused preprocess kernel writing
@@ -255,18 +258,19 @@ impl CudaPreprocessor {
             .memcpy_htod(frame_hwc, &mut self.frame_dev)
             .map_err(|e| InferenceError::InferenceError(format!("htod: {e:?}")))?;
 
-        let dst = self.dst_size as f32;
-        let scale = (dst / src_h as f32).min(dst / src_w as f32);
+        // Letterbox into the (possibly non-square) dst_h × dst_w target:
+        // single uniform scale = min over both axes, centered padding.
+        let scale = (self.dst_h as f32 / src_h as f32).min(self.dst_w as f32 / src_w as f32);
         let resized_w = (src_w as f32 * scale).round() as i32;
         let resized_h = (src_h as f32 * scale).round() as i32;
-        let pad_x = (self.dst_size as i32 - resized_w) / 2;
-        let pad_y = (self.dst_size as i32 - resized_h) / 2;
+        let pad_x = (self.dst_w as i32 - resized_w) / 2;
+        let pad_y = (self.dst_h as i32 - resized_h) / 2;
         let bgr_in_i = i32::from(bgr_in);
 
         let block_dim = (16u32, 16u32, 1u32);
         let grid_dim = (
-            (self.dst_size as u32).div_ceil(block_dim.0),
-            (self.dst_size as u32).div_ceil(block_dim.1),
+            (self.dst_w as u32).div_ceil(block_dim.0),
+            (self.dst_h as u32).div_ceil(block_dim.1),
             1u32,
         );
         let launch_cfg = LaunchConfig {
@@ -282,7 +286,8 @@ impl CudaPreprocessor {
                 .arg(&(src_h as i32))
                 .arg(&(src_w as i32))
                 .arg(&mut self.input_dev)
-                .arg(&(self.dst_size as i32))
+                .arg(&(self.dst_h as i32))
+                .arg(&(self.dst_w as i32))
                 .arg(&scale)
                 .arg(&pad_x)
                 .arg(&pad_y)
