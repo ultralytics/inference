@@ -829,12 +829,21 @@ impl YOLOModel {
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
         // Fast path: GPU preprocess + zero-copy device input.
-        // Gated at runtime by task != Classify (uses center-crop, not letterbox)
-        // and !fp16_input (kernel writes f32).
+        //
+        // Allowlisted to the tasks whose preprocessing is a square letterbox +
+        // f32 input. Classify uses center-crop (not letterbox), so it's
+        // excluded. Semantic is included: `predict_image_cuda_pre` handles both
+        // its f32-logits and baked-in ArgMax (u8) output forms. Requirements:
+        //   - f32 input (the kernel writes f32, not f16),
+        //   - square model input (the kernel emits dst_size × dst_size).
         #[cfg(feature = "cuda-preprocess")]
         if self.cuda_preprocessor.is_some()
-            && self.metadata.task != Task::Classify
             && !self.fp16_input
+            && self.metadata.imgsz.is_some_and(|(h, w)| h == w)
+            && matches!(
+                self.metadata.task,
+                Task::Detect | Task::Segment | Task::Pose | Task::Obb | Task::Semantic
+            )
         {
             let results = self.predict_image_cuda_pre(image, path)?;
             if let Some(result) = results.first() {
@@ -884,6 +893,11 @@ impl YOLOModel {
     ) -> Result<Vec<Results>> {
         use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
         use ort::value::TensorRefMut;
+
+        // Computed before `run_binding` borrows the session: true when the
+        // ONNX bakes in ArgMax+Cast(u8) so the single output is a uint8 class
+        // map (semantic segmentation fast form).
+        let semantic_u8 = self.has_semantic_mask_output();
 
         let start_preprocess = Instant::now();
         let rgb_img = image.to_rgb8();
@@ -946,6 +960,50 @@ impl YOLOModel {
         #[allow(clippy::cast_precision_loss)]
         let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0;
 
+        // HWC u8 ndarray for annotators/postprocess reuses the rgb buffer
+        // (moved in), no copy.
+        let orig_img = ndarray::Array3::from_shape_vec((h as usize, w as usize, 3), rgb_bytes)
+            .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))?;
+
+        let start_postprocess = Instant::now();
+        let speed = Speed::new(preprocess_time, inference_time, 0.0);
+
+        // Semantic fast form: the ONNX emits a single uint8 class map. Extract
+        // it directly (no f32 logits, no CPU argmax) and run the dedicated
+        // mask post-processor — mirrors the CPU `run_inference_u8_with` path.
+        if semantic_u8 {
+            let name = self.output_names.first().ok_or_else(|| {
+                InferenceError::InferenceError("semantic model has no output".into())
+            })?;
+            let output = outputs.get(name.as_str()).ok_or_else(|| {
+                InferenceError::InferenceError(format!("Output '{name}' not found"))
+            })?;
+            let (oshape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
+                InferenceError::InferenceError(format!("extract uint8 semantic output: {e}"))
+            })?;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let shape_vec: Vec<usize> = oshape.iter().map(|&d| d as usize).collect();
+            // Drop the leading batch dim (batch == 1 here).
+            let img_shape: &[usize] = if shape_vec.len() > 1 {
+                &shape_vec[1..]
+            } else {
+                &shape_vec
+            };
+            let mut result = crate::postprocessing::postprocess_semantic_mask(
+                data,
+                img_shape,
+                Arc::clone(&self.metadata.names),
+                orig_img,
+                path,
+                speed,
+                (dst_size as u32, dst_size as u32),
+            );
+            #[allow(clippy::cast_precision_loss)]
+            let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
+            result.speed.postprocess = Some(postprocess_time);
+            return Ok(vec![result]);
+        }
+
         // Minimal PreprocessResult — postprocess reads orig_shape, scale, padding.
         // tensor/tensor_f16 are unused in the GPU path (preprocess ran on device).
         let pre = crate::preprocessing::PreprocessResult {
@@ -955,13 +1013,6 @@ impl YOLOModel {
             scale: (geom.scale, geom.scale),
             padding: (geom.pad_y as f32, geom.pad_x as f32),
         };
-        // HWC u8 ndarray for annotators/postprocess reuses the rgb buffer
-        // (moved in), no copy.
-        let orig_img = ndarray::Array3::from_shape_vec((h as usize, w as usize, 3), rgb_bytes)
-            .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))?;
-
-        let start_postprocess = Instant::now();
-        let speed = Speed::new(preprocess_time, inference_time, 0.0);
         // Reuse the shared zero-copy extraction helper (it handles the f16→f32
         // fallback) rather than duplicating the borrow-or-own here.
         let mut result =
