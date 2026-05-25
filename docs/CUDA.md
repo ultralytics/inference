@@ -2,22 +2,22 @@
 
 `ultralytics-inference` supports NVIDIA GPUs through three opt-in cargo features.
 
-| Feature | Path | When to use |
-|---|---|---|
-| `cuda` | ORT CUDA EP | NVIDIA GPU, fast to set up, CUDA-only deps |
-| `tensorrt` | ORT TensorRT EP (FP16, engine cache, opt-level 5) | NVIDIA GPU with TensorRT installed; 2–3× faster than `cuda` |
+| Feature           | Path                                                | When to use                                                                                      |
+| ----------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `cuda`            | ORT CUDA EP                                         | NVIDIA GPU, fast to set up, CUDA-only deps                                                       |
+| `tensorrt`        | ORT TensorRT EP (FP16, engine cache, opt-level 5)   | NVIDIA GPU with TensorRT installed; 2–3× faster than `cuda`                                      |
 | `cuda-preprocess` | GPU-side preprocess + zero-copy device input to TRT | maximum throughput; `YOLOModel::predict_image` transparently uses a fused CUDA preprocess kernel |
 
 `cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required — `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
 
 ## Requirements
 
-| Component | Tested | How to verify |
-|---|---|---|
-| NVIDIA driver | 580+ | `nvidia-smi` |
-| CUDA toolkit | 11.4 – 13.2 | `nvcc --version` *(toolkit only required for `cuda-preprocess`; `cuda` and `tensorrt` ship their EP libs through `ort`)* |
-| TensorRT | 10.x | `ldconfig -p \| grep libnvinfer` (only for `tensorrt` / `cuda-preprocess`) |
-| GPU compute capability | sm_70+ | `nvidia-smi --query-gpu=compute_cap --format=csv` |
+| Component              | Tested      | How to verify                                                                                                            |
+| ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| NVIDIA driver          | 580+        | `nvidia-smi`                                                                                                             |
+| CUDA toolkit           | 11.4 – 13.2 | `nvcc --version` _(toolkit only required for `cuda-preprocess`; `cuda` and `tensorrt` ship their EP libs through `ort`)_ |
+| TensorRT               | 10.x        | `ldconfig -p \| grep libnvinfer` (only for `tensorrt` / `cuda-preprocess`)                                               |
+| GPU compute capability | sm_70+      | `nvidia-smi --query-gpu=compute_cap --format=csv`                                                                        |
 
 `cuda-preprocess` only needs `libcudart.so` and `libnvrtc.so` at **runtime**. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
 
@@ -37,8 +37,8 @@ Then `cargo build --release` — no extra flags needed.
 For the CLI / examples in this repo directly:
 
 ```bash
-cargo build --release --features tensorrt           # TensorRT EP
-cargo build --release --features cuda-preprocess    # GPU preprocess (fastest)
+cargo build --release --features tensorrt        # TensorRT EP
+cargo build --release --features cuda-preprocess # GPU preprocess (fastest)
 ```
 
 ### Selecting the CUDA toolkit version (`cuda-preprocess` only)
@@ -129,7 +129,7 @@ The CLI selects the GPU EP via `--device`:
 
 ```bash
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg \
-    --device tensorrt:0 --half
+  --device tensorrt:0 --half
 ```
 
 This uses the TensorRT EP (FP16 + engine cache). The `cuda-preprocess` kernel
@@ -141,10 +141,10 @@ through `YOLOModel::predict_image` in library code.
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| `cudarc-* build script failed: \`nvcc --version\` failed` | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above). |
-| `libcudart.so.13: cannot open shared object file` | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`. |
-| `libnvinfer.so.10: cannot open shared object file` | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features. |
-| TRT engine build is slow on first run | Expected — engines are cached under `.trt_cache/`. Subsequent runs reuse them. |
-| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one. |
+| Symptom                                                                    | Fix                                                                                      |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `cudarc-* build script failed: \`nvcc --version\` failed`                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).    |
+| `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`. |
+| `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.          |
+| TRT engine build is slow on first run                                      | Expected — engines are cached under `.trt_cache/`. Subsequent runs reuse them.           |
+| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.   |
