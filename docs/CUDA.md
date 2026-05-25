@@ -68,14 +68,18 @@ cudarc = { version = "0.19", default-features = false, features = ["driver", "nv
 
 ### `tensorrt` feature
 
-```rust
+```rust,no_run
 use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
 
-let cfg = InferenceConfig::new()
-    .with_device(Device::TensorRt(0))
-    .with_half(true);
-let mut model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
-let results = model.predict("image.jpg")?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cfg = InferenceConfig::new()
+        .with_device(Device::TensorRt(0))
+        .with_half(true);
+    let mut model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
+    let results = model.predict("image.jpg")?;
+    println!("{} detections", results.len());
+    Ok(())
+}
 ```
 
 The first run builds and caches a TensorRT engine at `<model_dir>/.trt_cache/<model_stem>_fp16/` (one-time cost, ~1–3 minutes for medium models). Subsequent runs are instant.
@@ -87,27 +91,37 @@ device, [`YOLOModel::predict_image`] automatically runs the fused GPU
 preprocess kernel (bilinear letterbox + `/255` normalize + HWC→CHW) and hands
 the result to ORT as a zero-copy device tensor:
 
-```rust
+```rust,no_run
 use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
 
-let cfg = InferenceConfig::new()
-    .with_device(Device::TensorRt(0))
-    .with_half(true);
-let mut model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cfg = InferenceConfig::new()
+        .with_device(Device::TensorRt(0))
+        .with_half(true);
+    let mut model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
 
-// predict_image() transparently uses the GPU preprocess fast path:
-let img = image::open("image.jpg")?;
-let results = model.predict_image(&img, String::new())?;
+    // predict() decodes the frame and calls predict_image(), which
+    // transparently uses the GPU preprocess fast path:
+    let results = model.predict("image.jpg")?;
+    println!("{} detections", results.len());
+    Ok(())
+}
 ```
 
 To force the standard CPU preprocess path (e.g. for an A/B comparison) without
 recompiling, set the flag to `false`:
 
-```rust
-let cfg = InferenceConfig::new()
-    .with_device(Device::TensorRt(0))
-    .with_half(true)
-    .with_cuda_preprocess(false); // opt out; CPU letterbox + host→device copy
+```rust,no_run
+use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cfg = InferenceConfig::new()
+        .with_device(Device::TensorRt(0))
+        .with_half(true)
+        .with_cuda_preprocess(false); // opt out; CPU letterbox + host→device copy
+    let _model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
+    Ok(())
+}
 ```
 
 The fast path is selected at load time when **all** of these hold; otherwise
