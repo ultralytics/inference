@@ -443,15 +443,13 @@ impl YOLOModel {
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
         // has been wired into the EPs above — dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
-        // opened we always finalize the preprocessor, even for square=false /
-        // Classify / fp16-input models; `predict_image`'s runtime gate keeps it
-        // unused in those cases.
+        // opened we always finalize the preprocessor, sizing the input buffer to
+        // the resolved (possibly non-square) model input; `predict_image`'s
+        // runtime gate keeps it unused for Classify / fp16-input models.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
-            // For non-square / classify, allocate the input buffer at the
-            // resolved height; the kernel won't be dispatched anyway.
-            let buf_size = resolved_imgsz.0.max(resolved_imgsz.1);
-            match crate::cuda_inference::CudaPreprocessor::finalize(handle, buf_size) {
+            let (dst_h, dst_w) = resolved_imgsz;
+            match crate::cuda_inference::CudaPreprocessor::finalize(handle, dst_h, dst_w) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     return Err(InferenceError::ModelLoadError(format!(
@@ -830,16 +828,15 @@ impl YOLOModel {
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
         // Fast path: GPU preprocess + zero-copy device input.
         //
-        // Allowlisted to the tasks whose preprocessing is a square letterbox +
-        // f32 input. Classify uses center-crop (not letterbox), so it's
-        // excluded. Semantic is included: `predict_image_cuda_pre` handles both
-        // its f32-logits and baked-in ArgMax (u8) output forms. Requirements:
-        //   - f32 input (the kernel writes f32, not f16),
-        //   - square model input (the kernel emits dst_size × dst_size).
+        // Allowlisted to the tasks whose preprocessing is a letterbox (square or
+        // non-square) + f32 input. Classify uses center-crop (not letterbox), so
+        // it's excluded. Semantic is included: `predict_image_cuda_pre` handles
+        // both its f32-logits and baked-in ArgMax (u8) output forms. The kernel
+        // emits the model's fixed dst_h × dst_w; the only requirement is f32
+        // input (the kernel writes f32, not f16).
         #[cfg(feature = "cuda-preprocess")]
         if self.cuda_preprocessor.is_some()
             && !self.fp16_input
-            && self.metadata.imgsz.is_some_and(|(h, w)| h == w)
             && matches!(
                 self.metadata.task,
                 Task::Detect | Task::Segment | Task::Pose | Task::Obb | Task::Semantic
@@ -909,7 +906,7 @@ impl YOLOModel {
             .as_mut()
             .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
         let geom = pre.preprocess(&rgb_bytes, h, w, false)?;
-        let dst_size = pre.dst_size();
+        let (dst_h, dst_w) = pre.dst_hw();
         let dev_ptr = pre.input_dev_ptr();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
@@ -928,7 +925,7 @@ impl YOLOModel {
             MemoryType::Default,
         )
         .map_err(|e| InferenceError::InferenceError(format!("cpu meminfo: {e}")))?;
-        let shape: Vec<i64> = vec![1, 3, dst_size as i64, dst_size as i64];
+        let shape: Vec<i64> = vec![1, 3, dst_h as i64, dst_w as i64];
         // SAFETY: dev_ptr is owned by `cuda_preprocessor` (stored on `self`) and remains
         // valid for the duration of this call. ORT consumes it during
         // `run_binding`, which is synchronized via the shared cuda stream.
@@ -996,7 +993,7 @@ impl YOLOModel {
                 orig_img,
                 path,
                 speed,
-                (dst_size as u32, dst_size as u32),
+                (dst_h as u32, dst_w as u32),
             );
             #[allow(clippy::cast_precision_loss)]
             let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
@@ -1028,7 +1025,7 @@ impl YOLOModel {
                     orig_img,
                     path,
                     speed,
-                    (dst_size as u32, dst_size as u32),
+                    (dst_h as u32, dst_w as u32),
                     self.metadata.end2end,
                     self.metadata.kpt_shape,
                 ))
