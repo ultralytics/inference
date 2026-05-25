@@ -24,6 +24,7 @@ include = [
     "/README.md",
     "/src/**/*.rs",
     "/tests/**/*.rs",
+    "/docs/**/*.md",
 ]
 
 # NOTE: do not use `all-features = true` here. It would enable `cuda-preprocess`,
