@@ -885,14 +885,6 @@ impl YOLOModel {
         use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
         use ort::value::TensorRefMut;
 
-        // Holds each output as a zero-copy borrow into the ORT buffer, or an
-        // owned Vec<f32> for f16 outputs needing dtype conversion. Declared
-        // before any statement to satisfy `clippy::items_after_statements`.
-        enum OutBuf<'a> {
-            Borrow(&'a [f32]),
-            Owned(Vec<f32>),
-        }
-
         let start_preprocess = Instant::now();
         let rgb_img = image.to_rgb8();
         let (w, h) = (rgb_img.width(), rgb_img.height());
@@ -954,42 +946,6 @@ impl YOLOModel {
         #[allow(clippy::cast_precision_loss)]
         let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0;
 
-        // Extract outputs as host slices: zero-copy for f32; convert for f16.
-        // Mirrors `extract_and_invoke`'s borrow-or-own scheme so postprocess
-        // sees stable `&[f32]` slices for the duration of this call.
-        let mut bufs: Vec<(OutBuf<'_>, Vec<usize>)> = Vec::with_capacity(self.output_names.len());
-        for output_name in &self.output_names {
-            let output = outputs.get(output_name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
-            })?;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let (buf, shape_vec) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
-                (
-                    OutBuf::Borrow(data),
-                    shape.iter().map(|&d| d as usize).collect::<Vec<usize>>(),
-                )
-            } else {
-                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
-                    InferenceError::InferenceError(format!("Failed to extract output: {e}"))
-                })?;
-                (
-                    OutBuf::Owned(data.iter().map(|v| v.to_f32()).collect()),
-                    shape.iter().map(|&d| d as usize).collect::<Vec<usize>>(),
-                )
-            };
-            bufs.push((buf, shape_vec));
-        }
-        let views: Vec<(&[f32], Vec<usize>)> = bufs
-            .iter()
-            .map(|(b, s)| {
-                let slice: &[f32] = match b {
-                    OutBuf::Borrow(d) => d,
-                    OutBuf::Owned(v) => v.as_slice(),
-                };
-                (slice, s.clone())
-            })
-            .collect();
-
         // Minimal PreprocessResult — postprocess reads orig_shape, scale, padding.
         // tensor/tensor_f16 are unused in the GPU path (preprocess ran on device).
         let pre = crate::preprocessing::PreprocessResult {
@@ -999,26 +955,33 @@ impl YOLOModel {
             scale: (geom.scale, geom.scale),
             padding: (geom.pad_y as f32, geom.pad_x as f32),
         };
-
-        // HWC u8 ndarray for annotators/postprocess.
+        // HWC u8 ndarray for annotators/postprocess reuses the rgb buffer
+        // (moved in), no copy.
         let orig_img = ndarray::Array3::from_shape_vec((h as usize, w as usize, 3), rgb_bytes)
             .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))?;
 
         let start_postprocess = Instant::now();
         let speed = Speed::new(preprocess_time, inference_time, 0.0);
-        let mut result = postprocess(
-            views,
-            self.metadata.task,
-            &pre,
-            &self.config,
-            Arc::clone(&self.metadata.names),
-            orig_img,
-            path,
-            speed,
-            (dst_size as u32, dst_size as u32),
-            self.metadata.end2end,
-            self.metadata.kpt_shape,
-        );
+        // Reuse the shared zero-copy extraction helper (it handles the f16→f32
+        // fallback) rather than duplicating the borrow-or-own here.
+        let mut result =
+            Self::extract_and_invoke(&outputs, &self.output_names, inference_time, |outs, _ms| {
+                let img_outputs: Vec<(&[f32], Vec<usize>)> =
+                    outs.iter().map(|(d, s)| (*d, s.clone())).collect();
+                Ok(postprocess(
+                    img_outputs,
+                    self.metadata.task,
+                    &pre,
+                    &self.config,
+                    Arc::clone(&self.metadata.names),
+                    orig_img,
+                    path,
+                    speed,
+                    (dst_size as u32, dst_size as u32),
+                    self.metadata.end2end,
+                    self.metadata.kpt_shape,
+                ))
+            })?;
         #[allow(clippy::cast_precision_loss)]
         let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
         result.speed.postprocess = Some(postprocess_time);
