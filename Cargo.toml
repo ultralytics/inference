@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.17"
+version = "0.0.18"
 edition = "2024"
 rust-version = "1.89"
 authors = [
@@ -81,6 +81,13 @@ dirs = "^6.0"
 rayon = "^1.12"
 bytemuck = { version = "^1.25", features = ["derive"] }
 
+cudarc = { version = "0.19", optional = true, default-features = false, features = [
+    "driver",
+    "nvrtc",
+    "dynamic-loading",
+    "cuda-version-from-build-system",
+] }
+
 # Core - CLI arguments parsing
 clap = { version = "^4.6.1", features = ["derive"] }
 colored = "^3.1.1"
@@ -108,6 +115,7 @@ annotate = ["imageproc", "ab_glyph"]
 # NVIDIA GPU acceleration
 cuda = ["ort/cuda"]
 tensorrt = ["ort/tensorrt"]
+cuda-preprocess = ["cuda", "tensorrt", "dep:cudarc"]
 
 # AMD GPU acceleration
 rocm = ["ort/rocm"]
