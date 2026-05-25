@@ -89,7 +89,7 @@ The first run builds and caches a TensorRT engine at `<model_dir>/.trt_cache/<mo
 The TensorRT EP compiles a hardware-specific engine the **first time a given
 model + input shape + precision is loaded**. This happens *during model load*
 (inside `YOLOModel::load*`), and it can take from tens of seconds to several
-minutes — it is **not** a hang. Rough guide (Ada-class GPU, `opt-level 5`):
+minutes, it is **not** a hang.
 
 | Model input | Approx. first-build time |
 |---|---|
