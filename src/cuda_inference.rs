@@ -32,7 +32,7 @@ use cudarc::nvrtc::compile_ptx_with_opts;
 
 use crate::error::{InferenceError, Result};
 
-/// CUDA preprocess kernel source (NVRTC-compiled once per `GpuPreprocessor`).
+/// CUDA preprocess kernel source (NVRTC-compiled once per `CudaPreprocessor`).
 ///
 /// Reads BGR/RGB HWC u8 input, writes RGB CHW f32 in `[0,1]` with letterbox padding.
 /// `bgr_in=1` for OpenCV-style BGR inputs, `bgr_in=0` for RGB inputs (e.g. from the
@@ -102,7 +102,7 @@ extern "C" __global__ void preprocess(
 }
 "#;
 
-/// Geometry produced by [`GpuPreprocessor::preprocess`].
+/// Geometry produced by [`CudaPreprocessor::preprocess`].
 ///
 /// `scale` is the uniform letterbox scale factor; `pad_x`/`pad_y` are the
 /// pixel offsets applied along each axis. These values are needed by
@@ -115,7 +115,7 @@ pub(crate) struct PreGeom {
 
 /// Phase-1 of the fast-path init: a cudarc context + stream created before
 /// the ORT session is built, so the raw stream pointer can be handed to the
-/// TRT/CUDA EPs via `with_compute_stream`. Phase-2 ([`GpuPreprocessor::finalize`])
+/// TRT/CUDA EPs via `with_compute_stream`. Phase-2 ([`CudaPreprocessor::finalize`])
 /// happens after the session is committed and the model's input size is known.
 pub(crate) struct CudaStreamHandle {
     ctx: Arc<CudaContext>,
@@ -147,7 +147,7 @@ impl CudaStreamHandle {
 /// into the TRT/CUDA EPs), then [`Self::finalize`] runs *after* the session
 /// commit (so the model input edge length is known and the input buffer can
 /// be sized correctly). Per-frame work happens in [`Self::preprocess`].
-pub(crate) struct GpuPreprocessor {
+pub(crate) struct CudaPreprocessor {
     /// Kept alive so the stream below outlives every session bound to it.
     _ctx: Arc<CudaContext>,
     stream: Arc<CudaStream>,
@@ -167,7 +167,7 @@ pub(crate) struct GpuPreprocessor {
     dst_size: usize,
 }
 
-impl GpuPreprocessor {
+impl CudaPreprocessor {
     /// Phase-2 init: NVRTC-compile the preprocess kernel and pre-allocate the
     /// device input buffer (`3 * dst_size^2` f32). Reuses the context+stream
     /// from [`CudaStreamHandle::open`] so ORT and this preprocessor share the
