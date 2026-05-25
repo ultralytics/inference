@@ -64,6 +64,14 @@ pub struct YOLOModel {
     execution_provider: String,
     /// Whether the model accepts dynamic input shapes.
     is_dynamic: bool,
+    /// Fast-path GPU preprocessor (`cuda-preprocess` feature only).
+    ///
+    /// Populated at load time when the user hasn't opted out and the device
+    /// is CUDA/TensorRT. When `Some`, [`Self::predict_image`] routes through
+    /// a fused CUDA kernel + zero-copy device input. `None` means the
+    /// standard CPU preprocess path runs.
+    #[cfg(feature = "cuda-preprocess")]
+    cuda_preprocessor: Option<crate::cuda_inference::CudaPreprocessor>,
 }
 
 #[allow(
@@ -126,6 +134,46 @@ impl YOLOModel {
         };
         let path = path.as_ref();
 
+        // Establish a shared cudarc stream up-front when the cuda-preprocess
+        // fast path is eligible. The TRT/CUDA EPs below bind to this stream
+        // via `with_compute_stream`, so the preprocess kernel and ORT see
+        // each other's enqueued ops without an explicit synchronize.
+        //
+        // The handle is consumed by `CudaPreprocessor::finalize` further down
+        // (after metadata is known) or dropped silently if the fast path
+        // can't engage. Either way it outlives EP construction.
+        #[cfg(feature = "cuda-preprocess")]
+        let cuda_pre_stream: Option<crate::cuda_inference::CudaStreamHandle> = {
+            let device_eligible = matches!(
+                config.device,
+                None | Some(crate::Device::Cuda(_) | crate::Device::TensorRt(_))
+            );
+            if config.cuda_preprocess && device_eligible {
+                match crate::cuda_inference::CudaStreamHandle::open(0) {
+                    Ok(h) => Some(h),
+                    Err(e) => {
+                        warn!("cuda-preprocess: stream init failed ({e:?}); using CPU preprocess");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        };
+        #[cfg(any(feature = "cuda", feature = "tensorrt"))]
+        let cuda_pre_stream_ptr: Option<*mut ()> = {
+            #[cfg(feature = "cuda-preprocess")]
+            {
+                cuda_pre_stream
+                    .as_ref()
+                    .map(crate::cuda_inference::CudaStreamHandle::raw_stream_ptr)
+            }
+            #[cfg(not(feature = "cuda-preprocess"))]
+            {
+                None
+            }
+        };
+
         // Determine optimal thread count based on available parallelism
         let num_threads = if config.num_threads > 0 {
             config.num_threads
@@ -151,7 +199,7 @@ impl YOLOModel {
                 crate::Device::Cpu => {}
                 #[cfg(feature = "cuda")]
                 crate::Device::Cuda(i) => {
-                    eps.push(Self::build_cuda_ep(*i as i32));
+                    eps.push(Self::build_cuda_ep(*i as i32, cuda_pre_stream_ptr));
                     provider_name = "CUDAExecutionProvider";
                 }
                 #[cfg(feature = "coreml")]
@@ -165,11 +213,12 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "tensorrt")]
                 crate::Device::TensorRt(i) => {
-                    eps.push(
-                        ort::execution_providers::TensorRTExecutionProvider::default()
-                            .with_device_id(*i as i32)
-                            .build(),
-                    );
+                    eps.push(Self::build_tensorrt_ep(
+                        path,
+                        *i as i32,
+                        config.half,
+                        cuda_pre_stream_ptr,
+                    ));
                     provider_name = "TensorRTExecutionProvider";
                 }
                 #[cfg(feature = "rocm")]
@@ -214,13 +263,18 @@ impl YOLOModel {
             // Default: Register all available providers in preference order
             #[cfg(feature = "tensorrt")]
             {
-                eps.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
+                eps.push(Self::build_tensorrt_ep(
+                    path,
+                    0,
+                    config.half,
+                    cuda_pre_stream_ptr,
+                ));
                 provider_name = "TensorRTExecutionProvider";
             }
 
             #[cfg(feature = "cuda")]
             {
-                eps.push(Self::build_cuda_ep(0));
+                eps.push(Self::build_cuda_ep(0, cuda_pre_stream_ptr));
                 if provider_name == "CPUExecutionProvider" {
                     provider_name = "CUDAExecutionProvider";
                 }
@@ -385,6 +439,32 @@ impl YOLOModel {
         let mut metadata = metadata;
         metadata.imgsz = Some(resolved_imgsz);
 
+        // Finalize the GPU preprocessor now that we know the model input edge.
+        // The handle MUST be consumed (not dropped) once `with_compute_stream`
+        // has been wired into the EPs above — dropping the last `Arc<CudaStream>`
+        // would invalidate the raw pointer held by ORT. So if the stream was
+        // opened we always finalize the preprocessor, even for square=false /
+        // Classify / fp16-input models; `predict_image`'s runtime gate keeps it
+        // unused in those cases.
+        #[cfg(feature = "cuda-preprocess")]
+        let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
+            // For non-square / classify, allocate the input buffer at the
+            // resolved height; the kernel won't be dispatched anyway.
+            let buf_size = resolved_imgsz.0.max(resolved_imgsz.1);
+            match crate::cuda_inference::CudaPreprocessor::finalize(handle, buf_size) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    return Err(InferenceError::ModelLoadError(format!(
+                        "cuda-preprocess: finalize failed ({e:?}) but stream was already \
+                         bound to EPs; cannot safely drop the stream. Disable the \
+                         `cuda-preprocess` feature or set with_cuda_preprocess(false)."
+                    )));
+                }
+            }
+        } else {
+            None
+        };
+
         let mut model = Self {
             session,
             metadata,
@@ -395,6 +475,8 @@ impl YOLOModel {
             fp16_input,
             execution_provider: provider_name.to_string(),
             is_dynamic,
+            #[cfg(feature = "cuda-preprocess")]
+            cuda_preprocessor,
         };
 
         // Warmup inference to trigger JIT compilation and memory allocation
@@ -413,12 +495,69 @@ impl YOLOModel {
     /// below detection-threshold sensitivity. On GPUs without TF32
     /// hardware (pre-Ampere), the flag is a silent no-op cuDNN falls
     /// back to standard FP32.
+    ///
+    /// `compute_stream` (when `Some`) binds the EP to an external cudarc stream
+    /// for the `cuda-preprocess` fast path; this requires an `unsafe` ORT call.
     #[cfg(feature = "cuda")]
-    fn build_cuda_ep(device_id: i32) -> ort::execution_providers::ExecutionProviderDispatch {
-        ort::execution_providers::CUDAExecutionProvider::default()
+    #[allow(unsafe_code)]
+    fn build_cuda_ep(
+        device_id: i32,
+        compute_stream: Option<*mut ()>,
+    ) -> ort::execution_providers::ExecutionProviderDispatch {
+        let ep = ort::execution_providers::CUDAExecutionProvider::default()
             .with_device_id(device_id)
-            .with_tf32(true)
-            .build()
+            .with_tf32(true);
+        // Bind to the cuda-preprocess stream when supplied; this keeps the
+        // ORT inference enqueued behind the preprocess kernel without an
+        // explicit synchronize. SAFETY: caller (load_with_config) keeps the
+        // CudaStreamHandle alive for the lifetime of the Session.
+        match compute_stream {
+            Some(s) => unsafe { ep.with_compute_stream(s).build() },
+            None => ep.build(),
+        }
+    }
+
+    /// Build the `TensorRT` execution provider with engine + timing caches enabled.
+    ///
+    /// FP16 is enabled when `fp16` is true (driven by `config.half`). On Ada and
+    /// newer GPUs this is ~2x faster than FP32 with negligible accuracy delta
+    /// for YOLO detection. Engine and timing caches are written under
+    /// `<model_dir>/.trt_cache/<model_stem>_{fp16,fp32}/` so subsequent loads
+    /// skip the multi-minute TRT engine compile.
+    ///
+    /// `compute_stream` (when `Some`) binds the EP to an external cudarc stream
+    /// for the `cuda-preprocess` fast path; this requires an `unsafe` ORT call.
+    #[cfg(feature = "tensorrt")]
+    #[allow(unsafe_code)]
+    fn build_tensorrt_ep(
+        model_path: &Path,
+        device_id: i32,
+        fp16: bool,
+        compute_stream: Option<*mut ()>,
+    ) -> ort::execution_providers::ExecutionProviderDispatch {
+        let stem = model_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("model");
+        let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
+        let suffix = if fp16 { "fp16" } else { "fp32" };
+        let cache_dir = parent.join(".trt_cache").join(format!("{stem}_{suffix}"));
+        let _ = std::fs::create_dir_all(&cache_dir);
+        let cache_str = cache_dir.to_string_lossy().into_owned();
+        let ep = ort::execution_providers::TensorRTExecutionProvider::default()
+            .with_device_id(device_id)
+            .with_fp16(fp16)
+            .with_engine_cache(true)
+            .with_engine_cache_path(cache_str.clone())
+            .with_timing_cache(true)
+            .with_timing_cache_path(cache_str)
+            .with_max_workspace_size(4 * 1024 * 1024 * 1024)
+            .with_builder_optimization_level(5);
+        // SAFETY: see build_cuda_ep above.
+        match compute_stream {
+            Some(s) => unsafe { ep.with_compute_stream(s).build() },
+            None => ep.build(),
+        }
     }
 
     #[cfg(feature = "coreml")]
@@ -582,7 +721,7 @@ impl YOLOModel {
     }
 
     /// Extract metadata from the ONNX model session.
-    fn extract_metadata(session: &Session) -> Result<ModelMetadata> {
+    pub(crate) fn extract_metadata(session: &Session) -> Result<ModelMetadata> {
         // Get metadata from the model
         let model_metadata = session.metadata().map_err(|e| {
             InferenceError::ModelLoadError(format!("Failed to get model metadata: {e}"))
@@ -689,6 +828,29 @@ impl YOLOModel {
     ///
     /// Vector of Results.
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
+        // Fast path: GPU preprocess + zero-copy device input.
+        // Gated at runtime by task != Classify (uses center-crop, not letterbox)
+        // and !fp16_input (kernel writes f32).
+        #[cfg(feature = "cuda-preprocess")]
+        if self.cuda_preprocessor.is_some()
+            && self.metadata.task != Task::Classify
+            && !self.fp16_input
+        {
+            let results = self.predict_image_cuda_pre(image, path)?;
+            if let Some(result) = results.first() {
+                let shape = result.inference_shape();
+                verbose!(
+                    "image 1/1 {}: {}x{} {}, {:.1}ms",
+                    result.path,
+                    shape.0,
+                    shape.1,
+                    result.detection_summary(),
+                    result.speed.inference.unwrap_or(0.0)
+                );
+            }
+            return Ok(results);
+        }
+
         let images = [image];
         let paths = [path];
         let mut results = self.predict_internal(&images, &paths)?;
@@ -707,6 +869,161 @@ impl YOLOModel {
         }
 
         Ok(results)
+    }
+
+    /// CUDA-preprocess fast path used by [`Self::predict_image`] when
+    /// `cuda_preprocessor` is populated. Runs the fused letterbox+normalize kernel,
+    /// hands the resulting device buffer to ORT via `TensorRefMut::from_raw`,
+    /// then post-processes with the standard pipeline.
+    #[cfg(feature = "cuda-preprocess")]
+    #[allow(unsafe_code)]
+    fn predict_image_cuda_pre(
+        &mut self,
+        image: &DynamicImage,
+        path: String,
+    ) -> Result<Vec<Results>> {
+        use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
+        use ort::value::TensorRefMut;
+
+        // Holds each output as a zero-copy borrow into the ORT buffer, or an
+        // owned Vec<f32> for f16 outputs needing dtype conversion. Declared
+        // before any statement to satisfy `clippy::items_after_statements`.
+        enum OutBuf<'a> {
+            Borrow(&'a [f32]),
+            Owned(Vec<f32>),
+        }
+
+        let start_preprocess = Instant::now();
+        let rgb_img = image.to_rgb8();
+        let (w, h) = (rgb_img.width(), rgb_img.height());
+        let rgb_bytes = rgb_img.into_raw();
+
+        let pre = self
+            .cuda_preprocessor
+            .as_mut()
+            .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
+        let geom = pre.preprocess(&rgb_bytes, h, w, false)?;
+        let dst_size = pre.dst_size();
+        let dev_ptr = pre.input_dev_ptr();
+        #[allow(clippy::cast_precision_loss)]
+        let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
+
+        let cuda_mem = MemoryInfo::new(
+            AllocationDevice::CUDA,
+            0,
+            AllocatorType::Device,
+            MemoryType::Default,
+        )
+        .map_err(|e| InferenceError::InferenceError(format!("cuda meminfo: {e}")))?;
+        let cpu_mem = MemoryInfo::new(
+            AllocationDevice::CPU,
+            0,
+            AllocatorType::Device,
+            MemoryType::Default,
+        )
+        .map_err(|e| InferenceError::InferenceError(format!("cpu meminfo: {e}")))?;
+        let shape: Vec<i64> = vec![1, 3, dst_size as i64, dst_size as i64];
+        // SAFETY: dev_ptr is owned by `cuda_preprocessor` (stored on `self`) and remains
+        // valid for the duration of this call. ORT consumes it during
+        // `run_binding`, which is synchronized via the shared cuda stream.
+        let in_tensor = unsafe {
+            TensorRefMut::<f32>::from_raw(cuda_mem, dev_ptr as *mut core::ffi::c_void, shape.into())
+                .map_err(|e| InferenceError::InferenceError(format!("from_raw: {e}")))?
+        };
+
+        let start_inference = Instant::now();
+        let mut binding = self
+            .session
+            .create_binding()
+            .map_err(|e| InferenceError::InferenceError(format!("create_binding: {e}")))?;
+        binding
+            .bind_input(&self.input_name, &in_tensor)
+            .map_err(|e| InferenceError::InferenceError(format!("bind_input: {e}")))?;
+        for n in &self.output_names {
+            binding
+                .bind_output_to_device(n, &cpu_mem)
+                .map_err(|e| InferenceError::InferenceError(format!("bind_output: {e}")))?;
+        }
+        let outputs = self
+            .session
+            .run_binding(&binding)
+            .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
+        binding
+            .synchronize_outputs()
+            .map_err(|e| InferenceError::InferenceError(format!("sync_outputs: {e}")))?;
+        #[allow(clippy::cast_precision_loss)]
+        let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0;
+
+        // Extract outputs as host slices: zero-copy for f32; convert for f16.
+        // Mirrors `extract_and_invoke`'s borrow-or-own scheme so postprocess
+        // sees stable `&[f32]` slices for the duration of this call.
+        let mut bufs: Vec<(OutBuf<'_>, Vec<usize>)> = Vec::with_capacity(self.output_names.len());
+        for output_name in &self.output_names {
+            let output = outputs.get(output_name.as_str()).ok_or_else(|| {
+                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
+            })?;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let (buf, shape_vec) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
+                (
+                    OutBuf::Borrow(data),
+                    shape.iter().map(|&d| d as usize).collect::<Vec<usize>>(),
+                )
+            } else {
+                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
+                    InferenceError::InferenceError(format!("Failed to extract output: {e}"))
+                })?;
+                (
+                    OutBuf::Owned(data.iter().map(|v| v.to_f32()).collect()),
+                    shape.iter().map(|&d| d as usize).collect::<Vec<usize>>(),
+                )
+            };
+            bufs.push((buf, shape_vec));
+        }
+        let views: Vec<(&[f32], Vec<usize>)> = bufs
+            .iter()
+            .map(|(b, s)| {
+                let slice: &[f32] = match b {
+                    OutBuf::Borrow(d) => d,
+                    OutBuf::Owned(v) => v.as_slice(),
+                };
+                (slice, s.clone())
+            })
+            .collect();
+
+        // Minimal PreprocessResult — postprocess reads orig_shape, scale, padding.
+        // tensor/tensor_f16 are unused in the GPU path (preprocess ran on device).
+        let pre = crate::preprocessing::PreprocessResult {
+            tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
+            tensor_f16: None,
+            orig_shape: (h, w),
+            scale: (geom.scale, geom.scale),
+            padding: (geom.pad_y as f32, geom.pad_x as f32),
+        };
+
+        // HWC u8 ndarray for annotators/postprocess.
+        let orig_img = ndarray::Array3::from_shape_vec((h as usize, w as usize, 3), rgb_bytes)
+            .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))?;
+
+        let start_postprocess = Instant::now();
+        let speed = Speed::new(preprocess_time, inference_time, 0.0);
+        let mut result = postprocess(
+            views,
+            self.metadata.task,
+            &pre,
+            &self.config,
+            Arc::clone(&self.metadata.names),
+            orig_img,
+            path,
+            speed,
+            (dst_size as u32, dst_size as u32),
+            self.metadata.end2end,
+            self.metadata.kpt_shape,
+        );
+        #[allow(clippy::cast_precision_loss)]
+        let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
+        result.speed.postprocess = Some(postprocess_time);
+
+        Ok(vec![result])
     }
 
     /// Run inference on the default Ultralytics sample images.
