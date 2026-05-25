@@ -31,7 +31,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 
 ### Prerequisites
 
-- [Rust 1.88+](https://rustup.rs/) (install via rustup)
+- [Rust 1.89+](https://rustup.rs/) (install via rustup)
 - A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo26n.pt format=onnx`)
 
 ### Installation
