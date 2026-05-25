@@ -8,7 +8,7 @@
 | `tensorrt`        | ORT TensorRT EP (FP16, engine cache, opt-level 5)   | NVIDIA GPU with TensorRT installed; 2–3× faster than `cuda`                                      |
 | `cuda-preprocess` | GPU-side preprocess + zero-copy device input to TRT | maximum throughput; `YOLOModel::predict_image` transparently uses a fused CUDA preprocess kernel |
 
-`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required — `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
+`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required — `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](crate::InferenceConfig::with_cuda_preprocess).
 
 ## Requirements
 
@@ -137,7 +137,7 @@ fast path is **not** used by the CLI — the CLI runs through the batch
 processor, which uses CPU preprocess. The GPU preprocess path is reached only
 through `YOLOModel::predict_image` in library code.
 
-[`YOLOModel::predict_image`]: https://docs.rs/ultralytics-inference/latest/ultralytics_inference/struct.YOLOModel.html#method.predict_image
+[`YOLOModel::predict_image`]: crate::YOLOModel::predict_image
 
 ## Troubleshooting
 
