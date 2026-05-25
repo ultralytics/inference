@@ -397,6 +397,9 @@ cargo build --release --features cuda
 # NVIDIA TensorRT
 cargo build --release --features tensorrt
 
+# NVIDIA GPU preprocessing + zero-copy TensorRT input (fastest; needs CUDA toolkit)
+cargo build --release --features cuda-preprocess
+
 # Apple CoreML (macOS/iOS)
 cargo build --release --features coreml
 
@@ -406,6 +409,8 @@ cargo build --release --features openvino
 # Multiple features
 cargo build --release --features "cuda,tensorrt"
 ```
+
+> NVIDIA setup, requirements, and the GPU preprocessing fast path are documented in [`docs/CUDA.md`](docs/CUDA.md).
 
 **Available Features:**
 
@@ -418,6 +423,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `video`     | Video file decoding/encoding (requires FFmpeg)  |
 | `cuda`      | NVIDIA CUDA support                             |
 | `tensorrt`  | NVIDIA TensorRT optimization                    |
+| `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
 | `coreml`    | Apple CoreML (macOS/iOS)                        |
 | `openvino`  | Intel OpenVINO                                  |
 | `onednn`    | Intel oneDNN                                    |
