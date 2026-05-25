@@ -241,6 +241,9 @@
 //!
 //! ## Hardware Acceleration
 //!
+//! See the [CUDA / `TensorRT` acceleration guide](crate::cuda_guide) for setup,
+//! requirements, and the zero-copy GPU preprocess fast path.
+//!
 //! Enable hardware acceleration with Cargo features:
 //!
 //! ```bash
@@ -249,6 +252,10 @@
 //!
 //! # NVIDIA TensorRT
 //! cargo build --release --features tensorrt
+//!
+//! # NVIDIA GPU preprocess + zero-copy device input
+//! # (requires CUDA toolkit; see docs/CUDA.md)
+//! cargo build --release --features cuda-preprocess
 //!
 //! # Apple CoreML
 //! cargo build --release --features coreml
@@ -320,6 +327,11 @@
 //! for open-source use or [Ultralytics Enterprise License](https://ultralytics.com/license)
 //! for commercial applications.
 
+/// CUDA / `TensorRT` acceleration guide rendered from `docs/CUDA.md`.
+#[allow(clippy::doc_markdown)]
+#[doc = include_str!("../docs/CUDA.md")]
+pub mod cuda_guide {}
+
 // Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
@@ -335,6 +347,13 @@ pub mod logging;
 pub mod metadata;
 pub mod model;
 pub mod postprocessing;
+
+// CUDA-side preprocess + zero-copy device input — internal fast path used by
+// `YOLOModel` when the `cuda-preprocess` feature is enabled and the device is
+// CUDA/TensorRT. Gated by `InferenceConfig::with_cuda_preprocess(false)` to
+// opt back into CPU preprocess.
+#[cfg(feature = "cuda-preprocess")]
+mod cuda_inference;
 pub mod preprocessing;
 pub mod results;
 pub mod source;
