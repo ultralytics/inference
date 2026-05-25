@@ -31,7 +31,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 
 ### Prerequisites
 
-- [Rust 1.88+](https://rustup.rs/) (install via rustup)
+- [Rust 1.89+](https://rustup.rs/) (install via rustup)
 - A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo26n.pt format=onnx`)
 
 ### Installation
@@ -143,7 +143,7 @@ ultralytics-inference predict --task semantic --source cityscapes/ --save-json
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.17 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.18 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -161,7 +161,7 @@ Results saved to runs/detect/predict1
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.17 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.18 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -257,7 +257,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.17"
+ultralytics-inference = "0.0.18"
 ```
 
 ```toml
@@ -397,6 +397,9 @@ cargo build --release --features cuda
 # NVIDIA TensorRT
 cargo build --release --features tensorrt
 
+# NVIDIA GPU preprocessing + zero-copy TensorRT input (fastest; needs CUDA toolkit)
+cargo build --release --features cuda-preprocess
+
 # Apple CoreML (macOS/iOS)
 cargo build --release --features coreml
 
@@ -407,38 +410,41 @@ cargo build --release --features openvino
 cargo build --release --features "cuda,tensorrt"
 ```
 
+> NVIDIA setup, requirements, and the GPU preprocessing fast path are documented in [`docs/CUDA.md`](docs/CUDA.md).
+
 **Available Features:**
 
 Default features (enabled unless `--no-default-features` is passed): `annotate`, `visualize`.
 
-| Feature     | Description                                     |
-| ----------- | ----------------------------------------------- |
-| `annotate`  | Image annotation for `--save` (default)         |
-| `visualize` | Real-time window display for `--show` (default) |
-| `video`     | Video file decoding/encoding (requires FFmpeg)  |
-| `cuda`      | NVIDIA CUDA support                             |
-| `tensorrt`  | NVIDIA TensorRT optimization                    |
-| `coreml`    | Apple CoreML (macOS/iOS)                        |
-| `openvino`  | Intel OpenVINO                                  |
-| `onednn`    | Intel oneDNN                                    |
-| `rocm`      | AMD ROCm                                        |
-| `migraphx`  | AMD MIGraphX                                    |
-| `directml`  | DirectML (Windows)                              |
-| `nnapi`     | Android Neural Networks API                     |
-| `qnn`       | Qualcomm Neural Networks                        |
-| `xnnpack`   | XNNPACK (cross-platform)                        |
-| `acl`       | ARM Compute Library                             |
-| `armnn`     | ARM NN                                          |
-| `tvm`       | Apache TVM                                      |
-| `rknpu`     | Rockchip NPU                                    |
-| `cann`      | Huawei CANN                                     |
-| `webgpu`    | WebGPU                                          |
-| `azure`     | Azure                                           |
-| `nvidia`    | Convenience: CUDA + TensorRT                    |
-| `amd`       | Convenience: ROCm + MIGraphX                    |
-| `intel`     | Convenience: OpenVINO + oneDNN                  |
-| `mobile`    | Convenience: NNAPI + CoreML + QNN               |
-| `all`       | Convenience: annotate + visualize + video       |
+| Feature           | Description                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `annotate`        | Image annotation for `--save` (default)                                                               |
+| `visualize`       | Real-time window display for `--show` (default)                                                       |
+| `video`           | Video file decoding/encoding (requires FFmpeg)                                                        |
+| `cuda`            | NVIDIA CUDA support                                                                                   |
+| `tensorrt`        | NVIDIA TensorRT optimization                                                                          |
+| `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
+| `coreml`          | Apple CoreML (macOS/iOS)                                                                              |
+| `openvino`        | Intel OpenVINO                                                                                        |
+| `onednn`          | Intel oneDNN                                                                                          |
+| `rocm`            | AMD ROCm                                                                                              |
+| `migraphx`        | AMD MIGraphX                                                                                          |
+| `directml`        | DirectML (Windows)                                                                                    |
+| `nnapi`           | Android Neural Networks API                                                                           |
+| `qnn`             | Qualcomm Neural Networks                                                                              |
+| `xnnpack`         | XNNPACK (cross-platform)                                                                              |
+| `acl`             | ARM Compute Library                                                                                   |
+| `armnn`           | ARM NN                                                                                                |
+| `tvm`             | Apache TVM                                                                                            |
+| `rknpu`           | Rockchip NPU                                                                                          |
+| `cann`            | Huawei CANN                                                                                           |
+| `webgpu`          | WebGPU                                                                                                |
+| `azure`           | Azure                                                                                                 |
+| `nvidia`          | Convenience: CUDA + TensorRT                                                                          |
+| `amd`             | Convenience: ROCm + MIGraphX                                                                          |
+| `intel`           | Convenience: OpenVINO + oneDNN                                                                        |
+| `mobile`          | Convenience: NNAPI + CoreML + QNN                                                                     |
+| `all`             | Convenience: annotate + visualize + video                                                             |
 
 ## 📦 Dependencies
 

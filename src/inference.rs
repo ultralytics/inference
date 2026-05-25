@@ -71,6 +71,14 @@ pub struct InferenceConfig {
     /// Class IDs to filter predictions. If `None`, all classes are returned.
     /// Useful for focusing on specific objects in multi-class detection tasks.
     pub classes: Option<Vec<usize>>,
+    /// Use the `CUDA` preprocess fast path when available.
+    ///
+    /// Defaults to `true`. The flag is only consulted when the crate was
+    /// compiled with the `cuda-preprocess` feature **and** the selected
+    /// device is `CUDA` or `TensorRT` (or one of those EPs is registered by
+    /// default). In every other configuration the value is ignored and the
+    /// standard CPU preprocess path runs.
+    pub cuda_preprocess: bool,
 }
 
 impl Default for InferenceConfig {
@@ -88,6 +96,7 @@ impl Default for InferenceConfig {
             save_frames: Self::DEFAULT_SAVE_FRAMES,
             rect: Self::DEFAULT_RECT,
             classes: None,
+            cuda_preprocess: Self::DEFAULT_CUDA_PREPROCESS,
         }
     }
 }
@@ -111,6 +120,9 @@ impl InferenceConfig {
     pub const DEFAULT_IMGSZ: (usize, usize) = (640, 640);
     /// Default input image size for OBB models (height, width).
     pub const DEFAULT_OBB_IMGSZ: (usize, usize) = (1024, 1024);
+    /// Default for the CUDA preprocess fast path: on whenever the crate is
+    /// built with the `cuda-preprocess` feature and the device permits it.
+    pub const DEFAULT_CUDA_PREPROCESS: bool = true;
 
     /// Create a new configuration with default values.
     ///
@@ -238,6 +250,24 @@ impl InferenceConfig {
     #[must_use]
     pub const fn with_half(mut self, half: bool) -> Self {
         self.half = half;
+        self
+    }
+
+    /// Enable or disable the CUDA preprocess fast path.
+    ///
+    /// When `true` (default), and the crate was built with the
+    /// `cuda-preprocess` feature, and the selected device is CUDA or
+    /// `TensorRT`, [`YOLOModel::predict_image`](crate::YOLOModel::predict_image)
+    /// dispatches to a fused CUDA kernel for letterbox + normalize +
+    /// HWC→CHW and feeds the result to ORT as a zero-copy device tensor.
+    /// Set to `false` to force the standard CPU preprocess path even when
+    /// the feature is available.
+    ///
+    /// In any configuration where the fast path can't run (feature off,
+    /// non-CUDA device, or runtime fallback), the value is silently ignored.
+    #[must_use]
+    pub const fn with_cuda_preprocess(mut self, enabled: bool) -> Self {
+        self.cuda_preprocess = enabled;
         self
     }
 
