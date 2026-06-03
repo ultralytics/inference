@@ -92,4 +92,24 @@ mod tests {
         assert_eq!(Device::from_str("directml").unwrap(), Device::DirectMl(0));
         assert_eq!(Device::from_str("directml:1").unwrap(), Device::DirectMl(1));
     }
+
+    #[test]
+    fn test_device_display() {
+        assert_eq!(Device::Cpu.to_string(), "cpu");
+        assert_eq!(Device::Cuda(0).to_string(), "cuda:0");
+        assert_eq!(Device::Cuda(1).to_string(), "cuda:1");
+        assert_eq!(Device::CoreMl.to_string(), "coreml");
+        assert_eq!(Device::DirectMl(0).to_string(), "directml:0");
+        assert_eq!(Device::OpenVino.to_string(), "openvino");
+        assert_eq!(Device::Xnnpack.to_string(), "xnnpack");
+        assert_eq!(Device::TensorRt(2).to_string(), "tensorrt:2");
+        assert_eq!(Device::Rocm(3).to_string(), "rocm:3");
+    }
+
+    #[test]
+    fn test_device_display_roundtrip() {
+        for s in ["cpu", "cuda:0", "coreml", "directml:0", "openvino", "xnnpack"] {
+            assert_eq!(Device::from_str(s).unwrap().to_string(), s);
+        }
+    }
 }
