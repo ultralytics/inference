@@ -108,7 +108,14 @@ mod tests {
 
     #[test]
     fn test_device_display_roundtrip() {
-        for s in ["cpu", "cuda:0", "coreml", "directml:0", "openvino", "xnnpack"] {
+        for s in [
+            "cpu",
+            "cuda:0",
+            "coreml",
+            "directml:0",
+            "openvino",
+            "xnnpack",
+        ] {
             assert_eq!(Device::from_str(s).unwrap().to_string(), s);
         }
     }
