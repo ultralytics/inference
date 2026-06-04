@@ -425,6 +425,20 @@ pub struct Boxes {
     is_track: bool,
 }
 
+/// Normalize box rows in-place by image size: columns 0 and 2 are divided by the
+/// width and columns 1 and 3 by the height. Shared by the xyxy and xywh paths,
+/// both of which store x-like values in columns 0/2 and y-like values in 1/3.
+#[allow(clippy::cast_precision_loss)]
+fn normalize_box_rows(boxes: &mut Array2<f32>, orig_shape: (u32, u32)) {
+    let (h, w) = (orig_shape.0 as f32, orig_shape.1 as f32);
+    for mut row in boxes.rows_mut() {
+        row[0] /= w;
+        row[1] /= h;
+        row[2] /= w;
+        row[3] /= h;
+    }
+}
+
 impl Boxes {
     /// Create a new Boxes instance.
     ///
@@ -544,16 +558,7 @@ impl Boxes {
     #[must_use]
     pub fn xyxyn(&self) -> Array2<f32> {
         let mut xyxyn = self.xyxy().to_owned();
-        #[allow(clippy::cast_precision_loss)]
-        let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
-
-        for mut row in xyxyn.rows_mut() {
-            row[0] /= w;
-            row[1] /= h;
-            row[2] /= w;
-            row[3] /= h;
-        }
-
+        normalize_box_rows(&mut xyxyn, self.orig_shape);
         xyxyn
     }
 
@@ -565,16 +570,7 @@ impl Boxes {
     #[must_use]
     pub fn xywhn(&self) -> Array2<f32> {
         let mut xywhn = self.xywh();
-        #[allow(clippy::cast_precision_loss)]
-        let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
-
-        for mut row in xywhn.rows_mut() {
-            row[0] /= w;
-            row[1] /= h;
-            row[2] /= w;
-            row[3] /= h;
-        }
-
+        normalize_box_rows(&mut xywhn, self.orig_shape);
         xywhn
     }
 
