@@ -5,7 +5,6 @@ use std::process;
 #[cfg(feature = "visualize")]
 use std::time::Duration;
 
-
 #[cfg(feature = "annotate")]
 use crate::annotate::annotate_image;
 use crate::io::find_next_run_dir;
