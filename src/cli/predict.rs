@@ -1,10 +1,9 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+use std::path::Path;
 use std::process;
 #[cfg(feature = "visualize")]
 use std::time::Duration;
-
-use std::fs;
 
 #[cfg(feature = "annotate")]
 use crate::annotate::annotate_image;
@@ -179,7 +178,7 @@ pub fn run_prediction(args: &PredictArgs) {
             crate::task::Task::Semantic => "runs/semantic",
         };
         let dir = find_next_run_dir(parent_dir, "predict");
-        if let Err(e) = fs::create_dir_all(&dir) {
+        if let Err(e) = crate::io::ensure_dir(Path::new(&dir)) {
             error!("Failed to create save directory '{dir}': {e}");
             process::exit(1);
         }
@@ -194,7 +193,7 @@ pub fn run_prediction(args: &PredictArgs) {
             return None;
         }
         let dir = d.join("results");
-        if let Err(e) = fs::create_dir_all(&dir) {
+        if let Err(e) = crate::io::ensure_dir(&dir) {
             error!(
                 "Failed to create results directory '{}': {e}",
                 dir.display()

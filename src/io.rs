@@ -30,6 +30,24 @@ pub fn init_logging() {
     });
 }
 
+/// Create `path` and all of its parent directories if they do not already exist.
+///
+/// This is a no-op when the directory is already present. On failure the
+/// underlying I/O error is wrapped with the offending path for context.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be created.
+pub(crate) fn ensure_dir(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("Failed to create directory {}: {e}", path.display()),
+        )
+        .into()
+    })
+}
+
 /// Return the next available run directory, e.g. `runs/detect/predict`, then `predict2`, `predict3`, ...
 #[must_use]
 pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
@@ -76,10 +94,7 @@ impl VideoWriter {
 
         // Ensure parent directory exists
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                let dir = parent.display();
-                std::io::Error::new(e.kind(), format!("Failed to create directory {dir}: {e}"))
-            })?;
+            ensure_dir(parent)?;
         }
 
         let settings = EncoderSettings::preset_h264_yuv420p(width, height, false);
@@ -234,10 +249,8 @@ impl SaveResults {
                     let fps = meta.fps.unwrap_or(30.0);
 
                     // Ensure directory exists
-                    if let Some(parent) = save_path.parent()
-                        && !parent.exists()
-                    {
-                        std::fs::create_dir_all(parent)?;
+                    if let Some(parent) = save_path.parent() {
+                        ensure_dir(parent)?;
                     }
 
                     self.video_writer = Some(VideoWriter::new(save_path, width, height, fps)?);
@@ -271,9 +284,7 @@ impl SaveResults {
             let save_path = save_dir.join(filename);
 
             // Ensure directory exists
-            if !save_dir.exists() {
-                std::fs::create_dir_all(&save_dir)?;
-            }
+            ensure_dir(&save_dir)?;
 
             annotated
                 .save(&save_path)
