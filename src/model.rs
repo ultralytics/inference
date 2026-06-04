@@ -621,19 +621,30 @@ impl YOLOModel {
         }
     }
 
-    /// Concatenate per-image FP32 input tensors along the batch axis.
-    fn concat_f32_batch(
-        preprocessed: &[crate::preprocessing::PreprocessResult],
-    ) -> Result<ndarray::Array4<f32>> {
-        let arrays: Vec<_> = preprocessed.iter().map(|r| r.tensor.view()).collect();
-        let batch = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to concatenate FP32 tensors: {e}"))
+    /// Concatenate per-image input tensor views along the batch axis into a 4D array.
+    ///
+    /// `label` names the precision in error messages (e.g. "FP32"). Shared tail for
+    /// the FP32 and FP16 batch builders.
+    fn concat_views<T: Clone>(
+        arrays: &[ndarray::ArrayView4<'_, T>],
+        label: &str,
+    ) -> Result<ndarray::Array4<T>> {
+        let batch = ndarray::concatenate(ndarray::Axis(0), arrays).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to concatenate {label} tensors: {e}"))
         })?;
         batch.into_dimensionality::<ndarray::Ix4>().map_err(|e| {
             InferenceError::InferenceError(format!(
                 "Failed to convert concatenated tensor to 4D: {e}"
             ))
         })
+    }
+
+    /// Concatenate per-image FP32 input tensors along the batch axis.
+    fn concat_f32_batch(
+        preprocessed: &[crate::preprocessing::PreprocessResult],
+    ) -> Result<ndarray::Array4<f32>> {
+        let arrays: Vec<_> = preprocessed.iter().map(|r| r.tensor.view()).collect();
+        Self::concat_views(&arrays, "FP32")
     }
 
     /// Concatenate per-image FP16 input tensors along the batch axis.
@@ -649,14 +660,66 @@ impl YOLOModel {
                     .view()
             })
             .collect();
-        let batch = ndarray::concatenate(ndarray::Axis(0), &arrays).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to concatenate FP16 tensors: {e}"))
-        })?;
-        batch.into_dimensionality::<ndarray::Ix4>().map_err(|e| {
-            InferenceError::InferenceError(format!(
-                "Failed to convert concatenated tensor to 4D: {e}"
-            ))
-        })
+        Self::concat_views(&arrays, "FP16")
+    }
+
+    /// Build per-image semantic-mask results from a batched `uint8` model output.
+    ///
+    /// Shared by the FP16 and FP32 semantic fast paths (models with ArgMax+Cast
+    /// baked into the ONNX graph). Consumes `preprocessed_results` and
+    /// `image_arrays`, slicing the batched output into per-image class maps.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::too_many_arguments,
+        clippy::needless_pass_by_value
+    )]
+    fn semantic_mask_batch_results(
+        outputs: &[(&[u8], Vec<usize>)],
+        inference_ms_total: f64,
+        n_images_f: f64,
+        preprocess_time: f64,
+        preprocessed_results: Vec<crate::preprocessing::PreprocessResult>,
+        image_arrays: Vec<Array3<u8>>,
+        paths: &[String],
+        names: &Arc<HashMap<usize, String>>,
+    ) -> Vec<Vec<Results>> {
+        let inference_time = inference_ms_total / n_images_f;
+        let start_postprocess = Instant::now();
+        let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(image_arrays.len());
+
+        for (i, (orig_img, preprocess_res)) in image_arrays
+            .into_iter()
+            .zip(preprocessed_results)
+            .enumerate()
+        {
+            let path_i = paths.get(i).cloned().unwrap_or_default();
+            let speed = Speed::new(preprocess_time, inference_time, 0.0);
+
+            // Build the per-image slice from the batch output.
+            let (data, shape) = &outputs[0];
+            let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
+            let elems_per_img = data.len() / actual_batch;
+            let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
+            // Per-image shape view (drops the batch dim). Zero-copy slice.
+            let img_shape: &[usize] = &shape[1..];
+
+            let tensor_shape = preprocess_res.tensor.shape();
+            let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
+
+            let result = crate::postprocessing::postprocess_semantic_mask(
+                img_slice,
+                img_shape,
+                Arc::clone(names),
+                orig_img,
+                path_i,
+                speed,
+                inference_shape,
+            );
+            batch_results.push(vec![result]);
+        }
+
+        Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
+        batch_results
     }
 
     /// Returns true when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only output is
@@ -1249,124 +1312,55 @@ impl YOLOModel {
             // Fast path: the exported ONNX graph already contains ArgMax+Cast(uint8) nodes,
             // so ONNX Runtime returns a uint8 class map directly (no f32 logits, no CPU argmax).
             // Works for both FP32 and FP16 model inputs.
-            if self.fp16_input {
-                let batch_tensor = {
-                    let pre_borrow = preprocessed_results_opt.borrow();
-                    Self::concat_f16_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
-                };
-                let task = self.metadata.task;
-                let names = &self.metadata.names;
-                let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
-                let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
-                let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(n_images);
+            debug_assert_eq!(self.metadata.task, crate::task::Task::Semantic);
+            let names = &self.metadata.names;
+            let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
+            let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
+            let mut batch_results: Vec<Vec<Results>> = Vec::new();
 
+            if self.fp16_input {
+                let batch_tensor = Self::concat_f16_batch(&preprocessed_results)?;
                 Self::run_inference_f16_u8_with(
                     &mut self.session,
                     &self.input_name,
                     &self.output_names,
                     &batch_tensor,
                     |outputs, inference_ms_total| {
-                        debug_assert_eq!(task, crate::task::Task::Semantic);
-                        let inference_time = inference_ms_total / n_images_f;
-                        let start_postprocess = std::time::Instant::now();
-
-                        for (i, (orig_img, preprocess_res)) in image_arrays
-                            .into_iter()
-                            .zip(preprocessed_results)
-                            .enumerate()
-                        {
-                            let path_i = paths_ref.get(i).cloned().unwrap_or_default();
-                            let speed = Speed::new(preprocess_time, inference_time, 0.0);
-
-                            let (data, shape) = &outputs[0];
-                            let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
-                            let elems_per_img = data.len() / actual_batch;
-                            let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
-                            let img_shape: &[usize] = &shape[1..];
-
-                            let tensor_shape = preprocess_res.tensor.shape();
-                            let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
-
-                            let result = crate::postprocessing::postprocess_semantic_mask(
-                                img_slice,
-                                img_shape,
-                                Arc::clone(names),
-                                orig_img,
-                                path_i,
-                                speed,
-                                inference_shape,
-                            );
-                            batch_results.push(vec![result]);
-                        }
-
-                        Self::apply_postprocess_time(
-                            &mut batch_results,
-                            start_postprocess,
+                        batch_results = Self::semantic_mask_batch_results(
+                            outputs,
+                            inference_ms_total,
                             n_images_f,
+                            preprocess_time,
+                            preprocessed_results,
+                            image_arrays,
+                            paths_ref,
+                            names,
                         );
                         Ok(())
                     },
                 )?;
-                return Ok(batch_results);
-            }
-
-            // Same fast path for FP32 input models.
-            let batch_tensor = {
-                let pre_borrow = preprocessed_results_opt.borrow();
-                Self::concat_f32_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
-            };
-
-            let task = self.metadata.task;
-            let names = &self.metadata.names;
-            let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
-            let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
-            let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(n_images);
-
-            Self::run_inference_u8_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &batch_tensor,
-                |outputs, inference_ms_total| {
-                    debug_assert_eq!(task, crate::task::Task::Semantic);
-                    let inference_time = inference_ms_total / n_images_f;
-                    let start_postprocess = std::time::Instant::now();
-
-                    for (i, (orig_img, preprocess_res)) in image_arrays
-                        .into_iter()
-                        .zip(preprocessed_results)
-                        .enumerate()
-                    {
-                        let path_i = paths_ref.get(i).cloned().unwrap_or_default();
-                        let speed = Speed::new(preprocess_time, inference_time, 0.0);
-
-                        // Build the per-image slice from the batch output.
-                        let (data, shape) = &outputs[0];
-                        let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
-                        let elems_per_img = data.len() / actual_batch;
-                        let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
-                        // Per-image shape view (drops the batch dim). Zero-copy slice.
-                        let img_shape: &[usize] = &shape[1..];
-
-                        let tensor_shape = preprocess_res.tensor.shape();
-                        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
-
-                        let result = crate::postprocessing::postprocess_semantic_mask(
-                            img_slice,
-                            img_shape,
-                            Arc::clone(names),
-                            orig_img,
-                            path_i,
-                            speed,
-                            inference_shape,
+            } else {
+                let batch_tensor = Self::concat_f32_batch(&preprocessed_results)?;
+                Self::run_inference_u8_with(
+                    &mut self.session,
+                    &self.input_name,
+                    &self.output_names,
+                    &batch_tensor,
+                    |outputs, inference_ms_total| {
+                        batch_results = Self::semantic_mask_batch_results(
+                            outputs,
+                            inference_ms_total,
+                            n_images_f,
+                            preprocess_time,
+                            preprocessed_results,
+                            image_arrays,
+                            paths_ref,
+                            names,
                         );
-                        batch_results.push(vec![result]);
-                    }
-
-                    Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
-                    Ok(())
-                },
-            )?;
+                        Ok(())
+                    },
+                )?;
+            }
             return Ok(batch_results);
         }
 
