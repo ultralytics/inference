@@ -271,6 +271,12 @@ pub fn array_to_image(arr: &Array3<u8>) -> Result<DynamicImage> {
     Ok(DynamicImage::ImageRgb8(img_buffer))
 }
 
+/// Convert a center-form box `(cx, cy, w, h)` to corner form `[x1, y1, x2, y2]`.
+#[inline]
+pub(crate) fn xywh_to_xyxy(cx: f32, cy: f32, w: f32, h: f32) -> [f32; 4] {
+    [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
