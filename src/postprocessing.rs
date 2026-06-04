@@ -29,7 +29,7 @@ use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
 use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
-use crate::utils::{nms_per_class, nms_rotated_per_class};
+use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
 
 /// Post-process raw model output based on task type.
 ///
@@ -350,6 +350,14 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
         }
         _ => (expected_classes.max(1), 0, false),
     }
+}
+
+/// Scale a corner-form box from letterboxed inference space back to the original
+/// image, then clip it to the image bounds.
+#[inline]
+fn scale_and_clip_box(xyxy: &[f32; 4], preprocess: &PreprocessResult) -> [f32; 4] {
+    let scaled = scale_coords(xyxy, preprocess.scale, preprocess.padding);
+    clip_coords(&scaled, preprocess.orig_shape)
 }
 
 #[derive(Clone, Copy)]
@@ -770,13 +778,7 @@ fn postprocess_segment(
         let cy = output_2d[[i, 1]];
         let w = output_2d[[i, 2]];
         let h = output_2d[[i, 3]];
-        let x1 = cx - w / 2.0;
-        let y1 = cy - h / 2.0;
-        let x2 = cx + w / 2.0;
-        let y2 = cy + h / 2.0;
-
-        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
-        let clipped = clip_coords(&scaled, preprocess.orig_shape);
+        let clipped = scale_and_clip_box(&xywh_to_xyxy(cx, cy, w, h), preprocess);
 
         // Filter by class if specified
         if !config.keep_class(best_class) {
@@ -1007,15 +1009,8 @@ fn postprocess_pose(
         let w = output_2d[[i, 2]];
         let h = output_2d[[i, 3]];
 
-        // Convert to xyxy
-        let x1 = cx - w / 2.0;
-        let y1 = cy - h / 2.0;
-        let x2 = cx + w / 2.0;
-        let y2 = cy + h / 2.0;
-
-        // Scale box to original image space
-        let scaled = scale_coords(&[x1, y1, x2, y2], preprocess.scale, preprocess.padding);
-        let clipped = clip_coords(&scaled, preprocess.orig_shape);
+        // Convert to xyxy, then scale to original image space and clip
+        let clipped = scale_and_clip_box(&xywh_to_xyxy(cx, cy, w, h), preprocess);
 
         // Extract keypoints (after class scores)
         let kpt_start = 4 + num_classes;
