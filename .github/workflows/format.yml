@@ -24,7 +24,7 @@ jobs:
       - name: Run Ultralytics Actions
         uses: ultralytics/actions@main
         with:
-          token: ${{ secrets._GITHUB_TOKEN || github.token }} # Auto-generated fallback
+          token: ${{ secrets.GITHUB_TOKEN }} # Auto-generated token
           labels: true # Auto-label issues/PRs using AI
           python: false # Format Python with Ruff
           prettier: true # Format YAML, JSON, Markdown, CSS
