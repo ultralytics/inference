@@ -140,8 +140,8 @@ ultralytics-inference predict --task semantic --source cityscapes/ --save-json
 
 ### 示例输出
 
-```text
-# ultralytics-inference predict
+```bash
+ultralytics-inference predict
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
@@ -159,7 +159,7 @@ Results saved to runs/detect/predict1
 **使用 `--task`（自动下载匹配的 nano 模型）：**
 
 ```bash
-# ultralytics-inference predict --task segment
+ultralytics-inference predict --task segment
 
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
