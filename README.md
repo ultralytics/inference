@@ -2,6 +2,8 @@
 
 # 🦀 Ultralytics YOLO Rust Inference
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 High-performance YOLO inference library written in Rust. This library provides a fast, safe, and efficient interface for running YOLO models using ONNX Runtime, with an API designed to match the [Ultralytics Python package](https://github.com/ultralytics/ultralytics).
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
@@ -19,11 +21,11 @@ High-performance YOLO inference library written in Rust. This library provides a
 ## ✨ Features
 
 - 🚀 **High Performance** - Pure Rust implementation with zero-cost abstractions
-- 🎯 **Ultralytics API Compatible** - `Results`, `Boxes`, `Masks`, `Keypoints`, `Probs`, `SemanticMask` classes matching Python
+- 🎯 **Ultralytics API Compatible** - `Results`, `Boxes`, `Masks`, `Keypoints`, `Probs`, and `SemanticMask` types matching the Python API shape
 - 🔧 **Multiple Backends** - CPU, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
-- ⬇️ **Auto Download** - Automatically downloads YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes: n/s/m/l/x) when not found locally
+- ⬇️ **Auto Download** - Downloads supported YOLO26, YOLO11, and YOLOv8 ONNX models (sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
@@ -147,7 +149,7 @@ Ultralytics Inference 0.0.18 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 640x480 4 persons, 1 bus, 36.4ms
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 36.4ms
 image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
 Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 384, 640)
 Results saved to runs/detect/predict1
@@ -191,25 +193,25 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option          | Short | Description                                                                                                                                                                    | Default                                 |
-| --------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                                                                                  | `yolo26n.onnx`                          |
-| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*); selects nano model when `--model` is omitted                                                         | `detect`                                |
-| `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                                                                             | `Task dependent Ultralytics URL assets` |
-| `--conf`        |       | Confidence threshold                                                                                                                                                           | `0.25`                                  |
-| `--iou`         |       | IoU threshold for NMS                                                                                                                                                          | `0.7`                                   |
-| `--max-det`     |       | Maximum number of detections                                                                                                                                                   | `300`                                   |
-| `--imgsz`       |       | Inference image size                                                                                                                                                           | `Model metadata`                        |
-| `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                 | `true`                                  |
-| `--batch`       |       | Batch size for inference                                                                                                                                                       | `1`                                     |
-| `--half`        |       | Use FP16 half-precision inference                                                                                                                                              | `false`                                 |
-| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                | `true`                                  |
-| `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                 | `false`                                 |
-| `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                              | `false`                                 |
-| `--show`        |       | Display results in a window                                                                                                                                                    | `false`                                 |
-| `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                   |
-| `--verbose`     |       | Show verbose output                                                                                                                                                            | `true`                                  |
-| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                    | all classes                             |
+| Option          | Short | Description                                                                                                                                                                    | Default                               |
+| --------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                                                                                  | `yolo26n.onnx`                        |
+| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*); selects nano model when `--model` is omitted                                                         | `detect`                              |
+| `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                                                                             | Task-dependent Ultralytics URL assets |
+| `--conf`        |       | Confidence threshold                                                                                                                                                           | `0.25`                                |
+| `--iou`         |       | IoU threshold for NMS                                                                                                                                                          | `0.7`                                 |
+| `--max-det`     |       | Maximum number of detections                                                                                                                                                   | `300`                                 |
+| `--imgsz`       |       | Inference image size                                                                                                                                                           | `Model metadata`                      |
+| `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                 | `true`                                |
+| `--batch`       |       | Batch size for inference                                                                                                                                                       | `1`                                   |
+| `--half`        |       | Use FP16 half-precision inference                                                                                                                                              | `false`                               |
+| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                | `true`                                |
+| `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                 | `false`                               |
+| `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                              | `false`                               |
+| `--show`        |       | Display results in a window                                                                                                                                                    | `false`                               |
+| `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                 |
+| `--verbose`     |       | Show verbose output                                                                                                                                                            | `true`                                |
+| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                    | all classes                           |
 
 **Task and Model Resolution:**
 
@@ -229,7 +231,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **Auto-downloadable models:**
 
-All YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** across all five task variants are supported for auto-download. YOLO26 also includes a sixth variant, `-sem`, for semantic segmentation (YOLO26 only):
+YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation:
 
 | Family | Variants                                                                                  |
 | ------ | ----------------------------------------------------------------------------------------- |
@@ -379,11 +381,13 @@ inference/
 ├── tests/
 │   └── integration_test.rs # Integration tests
 ├── assets/                 # Test images
+│   ├── boats.jpg
 │   ├── bus.jpg
 │   └── zidane.jpg
 ├── Cargo.toml              # Rust dependencies and features
 ├── LICENSE                 # AGPL-3.0 License
-└── README.md               # This file
+├── README.md               # English README
+└── README.zh-CN.md         # Simplified Chinese README
 ```
 
 ## ⚡ Hardware Acceleration

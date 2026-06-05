@@ -19,10 +19,10 @@ Run the full suite from the project root:
 cargo test
 ```
 
-To generate code coverage locally (Linux recommended):
+To generate code coverage locally (Linux recommended), use the same feature set as CI:
 
 ```bash
-cargo llvm-cov --all-features --workspace --html
+cargo llvm-cov --features annotate,video,visualize --workspace --html
 ```
 
 ## ✨ Contributing
