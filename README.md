@@ -140,9 +140,11 @@ ultralytics-inference predict --task semantic --source cityscapes/ --save-json
 
 ### Example Output
 
+```bash
+ultralytics-inference predict
 ```
-# ultralytics-inference predict
 
+```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
 Ultralytics Inference 0.0.18 🚀 Rust ONNX FP32 CPU
@@ -159,8 +161,10 @@ Results saved to runs/detect/predict1
 **With `--task` (auto-downloads the matching nano model):**
 
 ```bash
-# ultralytics-inference predict --task segment
+ultralytics-inference predict --task segment
+```
 
+```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
 Ultralytics Inference 0.0.18 🚀 Rust ONNX FP32 CPU
