@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use wide::{CmpGt, f32x8};
+use wide::f32x8;
 
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
