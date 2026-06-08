@@ -62,7 +62,7 @@ image = "^0.25"
 jpeg-decoder = "^0.3"
 fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
 # SIMD for fast preprocessing
-wide = "^1.4"
+wide = "^1.5"
 
 # LRU cache for preprocessing LUT
 lru = "^0.18"
