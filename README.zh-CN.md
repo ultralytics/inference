@@ -22,7 +22,7 @@
 
 - 🚀 **高性能**：纯 Rust 实现，使用零成本抽象。
 - 🎯 **兼容 Ultralytics API**：`Results`、`Boxes`、`Masks`、`Keypoints`、`Probs` 和 `SemanticMask` 类型与 Python API 形态保持一致。
-- 🔧 **多后端支持**：通过 ONNX Runtime 支持 CPU、CUDA、TensorRT、CoreML、OpenVINO 等后端。
+- 🔧 **多后端支持**：通过 ONNX Runtime 支持 CPU、XNNPACK、CUDA、TensorRT、CoreML、OpenVINO 等后端。
 - 📦 **双用途**：既可作为 Rust 项目的库，也可作为独立 CLI 应用。
 - 🏷️ **自动读取元数据**：自动读取 ONNX 模型中的类别名称、任务类型和输入尺寸。
 - ⬇️ **自动下载**：本地不存在时，自动下载支持的 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（尺寸：n/s/m/l/x）。
