@@ -4,6 +4,7 @@ name: CI
 
 permissions:
   contents: read
+  id-token: write
 
 on:
   push:
@@ -211,5 +212,7 @@ jobs:
         with:
           files: ./lcov.info
           disable_search: true
+          fail_ci_if_error: true
           plugins: noop
           flags: template_coverage
+          use_oidc: true
