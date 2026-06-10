@@ -29,6 +29,22 @@ pub const fn get_class_color(class_id: usize) -> Rgb<u8> {
     Rgb(color)
 }
 
+/// Dynamic render scale derived from image size (reference 640x640).
+///
+/// Returns the scale factor and the base line thickness. Callers derive the
+/// font size or marker radius from the factor as needed.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn render_scale(width: u32, height: u32) -> (f32, i32) {
+    let max_dim = width.max(height) as f32;
+    let scale_factor = (max_dim / 640.0).max(1.0);
+    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    (scale_factor, thickness)
+}
+
 /// Return the next unused run directory under `base` with the given `prefix`.
 ///
 /// Tries `<base>/<prefix>` first, then `<base>/<prefix>2`, `<base>/<prefix>3`, and so on
@@ -438,12 +454,8 @@ fn draw_label(
 fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
-    // Calculate dynamic scale factor based on image size (reference 640x640)
-    let max_dim = width.max(height) as f32;
-    let scale_factor = (max_dim / 640.0).max(1.0);
-
-    // Scale thickness and font size
-    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    // Dynamic scale factor and thickness based on image size (reference 640x640)
+    let (scale_factor, thickness) = render_scale(width, height);
     let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
 
     if let Some(ref boxes) = result.boxes {
@@ -654,12 +666,8 @@ fn draw_pose(
 ) {
     let (width, height) = img.dimensions();
 
-    // Calculate dynamic scale factor based on image size (reference 640x640)
-    let max_dim = width.max(height) as f32;
-    let scale_factor = (max_dim / 640.0).max(1.0);
-
-    // Scale thickness and radius
-    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    // Dynamic scale factor and thickness based on image size (reference 640x640)
+    let (scale_factor, thickness) = render_scale(width, height);
     let radius = (3.0 * scale_factor).round() as i32;
 
     if let Some(ref keypoints) = result.keypoints {
@@ -727,12 +735,8 @@ fn draw_pose(
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
-    // Calculate dynamic scale factor based on image size (reference 640x640)
-    let max_dim = width.max(height) as f32;
-    let scale_factor = (max_dim / 640.0).max(1.0);
-
-    // Scale thickness and font size
-    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    // Dynamic scale factor and thickness based on image size (reference 640x640)
+    let (scale_factor, thickness) = render_scale(width, height);
     let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
 
     if let Some(ref obb) = result.obb {
