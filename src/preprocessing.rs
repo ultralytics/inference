@@ -22,6 +22,7 @@
 
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use half::f16;
 use image::{DynamicImage, GenericImageView, RgbImage};
@@ -58,7 +59,7 @@ type XLutEntry = (usize, usize, i32, i32);
 type XLutKey = (u32, u32);
 
 thread_local! {
-    static X_LUT_CACHE: RefCell<LruCache<XLutKey, Vec<XLutEntry>>> =
+    static X_LUT_CACHE: RefCell<LruCache<XLutKey, Arc<Vec<XLutEntry>>>> =
         RefCell::new(LruCache::new(NonZeroUsize::new(LUT_CACHE_SIZE).unwrap()));
 }
 
@@ -192,35 +193,37 @@ pub fn preprocess_image_with_precision(
 ///
 /// Weight computation matches `OpenCV`'s `resize.cpp`:
 /// `cbuf[0] = saturate_cast<short>((1-fx) * 2048); cbuf[1] = 2048 - cbuf[0];`
-fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Vec<XLutEntry> {
+fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Arc<Vec<XLutEntry>> {
     let key = (src_w, dst_w);
 
     X_LUT_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
 
         if let Some(lut) = cache.get(&key) {
-            return lut.clone();
+            return Arc::clone(lut);
         }
 
         let scale_x = src_w as f32 / dst_w as f32;
         let src_w_max = (src_w - 1) as i32;
 
-        let lut: Vec<XLutEntry> = (0..dst_w)
-            .map(|dx| {
-                let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
-                let x0 = sx.floor() as i32;
-                // Match OpenCV: cbuf[0] = saturate_cast<short>((1-fx)*SCALE),
-                //               cbuf[1] = SCALE - cbuf[0]
-                let fx_f = sx - x0 as f32;
-                let fx_inv = ((1.0 - fx_f) * SCALE_INT as f32 + 0.5) as i32;
-                let fx = SCALE_INT - fx_inv;
-                let x0c = x0.clamp(0, src_w_max) as usize * 3;
-                let x1c = (x0 + 1).clamp(0, src_w_max) as usize * 3;
-                (x0c, x1c, fx_inv, fx)
-            })
-            .collect();
+        let lut: Arc<Vec<XLutEntry>> = Arc::new(
+            (0..dst_w)
+                .map(|dx| {
+                    let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
+                    let x0 = sx.floor() as i32;
+                    // Match OpenCV: cbuf[0] = saturate_cast<short>((1-fx)*SCALE),
+                    //               cbuf[1] = SCALE - cbuf[0]
+                    let fx_f = sx - x0 as f32;
+                    let fx_inv = ((1.0 - fx_f) * SCALE_INT as f32 + 0.5) as i32;
+                    let fx = SCALE_INT - fx_inv;
+                    let x0c = x0.clamp(0, src_w_max) as usize * 3;
+                    let x1c = (x0 + 1).clamp(0, src_w_max) as usize * 3;
+                    (x0c, x1c, fx_inv, fx)
+                })
+                .collect(),
+        );
 
-        cache.put(key, lut.clone());
+        cache.put(key, Arc::clone(&lut));
         lut
     })
 }
