@@ -200,7 +200,6 @@ fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Arc<Vec<XLutEntry>> {
         let mut cache = cache.borrow_mut();
 
         if let Some(lut) = cache.get(&key) {
-            // Cache hit: bump the refcount instead of cloning the whole table.
             return Arc::clone(lut);
         }
 

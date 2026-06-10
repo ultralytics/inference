@@ -656,7 +656,6 @@ fn apply_mask_proto(
         .map(|&v| 1.0 / (1.0 + (-v).exp()))
         .collect();
     let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-    // Borrow the sigmoid buffer directly instead of copying it into an owned image.
     let Ok(src_image) = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32) else {
         return;
     };
