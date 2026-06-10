@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use wide::f32x8;
 
-use fast_image_resize::images::Image;
+use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
 use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
@@ -360,6 +360,27 @@ fn scale_and_clip_box(xyxy: &[f32; 4], preprocess: &PreprocessResult) -> [f32; 4
     clip_coords(&scaled, preprocess.orig_shape)
 }
 
+/// Reshape a flat model output into a `[preds, features]` 2D array.
+///
+/// When `is_transposed` the data is already laid out `[preds, features]`;
+/// otherwise it is `[features, preds]` and gets transposed. Returns an empty
+/// array on shape mismatch, matching the per-task fallbacks.
+fn output_to_2d(
+    data: &[f32],
+    num_preds: usize,
+    features: usize,
+    is_transposed: bool,
+) -> Array2<f32> {
+    if is_transposed {
+        Array2::from_shape_vec((num_preds, features), data.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)))
+    } else {
+        let arr = Array2::from_shape_vec((features, num_preds), data.to_vec())
+            .unwrap_or_else(|_| Array2::zeros((0, 0)));
+        arr.t().to_owned()
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Candidate {
     bbox: [f32; 4],
@@ -635,9 +656,7 @@ fn apply_mask_proto(
         .map(|&v| 1.0 / (1.0 + (-v).exp()))
         .collect();
     let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-    let Ok(src_image) =
-        Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32)
-    else {
+    let Ok(src_image) = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32) else {
         return;
     };
 
@@ -749,14 +768,7 @@ fn postprocess_segment(
     }
 
     // Convert to 2D [preds, features]
-    let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, expected_features), output0.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        let arr = Array2::from_shape_vec((expected_features, num_preds), output0.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
+    let output_2d = output_to_2d(output0, num_preds, expected_features, is_transposed);
 
     // Filter and NMS
     let mut candidates = Vec::new(); // (bbox, score, class, original_index)
@@ -968,14 +980,7 @@ fn postprocess_pose(
     }
 
     // Convert to 2D [preds, features]
-    let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
+    let output_2d = output_to_2d(output, num_preds, actual_features, is_transposed);
 
     if output_2d.is_empty() {
         return results;
@@ -1218,14 +1223,7 @@ fn postprocess_obb(
     }
 
     // Convert to 2D [preds, features]
-    let output_2d = if is_transposed {
-        Array2::from_shape_vec((num_preds, actual_features), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
-    } else {
-        let arr = Array2::from_shape_vec((actual_features, num_preds), output.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
-    };
+    let output_2d = output_to_2d(output, num_preds, actual_features, is_transposed);
 
     if output_2d.is_empty() {
         return results;
@@ -1328,25 +1326,6 @@ fn postprocess_obb(
 // Coordinates are in the letterboxed model-input space, so we still scale/pad-correct
 // them back to original-image space. No NMS, no class-score matrix.
 
-/// Helper: scale a model-space xyxy box to original image coordinates.
-#[inline]
-fn scale_xyxy(
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-    preprocess: &PreprocessResult,
-) -> (f32, f32, f32, f32) {
-    let (scale_y, scale_x) = preprocess.scale;
-    let (pad_top, pad_left) = preprocess.padding;
-    (
-        (x1 - pad_left) / scale_x,
-        (y1 - pad_top) / scale_y,
-        (x2 - pad_left) / scale_x,
-        (y2 - pad_top) / scale_y,
-    )
-}
-
 /// Post-process YOLO26 end-to-end detection output `[1, max_det, 6]`.
 #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
 fn postprocess_detect_end2end(
@@ -1387,12 +1366,15 @@ fn postprocess_detect_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let (x1, y1, x2, y2) = scale_xyxy(
-            output[base],
-            output[base + 1],
-            output[base + 2],
-            output[base + 3],
-            preprocess,
+        let [x1, y1, x2, y2] = scale_coords(
+            &[
+                output[base],
+                output[base + 1],
+                output[base + 2],
+                output[base + 3],
+            ],
+            preprocess.scale,
+            preprocess.padding,
         );
         flat.extend_from_slice(&[
             x1.clamp(0.0, max_w),
@@ -1475,12 +1457,15 @@ fn postprocess_segment_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let (x1, y1, x2, y2) = scale_xyxy(
-            output0[base],
-            output0[base + 1],
-            output0[base + 2],
-            output0[base + 3],
-            preprocess,
+        let [x1, y1, x2, y2] = scale_coords(
+            &[
+                output0[base],
+                output0[base + 1],
+                output0[base + 2],
+                output0[base + 3],
+            ],
+            preprocess.scale,
+            preprocess.padding,
         );
         flat_boxes.extend_from_slice(&[
             x1.clamp(0.0, max_w),
@@ -1591,12 +1576,15 @@ fn postprocess_pose_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let (x1, y1, x2, y2) = scale_xyxy(
-            output[base],
-            output[base + 1],
-            output[base + 2],
-            output[base + 3],
-            preprocess,
+        let [x1, y1, x2, y2] = scale_coords(
+            &[
+                output[base],
+                output[base + 1],
+                output[base + 2],
+                output[base + 3],
+            ],
+            preprocess.scale,
+            preprocess.padding,
         );
         flat_boxes.extend_from_slice(&[
             x1.clamp(0.0, max_w),

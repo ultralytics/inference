@@ -1,5 +1,10 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+//! Pose skeleton definition.
+//!
+//! Holds the COCO-Pose keypoint connections used to draw the skeleton lines
+//! between detected keypoints.
+
 /// COCO-Pose dataset skeleton structure (pairs of keypoint indices)
 /// Defines which keypoints connect to form the pose skeleton
 pub const SKELETON: [[usize; 2]; 19] = [

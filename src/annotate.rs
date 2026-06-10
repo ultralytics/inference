@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
+/// Minimum keypoint confidence for drawing a keypoint or skeleton limb.
+const KPT_CONF_THRES: f32 = 0.25;
+
 /// Return the RGB color assigned to a class ID.
 ///
 /// Cycles through the 20-entry Ultralytics palette so every class gets a
@@ -27,6 +30,22 @@ const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/downloa
 pub const fn get_class_color(class_id: usize) -> Rgb<u8> {
     let color = COLORS[class_id % COLORS.len()];
     Rgb(color)
+}
+
+/// Dynamic render scale derived from image size (reference 640x640).
+///
+/// Returns the scale factor and the base line thickness. Callers derive the
+/// font size or marker radius from the factor as needed.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn render_scale(width: u32, height: u32) -> (f32, i32) {
+    let max_dim = width.max(height) as f32;
+    let scale_factor = (max_dim / 640.0).max(1.0);
+    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    (scale_factor, thickness)
 }
 
 /// Return the next unused run directory under `base` with the given `prefix`.
@@ -438,12 +457,8 @@ fn draw_label(
 fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
-    // Calculate dynamic scale factor based on image size (reference 640x640)
-    let max_dim = width.max(height) as f32;
-    let scale_factor = (max_dim / 640.0).max(1.0);
-
-    // Scale thickness and font size
-    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    // Dynamic scale factor and thickness based on image size (reference 640x640)
+    let (scale_factor, thickness) = render_scale(width, height);
     let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
 
     if let Some(ref boxes) = result.boxes {
@@ -654,12 +669,8 @@ fn draw_pose(
 ) {
     let (width, height) = img.dimensions();
 
-    // Calculate dynamic scale factor based on image size (reference 640x640)
-    let max_dim = width.max(height) as f32;
-    let scale_factor = (max_dim / 640.0).max(1.0);
-
-    // Scale thickness and radius
-    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    // Dynamic scale factor and thickness based on image size (reference 640x640)
+    let (scale_factor, thickness) = render_scale(width, height);
     let radius = (3.0 * scale_factor).round() as i32;
 
     if let Some(ref keypoints) = result.keypoints {
@@ -685,7 +696,7 @@ fn draw_pose(
                 let y2 = kpt_data[[person_idx, kpt_b, 1]];
                 let conf2 = kpt_data[[person_idx, kpt_b, 2]];
 
-                if conf1 > 0.5 && conf2 > 0.5 {
+                if conf1 >= KPT_CONF_THRES && conf2 >= KPT_CONF_THRES {
                     let color_idx = limb_colors[limb_idx % limb_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_line_segment(img, x1, y1, x2, y2, color, thickness);
@@ -697,7 +708,12 @@ fn draw_pose(
                 let y = kpt_data[[person_idx, kpt_idx, 1]];
                 let conf = kpt_data[[person_idx, kpt_idx, 2]];
 
-                if conf > 0.5 && x >= 0.0 && y >= 0.0 && x < width as f32 && y < height as f32 {
+                if conf >= KPT_CONF_THRES
+                    && x >= 0.0
+                    && y >= 0.0
+                    && x < width as f32
+                    && y < height as f32
+                {
                     let color_idx = kpt_colors[kpt_idx % kpt_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_filled_circle(img, x as i32, y as i32, radius, color);
@@ -727,12 +743,8 @@ fn draw_pose(
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
-    // Calculate dynamic scale factor based on image size (reference 640x640)
-    let max_dim = width.max(height) as f32;
-    let scale_factor = (max_dim / 640.0).max(1.0);
-
-    // Scale thickness and font size
-    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
+    // Dynamic scale factor and thickness based on image size (reference 640x640)
+    let (scale_factor, thickness) = render_scale(width, height);
     let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
 
     if let Some(ref obb) = result.obb {
