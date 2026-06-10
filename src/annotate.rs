@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
+/// Minimum keypoint confidence for drawing a keypoint or skeleton limb.
+const KPT_CONF_THRES: f32 = 0.25;
+
 /// Return the RGB color assigned to a class ID.
 ///
 /// Cycles through the 20-entry Ultralytics palette so every class gets a
@@ -693,7 +696,7 @@ fn draw_pose(
                 let y2 = kpt_data[[person_idx, kpt_b, 1]];
                 let conf2 = kpt_data[[person_idx, kpt_b, 2]];
 
-                if conf1 > 0.5 && conf2 > 0.5 {
+                if conf1 >= KPT_CONF_THRES && conf2 >= KPT_CONF_THRES {
                     let color_idx = limb_colors[limb_idx % limb_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_line_segment(img, x1, y1, x2, y2, color, thickness);
@@ -705,7 +708,12 @@ fn draw_pose(
                 let y = kpt_data[[person_idx, kpt_idx, 1]];
                 let conf = kpt_data[[person_idx, kpt_idx, 2]];
 
-                if conf > 0.5 && x >= 0.0 && y >= 0.0 && x < width as f32 && y < height as f32 {
+                if conf >= KPT_CONF_THRES
+                    && x >= 0.0
+                    && y >= 0.0
+                    && x < width as f32
+                    && y < height as f32
+                {
                     let color_idx = kpt_colors[kpt_idx % kpt_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_filled_circle(img, x as i32, y as i32, radius, color);
