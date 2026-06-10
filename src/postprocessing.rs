@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use wide::f32x8;
 
-use fast_image_resize::images::Image;
+use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
 use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
@@ -635,9 +635,8 @@ fn apply_mask_proto(
         .map(|&v| 1.0 / (1.0 + (-v).exp()))
         .collect();
     let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-    let Ok(src_image) =
-        Image::from_vec_u8(mw as u32, mh as u32, src_bytes.to_vec(), PixelType::F32)
-    else {
+    // Borrow the sigmoid buffer directly instead of copying it into an owned image.
+    let Ok(src_image) = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32) else {
         return;
     };
 
