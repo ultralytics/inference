@@ -632,7 +632,8 @@ impl Masks {
         self.data.is_empty()
     }
 
-    // TODO: Implement xy and xyn properties for segment coordinates
+    // Note: this type exposes the raw mask tensor only. Polygon xy/xyn
+    // contour properties are not derived yet.
 }
 
 /// Pose keypoints.
