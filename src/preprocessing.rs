@@ -493,20 +493,35 @@ fn calculate_letterbox_params(
 ///
 /// Array4 with shape (1, 3, H, W) and values in [0, 1].
 fn image_to_tensor(image: &RgbImage) -> Array4<f32> {
+    image_to_tensor_generic(image, 0.0, |v| f32::from(v) / 255.0)
+}
+
+/// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.
+///
+/// Shared structure for the f32 and f16 variants: allocates the `(1, 3, H, W)`
+/// tensor, splits it into per-channel slices, and fills each pixel with
+/// `convert` applied to the source byte. The caller supplies the element type's
+/// zero value and the per-byte conversion so each variant keeps its exact
+/// arithmetic (the f16 path hoists its scale constant into the closure).
+fn image_to_tensor_generic<T: Clone>(
+    image: &RgbImage,
+    zero: T,
+    mut convert: impl FnMut(u8) -> T,
+) -> Array4<T> {
     let (width, height) = image.dimensions();
     let (w, h) = (width as usize, height as usize);
     let pixels = image.as_raw();
 
-    let mut tensor = Array4::zeros((1, 3, h, w));
+    let mut tensor = Array4::from_elem((1, 3, h, w), zero);
 
     // Get mutable slices for each channel for faster access
     let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
     let (g_slice, b_slice) = rest.split_at_mut(h * w);
 
     for (i, chunk) in pixels.chunks_exact(3).enumerate() {
-        r_slice[i] = f32::from(chunk[0]) / 255.0;
-        g_slice[i] = f32::from(chunk[1]) / 255.0;
-        b_slice[i] = f32::from(chunk[2]) / 255.0;
+        r_slice[i] = convert(chunk[0]);
+        g_slice[i] = convert(chunk[1]);
+        b_slice[i] = convert(chunk[2]);
     }
 
     tensor
@@ -524,25 +539,11 @@ fn image_to_tensor(image: &RgbImage) -> Array4<f32> {
 ///
 /// Array4 with shape (1, 3, H, W) and f16 values in [0, 1].
 fn image_to_tensor_f16(image: &RgbImage) -> Array4<f16> {
-    let (width, height) = image.dimensions();
-    let (w, h) = (width as usize, height as usize);
-    let pixels = image.as_raw();
-
-    let mut tensor = Array4::from_elem((1, 3, h, w), f16::ZERO);
-
-    let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
-    let (g_slice, b_slice) = rest.split_at_mut(h * w);
-
     // Precompute 1/255 as f16 for direct conversion
     let scale = f16::from_f32(1.0 / 255.0);
-
-    for (i, chunk) in pixels.chunks_exact(3).enumerate() {
-        r_slice[i] = f16::from_f32(f32::from(chunk[0])) * scale;
-        g_slice[i] = f16::from_f32(f32::from(chunk[1])) * scale;
-        b_slice[i] = f16::from_f32(f32::from(chunk[2])) * scale;
-    }
-
-    tensor
+    image_to_tensor_generic(image, f16::ZERO, move |v| {
+        f16::from_f32(f32::from(v)) * scale
+    })
 }
 
 /// Convert a `DynamicImage` to an HWC ndarray.
