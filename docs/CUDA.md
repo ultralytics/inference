@@ -27,9 +27,9 @@ Add the feature you need in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.18", features = ["tensorrt"] }
+ultralytics-inference = { version = "0.0.19", features = ["tensorrt"] }
 # or, for the fastest path:
-ultralytics-inference = { version = "0.0.18", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.19", features = ["cuda-preprocess"] }
 ```
 
 Then `cargo build --release` — no extra flags needed.
@@ -59,7 +59,7 @@ If you need to pin a specific version at compile time instead, override the cuda
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.18", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.19", features = ["cuda-preprocess"] }
 # Replace the default feature with a pinned one (e.g. CUDA 12.8):
 cudarc = { version = "0.19", default-features = false, features = ["driver", "nvrtc", "dynamic-loading", "cuda-12080"] }
 ```
