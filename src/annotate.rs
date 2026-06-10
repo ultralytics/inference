@@ -20,9 +20,6 @@ use std::path::{Path, PathBuf};
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
 /// Minimum keypoint confidence for drawing a keypoint or skeleton limb.
-///
-/// Matches Ultralytics' `Annotator.kpts` default (`conf_thres = 0.25`); a higher
-/// value drops valid-but-uncertain keypoints (e.g. occluded upper bodies).
 const KPT_CONF_THRES: f32 = 0.25;
 
 /// Return the RGB color assigned to a class ID.
