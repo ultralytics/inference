@@ -25,6 +25,7 @@ jobs:
       contents: write
     outputs:
       increment: ${{ steps.check_version.outputs.increment }}
+      npm_increment: ${{ steps.check_npm.outputs.npm_increment }}
       version: ${{ steps.check_version.outputs.version }}
       current_tag: ${{ steps.check_version.outputs.current_tag }}
       previous_tag: ${{ steps.check_version.outputs.previous_tag }}
@@ -93,6 +94,21 @@ jobs:
             print(f"previous_tag={previous_tag}", file=f)
           if increment == "True":
             print("Ready to publish new version to crates.io ✅.")
+      - name: Check npm version
+        id: check_npm
+        # Independent of the Git tag: gate the npm publish on the npm registry so a
+        # failed/partial npm publish can be re-run for the same version (the tag
+        # check alone would skip it forever once the crate tag exists).
+        env:
+          VERSION: ${{ steps.check_version.outputs.version }}
+        run: |
+          if npm view "@ultralytics/yolo@$VERSION" version >/dev/null 2>&1; then
+            echo "@ultralytics/yolo@$VERSION already on npm; will skip npm publish."
+            echo "npm_increment=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "@ultralytics/yolo@$VERSION not on npm; will publish."
+            echo "npm_increment=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Tag and Release
         if: steps.check_version.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
         env:
@@ -144,8 +160,10 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   npm:
-    needs: [check, build]
-    if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
+    needs: check
+    # Gated on the npm registry check (not the crate tag) and self-contained (its
+    # own wasm build), mirroring the previous standalone npm workflow.
+    if: needs.check.outputs.npm_increment == 'true' && (github.event_name == 'push' || inputs.publish == true)
     runs-on: ubuntu-latest
     environment:
       name: Release - npm
@@ -187,8 +205,15 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_GITHUB_ACTIONS_TOKEN }}
 
   sbom:
-    needs: [check, build, publish]
-    if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
+    needs: [check, build, publish, npm]
+    # Waits on npm too, and is skipped if npm failed, so the release SBOM is not
+    # uploaded for a partial publish. A legitimately skipped npm (already on the
+    # registry) still counts as done.
+    if: >-
+      always() && needs.check.outputs.increment == 'True'
+      && (github.event_name == 'push' || inputs.publish == true)
+      && needs.build.result == 'success' && needs.publish.result == 'success'
+      && needs.npm.result != 'failure' && needs.npm.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -214,7 +239,7 @@ jobs:
     permissions: {}
     steps:
       - name: Notify Success
-        if: needs.build.result == 'success' && needs.publish.result == 'success' && needs.npm.result == 'success' && needs.sbom.result == 'success'
+        if: needs.build.result == 'success' && needs.publish.result == 'success' && needs.sbom.result == 'success' && needs.npm.result != 'failure' && needs.npm.result != 'cancelled'
         uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
         with:
           webhook-type: incoming-webhook
@@ -222,7 +247,7 @@ jobs:
           payload: |
             text: "<!channel> GitHub Actions success for ${{ github.workflow }} ✅\n\n\n*Repository:* https://github.com/${{ github.repository }}\n*Action:* https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n*Author:* ${{ github.actor }}\n*Event:* NEW `ultralytics-inference ${{ needs.check.outputs.current_tag }}` published to crates.io and `@ultralytics/yolo` to npm 😃\n*Job Status:* ${{ job.status }}\n"
       - name: Notify Failure
-        if: needs.build.result != 'success' || needs.publish.result != 'success' || needs.npm.result != 'success' || needs.sbom.result != 'success'
+        if: needs.build.result != 'success' || needs.publish.result != 'success' || needs.sbom.result != 'success' || needs.npm.result == 'failure' || needs.npm.result == 'cancelled'
         uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
         with:
           webhook-type: incoming-webhook
