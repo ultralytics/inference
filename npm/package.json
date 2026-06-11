@@ -1,5 +1,5 @@
 {
-  "name": "ultralytics-inference",
+  "name": "@ultralytics/yolo",
   "version": "0.0.19",
   "description": "Run Ultralytics YOLO models in the browser on WebGPU (WebAssembly, ONNX Runtime Web via ort-web). Python-like API.",
   "type": "module",
@@ -16,13 +16,17 @@
   "files": [
     "dist",
     "pkg",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": [
     "./pkg/*"
   ],
   "scripts": {
-    "build:wasm": "wasm-pack build ../crates/web --release --target web --out-dir \"$PWD/pkg\" --out-name ultralytics_inference_web",
+    "build:wasm": "wasm-pack build ../crates/web --release --target web --out-dir \"$PWD/pkg\" --out-name ultralytics_inference_web && rm -f \"$PWD/pkg/.gitignore\"",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:ts",
     "clean": "rm -rf dist pkg"

@@ -38,11 +38,11 @@ jobs:
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if npm view "ultralytics-inference@$VERSION" version >/dev/null 2>&1; then
-            echo "ultralytics-inference@$VERSION already on npm — skipping."
+          if npm view "@ultralytics/yolo@$VERSION" version >/dev/null 2>&1; then
+            echo "@ultralytics/yolo@$VERSION already on npm — skipping."
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
-            echo "ultralytics-inference@$VERSION is new — will publish ✅"
+            echo "@ultralytics/yolo@$VERSION is new — will publish ✅"
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: Release - npm
-      url: https://www.npmjs.com/package/ultralytics-inference
+      url: https://www.npmjs.com/package/@ultralytics/yolo
     permissions:
       contents: read
       id-token: write # required for npm provenance
@@ -94,4 +94,4 @@ jobs:
         working-directory: npm
         run: npm publish --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_GITHUB_ACTIONS_TOKEN }}
