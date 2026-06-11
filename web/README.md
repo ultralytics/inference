@@ -2,6 +2,14 @@
 
 # Ultralytics Inference (Browser / WebGPU)
 
+[![npm version](https://img.shields.io/npm/v/@ultralytics/yolo?logo=npm&logoColor=white&label=npm&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
+[![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/ultralytics/inference/blob/main/LICENSE)
+
+[![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
+[![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
+[![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
+
 Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser on
 **WebGPU** — no server, no Python. Detection, segmentation, pose, classification,
 OBB, and semantic segmentation, with a small Python-like API and a built-in
@@ -71,20 +79,22 @@ async function frame() {
 
 ## Models
 
-Pass a bare ONNX name and it **auto-downloads** from the
-[Ultralytics assets](https://github.com/ultralytics/assets/releases) — no local
-files needed:
+A bare ONNX name resolves to the
+[Ultralytics assets release](https://github.com/ultralytics/assets/releases):
 
 ```ts
-await YOLO.load("yolo26n.onnx");      // detect
-await YOLO.load("yolo11s-seg.onnx");  // segment
-await YOLO.load("yolov8n-pose.onnx"); // pose
+await YOLO.load("yolo26n.onnx"); // -> .../releases/download/v8.4.0/yolo26n.onnx
 ```
 
 Supports **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x` with task
 suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26 only). A
-value containing a `/` or a scheme is used as a URL/path as-is, so you can also
-host your own model.
+value containing a `/` or a scheme is used as a URL/path as-is.
+
+> **CORS note:** GitHub release assets do not send `Access-Control-Allow-Origin`,
+> so a browser cannot fetch them cross-origin. Host the `.onnx` **same-origin**
+> (e.g. `YOLO.load("/models/yolo26n.onnx")`) or behind a CORS-enabled origin /
+> proxy. The bare-name shortcut is convenient when you mirror the assets on such
+> a host.
 
 ## Results shape
 
