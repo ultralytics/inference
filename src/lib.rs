@@ -350,8 +350,8 @@ pub mod visualizer;
 
 // Internal rayon/sequential abstraction. On native targets it re-exports the
 // rayon prelude; on `wasm32` (no OS threads) it provides sequential shims so the
-// shared preprocessing/postprocessing code compiles unchanged. See `src/par.rs`.
-mod par;
+// shared preprocessing/postprocessing code compiles unchanged. See `src/parallel.rs`.
+mod parallel;
 
 // Backend and host-only modules. These depend on the native ONNX Runtime (`ort`),
 // OS threads, filesystem, sockets, or windowing, none of which are available on

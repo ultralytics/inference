@@ -19,33 +19,30 @@
 //! ultralytics-inference help
 //! ```
 
-// The CLI is native-only: it depends on `clap`, the native ONNX Runtime, and the
-// filesystem/source modules, none of which exist on `wasm32`. Browser inference
-// is provided by the `ultralytics-inference-web` crate instead.
-#[cfg(target_arch = "wasm32")]
-fn main() {}
-
-#[cfg(not(target_arch = "wasm32"))]
-use clap::Parser;
-
-#[cfg(not(target_arch = "wasm32"))]
-use ultralytics_inference::cli::args::{Cli, Commands};
-#[cfg(not(target_arch = "wasm32"))]
-use ultralytics_inference::cli::predict::run_prediction;
-#[cfg(not(target_arch = "wasm32"))]
-use ultralytics_inference::logging::set_verbose;
-
-/// Entry point for the Ultralytics YOLO Inference CLI.
-#[cfg(not(target_arch = "wasm32"))]
+/// Entry point. The binary needs a `main` on every target, so this stays
+/// unconditional and simply does nothing on `wasm32` (the CLI is native-only:
+/// it depends on `clap`, the native ONNX Runtime, and the filesystem/source
+/// modules; browser inference is the `ultralytics-inference-web` crate instead).
 fn main() {
+    #[cfg(not(target_arch = "wasm32"))]
+    run();
+}
+
+/// The actual CLI. All native-only imports live here, so a single `cfg` gates
+/// the whole thing instead of one per `use`.
+#[cfg(not(target_arch = "wasm32"))]
+fn run() {
+    use clap::Parser;
+    use ultralytics_inference::cli::args::{Cli, Commands};
+    use ultralytics_inference::cli::predict::run_prediction;
+    use ultralytics_inference::logging::set_verbose;
+
     ultralytics_inference::io::init_logging();
 
     #[cfg(debug_assertions)]
     let _ = ort::init().commit();
 
-    let cli = Cli::parse();
-
-    match &cli.command {
+    match &Cli::parse().command {
         Commands::Predict(args) => {
             set_verbose(args.verbose);
             run_prediction(args);

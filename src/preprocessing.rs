@@ -240,7 +240,7 @@ fn fused_zerocopy_preprocess(
     geom: &LetterboxGeometry,
 ) -> Array4<f32> {
     #[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
-    use crate::par::*;
+    use crate::parallel::*;
     use std::mem::MaybeUninit;
     use std::sync::atomic::{AtomicPtr, Ordering};
 

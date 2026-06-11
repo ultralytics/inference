@@ -21,7 +21,7 @@ use std::sync::Arc;
 use wide::f32x8;
 
 #[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
-use crate::par::*;
+use crate::parallel::*;
 use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
@@ -896,7 +896,7 @@ fn postprocess_segment(
             mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
         );
     };
-    // rayon on native, sequential on wasm (no threads); see `crate::par`.
+    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
     #[cfg(not(target_arch = "wasm32"))]
     zip.par_for_each(apply);
     #[cfg(target_arch = "wasm32")]
@@ -1528,7 +1528,7 @@ fn postprocess_segment_end2end(
             mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
         );
     };
-    // rayon on native, sequential on wasm (no threads); see `crate::par`.
+    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
     #[cfg(not(target_arch = "wasm32"))]
     zip.par_for_each(apply);
     #[cfg(target_arch = "wasm32")]
