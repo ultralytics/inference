@@ -68,8 +68,7 @@ path = "src/main.rs"
 image = "^0.25"
 jpeg-decoder = "^0.3"
 # Base feature set is wasm-compatible; the `rayon` feature is added for native
-# targets only (see the `cfg(not(target_arch = "wasm32"))` table below) because
-# rayon cannot build for `wasm32-unknown-unknown`, which has no OS threads.
+# targets only (see the `cfg(not(target_arch = "wasm32"))`
 fast_image_resize = { version = "^6.0", features = ["image"] }
 # SIMD for fast preprocessing
 wide = "^1.5"
