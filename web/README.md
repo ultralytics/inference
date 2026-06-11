@@ -90,16 +90,17 @@ async function frame() {
 
 ## Models
 
-A bare ONNX name resolves to the
-[Ultralytics assets release](https://github.com/ultralytics/assets/releases):
+Pass a bare ONNX name and it is **auto-downloaded** from the
+[Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the
+same weights the native crate and Python use):
 
 ```ts
-await YOLO.load("yolo26n.onnx"); // resolves to the release: .../download/v8.4.0/yolo26n.onnx
+await YOLO.load("yolo26n.onnx"); // auto-downloads from the release: .../download/v8.4.0/yolo26n.onnx
 ```
 
-Supports **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x` with task
-suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26 only). A
-value containing a `/` or a scheme is used as a URL/path as-is.
+Auto-download covers **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x`
+with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26
+only). A value containing a `/` or a scheme is used as a URL/path as-is.
 
 > **CORS note:** GitHub release assets do not send `Access-Control-Allow-Origin`,
 > so a browser cannot fetch them cross-origin. Host the `.onnx` **same-origin**
@@ -137,9 +138,9 @@ the native renderer. None of this is duplicated in JS.
   context** (`https://` or `http://localhost`) gives the fast path. Without
   WebGPU (older browsers, some phones), `YOLO.load` automatically falls back to a
   portable **CPU/wasm** build that runs everywhere. Pick the device with
-  `YOLO.load(model, { device: "webgpu" | "cpu" })` (default `"auto"`). If WebGPU
-  cannot engage, the load falls back to CPU; `model.device` reports what actually
-  ran.
+  `YOLO.load("yolo26n.onnx", { device: "webgpu" | "cpu" })` (default `"auto"`). If
+  WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
+  actually ran.
 - **Model format**: export your model to ONNX with Ultralytics so the metadata
   (task, class names, `imgsz`) is embedded:
 
