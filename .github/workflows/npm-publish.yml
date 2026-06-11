@@ -1,23 +1,61 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-name: Publish npm
+# Publish the browser/WebGPU package to npm https://www.npmjs.com/package/ultralytics-inference
+# Mirrors publish.yml (crates.io): on push to main, if the version in Cargo.toml
+# is not already on npm, build the wasm + TypeScript and publish it. So a single
+# version bump in Cargo.toml releases both the crate and the npm package.
+
+name: Publish to npm
 
 permissions:
   contents: read
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        type: boolean
+        description: Publish to npm
+        default: false
 
 jobs:
-  publish:
-    name: build & publish
+  check:
+    if: github.repository == 'ultralytics/inference'
     runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check_version.outputs.publish }}
+      version: ${{ steps.check_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - id: check_version
+        # Single source of truth: the version in Cargo.toml. Publish only if that
+        # exact version is not already on the npm registry.
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "ultralytics-inference@$VERSION" version >/dev/null 2>&1; then
+            echo "ultralytics-inference@$VERSION already on npm — skipping."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ultralytics-inference@$VERSION is new — will publish ✅"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: check
+    if: needs.check.outputs.publish == 'true' && (github.event_name == 'push' || inputs.publish == true)
+    runs-on: ubuntu-latest
+    environment:
+      name: Release - npm
+      url: https://www.npmjs.com/package/ultralytics-inference
     permissions:
       contents: read
       id-token: write # required for npm provenance
-
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -41,6 +79,10 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
+
+      - name: Sync package version from Cargo.toml
+        working-directory: npm
+        run: npm version "${{ needs.check.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Build package
         working-directory: npm
