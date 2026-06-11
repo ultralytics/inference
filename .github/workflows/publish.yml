@@ -1,8 +1,11 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-# Publish crate to crates.io https://crates.io/crates/ultralytics-inference
+# Release pipeline: a single version bump in Cargo.toml publishes the crate to
+# crates.io (https://crates.io/crates/ultralytics-inference) and the browser
+# package to npm (https://www.npmjs.com/package/@ultralytics/yolo), then uploads
+# the SBOM and posts a Slack notification once every job has finished.
 
-name: Publish to crates.io
+name: Publish
 
 on:
   push:
@@ -22,9 +25,11 @@ jobs:
       contents: write
     outputs:
       increment: ${{ steps.check_version.outputs.increment }}
+      version: ${{ steps.check_version.outputs.version }}
       current_tag: ${{ steps.check_version.outputs.current_tag }}
       previous_tag: ${{ steps.check_version.outputs.previous_tag }}
       crate_url: https://crates.io/crates/ultralytics-inference
+      npm_url: https://www.npmjs.com/package/@ultralytics/yolo
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -83,6 +88,7 @@ jobs:
 
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as f:
             print(f"increment={increment}", file=f)
+            print(f"version={version}", file=f)
             print(f"current_tag={current_tag}", file=f)
             print(f"previous_tag={previous_tag}", file=f)
           if increment == "True":
@@ -137,6 +143,49 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+  npm:
+    needs: [check, build]
+    if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
+    runs-on: ubuntu-latest
+    environment:
+      name: Release - npm
+      url: ${{ needs.check.outputs.npm_url }}
+    permissions:
+      contents: read
+      id-token: write # required for npm provenance
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: wasm
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912 # v2.81.10
+        with:
+          tool: wasm-pack
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Sync package version from Cargo.toml
+        working-directory: web
+        run: npm version "${{ needs.check.outputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Build package
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Publish to npm
+        working-directory: web
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_GITHUB_ACTIONS_TOKEN }}
+
   sbom:
     needs: [check, build, publish]
     if: needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
@@ -159,24 +208,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   notify:
-    needs: [check, build, publish, sbom]
+    needs: [check, build, publish, npm, sbom]
     if: always() && needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Notify Success
-        if: needs.build.result == 'success' && needs.publish.result == 'success' && needs.sbom.result == 'success'
+        if: needs.build.result == 'success' && needs.publish.result == 'success' && needs.npm.result == 'success' && needs.sbom.result == 'success'
         uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
         with:
           webhook-type: incoming-webhook
           webhook: ${{ secrets.SLACK_WEBHOOK_URL_YOLO }}
           payload: |
-            text: "<!channel> GitHub Actions success for ${{ github.workflow }} ✅\n\n\n*Repository:* https://github.com/${{ github.repository }}\n*Action:* https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n*Author:* ${{ github.actor }}\n*Event:* NEW `ultralytics-inference ${{ needs.check.outputs.current_tag }}` crates.io package published 😃\n*Job Status:* ${{ job.status }}\n"
+            text: "<!channel> GitHub Actions success for ${{ github.workflow }} ✅\n\n\n*Repository:* https://github.com/${{ github.repository }}\n*Action:* https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n*Author:* ${{ github.actor }}\n*Event:* NEW `ultralytics-inference ${{ needs.check.outputs.current_tag }}` published to crates.io and `@ultralytics/yolo` to npm 😃\n*Job Status:* ${{ job.status }}\n"
       - name: Notify Failure
-        if: needs.build.result != 'success' || needs.publish.result != 'success' || needs.sbom.result != 'success'
+        if: needs.build.result != 'success' || needs.publish.result != 'success' || needs.npm.result != 'success' || needs.sbom.result != 'success'
         uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
         with:
           webhook-type: incoming-webhook
           webhook: ${{ secrets.SLACK_WEBHOOK_URL_YOLO }}
           payload: |
-            text: "<!channel> GitHub Actions error for ${{ github.workflow }} ❌\n\n\n*Repository:* https://github.com/${{ github.repository }}\n*Action:* https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n*Author:* ${{ github.actor }}\n*Event:* ${{ github.event_name }}\n*Build:* ${{ needs.build.result }}\n*Publish:* ${{ needs.publish.result }}\n*SBOM:* ${{ needs.sbom.result }}\n*Job Status:* ${{ job.status }}\n"
+            text: "<!channel> GitHub Actions error for ${{ github.workflow }} ❌\n\n\n*Repository:* https://github.com/${{ github.repository }}\n*Action:* https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n*Author:* ${{ github.actor }}\n*Event:* ${{ github.event_name }}\n*Build:* ${{ needs.build.result }}\n*Publish:* ${{ needs.publish.result }}\n*npm:* ${{ needs.npm.result }}\n*SBOM:* ${{ needs.sbom.result }}\n*Job Status:* ${{ job.status }}\n"
