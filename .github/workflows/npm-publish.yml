@@ -81,17 +81,17 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Sync package version from Cargo.toml
-        working-directory: npm
+        working-directory: web
         run: npm version "${{ needs.check.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Build package
-        working-directory: npm
+        working-directory: web
         run: |
           npm ci
           npm run build
 
       - name: Publish to npm
-        working-directory: npm
+        working-directory: web
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_GITHUB_ACTIONS_TOKEN }}

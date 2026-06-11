@@ -124,14 +124,14 @@ the native renderer — none of which is duplicated in JS.
 ## Building from source
 
 This package builds the wasm from the Rust crate with
-[`wasm-pack`](https://rustwasm.github.io/wasm-pack/):
+[`wasm-pack`](https://github.com/rustwasm/wasm-pack):
 
 ```bash
 npm run build # wasm-pack build + tsc
 ```
 
-See `example/index.html` for a complete, runnable demo (serve the `npm/` folder
-over `localhost` and open it in a WebGPU browser).
+Serve the built `dist/` + `pkg/` over `localhost` (a secure context) and open it
+in a WebGPU browser.
 
 ## License
 

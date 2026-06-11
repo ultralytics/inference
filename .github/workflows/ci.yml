@@ -225,7 +225,7 @@ jobs:
 
       # Builds the wasm (wasm-pack) and the TypeScript wrapper.
       - name: Build npm package
-        working-directory: npm
+        working-directory: web
         run: |
           npm ci
           npm run build

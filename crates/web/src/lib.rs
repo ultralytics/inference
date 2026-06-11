@@ -215,8 +215,8 @@ fn parse_string_string_entry(buf: &[u8]) -> Option<(String, String)> {
 
 /// A loaded YOLO model ready for inference in the browser.
 ///
-/// Created via [`YoloModel::load_url`] or [`YoloModel::load_bytes`]; run with
-/// [`YoloModel::predict`]. The TypeScript wrapper exposes this as `YOLO`.
+/// Created via [`YoloModel::load_bytes`]; run with [`YoloModel::predict`]. The
+/// TypeScript wrapper exposes this as `YOLO`.
 #[wasm_bindgen]
 pub struct YoloModel {
     session: Session,

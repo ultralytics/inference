@@ -13,6 +13,10 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
 [dependencies]
 # Reuse the wasm-safe core pipeline (preprocessing, postprocessing, results,
 # metadata, task). `default-features = false` drops the native backend modules.
