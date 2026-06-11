@@ -1,19 +1,23 @@
 <!-- Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license -->
 
-# Ultralytics Inference (Browser / WebGPU)
+<a href="https://www.ultralytics.com/"><img src="https://raw.githubusercontent.com/ultralytics/assets/main/logo/Ultralytics_Logotype_Original.svg" width="320" alt="Ultralytics logo"></a>
+
+# Ultralytics Inference
 
 [![npm version](https://img.shields.io/npm/v/@ultralytics/yolo?logo=npm&logoColor=white&label=npm&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 [![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
+[![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/ultralytics/inference/blob/main/LICENSE)
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
 
-Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser on
-**WebGPU**, with no server and no Python. It covers detection, segmentation,
-pose, classification, OBB, and semantic segmentation, with a compact
-TypeScript API and a built-in `annotate()` for drawing.
+Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser,
+with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm
+fallback) and covers detection, segmentation, pose, classification, OBB, and
+semantic segmentation, behind a small TypeScript API with a built-in
+`annotate()` that draws results straight to a canvas.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -34,7 +38,15 @@ visuals match the native and Python paths.
 
 ```bash
 npm install @ultralytics/yolo
+# or
+pnpm add @ultralytics/yolo
+yarn add @ultralytics/yolo
+bun add @ultralytics/yolo
 ```
+
+It ships as an ES module with TypeScript types and works in any modern bundler
+(Vite, webpack, esbuild, Bun) or directly via a CDN such as
+[esm.sh](https://esm.sh/@ultralytics/yolo).
 
 ## Quick start
 
@@ -76,18 +88,30 @@ async function frame() {
 }
 ```
 
-## Models
+## ✨ Models
 
-A bare ONNX name resolves to the
-[Ultralytics assets release](https://github.com/ultralytics/assets/releases):
+<a href="https://docs.ultralytics.com/tasks" target="_blank">
+    <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/docs/ultralytics-yolov8-tasks-banner.avif" alt="Ultralytics YOLO supported tasks">
+</a>
+<br>
+<br>
+
+Runs [YOLOv8](https://docs.ultralytics.com/models/yolov8),
+[YOLO11](https://docs.ultralytics.com/models/yolo11), and
+[YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for detection,
+segmentation, pose, OBB, classification, and semantic segmentation.
+
+Pass a bare ONNX name and it is **auto-downloaded** from the
+[Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the
+same weights the native crate and Python use):
 
 ```ts
-await YOLO.load("yolo26n.onnx"); // resolves to the release: .../download/v8.4.0/yolo26n.onnx
+await YOLO.load("yolo26n.onnx"); // auto-downloads from the release: .../download/v8.4.0/yolo26n.onnx
 ```
 
-Supports **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x` with task
-suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26 only). A
-value containing a `/` or a scheme is used as a URL/path as-is.
+Auto-download covers **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x`
+with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26
+only). A value containing a `/` or a scheme is used as a URL/path as-is.
 
 > **CORS note:** GitHub release assets do not send `Access-Control-Allow-Origin`,
 > so a browser cannot fetch them cross-origin. Host the `.onnx` **same-origin**
@@ -125,9 +149,9 @@ the native renderer. None of this is duplicated in JS.
   context** (`https://` or `http://localhost`) gives the fast path. Without
   WebGPU (older browsers, some phones), `YOLO.load` automatically falls back to a
   portable **CPU/wasm** build that runs everywhere. Pick the device with
-  `YOLO.load(model, { device: "webgpu" | "cpu" })` (default `"auto"`). If WebGPU
-  cannot engage, the load falls back to CPU; `model.device` reports what actually
-  ran.
+  `YOLO.load("yolo26n.onnx", { device: "webgpu" | "cpu" })` (default `"auto"`). If
+  WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
+  actually ran.
 - **Model format**: export your model to ONNX with Ultralytics so the metadata
   (task, class names, `imgsz`) is embedded:
 
@@ -163,6 +187,46 @@ npm run build # wasm-pack build + tsc
 Serve the built `dist/` + `pkg/` over `localhost` (a secure context) and open it
 in a WebGPU browser.
 
-## License
+## 💡 Contributing
 
-AGPL-3.0. See the repository [LICENSE](https://github.com/ultralytics/inference/blob/main/LICENSE).
+Ultralytics thrives on community collaboration, and we deeply value your contributions! Whether it's reporting bugs,
+suggesting features, or submitting code changes, your involvement is crucial.
+
+- **Report Issues**: Found a bug? [Open an issue](https://github.com/ultralytics/inference/issues)
+- **Feature Requests**: Have an idea? [Share it](https://github.com/ultralytics/inference/issues)
+- **Pull Requests**: Read our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) first
+- **Feedback**: Take our [Survey](https://www.ultralytics.com/survey?utm_source=github&utm_medium=social&utm_campaign=Survey)
+
+A heartfelt thank you 🙏 goes out to all our contributors! Your efforts help make Ultralytics tools better for everyone.
+
+[![Ultralytics open-source contributors](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
+
+## 📜 License
+
+Ultralytics offers two licensing options to suit different needs:
+
+- **AGPL-3.0 License**: This [OSI-approved](https://opensource.org/license/agpl-3.0) open-source license is perfect for students, researchers, and enthusiasts. It encourages open collaboration and knowledge sharing. See the [LICENSE](https://github.com/ultralytics/inference/blob/main/LICENSE) file for full details.
+- **Ultralytics Enterprise License**: Designed for commercial use, this license allows for the seamless integration of Ultralytics software and AI models into commercial products and services, bypassing the open-source requirements of AGPL-3.0. If your use case involves commercial deployment, please contact us via [Ultralytics Licensing](https://www.ultralytics.com/license).
+
+## 📮 Contact
+
+- **GitHub Issues**: [Bug reports and feature requests](https://github.com/ultralytics/inference/issues)
+- **Discord**: [Join our community](https://discord.com/invite/ultralytics)
+- **Documentation**: [docs.ultralytics.com](https://docs.ultralytics.com)
+
+<br>
+<div align="center">
+  <a href="https://github.com/ultralytics"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-github.png" width="3%" alt="Ultralytics GitHub"></a>
+  <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
+  <a href="https://www.linkedin.com/company/ultralytics/"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-linkedin.png" width="3%" alt="Ultralytics LinkedIn"></a>
+  <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
+  <a href="https://twitter.com/ultralytics"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-twitter.png" width="3%" alt="Ultralytics Twitter"></a>
+  <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
+  <a href="https://www.youtube.com/ultralytics?sub_confirmation=1"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-youtube.png" width="3%" alt="Ultralytics YouTube"></a>
+  <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
+  <a href="https://www.tiktok.com/@ultralytics"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-tiktok.png" width="3%" alt="Ultralytics TikTok"></a>
+  <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
+  <a href="https://ultralytics.com/bilibili"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-bilibili.png" width="3%" alt="Ultralytics BiliBili"></a>
+  <img src="https://github.com/ultralytics/assets/raw/main/social/logo-transparent.png" width="3%" alt="space">
+  <a href="https://discord.com/invite/ultralytics"><img src="https://github.com/ultralytics/assets/raw/main/social/logo-social-discord.png" width="3%" alt="Ultralytics Discord"></a>
+</div>

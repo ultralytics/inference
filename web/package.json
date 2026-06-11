@@ -1,7 +1,7 @@
 {
   "name": "@ultralytics/yolo",
-  "version": "0.0.20",
-  "description": "Run Ultralytics YOLO models in the browser on WebGPU (WebAssembly, ONNX Runtime Web via ort-web). Python-like API.",
+  "version": "0.0.21",
+  "description": "Run Ultralytics YOLO models in the browser on WebGPU (WebAssembly, ONNX Runtime Web via ort-web).",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -43,9 +43,18 @@
     "computer-vision"
   ],
   "license": "AGPL-3.0",
+  "author": "Ultralytics",
+  "contributors": [
+    "Glenn Jocher <glenn.jocher@ultralytics.com>",
+    "Onuralp Sezer <onuralp@ultralytics.com>"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/ultralytics/inference"
+    "url": "git+https://github.com/ultralytics/inference.git",
+    "directory": "web"
+  },
+  "bugs": {
+    "url": "https://github.com/ultralytics/inference/issues"
   },
   "homepage": "https://www.ultralytics.com",
   "devDependencies": {

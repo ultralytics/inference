@@ -29,6 +29,16 @@ High-performance YOLO inference library written in Rust. This library provides a
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
+## ✨ Models
+
+<a href="https://docs.ultralytics.com/tasks" target="_blank">
+    <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/docs/ultralytics-yolov8-tasks-banner.avif" alt="Ultralytics YOLO supported tasks">
+</a>
+<br>
+<br>
+
+This crate runs [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](https://docs.ultralytics.com/models/yolo11), and [YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX models. They are pretrained on [COCO](https://docs.ultralytics.com/datasets/detect/coco) for [Detection](https://docs.ultralytics.com/tasks/detect), [Segmentation](https://docs.ultralytics.com/tasks/segment), and [Pose Estimation](https://docs.ultralytics.com/tasks/pose); on [DOTA](https://docs.ultralytics.com/datasets/obb/dota-v2) for [OBB](https://docs.ultralytics.com/tasks/obb); on [Cityscapes](https://docs.ultralytics.com/datasets/semantic/cityscapes) for [Semantic Segmentation](https://docs.ultralytics.com/tasks/semantic); and on [ImageNet](https://docs.ultralytics.com/datasets/classify/imagenet) for [Classification](https://docs.ultralytics.com/tasks/classify). All [models](https://docs.ultralytics.com/models) download automatically from the latest Ultralytics [release](https://github.com/ultralytics/assets/releases) on first use.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -147,7 +157,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.20 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.21 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -167,7 +177,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.20 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.21 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -263,7 +273,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.20"
+ultralytics-inference = "0.0.21"
 ```
 
 ```toml
@@ -586,11 +596,11 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Class filtering support
 - [x] Auto-download all YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes n/s/m/l/x, all tasks)
 - [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
+- [x] WebAssembly (WASM) browser inference on WebGPU (npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo))
 
 ### In Progress
 
 - [ ] Python bindings (PyO3)
-- [ ] WebAssembly (WASM) support for browser inference
 
 ## 💡 Contributing
 
