@@ -95,7 +95,7 @@ export interface Results {
   obb: Obb[];
   keypoints: Keypoints[];
   probs: Probs | null;
-  /** Segment masks as a translucent RGBA overlay (`width*height*4`), else empty. */
+  /** Segment/semantic masks as a translucent RGBA overlay (`width*height*4`), else empty. */
   masks: Uint8Array;
   speed: Speed;
 }
@@ -133,6 +133,18 @@ async function wantWebGPU(pref?: "auto" | "webgpu" | "cpu"): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Ultralytics model assets release (ONNX exports of yolo26 / yolo11 / yolov8). */
+const ASSETS = "https://github.com/ultralytics/assets/releases/download/v8.4.0/";
+
+/**
+ * Resolve a model reference to a URL. A bare ONNX name (e.g. `"yolo26n.onnx"`,
+ * `"yolo11s-seg.onnx"`, `"yolov8n.onnx"`) auto-downloads from the Ultralytics
+ * assets release; anything with a slash or scheme is used as-is.
+ */
+function resolveModel(src: string): string {
+  return /^[\w.-]+\.onnx$/i.test(src) ? ASSETS + src : src;
 }
 
 /** Options for {@link YOLO.predict}. */
@@ -261,8 +273,9 @@ export class YOLO {
     await ensureInit(options?.wasmUrl);
     let bytes: Uint8Array;
     if (typeof source === "string" || source instanceof URL) {
-      const resp = await fetch(source);
-      if (!resp.ok) throw new Error(`failed to fetch model: ${source} (${resp.status})`);
+      const url = resolveModel(source.toString());
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`failed to fetch model: ${url} (${resp.status})`);
       bytes = new Uint8Array(await resp.arrayBuffer());
     } else {
       bytes = source instanceof Uint8Array ? source : new Uint8Array(source);

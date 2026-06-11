@@ -335,7 +335,6 @@ pub mod cuda_guide {}
 // Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
-pub mod colors;
 pub mod device;
 pub mod error;
 pub mod inference;
@@ -343,6 +342,11 @@ pub mod inference;
 pub mod logging;
 pub mod metadata;
 pub mod postprocessing;
+
+// Palettes + pose skeleton. Pure data (the native window viewer inside is gated
+// behind the `visualize` feature), so it compiles on wasm and the browser crate
+// reuses the exact same colors/skeleton as the native annotator.
+pub mod visualizer;
 
 // Internal rayon/sequential abstraction. On native targets it re-exports the
 // rayon prelude; on `wasm32` (no OS threads) it provides sequential shims so the
@@ -365,8 +369,6 @@ pub mod io;
 pub mod model;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod visualizer;
 
 // CUDA-side preprocess + zero-copy device input — internal fast path used by
 // `YOLOModel` when the `cuda-preprocess` feature is enabled and the device is

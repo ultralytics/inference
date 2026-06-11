@@ -2,21 +2,11 @@
 
 //! Browser/WebAssembly bindings for `ultralytics-inference`.
 //!
-//! This crate runs Ultralytics YOLO ONNX models in the browser on **WebGPU**.
-//! Inference is executed by the official ONNX Runtime Web build, bridged into
-//! Rust through [`ort`](https://ort.pyke.io) and its
-//! [`ort-web`](https://ort.pyke.io/backends/web) backend. All preprocessing
-//! (letterbox + normalize) and postprocessing (NMS, coordinate scaling, mask /
-//! keypoint / OBB decoding) is reused verbatim from the core
-//! `ultralytics-inference` crate, so results match the native and Python paths.
-//!
-//! The JavaScript-facing surface is intentionally close to the Ultralytics
-//! Python API: construct a model, then `await model.predict(image)`. The thin
-//! TypeScript wrapper in the published npm package hides the wasm/memory and
-//! WebGPU initialization behind `new YOLO(...)`.
-//!
-//! The whole crate is gated to `wasm32`; on any other target it compiles to an
-//! empty library.
+//! Runs YOLO ONNX models in the browser on WebGPU via ONNX Runtime Web (bridged
+//! by [`ort-web`](https://ort.pyke.io/backends/web)), reusing the core crate's
+//! preprocessing/postprocessing so results match the native and Python paths.
+//! The published npm package wraps this behind a small `YOLO` class. The whole
+//! crate is gated to `wasm32`; elsewhere it compiles to an empty library.
 #![cfg(target_arch = "wasm32")]
 
 use std::cell::Cell;
@@ -31,13 +21,16 @@ use ort_web::sync_outputs;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use ultralytics_inference::colors::{Color, KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::postprocess;
 use ultralytics_inference::preprocessing::{
     preprocess_image_center_crop, preprocess_image_with_precision,
 };
 use ultralytics_inference::results::{Results, Speed};
+use ultralytics_inference::visualizer::color::Color;
+use ultralytics_inference::visualizer::skeleton::{
+    KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
+};
 use ultralytics_inference::{InferenceConfig, Task};
 
 /// Default inference image size used when a model does not record `imgsz` in its
@@ -608,37 +601,60 @@ impl JsResults {
     }
 }
 
-/// Build a translucent colored RGBA overlay for segment instance masks, colored
-/// by each instance's class palette color. Returns empty if there are no masks
-/// or the mask resolution does not match the original image.
+/// Write one colored RGBA pixel at `(x, y)` into a `width`-wide buffer.
+fn put(buf: &mut [u8], w: usize, x: usize, y: usize, c: Color, a: u8) {
+    let i = (y * w + x) * 4;
+    buf[i..i + 4].copy_from_slice(&[c.0, c.1, c.2, a]);
+}
+
+/// Build a translucent colored RGBA overlay (`width*height*4`) from the segment
+/// instance masks or the semantic class map, colored by the class palette.
+/// Empty for other tasks or if the mask resolution does not match the image.
 fn build_mask_overlay(r: &Results) -> Vec<u8> {
-    let (Some(masks), Some(boxes)) = (&r.masks, &r.boxes) else {
-        return Vec::new();
-    };
-    let h = r.orig_shape.0 as usize;
-    let w = r.orig_shape.1 as usize;
-    let shape = masks.data.shape();
-    let (n, mh, mw) = (shape[0], shape[1], shape[2]);
-    if n == 0 || mh != h || mw != w {
-        return Vec::new();
-    }
-    let cls = boxes.cls();
+    let (h, w) = (r.orig_shape.0 as usize, r.orig_shape.1 as usize);
     let mut buf = vec![0u8; w * h * 4];
-    for i in 0..n.min(cls.len()) {
-        let c = Color::from_index(cls[i] as usize);
-        for y in 0..h {
-            for x in 0..w {
-                if masks.data[[i, y, x]] > 0.5 {
-                    let idx = (y * w + x) * 4;
-                    buf[idx] = c.0;
-                    buf[idx + 1] = c.1;
-                    buf[idx + 2] = c.2;
-                    buf[idx + 3] = 140;
+
+    // Segment: per-instance binary masks, each colored by its detection class.
+    if let (Some(masks), Some(boxes)) = (&r.masks, &r.boxes) {
+        let (n, mh, mw) = masks.data.dim();
+        if mh != h || mw != w {
+            return Vec::new();
+        }
+        let cls = boxes.cls();
+        for i in 0..n.min(cls.len()) {
+            let c = Color::from_index(cls[i] as usize);
+            for y in 0..h {
+                for x in 0..w {
+                    if masks.data[[i, y, x]] > 0.5 {
+                        put(&mut buf, w, x, y, c, 140);
+                    }
                 }
             }
         }
+        return buf;
     }
-    buf
+
+    // Semantic: per-pixel class map, blended 50/50 like the native renderer.
+    if let Some(sem) = &r.semantic_mask {
+        if sem.data.dim() != (h, w) {
+            return Vec::new();
+        }
+        for y in 0..h {
+            for x in 0..w {
+                put(
+                    &mut buf,
+                    w,
+                    x,
+                    y,
+                    Color::from_index(sem.data[[y, x]] as usize),
+                    128,
+                );
+            }
+        }
+        return buf;
+    }
+
+    Vec::new()
 }
 
 /// Infer the task label from which result fields are populated.

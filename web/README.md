@@ -4,7 +4,8 @@
 
 Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser on
 **WebGPU** — no server, no Python. Detection, segmentation, pose, classification,
-and OBB, with a small Python-like API and a built-in `annotate()` for drawing.
+OBB, and semantic segmentation, with a small Python-like API and a built-in
+`annotate()` for drawing.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -68,6 +69,23 @@ async function frame() {
 }
 ```
 
+## Models
+
+Pass a bare ONNX name and it **auto-downloads** from the
+[Ultralytics assets](https://github.com/ultralytics/assets/releases) — no local
+files needed:
+
+```ts
+await YOLO.load("yolo26n.onnx");      // detect
+await YOLO.load("yolo11s-seg.onnx");  // segment
+await YOLO.load("yolov8n-pose.onnx"); // pose
+```
+
+Supports **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x` with task
+suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26 only). A
+value containing a `/` or a scheme is used as a URL/path as-is, so you can also
+host your own model.
+
 ## Results shape
 
 `predict()` resolves to a `Results` object shaped like the Ultralytics Python
@@ -83,7 +101,7 @@ Field names match the Rust/Ultralytics `Results` API 1-1:
 | `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`         | obb                   |
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                     | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, color } \| null` | classify              |
-| `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment               |
+| `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment, semantic     |
 | `speed`            | `{ preprocess, inference, postprocess }` ms               | all                   |
 
 `model.names` is the class id -> name map (like `model.names` in Python). Every
