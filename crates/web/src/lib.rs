@@ -395,21 +395,17 @@ impl YoloModel {
             .await
             .map_err(|e| JsError::new(&format!("failed to sync outputs: {e}")))?;
 
-        // Collect each output as an owned f32 buffer + shape for the shared postprocessor.
+        // Borrow each output's data directly (no copy — important for the large
+        // semantic logits, ~160 MB) and feed it to the shared postprocessor while
+        // `outputs` is still alive.
         let t_post = now_ms();
-        let mut owned: Vec<(Vec<f32>, Vec<usize>)> = Vec::with_capacity(self.output_names.len());
+        let mut views: Vec<(&[f32], Vec<usize>)> = Vec::with_capacity(self.output_names.len());
         for name in &self.output_names {
-            let value = &outputs[name.as_str()];
-            let (shape, data) = value
+            let (shape, data) = outputs[name.as_str()]
                 .try_extract_tensor::<f32>()
                 .map_err(|e| JsError::new(&format!("failed to extract output '{name}': {e}")))?;
-            let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
-            owned.push((data.to_vec(), shape_vec));
+            views.push((data, shape.iter().map(|&d| d as usize).collect()));
         }
-        let views: Vec<(&[f32], Vec<usize>)> = owned
-            .iter()
-            .map(|(d, s)| (d.as_slice(), s.clone()))
-            .collect();
 
         let config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
