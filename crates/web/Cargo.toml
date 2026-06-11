@@ -42,6 +42,7 @@ serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 ndarray = "0.17"
 half = "2.7"
+web-sys = { version = "0.3", features = ["Window", "Performance"] }
 # Decode JPEG/PNG image bytes handed in from JavaScript.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 

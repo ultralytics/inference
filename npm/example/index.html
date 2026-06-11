@@ -57,7 +57,10 @@
           log("Running inference...");
           const t0 = performance.now();
           const results = await model.predict(imageUrl);
-          log(`Inference: ${(performance.now() - t0).toFixed(1)} ms`);
+          const total = performance.now() - t0;
+          const s = results.speed;
+          log(`Total predict(): ${total.toFixed(1)} ms (includes image fetch + decode)`);
+          log(`  preprocess: ${s.preprocess.toFixed(1)} ms | inference+sync: ${s.inference.toFixed(1)} ms | postprocess: ${s.postprocess.toFixed(1)} ms`);
           log(`Detections: ${results.boxes.length}`);
           log("Result summary: " + JSON.stringify({
             task: results.task,

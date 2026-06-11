@@ -66,12 +66,24 @@ export interface Probs {
   color: string;
 }
 
+/** Per-stage timing in milliseconds (mirrors Ultralytics `results.speed`). */
+export interface Speed {
+  /** Image decode + letterbox/normalize. */
+  preprocess: number;
+  /** GPU inference (`run_async`) + cross-context output sync. */
+  inference: number;
+  /** NMS, decoding, and coordinate scaling. */
+  postprocess: number;
+}
+
 /** Inference results, shaped to mirror the Ultralytics Python `Results` API. */
 export interface Results {
   /** Task name: `detect`, `segment`, `pose`, `classify`, `obb`, or `semantic`. */
   task: string;
   orig_width: number;
   orig_height: number;
+  /** Per-stage timing in milliseconds. */
+  speed: Speed;
   /** Axis-aligned detections (detect/segment/pose tasks). */
   boxes: Box[];
   /** Oriented detections (obb task). */

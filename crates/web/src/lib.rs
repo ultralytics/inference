@@ -42,6 +42,14 @@ use ultralytics_inference::{InferenceConfig, Task};
 /// metadata. Mirrors the native crate's fallback.
 const DEFAULT_IMGSZ: usize = 640;
 
+/// High-resolution timestamp in milliseconds (`performance.now()`), for the
+/// per-stage `speed` breakdown. Falls back to 0 if unavailable.
+fn now_ms() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map_or(0.0, |p| p.now())
+}
+
 thread_local! {
     /// Whether `ort::set_api` has already installed the ort-web backend. Wasm is
     /// single-threaded, so a thread-local flag is a sufficient one-time guard.
@@ -265,7 +273,14 @@ impl YoloModel {
     }
 
     /// Core async predict: decode -> preprocess -> `run_async` -> sync -> postprocess.
+    ///
+    /// The three timed stages mirror the Ultralytics `speed` breakdown:
+    /// `preprocess` = JPEG/PNG decode + letterbox/normalize; `inference` =
+    /// `run_async` + cross-context output sync; `postprocess` = NMS, decoding,
+    /// and coordinate scaling. (Image *download* happens in JS before this and is
+    /// not counted here.)
     async fn run(&mut self, image: &[u8], conf: f32, iou: f32) -> Result<Results, JsError> {
+        let t_pre = now_ms();
         let dynimg = image::load_from_memory(image)
             .map_err(|e| JsError::new(&format!("failed to decode image: {e}")))?;
 
@@ -279,6 +294,7 @@ impl YoloModel {
         let pre = preprocess_image_with_precision(&dynimg, self.imgsz, self.metadata.stride, false);
 
         // Upload the NCHW f32 tensor into the ORT (WebGPU) context and run.
+        let t_inf = now_ms();
         let input = Tensor::from_array(pre.tensor.clone()).map_err(map_ort)?;
         let run_options = RunOptions::new().map_err(map_ort)?;
         let mut outputs = self
@@ -292,6 +308,7 @@ impl YoloModel {
             .map_err(|e| JsError::new(&format!("failed to sync outputs: {e}")))?;
 
         // Collect each output as an owned f32 buffer + shape for the shared postprocessor.
+        let t_post = now_ms();
         let mut owned: Vec<(Vec<f32>, Vec<usize>)> = Vec::with_capacity(self.output_names.len());
         for name in &self.output_names {
             let value = &outputs[name.as_str()];
@@ -309,7 +326,8 @@ impl YoloModel {
         let config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
-        let speed = Speed::new(0.0, 0.0, 0.0);
+        let t_end = now_ms();
+        let speed = Speed::new(t_inf - t_pre, t_post - t_inf, t_end - t_post);
 
         Ok(postprocess(
             views,
@@ -380,6 +398,17 @@ struct JsProbs {
     color: String,
 }
 
+/// Per-stage timing in milliseconds, mirroring Ultralytics `results.speed`.
+#[derive(Serialize)]
+struct JsSpeed {
+    /// Image decode + letterbox/normalize.
+    preprocess: f64,
+    /// `run_async` + cross-context output sync (the GPU inference).
+    inference: f64,
+    /// NMS, decoding, and coordinate scaling.
+    postprocess: f64,
+}
+
 /// JS-facing results payload. Fields are populated per task; unused ones are
 /// `null` on the JS side.
 #[derive(Serialize)]
@@ -394,6 +423,8 @@ struct JsResults {
     /// Number of instance masks (segment task). Mask pixel data is omitted here
     /// to keep the payload small; request it explicitly in a future API.
     mask_count: usize,
+    /// Per-stage timing (ms).
+    speed: JsSpeed,
 }
 
 impl JsResults {
@@ -486,6 +517,11 @@ impl JsResults {
             keypoints,
             probs,
             mask_count,
+            speed: JsSpeed {
+                preprocess: r.speed.preprocess.unwrap_or(0.0),
+                inference: r.speed.inference.unwrap_or(0.0),
+                postprocess: r.speed.postprocess.unwrap_or(0.0),
+            },
         }
     }
 }
