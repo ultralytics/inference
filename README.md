@@ -471,6 +471,9 @@ const results = await model.predict("bus.jpg");
 console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 ```
 
+Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the
+default), and read `model.device` to see what actually ran.
+
 The browser bindings live in [`crates/web`](crates/web) (the
 `ultralytics-inference-web` cdylib); the JS/TS wrapper and build instructions are
 in [`web/`](web/README.md). A WebGPU-capable browser and a secure context

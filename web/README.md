@@ -59,7 +59,7 @@ await annotate(document.querySelector("canvas"), "bus.jpg", results);
 
 ```ts
 const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
-console.log(model.backend); // "WebGPU" or "CPU (wasm)"
+console.log(model.device); // "webgpu" or "cpu"
 ```
 
 ### Webcam / video
@@ -111,6 +111,7 @@ Field names match the Rust/Ultralytics `Results` API 1-1:
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                     | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, color } \| null` | classify              |
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment, semantic     |
+| `semantic`         | `Uint16Array` (class id per pixel, `width*height`)        | semantic              |
 | `speed`            | `{ preprocess, inference, postprocess }` ms               | all                   |
 
 `model.names` is the class id to name map (like `model.names` in Python). Every
@@ -123,8 +124,10 @@ the native renderer. None of this is duplicated in JS.
 - **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure
   context** (`https://` or `http://localhost`) gives the fast path. Without
   WebGPU (older browsers, some phones), `YOLO.load` automatically falls back to a
-  portable **CPU/wasm** build that is slower but runs everywhere. Force a backend
-  with `YOLO.load(model, { backend: "webgpu" | "cpu" })`.
+  portable **CPU/wasm** build that runs everywhere. Pick the device with
+  `YOLO.load(model, { device: "webgpu" | "cpu" })` (default `"auto"`). If WebGPU
+  cannot engage, the load falls back to CPU; `model.device` reports what actually
+  ran.
 - **Model format**: export your model to ONNX with Ultralytics so the metadata
   (task, class names, `imgsz`) is embedded:
 

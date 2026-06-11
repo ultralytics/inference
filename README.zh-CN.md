@@ -471,6 +471,9 @@ const results = await model.predict("bus.jpg");
 console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 ```
 
+通过 `{ device: "webgpu" | "cpu" }` 选择加速器（默认 `"auto"`），并读取
+`model.device` 查看实际使用的设备。
+
 浏览器绑定位于 [`crates/web`](crates/web)（`ultralytics-inference-web` cdylib），
 JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的浏览器以及安全
 上下文（`https`/`localhost`）。
