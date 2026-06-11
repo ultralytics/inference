@@ -296,7 +296,12 @@ impl YoloModel {
     ///
     /// # Errors
     /// Returns a JS error if the image cannot be decoded or inference fails.
-    pub async fn predict(&mut self, image: Vec<u8>, conf: f32, iou: f32) -> Result<JsValue, JsError> {
+    pub async fn predict(
+        &mut self,
+        image: Vec<u8>,
+        conf: f32,
+        iou: f32,
+    ) -> Result<JsValue, JsError> {
         let dynimg = image::load_from_memory(&image)
             .map_err(|e| JsError::new(&format!("failed to decode image: {e}")))?;
         self.run(dynimg, conf, iou).await
@@ -326,7 +331,8 @@ impl YoloModel {
         }
         let img = image::RgbaImage::from_raw(width, height, rgba)
             .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))?;
-        self.run(image::DynamicImage::ImageRgba8(img), conf, iou).await
+        self.run(image::DynamicImage::ImageRgba8(img), conf, iou)
+            .await
     }
 }
 
