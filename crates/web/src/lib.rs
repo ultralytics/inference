@@ -26,7 +26,7 @@ use ultralytics_inference::postprocessing::postprocess;
 use ultralytics_inference::preprocessing::{
     preprocess_image_center_crop, preprocess_image_with_precision,
 };
-use ultralytics_inference::results::{Results, Speed};
+use ultralytics_inference::results::{Results, SemanticMask, Speed};
 use ultralytics_inference::visualizer::color::Color;
 use ultralytics_inference::visualizer::skeleton::{
     KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
@@ -276,9 +276,10 @@ impl YoloModel {
 
     /// Run inference on a single encoded image (JPEG or PNG bytes).
     ///
-    /// `conf` and `iou` are the confidence and NMS IoU thresholds; pass the
-    /// model defaults (0.25 / 0.7) to match Ultralytics. Returns a plain JS
-    /// object whose shape mirrors the Ultralytics `Results` API.
+    /// `conf` and `iou` are the confidence and NMS IoU thresholds (pass the model
+    /// defaults 0.25 / 0.7 to match Ultralytics); `classes` optionally keeps only
+    /// the given class ids (for semantic, other pixels become background).
+    /// Returns a plain JS object whose shape mirrors the Ultralytics `Results` API.
     ///
     /// # Errors
     /// Returns a JS error if the image cannot be decoded or inference fails.
@@ -287,10 +288,11 @@ impl YoloModel {
         image: Vec<u8>,
         conf: f32,
         iou: f32,
+        classes: Option<Vec<u32>>,
     ) -> Result<JsValue, JsError> {
         let dynimg = image::load_from_memory(&image)
             .map_err(|e| JsError::new(&format!("failed to decode image: {e}")))?;
-        self.run(dynimg, conf, iou).await
+        self.run(dynimg, conf, iou, classes).await
     }
 
     /// Run inference on raw `RGBA` pixels (e.g. a canvas/webcam `ImageData`).
@@ -307,6 +309,7 @@ impl YoloModel {
         height: u32,
         conf: f32,
         iou: f32,
+        classes: Option<Vec<u32>>,
     ) -> Result<JsValue, JsError> {
         let expected = (width as usize) * (height as usize) * 4;
         if rgba.len() != expected {
@@ -317,7 +320,7 @@ impl YoloModel {
         }
         let img = image::RgbaImage::from_raw(width, height, rgba)
             .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))?;
-        self.run(image::DynamicImage::ImageRgba8(img), conf, iou)
+        self.run(image::DynamicImage::ImageRgba8(img), conf, iou, classes)
             .await
     }
 }
@@ -357,6 +360,7 @@ impl YoloModel {
         dynimg: image::DynamicImage,
         conf: f32,
         iou: f32,
+        classes: Option<Vec<u32>>,
     ) -> Result<JsValue, JsError> {
         let t_pre = now_ms();
 
@@ -400,7 +404,10 @@ impl YoloModel {
             views.push((data, shape.iter().map(|&d| d as usize).collect()));
         }
 
-        let config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
+        let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
+        if let Some(classes) = classes {
+            config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
+        }
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
         let t_end = now_ms();
@@ -630,14 +637,11 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
         }
         for y in 0..h {
             for x in 0..w {
-                put(
-                    &mut buf,
-                    w,
-                    x,
-                    y,
-                    Color::from_index(sem.data[[y, x]] as usize),
-                    128,
-                );
+                // Filtered-out classes carry the IGNORE sentinel; leave transparent.
+                let cls = sem.data[[y, x]];
+                if cls != SemanticMask::IGNORE {
+                    put(&mut buf, w, x, y, Color::from_index(cls as usize), 128);
+                }
             }
         }
         return buf;

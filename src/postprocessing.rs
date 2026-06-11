@@ -169,7 +169,23 @@ pub fn postprocess(
         }
         Task::Semantic => {
             let (output, shape) = &outputs[0];
-            postprocess_semantic(output, shape, names, orig_img, path, speed, inference_shape)
+            let n_classes = names.len();
+            let mut results =
+                postprocess_semantic(output, shape, names, orig_img, path, speed, inference_shape);
+            // Adapt the `classes` filter to semantic segmentation: pixels whose
+            // class is not kept become IGNORE. Only meaningful for multi-class
+            // models, matching Ultralytics.
+            if n_classes > 1
+                && config.classes.is_some()
+                && let Some(sm) = results.semantic_mask.as_mut()
+            {
+                for px in &mut sm.data {
+                    if !config.keep_class(usize::from(*px)) {
+                        *px = SemanticMask::IGNORE;
+                    }
+                }
+            }
+            results
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];

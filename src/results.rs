@@ -67,6 +67,11 @@ pub struct SemanticMask {
 }
 
 impl SemanticMask {
+    /// Sentinel class index for "ignore" pixels, e.g. classes filtered out by
+    /// [`InferenceConfig::with_classes`](crate::InferenceConfig::with_classes).
+    /// Renderers skip it and [`class_ids`](Self::class_ids) excludes it.
+    pub const IGNORE: u16 = u16::MAX;
+
     /// Create a new `SemanticMask`.
     #[must_use]
     pub const fn new(data: Array2<u16>, orig_shape: (u32, u32)) -> Self {
@@ -85,13 +90,15 @@ impl SemanticMask {
         self.class_ids().len()
     }
 
-    /// Return sorted unique class IDs present in the mask.
+    /// Return sorted unique class IDs present in the mask (excluding
+    /// [`IGNORE`](Self::IGNORE)).
     #[must_use]
     pub fn class_ids(&self) -> Vec<usize> {
         let mut seen = vec![false; usize::from(u16::MAX) + 1];
         for &v in &self.data {
             seen[usize::from(v)] = true;
         }
+        seen[usize::from(Self::IGNORE)] = false;
         seen.iter()
             .enumerate()
             .filter_map(|(i, &present)| if present { Some(i) } else { None })

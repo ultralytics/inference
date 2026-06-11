@@ -153,6 +153,11 @@ export interface PredictOptions {
   conf?: number;
   /** NMS IoU threshold. Default `0.7` (matches Ultralytics). */
   iou?: number;
+  /**
+   * Keep only these class ids. Omit to keep all. Filters detections for
+   * detect/segment/pose/obb, and for semantic marks other pixels as background.
+   */
+  classes?: number[];
 }
 
 /** Options for {@link annotate}. */
@@ -313,12 +318,13 @@ export class YOLO {
   async predict(image: ImageInput, options?: PredictOptions): Promise<Results> {
     const conf = options?.conf ?? 0.25;
     const iou = options?.iou ?? 0.7;
+    const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return (await this.model.predict_rgba(data, width, height, conf, iou)) as Results;
+      return (await this.model.predict_rgba(data, width, height, conf, iou, classes)) as Results;
     }
     const bytes = await toEncodedBytes(image);
-    return (await this.model.predict(bytes, conf, iou)) as Results;
+    return (await this.model.predict(bytes, conf, iou, classes)) as Results;
   }
 
   /** Release the underlying wasm model. Call when you are done with it. */
