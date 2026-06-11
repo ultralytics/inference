@@ -11,9 +11,9 @@
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
 
 Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser on
-**WebGPU** — no server, no Python. Detection, segmentation, pose, classification,
-OBB, and semantic segmentation, with a small Python-like API and a built-in
-`annotate()` for drawing.
+**WebGPU**, with no server and no Python. It covers detection, segmentation,
+pose, classification, OBB, and semantic segmentation, with a small Python-like
+API and a built-in `annotate()` for drawing.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -23,11 +23,11 @@ const results = await model.predict("bus.jpg");
 await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
 
-It is a **library only** (no CLI — that's the native Rust crate). Under the hood
-the engine is the `ultralytics-inference` Rust crate compiled to WebAssembly;
-inference runs on [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/)
+It is a **library only** (no CLI; that is the native Rust crate). Under the hood
+the engine is the `ultralytics-inference` Rust crate compiled to WebAssembly.
+Inference runs on [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/)
 via [`ort-web`](https://ort.pyke.io/backends/web), and all pre/postprocessing,
-colors, and the pose skeleton come from that shared Rust code — so results and
+colors, and the pose skeleton come from that shared Rust code, so results and
 visuals match the native and Python paths.
 
 ## Install
@@ -49,8 +49,7 @@ for (const box of results.boxes) {
   console.log(box.name, box.conf.toFixed(2), [box.x1, box.y1, box.x2, box.y2]);
 }
 
-// Draw boxes / OBB / pose skeletons / labels onto a canvas in one call —
-// no manual canvas code required.
+// Draw boxes, OBB, pose, and labels onto a canvas in one call (no canvas code).
 await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
 
@@ -83,7 +82,7 @@ A bare ONNX name resolves to the
 [Ultralytics assets release](https://github.com/ultralytics/assets/releases):
 
 ```ts
-await YOLO.load("yolo26n.onnx"); // -> .../releases/download/v8.4.0/yolo26n.onnx
+await YOLO.load("yolo26n.onnx"); // resolves to the release: .../download/v8.4.0/yolo26n.onnx
 ```
 
 Supports **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x` with task
@@ -114,17 +113,17 @@ Field names match the Rust/Ultralytics `Results` API 1-1:
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment, semantic     |
 | `speed`            | `{ preprocess, inference, postprocess }` ms               | all                   |
 
-`model.names` is the class id -> name map (like `model.names` in Python). Every
+`model.names` is the class id to name map (like `model.names` in Python). Every
 detection carries its Ultralytics palette `color`, and `annotate()` draws the
 `masks` overlay and the pose skeleton with the same per-limb/keypoint colors as
-the native renderer — none of which is duplicated in JS.
+the native renderer. None of this is duplicated in JS.
 
 ## Requirements & notes
 
 - **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure
   context** (`https://` or `http://localhost`) gives the fast path. Without
   WebGPU (older browsers, some phones), `YOLO.load` automatically falls back to a
-  portable **CPU/wasm** build — slower, but it runs everywhere. Force a backend
+  portable **CPU/wasm** build that is slower but runs everywhere. Force a backend
   with `YOLO.load(model, { backend: "webgpu" | "cpu" })`.
 - **Model format**: export your model to ONNX with Ultralytics so the metadata
   (task, class names, `imgsz`) is embedded:

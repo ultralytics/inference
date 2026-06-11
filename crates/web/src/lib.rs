@@ -395,7 +395,7 @@ impl YoloModel {
             .await
             .map_err(|e| JsError::new(&format!("failed to sync outputs: {e}")))?;
 
-        // Borrow each output's data directly (no copy — important for the large
+        // Borrow each output's data directly (no copy, important for the large
         // semantic logits, ~160 MB) and feed it to the shared postprocessor while
         // `outputs` is still alive.
         let t_post = now_ms();

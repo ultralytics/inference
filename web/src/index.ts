@@ -9,7 +9,7 @@
  * setup, and image encoding behind a small `YOLO` class:
  *
  * ```ts
- * import { YOLO } from "ultralytics-inference";
+ * import { YOLO } from "@ultralytics/yolo";
  *
  * const model = await YOLO.load("yolo26n.onnx");
  * const results = await model.predict("bus.jpg");
@@ -305,7 +305,7 @@ export class YOLO {
    *
    * Drawable sources (`ImageData`, `HTMLImageElement`, `HTMLCanvasElement`,
    * `HTMLVideoElement`, `ImageBitmap`) take a fast path that reads raw pixels
-   * with no re-encoding — ideal for webcam/video. URLs, `Blob`s, and raw bytes
+   * with no re-encoding, ideal for webcam/video. URLs, `Blob`s, and raw bytes
    * are decoded inside wasm.
    *
    * @param image The image to run on.
@@ -477,7 +477,7 @@ async function resolveBitmap(input: ImageInput): Promise<CanvasImageSource> {
   if (input instanceof Uint8Array) return createImageBitmap(new Blob([input as BlobPart]));
   if (input instanceof ArrayBuffer) return createImageBitmap(new Blob([input]));
   if (input instanceof ImageData) return createImageBitmap(input);
-  // <img>, <canvas>, <video>, ImageBitmap are valid drawImage sources as-is —
+  // <img>, <canvas>, <video>, ImageBitmap are valid drawImage sources as-is;
   // createImageBitmap on a live <video> can throw InvalidStateError.
   return input;
 }

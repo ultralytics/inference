@@ -39,10 +39,10 @@ jobs:
           VERSION=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if npm view "@ultralytics/yolo@$VERSION" version >/dev/null 2>&1; then
-            echo "@ultralytics/yolo@$VERSION already on npm — skipping."
+            echo "@ultralytics/yolo@$VERSION already on npm; skipping."
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
-            echo "@ultralytics/yolo@$VERSION is new — will publish ✅"
+            echo "@ultralytics/yolo@$VERSION is new, will publish"
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
