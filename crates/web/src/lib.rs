@@ -172,9 +172,7 @@ impl YoloModel {
     /// and resolving the input size.
     fn from_session(session: Session) -> Result<Self, JsError> {
         let metadata = parse_metadata(&session)?;
-        let imgsz = metadata
-            .imgsz
-            .unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
+        let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
         let output_names = session
             .outputs()
             .iter()
@@ -225,12 +223,12 @@ impl YoloModel {
             let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
             owned.push((data.to_vec(), shape_vec));
         }
-        let views: Vec<(&[f32], Vec<usize>)> =
-            owned.iter().map(|(d, s)| (d.as_slice(), s.clone())).collect();
+        let views: Vec<(&[f32], Vec<usize>)> = owned
+            .iter()
+            .map(|(d, s)| (d.as_slice(), s.clone()))
+            .collect();
 
-        let config = InferenceConfig::new()
-            .with_confidence(conf)
-            .with_iou(iou);
+        let config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
         let speed = Speed::new(0.0, 0.0, 0.0);
@@ -383,7 +381,10 @@ impl JsResults {
             }
         });
 
-        let mask_count = r.masks.as_ref().map_or(0, ultralytics_inference::Masks::len);
+        let mask_count = r
+            .masks
+            .as_ref()
+            .map_or(0, ultralytics_inference::Masks::len);
 
         Self {
             task: format!("{:?}", task_of(r)).to_lowercase(),

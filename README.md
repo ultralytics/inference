@@ -454,6 +454,28 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `mobile`          | Convenience: NNAPI + CoreML + QNN                                                                     |
 | `all`             | Convenience: annotate + visualize + video                                                             |
 
+## 🌐 Browser / WebGPU (WASM)
+
+The same engine runs in the browser on **WebGPU**, compiled to WebAssembly. The
+forward pass executes on the official ONNX Runtime Web build, bridged through
+[`ort-web`](https://ort.pyke.io/backends/web), while the shared Rust
+preprocessing and postprocessing run in wasm, so results match the native path.
+
+It ships as an npm package (`npm/`) with a Python-like API:
+
+```ts
+import { YOLO } from "ultralytics-inference";
+
+const model = await YOLO.load("yolo26n.onnx");
+const results = await model.predict("bus.jpg");
+console.log(results.boxes); // [{ x1, y1, x2, y2, confidence, class_id, class_name }, ...]
+```
+
+The browser bindings live in [`crates/web`](crates/web) (the
+`ultralytics-inference-web` cdylib) and the JS/TS wrapper, build instructions,
+and a runnable demo are in [`npm/`](npm/README.md). A WebGPU-capable browser and
+a secure context (`https`/`localhost`) are required.
+
 ## 📦 Dependencies
 
 One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyTorch, TensorFlow, or Python runtime required.

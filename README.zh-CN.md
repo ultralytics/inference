@@ -454,6 +454,27 @@ cargo build --release --features "cuda,tensorrt"
 | `mobile`          | 便捷组合：NNAPI + CoreML + QNN                                                           |
 | `all`             | 便捷组合：annotate + visualize + video                                                   |
 
+## 🌐 浏览器 / WebGPU（WASM）
+
+同一套引擎可编译为 WebAssembly，在浏览器中通过 **WebGPU** 运行。前向推理由官方
+ONNX Runtime Web 构建执行，并通过
+[`ort-web`](https://ort.pyke.io/backends/web) 桥接到 Rust；预处理与后处理复用
+共享的 Rust 代码，因此结果与原生路径一致。
+
+它以 npm 包（`npm/`）形式发布，提供与 Python 类似的 API：
+
+```ts
+import { YOLO } from "ultralytics-inference";
+
+const model = await YOLO.load("yolo26n.onnx");
+const results = await model.predict("bus.jpg");
+console.log(results.boxes); // [{ x1, y1, x2, y2, confidence, class_id, class_name }, ...]
+```
+
+浏览器绑定位于 [`crates/web`](crates/web)（`ultralytics-inference-web` cdylib），
+JS/TS 封装、构建说明与可运行示例见 [`npm/`](npm/README.md)。需要支持 WebGPU 的
+浏览器以及安全上下文（`https`/`localhost`）。
+
 ## 📦 依赖
 
 本库的关键优势之一是使用 Rust/ONNX Runtime 技术栈，不需要 PyTorch、TensorFlow 或 Python 运行时。
