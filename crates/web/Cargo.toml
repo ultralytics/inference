@@ -46,5 +46,15 @@ half = "2.7"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 [package.metadata.wasm-pack.profile.release]
-# Smaller, faster-to-load wasm. `-O4` plus name-section stripping.
-wasm-opt = ["-O4"]
+# Smaller, faster-to-load wasm. The bindings pull in SIMD and reference-type
+# instructions, so wasm-opt must be told to accept those features (otherwise it
+# fails validation on the v128 ops).
+wasm-opt = [
+    "-O4",
+    "--enable-simd",
+    "--enable-reference-types",
+    "--enable-bulk-memory",
+    "--enable-mutable-globals",
+    "--enable-nontrapping-float-to-int",
+    "--enable-sign-ext",
+]
