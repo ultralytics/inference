@@ -127,6 +127,38 @@ pub const POSE_COLORS: [[u8; 3]; 20] = [
     [255, 255, 255], // #ffffff
 ];
 
+/// COCO-Pose skeleton: pairs of keypoint indices connected by a limb.
+pub const SKELETON: [[usize; 2]; 19] = [
+    [15, 13],
+    [13, 11],
+    [16, 14],
+    [14, 12],
+    [11, 12],
+    [5, 11],
+    [6, 12],
+    [5, 6],
+    [5, 7],
+    [6, 8],
+    [7, 9],
+    [8, 10],
+    [1, 2],
+    [0, 1],
+    [0, 2],
+    [1, 3],
+    [2, 4],
+    [3, 5],
+    [4, 6],
+];
+
+/// Index into [`POSE_COLORS`] for each limb in [`SKELETON`] (arms=blue,
+/// legs=orange, face=green).
+pub const LIMB_COLOR_INDICES: [usize; 19] = [
+    0, 0, 0, 0, 7, 7, 7, 9, 9, 9, 9, 9, 16, 16, 16, 16, 16, 16, 16,
+];
+
+/// Index into [`POSE_COLORS`] for each of the 17 keypoints.
+pub const KPT_COLOR_INDICES: [usize; 17] = [16, 16, 16, 16, 16, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0, 0, 0];
+
 #[cfg(test)]
 mod tests {
     use super::*;
