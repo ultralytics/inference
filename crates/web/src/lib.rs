@@ -134,42 +134,48 @@ fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
     }
 }
 
+/// Read the next protobuf field at `pos`, advancing it. Returns the field number
+/// and, for length-delimited fields (wire type 2), the payload bytes; varint and
+/// fixed-width fields are skipped and yield `None` payload. Returns `None` at the
+/// end of the buffer or on a malformed field.
+fn read_field<'a>(buf: &'a [u8], pos: &mut usize) -> Option<(u64, Option<&'a [u8]>)> {
+    let tag = read_varint(buf, pos)?;
+    let payload = match tag & 7 {
+        0 => {
+            read_varint(buf, pos)?;
+            None
+        }
+        1 => {
+            *pos += 8;
+            None
+        }
+        5 => {
+            *pos += 4;
+            None
+        }
+        2 => {
+            let len = read_varint(buf, pos)? as usize;
+            let sub = buf.get(*pos..*pos + len)?;
+            *pos += len;
+            Some(sub)
+        }
+        _ => return None,
+    };
+    Some((tag >> 3, payload))
+}
+
 /// Extract `ModelProto.metadata_props` (field 14, repeated
-/// `StringStringEntryProto`) into a key/value map by walking the top-level
-/// protobuf fields. Large fields such as the graph are skipped by length without
-/// being decoded.
+/// `StringStringEntryProto`) into a key/value map. Other fields (including the
+/// large graph) are skipped without being decoded.
 fn parse_metadata_props(buf: &[u8]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let mut pos = 0;
-    while pos < buf.len() {
-        let Some(tag) = read_varint(buf, &mut pos) else {
-            break;
-        };
-        let field = tag >> 3;
-        match tag & 7 {
-            0 => {
-                if read_varint(buf, &mut pos).is_none() {
-                    break;
-                }
-            }
-            1 => pos += 8,
-            5 => pos += 4,
-            2 => {
-                let Some(len) = read_varint(buf, &mut pos) else {
-                    break;
-                };
-                let len = len as usize;
-                let Some(sub) = buf.get(pos..pos + len) else {
-                    break;
-                };
-                pos += len;
-                if field == 14
-                    && let Some((key, value)) = parse_string_string_entry(sub)
-                {
-                    map.insert(key, value);
-                }
-            }
-            _ => break,
+    while let Some((field, payload)) = read_field(buf, &mut pos) {
+        if field == 14
+            && let Some(sub) = payload
+            && let Some((key, value)) = parse_string_string_entry(sub)
+        {
+            map.insert(key, value);
         }
     }
     map
@@ -180,27 +186,14 @@ fn parse_string_string_entry(buf: &[u8]) -> Option<(String, String)> {
     let mut pos = 0;
     let mut key = None;
     let mut value = None;
-    while pos < buf.len() {
-        let tag = read_varint(buf, &mut pos)?;
-        let field = tag >> 3;
-        match tag & 7 {
-            2 => {
-                let len = read_varint(buf, &mut pos)? as usize;
-                let bytes = buf.get(pos..pos + len)?;
-                pos += len;
-                let text = String::from_utf8_lossy(bytes).into_owned();
-                match field {
-                    1 => key = Some(text),
-                    2 => value = Some(text),
-                    _ => {}
-                }
+    while let Some((field, payload)) = read_field(buf, &mut pos) {
+        if let Some(sub) = payload {
+            let text = String::from_utf8_lossy(sub).into_owned();
+            match field {
+                1 => key = Some(text),
+                2 => value = Some(text),
+                _ => {}
             }
-            0 => {
-                read_varint(buf, &mut pos)?;
-            }
-            1 => pos += 8,
-            5 => pos += 4,
-            _ => return None,
         }
     }
     Some((key?, value.unwrap_or_default()))
