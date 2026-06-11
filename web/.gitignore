@@ -1,0 +1,8 @@
+node_modules/
+dist/
+pkg/
+# Generated from the repo root LICENSE at pack time (prepack)
+LICENSE
+
+# Local demo (page + models + self-hosted ONNX Runtime + sample images), not committed
+example/

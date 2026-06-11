@@ -1,0 +1,54 @@
+{
+  "name": "@ultralytics/yolo",
+  "version": "0.0.20",
+  "description": "Run Ultralytics YOLO models in the browser on WebGPU (WebAssembly, ONNX Runtime Web via ort-web). Python-like API.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./pkg/*": "./pkg/*"
+  },
+  "files": [
+    "dist",
+    "pkg",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": [
+    "./pkg/*"
+  ],
+  "scripts": {
+    "build:wasm": "wasm-pack build ../crates/web --release --target web --out-dir \"$PWD/pkg\" --out-name ultralytics_inference_web && rm -f \"$PWD/pkg/.gitignore\"",
+    "build:ts": "tsc",
+    "build": "npm run build:wasm && npm run build:ts",
+    "prepack": "cp ../LICENSE ./LICENSE",
+    "clean": "rm -rf dist pkg LICENSE"
+  },
+  "keywords": [
+    "yolo",
+    "ultralytics",
+    "inference",
+    "webgpu",
+    "wasm",
+    "onnx",
+    "object-detection",
+    "computer-vision"
+  ],
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ultralytics/inference"
+  },
+  "homepage": "https://www.ultralytics.com",
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

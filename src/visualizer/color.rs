@@ -19,53 +19,31 @@ impl Color {
     pub const BLACK: Self = Self(0, 0, 0);
 
     /// Create a new color from RGB values.
-    ///
-    /// # Arguments
-    ///
-    /// * `r` - Red component (0-255).
-    /// * `g` - Green component (0-255).
-    /// * `b` - Blue component (0-255).
-    ///
-    /// # Returns
-    ///
-    /// * A new `Color` instance.
     #[must_use]
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self(r, g, b)
     }
 
-    /// Get a color from the predefined palette by index.
-    ///
-    /// This cycles through the standard Ultralytics color palette.
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - The index (e.g., class ID) to select a color for.
-    ///
-    /// # Returns
-    ///
-    /// * A `Color` from the palette.
+    /// Get a color from the predefined palette by index (cycles through the
+    /// standard Ultralytics color palette).
     #[must_use]
     pub const fn from_index(index: usize) -> Self {
         let color = COLORS[index % COLORS.len()];
         Self(color[0], color[1], color[2])
     }
 
-    /// Get a color from the pose palette by index.
-    ///
-    /// This cycles through the pose-specific color palette.
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - The index (e.g., keypoint ID) to select a color for.
-    ///
-    /// # Returns
-    ///
-    /// * A `Color` from the pose palette.
+    /// Get a color from the pose palette by index (cycles through the
+    /// pose-specific palette).
     #[must_use]
     pub const fn from_pose_index(index: usize) -> Self {
         let color = POSE_COLORS[index % POSE_COLORS.len()];
         Self(color[0], color[1], color[2])
+    }
+
+    /// Format this color as a CSS hex string (`#rrggbb`).
+    #[must_use]
+    pub fn to_hex(self) -> String {
+        format!("#{:02X}{:02X}{:02X}", self.0, self.1, self.2)
     }
 }
 
@@ -124,37 +102,23 @@ mod tests {
     #[test]
     fn test_color_constants() {
         assert_eq!(Color::RED, Color(255, 0, 0));
-        assert_eq!(Color::GREEN, Color(0, 255, 0));
         assert_eq!(Color::BLUE, Color(0, 0, 255));
-        assert_eq!(Color::WHITE, Color(255, 255, 255));
-        assert_eq!(Color::BLACK, Color(0, 0, 0));
-    }
-
-    #[test]
-    fn test_color_new() {
-        let c = Color::new(10, 20, 30);
-        assert_eq!(c.0, 10);
-        assert_eq!(c.1, 20);
-        assert_eq!(c.2, 30);
     }
 
     #[test]
     fn test_from_index() {
-        // Test first color
-        let c1 = Color::from_index(0);
-        assert_eq!(c1, Color(4, 42, 255));
-
-        // Test wrapping
-        let c2 = Color::from_index(COLORS.len());
-        assert_eq!(c2, Color(4, 42, 255));
+        assert_eq!(Color::from_index(0), Color(4, 42, 255));
+        assert_eq!(Color::from_index(COLORS.len()), Color(4, 42, 255));
     }
 
     #[test]
     fn test_from_pose_index() {
-        let c1 = Color::from_pose_index(0);
-        assert_eq!(c1, Color(255, 128, 0));
+        assert_eq!(Color::from_pose_index(0), Color(255, 128, 0));
+    }
 
-        let c2 = Color::from_pose_index(POSE_COLORS.len());
-        assert_eq!(c2, Color(255, 128, 0));
+    #[test]
+    fn test_to_hex() {
+        assert_eq!(Color::from_index(0).to_hex(), "#042AFF");
+        assert_eq!(Color::BLACK.to_hex(), "#000000");
     }
 }

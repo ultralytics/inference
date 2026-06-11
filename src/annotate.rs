@@ -324,8 +324,11 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         let mask_row = y * w;
         let img_row = y * w * 3;
         for x in 0..w {
-            let class_id = mask_data[mask_row + x] as usize;
-            let color = COLORS[class_id % n_colors];
+            let raw = mask_data[mask_row + x];
+            if raw == crate::results::SemanticMask::IGNORE {
+                continue; // filtered-out class: leave the original pixel
+            }
+            let color = COLORS[raw as usize % n_colors];
             let p = img_row + x * 3;
             buf[p] = (buf[p] / 2).saturating_add(color[0] / 2);
             buf[p + 1] = (buf[p + 1] / 2).saturating_add(color[1] / 2);

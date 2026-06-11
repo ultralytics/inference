@@ -183,6 +183,53 @@ jobs:
       - name: Build (annotate + video features)
         run: cargo build --features annotate,video
 
+  # Browser/WebAssembly build: guards that the core library stays wasm-compatible
+  # and that the WebGPU (ort-web) bindings + npm wrapper build end to end.
+  wasm:
+    name: wasm / browser
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: wasm
+
+      - name: Ensure toolchain
+        run: rustup show
+
+      # The core crate must keep compiling for wasm without the native backend.
+      - name: Build core lib for wasm32
+        run: cargo build -p ultralytics-inference --lib --no-default-features --target wasm32-unknown-unknown
+
+      - name: Clippy WebGPU bindings (wasm32)
+        run: cargo clippy -p ultralytics-inference-web --target wasm32-unknown-unknown -- -D warnings
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912 # v2.81.10
+        with:
+          tool: wasm-pack
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Builds the wasm (wasm-pack) and the TypeScript wrapper.
+      - name: Build npm package
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
   # Code coverage (runs on Ubuntu with FFmpeg dev libs for full feature coverage)
   coverage:
     name: coverage

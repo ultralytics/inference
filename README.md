@@ -147,7 +147,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.19 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.20 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -167,7 +167,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.19 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.20 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -263,7 +263,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.19"
+ultralytics-inference = "0.0.20"
 ```
 
 ```toml
@@ -453,6 +453,31 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `intel`           | Convenience: OpenVINO + oneDNN                                                                        |
 | `mobile`          | Convenience: NNAPI + CoreML + QNN                                                                     |
 | `all`             | Convenience: annotate + visualize + video                                                             |
+
+## 🌐 Browser / WebGPU (WASM)
+
+The same engine runs in the browser on **WebGPU**, compiled to WebAssembly. The
+forward pass executes on the official ONNX Runtime Web build, bridged through
+[`ort-web`](https://ort.pyke.io/backends/web), while the shared Rust
+preprocessing and postprocessing run in wasm, so results match the native path.
+
+It ships as the [`@ultralytics/yolo`](web/README.md) npm package:
+
+```ts
+import { YOLO } from "@ultralytics/yolo";
+
+const model = await YOLO.load("yolo26n.onnx");
+const results = await model.predict("bus.jpg");
+console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
+```
+
+Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the
+default), and read `model.device` to see what actually ran.
+
+The browser bindings live in [`crates/web`](crates/web) (the
+`ultralytics-inference-web` cdylib); the JS/TS wrapper and build instructions are
+in [`web/`](web/README.md). A WebGPU-capable browser and a secure context
+(`https`/`localhost`) are required.
 
 ## 📦 Dependencies
 

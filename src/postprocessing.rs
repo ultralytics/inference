@@ -20,10 +20,11 @@ use std::sync::Arc;
 
 use wide::f32x8;
 
+#[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
+use crate::parallel::*;
 use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
-use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -168,7 +169,23 @@ pub fn postprocess(
         }
         Task::Semantic => {
             let (output, shape) = &outputs[0];
-            postprocess_semantic(output, shape, names, orig_img, path, speed, inference_shape)
+            let n_classes = names.len();
+            let mut results =
+                postprocess_semantic(output, shape, names, orig_img, path, speed, inference_shape);
+            // Adapt the `classes` filter to semantic segmentation: pixels whose
+            // class is not kept become IGNORE. Only meaningful for multi-class
+            // models, matching Ultralytics.
+            if n_classes > 1
+                && config.classes.is_some()
+                && let Some(sm) = results.semantic_mask.as_mut()
+            {
+                for px in &mut sm.data {
+                    if !config.keep_class(usize::from(*px)) {
+                        *px = SemanticMask::IGNORE;
+                    }
+                }
+            }
+            results
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];
@@ -887,14 +904,19 @@ fn postprocess_segment(
     // Initialize output array
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
 
-    Zip::from(masks_data.outer_iter_mut())
+    let zip = Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter())
-        .par_for_each(|mask_out, mask_flat, box_data| {
-            apply_mask_proto(
-                mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-            );
-        });
+        .and(boxes_data.outer_iter());
+    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
+        apply_mask_proto(
+            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+        );
+    };
+    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
+    #[cfg(not(target_arch = "wasm32"))]
+    zip.par_for_each(apply);
+    #[cfg(target_arch = "wasm32")]
+    zip.for_each(apply);
 
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
@@ -1514,14 +1536,19 @@ fn postprocess_segment_end2end(
     let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
 
     let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
-    Zip::from(masks_data.outer_iter_mut())
+    let zip = Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter())
-        .par_for_each(|mask_out, mask_flat, box_data| {
-            apply_mask_proto(
-                mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-            );
-        });
+        .and(boxes_data.outer_iter());
+    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
+        apply_mask_proto(
+            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+        );
+    };
+    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
+    #[cfg(not(target_arch = "wasm32"))]
+    zip.par_for_each(apply);
+    #[cfg(target_arch = "wasm32")]
+    zip.for_each(apply);
 
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));

@@ -335,18 +335,40 @@ pub mod cuda_guide {}
 // Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
-pub mod batch;
-pub mod cli;
 pub mod device;
-pub mod download;
 pub mod error;
 pub mod inference;
-pub mod io;
 
 pub mod logging;
 pub mod metadata;
-pub mod model;
 pub mod postprocessing;
+
+// Palettes + pose skeleton. Pure data (the native window viewer inside is gated
+// behind the `visualize` feature), so it compiles on wasm and the browser crate
+// reuses the exact same colors/skeleton as the native annotator.
+pub mod visualizer;
+
+// Internal rayon/sequential abstraction. On native targets it re-exports the
+// rayon prelude; on `wasm32` (no OS threads) it provides sequential shims so the
+// shared preprocessing/postprocessing code compiles unchanged. See `src/parallel.rs`.
+mod parallel;
+
+// Backend and host-only modules. These depend on the native ONNX Runtime (`ort`),
+// OS threads, filesystem, sockets, or windowing, none of which are available on
+// `wasm32-unknown-unknown`. The browser build (the `ultralytics-inference-web`
+// crate) reuses only the wasm-safe modules above plus its own `ort-web` session.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod batch;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cli;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod download;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod io;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod model;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod source;
 
 // CUDA-side preprocess + zero-copy device input — internal fast path used by
 // `YOLOModel` when the `cuda-preprocess` feature is enabled and the device is
@@ -356,17 +378,17 @@ pub mod postprocessing;
 mod cuda_inference;
 pub mod preprocessing;
 pub mod results;
-pub mod source;
 pub mod task;
 pub mod utils;
-pub mod visualizer;
 
 // Re-export main types for convenience
 pub use device::Device;
 pub use error::{InferenceError, Result};
 pub use inference::InferenceConfig;
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::YOLOModel;
 pub use results::{Boxes, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
+#[cfg(not(target_arch = "wasm32"))]
 pub use source::{Source, SourceIterator, SourceMeta};
 pub use task::Task;
 
