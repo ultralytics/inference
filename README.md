@@ -461,20 +461,20 @@ forward pass executes on the official ONNX Runtime Web build, bridged through
 [`ort-web`](https://ort.pyke.io/backends/web), while the shared Rust
 preprocessing and postprocessing run in wasm, so results match the native path.
 
-It ships as an npm package (`web/`) with a Python-like API:
+It ships as the [`@ultralytics/yolo`](web/README.md) npm package:
 
 ```ts
-import { YOLO } from "ultralytics-inference";
+import { YOLO } from "@ultralytics/yolo";
 
 const model = await YOLO.load("yolo26n.onnx");
 const results = await model.predict("bus.jpg");
-console.log(results.boxes); // [{ x1, y1, x2, y2, confidence, class_id, class_name }, ...]
+console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 ```
 
 The browser bindings live in [`crates/web`](crates/web) (the
-`ultralytics-inference-web` cdylib) and the JS/TS wrapper, build instructions,
-and a runnable demo are in [`web/`](web/README.md). A WebGPU-capable browser and
-a secure context (`https`/`localhost`) are required.
+`ultralytics-inference-web` cdylib); the JS/TS wrapper and build instructions are
+in [`web/`](web/README.md). A WebGPU-capable browser and a secure context
+(`https`/`localhost`) are required.
 
 ## 📦 Dependencies
 

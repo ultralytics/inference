@@ -3,7 +3,7 @@
 /**
  * Browser bindings for Ultralytics YOLO inference on WebGPU.
  *
- * Thin, Python-like wrapper around the WebAssembly module compiled from the
+ * Thin TypeScript wrapper around the WebAssembly module compiled from the
  * `ultralytics-inference` Rust crate. Inference runs on the GPU through ONNX
  * Runtime Web (bridged by `ort-web`); this module hides the wasm init, GPU
  * setup, and image encoding behind a small `YOLO` class:
@@ -256,9 +256,8 @@ function get2d(canvas: HTMLCanvasElement | OffscreenCanvas, options?: CanvasRend
 }
 
 /**
- * A loaded YOLO model. Mirrors the Ultralytics Python `YOLO` class as closely as
- * the browser allows (loading is asynchronous, so use {@link YOLO.load} instead
- * of a constructor).
+ * A loaded YOLO model. Loading is asynchronous, so use {@link YOLO.load} instead
+ * of a constructor.
  */
 export class YOLO {
   private constructor(private readonly model: YoloModel) {}

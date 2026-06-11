@@ -461,19 +461,19 @@ ONNX Runtime Web 构建执行，并通过
 [`ort-web`](https://ort.pyke.io/backends/web) 桥接到 Rust；预处理与后处理复用
 共享的 Rust 代码，因此结果与原生路径一致。
 
-它以 npm 包（`web/`）形式发布，提供与 Python 类似的 API：
+它以 [`@ultralytics/yolo`](web/README.md) npm 包形式发布：
 
 ```ts
-import { YOLO } from "ultralytics-inference";
+import { YOLO } from "@ultralytics/yolo";
 
 const model = await YOLO.load("yolo26n.onnx");
 const results = await model.predict("bus.jpg");
-console.log(results.boxes); // [{ x1, y1, x2, y2, confidence, class_id, class_name }, ...]
+console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 ```
 
 浏览器绑定位于 [`crates/web`](crates/web)（`ultralytics-inference-web` cdylib），
-JS/TS 封装、构建说明与可运行示例见 [`web/`](web/README.md)。需要支持 WebGPU 的
-浏览器以及安全上下文（`https`/`localhost`）。
+JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的浏览器以及安全
+上下文（`https`/`localhost`）。
 
 ## 📦 依赖
 

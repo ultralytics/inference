@@ -12,8 +12,8 @@
 
 Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser on
 **WebGPU**, with no server and no Python. It covers detection, segmentation,
-pose, classification, OBB, and semantic segmentation, with a small Python-like
-API and a built-in `annotate()` for drawing.
+pose, classification, OBB, and semantic segmentation, with a compact
+TypeScript API and a built-in `annotate()` for drawing.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -97,7 +97,7 @@ value containing a `/` or a scheme is used as a URL/path as-is.
 
 ## Results shape
 
-`predict()` resolves to a `Results` object shaped like the Ultralytics Python
+`predict()` resolves to a `Results` object shaped like the Ultralytics
 `Results`:
 
 Field names match the Rust/Ultralytics `Results` API 1-1:
