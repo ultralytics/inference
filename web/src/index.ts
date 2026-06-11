@@ -97,6 +97,12 @@ export interface Results {
   probs: Probs | null;
   /** Segment/semantic masks as a translucent RGBA overlay (`width*height*4`), else empty. */
   masks: Uint8Array;
+  /**
+   * Semantic segmentation class id per pixel, row-major (`width*height`),
+   * `undefined` for other tasks. The sentinel `65535` marks background or
+   * class-filtered pixels. The `masks` overlay is its renderable form.
+   */
+  semantic?: Uint16Array;
   speed: Speed;
 }
 
@@ -115,23 +121,27 @@ export interface LoadOptions {
    */
   ortBaseUrl?: string | URL;
   /**
-   * Which accelerator to use. `"auto"` (default) picks WebGPU when the browser
-   * has a working adapter, otherwise the portable CPU/wasm build. `"webgpu"` or
-   * `"cpu"` force one.
+   * Which device to run on, mirroring the native `device` option. `"auto"`
+   * (default) picks WebGPU when the browser has a working adapter, otherwise the
+   * portable CPU/wasm build. `"webgpu"` or `"cpu"` force one; the GPU adapter is
+   * chosen automatically by the browser. If WebGPU fails to engage the model
+   * falls back to CPU; read {@link YOLO.device} to see what actually ran.
    */
-  backend?: "auto" | "webgpu" | "cpu";
+  device?: "auto" | "webgpu" | "cpu";
 }
 
-/** Pick WebGPU vs CPU: respect an explicit choice, else feature-detect an adapter. */
-async function wantWebGPU(pref?: "auto" | "webgpu" | "cpu"): Promise<boolean> {
-  if (pref === "cpu") return false;
-  if (pref === "webgpu") return true;
+/**
+ * Resolve the device string passed to wasm. An explicit choice is honored;
+ * `"auto"` feature-detects a WebGPU adapter and otherwise falls back to CPU.
+ */
+async function resolveDevice(pref?: "auto" | "webgpu" | "cpu"): Promise<string> {
+  if (pref === "cpu" || pref === "webgpu") return pref;
   const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-  if (!gpu) return false;
+  if (!gpu) return "cpu";
   try {
-    return !!(await gpu.requestAdapter());
+    return (await gpu.requestAdapter()) ? "webgpu" : "cpu";
   } catch {
-    return false;
+    return "cpu";
   }
 }
 
@@ -145,6 +155,17 @@ const ASSETS = "https://github.com/ultralytics/assets/releases/download/v8.4.0/"
  */
 function resolveModel(src: string): string {
   return /^[\w.-]+\.onnx$/i.test(src) ? ASSETS + src : src;
+}
+
+/**
+ * Reinterpret the wasm payload's little-endian `semantic` bytes as a
+ * `Uint16Array` of class ids (a zero-copy view), leaving every other field as-is.
+ */
+function decodeResults(raw: unknown): Results {
+  const r = raw as Results & { semantic?: Uint8Array | Uint16Array };
+  const sem = r.semantic as Uint8Array | undefined;
+  r.semantic = sem && sem.length ? new Uint16Array(sem.buffer, sem.byteOffset, sem.length / 2) : undefined;
+  return r as Results;
 }
 
 /** Options for {@link YOLO.predict}. */
@@ -268,7 +289,7 @@ export class YOLO {
   private constructor(private readonly model: YoloModel) {}
 
   /**
-   * Load a model and initialize the WebGPU backend.
+   * Load a model and initialize the ONNX Runtime backend.
    *
    * @param source ONNX model URL/path, or its raw bytes.
    * @param options Optional loader options (e.g. an explicit wasm URL).
@@ -285,8 +306,8 @@ export class YOLO {
       bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
     }
     const ortBaseUrl = options?.ortBaseUrl ? options.ortBaseUrl.toString() : undefined;
-    const webgpu = await wantWebGPU(options?.backend);
-    return new YOLO(await YoloModel.load_bytes(bytes, ortBaseUrl, webgpu));
+    const device = await resolveDevice(options?.device);
+    return new YOLO(await YoloModel.load_bytes(bytes, ortBaseUrl, device));
   }
 
   /** The model's task (`detect`, `segment`, `pose`, `classify`, `obb`, `semantic`). */
@@ -294,9 +315,9 @@ export class YOLO {
     return this.model.task;
   }
 
-  /** The active accelerator / execution provider (e.g. `"WebGPU"`). */
-  get backend(): string {
-    return this.model.backend;
+  /** The active device that ran inference (`"webgpu"` or `"cpu"`). */
+  get device(): string {
+    return this.model.device;
   }
 
   /** Class id -> name map (like Ultralytics `model.names`). */
@@ -321,10 +342,10 @@ export class YOLO {
     const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return (await this.model.predict_rgba(data, width, height, conf, iou, classes)) as Results;
+      return decodeResults(await this.model.predict_rgba(data, width, height, conf, iou, classes));
     }
     const bytes = await toEncodedBytes(image);
-    return (await this.model.predict(bytes, conf, iou, classes)) as Results;
+    return decodeResults(await this.model.predict(bytes, conf, iou, classes));
   }
 
   /** Release the underlying wasm model. Call when you are done with it. */

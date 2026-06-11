@@ -9,7 +9,7 @@
 //! crate is gated to `wasm32`; elsewhere it compiles to an empty library.
 #![cfg(target_arch = "wasm32")]
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -37,6 +37,43 @@ use ultralytics_inference::{InferenceConfig, Task};
 /// metadata. Mirrors the native crate's fallback.
 const DEFAULT_IMGSZ: usize = 640;
 
+/// The device (accelerator) a model load asks for, mirroring the native
+/// [`Device`](ultralytics_inference::Device) concept for the browser.
+///
+/// `WebGpu` needs the accelerated ONNX Runtime build (jsep); `Cpu` is the
+/// portable wasm fallback that runs everywhere.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Device {
+    WebGpu,
+    Cpu,
+}
+
+impl Device {
+    /// Parse the JS device string; anything unrecognized is the CPU fallback.
+    fn parse(s: &str) -> Self {
+        if s == "webgpu" {
+            Self::WebGpu
+        } else {
+            Self::Cpu
+        }
+    }
+
+    /// Whether this device needs the accelerated (jsep) runtime build versus the
+    /// portable CPU/wasm build.
+    fn accelerated(self) -> bool {
+        self == Self::WebGpu
+    }
+
+    /// Lowercase label reported via [`YoloModel::device`], matching the native
+    /// `Device` display style (`"cpu"`, `"coreml"`, ...).
+    fn label(self) -> &'static str {
+        match self {
+            Self::WebGpu => "webgpu",
+            Self::Cpu => "cpu",
+        }
+    }
+}
+
 /// High-resolution timestamp in milliseconds (`performance.now()`), for the
 /// per-stage `speed` breakdown. Falls back to 0 if unavailable.
 fn now_ms() -> f64 {
@@ -46,31 +83,64 @@ fn now_ms() -> f64 {
 }
 
 thread_local! {
-    /// Whether `ort::set_api` has already installed the ort-web backend. Wasm is
-    /// single-threaded, so a thread-local flag is a sufficient one-time guard.
-    static API_READY: Cell<bool> = const { Cell::new(false) };
+    /// The backend the page's ort API was installed with: `(webgpu_runtime,
+    /// self-hosted base URL)`. `ort::set_api` installs the ONNX Runtime
+    /// process-globally and only once, so every model on a page shares it. We
+    /// record the choice so a later load that asks for a different one is
+    /// rejected rather than silently reusing the first. Wasm is single-threaded,
+    /// so a thread-local is a sufficient guard.
+    static BACKEND: RefCell<Option<(bool, Option<String>)>> = const { RefCell::new(None) };
 }
 
-/// Install the ort-web backend exactly once for this page.
+/// Install the ort-web backend for this page, or verify a later load matches the
+/// one already installed.
 ///
 /// Loads either the WebGPU build (`webgpu = true`) or the portable CPU/wasm build
 /// (`webgpu = false`, the universal fallback for browsers without WebGPU). The
 /// build is fetched from `cdn.pyke.io` unless `ort_base_url` is given to
-/// self-host it. Subsequent calls are no-ops.
+/// self-host it. The ONNX Runtime is process-global and installed once: the first
+/// load wins, and a later load requesting a different backend or runtime source is
+/// rejected (reload the page to switch) instead of silently ignored.
+///
+/// # Errors
+/// Returns a JS error if the backend fails to initialize, or if it was already
+/// initialized with a different `webgpu`/`ort_base_url`.
 async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<(), JsError> {
-    if API_READY.with(Cell::get) {
-        return Ok(());
+    let requested = (webgpu, ort_base_url.filter(|s| !s.is_empty()));
+
+    if let Some(active) = BACKEND.with(|b| b.borrow().clone()) {
+        if active == requested {
+            return Ok(());
+        }
+        let label = |w: bool| if w { "WebGPU" } else { "CPU (wasm)" };
+        let detail = if active.0 == requested.0 {
+            format!(
+                "runtime source cannot change (already loaded from {})",
+                active.1.as_deref().unwrap_or("the default CDN")
+            )
+        } else {
+            format!(
+                "backend {} cannot change to {}",
+                label(active.0),
+                label(requested.0)
+            )
+        };
+        return Err(JsError::new(&format!(
+            "the ONNX Runtime is initialized once per page and shared by every model: \
+             {detail}. Load all models with the same options, or reload the page to switch."
+        )));
     }
-    let api = match ort_base_url.filter(|s| !s.is_empty()) {
+
+    let api = match &requested.1 {
         // Self-hosted: pick the entrypoint + binary for the chosen build. The
         // wrapper (.mjs) name defaults to the binary with `.wasm` -> `.mjs`.
         Some(base) => {
             let dist = if webgpu {
-                ort_web::Dist::new(base)
+                ort_web::Dist::new(base.clone())
                     .with_script_name("ort.webgpu.min.js")
                     .with_binary_name("ort-wasm-simd-threaded.jsep.wasm")
             } else {
-                ort_web::Dist::new(base)
+                ort_web::Dist::new(base.clone())
                     .with_script_name("ort.wasm.min.js")
                     .with_binary_name("ort-wasm-simd-threaded.wasm")
             };
@@ -87,7 +157,7 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
     }
     .map_err(|e| JsError::new(&format!("failed to initialize ort-web backend: {e}")))?;
     ort::set_api(api);
-    API_READY.with(|c| c.set(true));
+    BACKEND.with(|b| *b.borrow_mut() = Some(requested));
     Ok(())
 }
 
@@ -210,18 +280,23 @@ pub struct YoloModel {
     output_names: Vec<String>,
     /// Network input size as `(height, width)`.
     imgsz: (usize, usize),
-    /// Active accelerator label (`"WebGPU"` or `"CPU (wasm)"`).
-    backend: &'static str,
+    /// Active device label (`"webgpu"` or `"cpu"`).
+    device: &'static str,
 }
 
 #[wasm_bindgen]
 impl YoloModel {
     /// Load a model from raw ONNX bytes (fetched by the JS wrapper).
     ///
-    /// Initializes the WebGPU backend on first use, reads the embedded
+    /// Initializes the accelerated backend on first use, reads the embedded
     /// Ultralytics metadata from the model bytes, then commits an ONNX Runtime
-    /// session with the WebGPU execution provider. Equivalent to Python's
+    /// session on the requested execution provider. Equivalent to Python's
     /// `YOLO('model.onnx')`.
+    ///
+    /// `device` is `"webgpu"` or `"cpu"` (the browser picks the GPU adapter
+    /// automatically). WebGPU is registered with `error_on_failure`, so if the
+    /// session cannot commit on it the load falls back to CPU and
+    /// [`device`](Self::device) reports what actually ran.
     ///
     /// # Errors
     /// Returns a JS error if the backend cannot start, the bytes are not a valid
@@ -229,23 +304,16 @@ impl YoloModel {
     pub async fn load_bytes(
         bytes: Vec<u8>,
         ort_base_url: Option<String>,
-        webgpu: bool,
+        device: String,
     ) -> Result<YoloModel, JsError> {
-        ensure_backend(ort_base_url, webgpu).await?;
+        let want = Device::parse(&device);
+        ensure_backend(ort_base_url, want.accelerated()).await?;
         let metadata = build_metadata(&bytes)?;
-        let mut builder = Session::builder().map_err(map_ort)?;
-        if webgpu {
-            // No `error_on_failure`: if the adapter is missing, ORT falls back to
-            // its CPU EP rather than aborting.
-            builder = builder
-                .with_execution_providers([WebGPU::default().build()])
-                .map_err(map_ort)?;
+        if want != Device::Cpu && let Ok(session) = Self::commit(&bytes, want).await {
+            return Self::from_session(session, metadata, want);
         }
-        let session = builder
-            .commit_from_memory(&bytes)
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load model from bytes: {e}")))?;
-        Self::from_session(session, metadata, webgpu)
+        let session = Self::commit(&bytes, Device::Cpu).await?;
+        Self::from_session(session, metadata, Device::Cpu)
     }
 
     /// The model's task (`"detect"`, `"segment"`, `"pose"`, `"classify"`,
@@ -256,12 +324,12 @@ impl YoloModel {
         format!("{:?}", self.metadata.task).to_lowercase()
     }
 
-    /// The active accelerator: `"WebGPU"` or `"CPU (wasm)"` (the fallback when the
-    /// browser has no WebGPU).
+    /// The active device: `"webgpu"` or `"cpu"` (the fallback when WebGPU is
+    /// unavailable). Mirrors the native `Device` display.
     #[wasm_bindgen(getter)]
     #[must_use]
-    pub fn backend(&self) -> String {
-        self.backend.to_string()
+    pub fn device(&self) -> String {
+        self.device.to_string()
     }
 
     /// Class id -> name map (like Ultralytics `model.names`), as a JS object.
@@ -326,12 +394,31 @@ impl YoloModel {
 }
 
 impl YoloModel {
+    /// Commit an ONNX Runtime session from model bytes on `device`.
+    ///
+    /// WebGPU is registered with `error_on_failure`, so a missing or broken
+    /// adapter surfaces as an error (which [`load_bytes`](Self::load_bytes)
+    /// catches to fall back to CPU) instead of a silent downgrade we would
+    /// mislabel.
+    async fn commit(bytes: &[u8], device: Device) -> Result<Session, JsError> {
+        let mut builder = Session::builder().map_err(map_ort)?;
+        if device == Device::WebGpu {
+            builder = builder
+                .with_execution_providers([WebGPU::default().build().error_on_failure()])
+                .map_err(map_ort)?;
+        }
+        builder
+            .commit_from_memory(bytes)
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load model from bytes: {e}")))
+    }
+
     /// Finish constructing a model from a committed session and its parsed
     /// metadata by resolving the input size and output names.
     fn from_session(
         session: Session,
         metadata: ModelMetadata,
-        webgpu: bool,
+        device: Device,
     ) -> Result<Self, JsError> {
         let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
         let output_names = session
@@ -344,7 +431,7 @@ impl YoloModel {
             metadata,
             output_names,
             imgsz,
-            backend: if webgpu { "WebGPU" } else { "CPU (wasm)" },
+            device: device.label(),
         })
     }
 
@@ -507,6 +594,12 @@ struct JsResults {
     /// empty for other tasks. A `Uint8Array`, drawable straight onto a canvas.
     #[serde(with = "serde_bytes")]
     masks: Vec<u8>,
+    /// Semantic class id per pixel, little-endian `u16` (`width*height*2` bytes),
+    /// row-major; empty for other tasks. The TS wrapper reinterprets it as a
+    /// `Uint16Array`. The IGNORE sentinel `65535` marks background or
+    /// class-filtered pixels.
+    #[serde(with = "serde_bytes")]
+    semantic: Vec<u8>,
     /// Per-stage timing in ms: `{ preprocess, inference, postprocess }`.
     speed: JsSpeed,
 }
@@ -588,6 +681,13 @@ impl JsResults {
             keypoints,
             probs,
             masks: build_mask_overlay(r),
+            semantic: r.semantic_mask.as_ref().map_or_else(Vec::new, |sem| {
+                let mut bytes = Vec::with_capacity(sem.data.len() * 2);
+                for &v in &sem.data {
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                }
+                bytes
+            }),
             speed: JsSpeed {
                 preprocess: r.speed.preprocess.unwrap_or(0.0),
                 inference: r.speed.inference.unwrap_or(0.0),
