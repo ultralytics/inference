@@ -2,33 +2,42 @@
 
 # Ultralytics Inference (Browser / WebGPU)
 
-Run [Ultralytics](https://ultralytics.com) YOLO models in the browser, entirely
-client-side, accelerated by **WebGPU**. The inference engine is the
-`ultralytics-inference` Rust crate compiled to WebAssembly; the forward pass runs
-on the official [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/)
-build, bridged through [`ort-web`](https://ort.pyke.io/backends/web). All
-preprocessing and postprocessing is shared with the native Rust and Python
-implementations, so results match.
+Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser on
+**WebGPU** — no server, no Python. Detection, segmentation, pose, classification,
+and OBB, with a small Python-like API and a built-in `annotate()` for drawing.
 
-The API mirrors the Ultralytics Python package as closely as the browser allows.
+```ts
+import { YOLO, annotate } from "@ultralytics/yolo";
+
+const model = await YOLO.load("yolo26n.onnx");
+const results = await model.predict("bus.jpg");
+await annotate(document.querySelector("canvas"), "bus.jpg", results);
+```
+
+It is a **library only** (no CLI — that's the native Rust crate). Under the hood
+the engine is the `ultralytics-inference` Rust crate compiled to WebAssembly;
+inference runs on [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/)
+via [`ort-web`](https://ort.pyke.io/backends/web), and all pre/postprocessing,
+colors, and the pose skeleton come from that shared Rust code — so results and
+visuals match the native and Python paths.
 
 ## Install
 
 ```bash
-npm install ultralytics-inference
+npm install @ultralytics/yolo
 ```
 
 ## Quick start
 
 ```ts
-import { YOLO, annotate } from "ultralytics-inference";
+import { YOLO, annotate } from "@ultralytics/yolo";
 
 // Loads the model and initializes WebGPU + ONNX Runtime Web on first use.
 const model = await YOLO.load("yolo26n.onnx");
 
 const results = await model.predict("bus.jpg");
 for (const box of results.boxes) {
-  console.log(box.class_name, box.confidence.toFixed(2), [box.x1, box.y1, box.x2, box.y2]);
+  console.log(box.name, box.conf.toFixed(2), [box.x1, box.y1, box.x2, box.y2]);
 }
 
 // Draw boxes / OBB / pose skeletons / labels onto a canvas in one call —
@@ -37,11 +46,26 @@ await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
 
 `predict()` accepts a URL/path, a `Blob`/`File`, raw encoded image bytes
-(`Uint8Array`/`ArrayBuffer`), `ImageData`, an `HTMLImageElement`, an
-`HTMLCanvasElement`, or an `ImageBitmap`.
+(`Uint8Array`/`ArrayBuffer`), `ImageData`, an `HTMLImageElement`,
+`HTMLCanvasElement`, `HTMLVideoElement`, or an `ImageBitmap`.
 
 ```ts
 const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
+console.log(model.backend); // "WebGPU" or "CPU (wasm)"
+```
+
+### Webcam / video
+
+Drawable sources (`<video>`, canvas, `ImageBitmap`, `ImageData`) take a
+raw-pixel fast path with no re-encoding, so a render loop is smooth:
+
+```ts
+const model = await YOLO.load("yolo26n.onnx");
+async function frame() {
+  const results = await model.predict(video);   // <video> element
+  await annotate(canvas, video, results);
+  requestAnimationFrame(frame);
+}
 ```
 
 ## Results shape
@@ -49,23 +73,31 @@ const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
 `predict()` resolves to a `Results` object shaped like the Ultralytics Python
 `Results`:
 
+Field names match the Rust/Ultralytics `Results` API 1-1:
+
 | Field | Type | Tasks |
 | --- | --- | --- |
 | `task` | `string` | all |
-| `boxes` | `{ x1, y1, x2, y2, confidence, class_id, class_name }[]` | detect, segment, pose |
-| `obb` | `{ x, y, width, height, angle, confidence, class_id, class_name }[]` | obb |
-| `keypoints` | `{ points: [x, y, conf][] }[]` | pose |
-| `probs` | `{ top1, top1_name, top1_conf, top5, top5_conf } \| null` | classify |
-| `mask_count` | `number` | segment |
-| `orig_width` / `orig_height` | `number` | all |
+| `width` / `height` | `number` | all |
+| `boxes` | `{ x1, y1, x2, y2, conf, cls, name, color }[]` | detect, segment, pose |
+| `obb` | `{ x, y, w, h, angle, conf, cls, name, color }[]` | obb |
+| `keypoints` | `{ points: [x, y, conf][], color }[]` | pose |
+| `probs` | `{ top1, top5, top1conf, top5conf, name, color } \| null` | classify |
+| `masks` | `Uint8Array` (RGBA overlay, `width*height*4`) | segment |
+| `speed` | `{ preprocess, inference, postprocess }` ms | all |
 
-Detection, segmentation, pose, classification, and OBB are supported. (Segment
-returns boxes plus a mask count today; raw mask pixels are a planned addition.)
+`model.names` is the class id -> name map (like `model.names` in Python). Every
+detection carries its Ultralytics palette `color`, and `annotate()` draws the
+`masks` overlay and the pose skeleton with the same per-limb/keypoint colors as
+the native renderer — none of which is duplicated in JS.
 
 ## Requirements & notes
 
-- **WebGPU** browser (Chrome/Edge, or Firefox with WebGPU enabled) served from a
-  **secure context** (`https://` or `http://localhost`).
+- **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure
+  context** (`https://` or `http://localhost`) gives the fast path. Without
+  WebGPU (older browsers, some phones), `YOLO.load` automatically falls back to a
+  portable **CPU/wasm** build — slower, but it runs everywhere. Force a backend
+  with `YOLO.load(model, { backend: "webgpu" | "cpu" })`.
 - **Model format**: export your model to ONNX with Ultralytics so the metadata
   (task, class names, `imgsz`) is embedded:
   ```python
@@ -73,8 +105,15 @@ returns boxes plus a mask count today; raw mask pixels are a planned addition.)
   YOLO("yolo26n.pt").export(format="onnx")
   ```
 - **Runtime assets**: on first load, `ort-web` fetches the ONNX Runtime Web wasm
-  bundle from `cdn.pyke.io`. If you set a Content-Security-Policy, allow that
-  origin in `script-src`/`connect-src` (or self-host the runtime).
+  bundle (~25 MB, browser-cached afterward) from `cdn.pyke.io`. If you set a
+  Content-Security-Policy, allow that origin in `script-src`/`connect-src`. To
+  avoid the CDN entirely, self-host the runtime and point to it:
+  ```ts
+  const model = await YOLO.load("yolo26n.onnx", { ortBaseUrl: "/ort/" });
+  ```
+  The folder must contain the ONNX Runtime Web entry scripts (`ort.webgpu.min.js`
+  and `ort.wasm.min.js` for the CPU fallback) plus the
+  `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` binaries.
 - **Telemetry**: `ort-web` reports the page domain to pyke on first session
   creation. See the [ort-web docs](https://ort.pyke.io/backends/web) to review or
   disable it.
