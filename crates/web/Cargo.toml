@@ -1,0 +1,16 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+[package]
+name = "ultralytics-inference-web"
+version = "0.0.19"
+edition = "2024"
+rust-version = "1.89"
+description = "Browser/WebAssembly bindings for ultralytics-inference (WebGPU via ort-web)"
+license = "AGPL-3.0"
+repository = "https://github.com/ultralytics/inference"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]

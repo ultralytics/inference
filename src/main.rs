@@ -19,13 +19,24 @@
 //! ultralytics-inference help
 //! ```
 
+// The CLI is native-only: it depends on `clap`, the native ONNX Runtime, and the
+// filesystem/source modules, none of which exist on `wasm32`. Browser inference
+// is provided by the `ultralytics-inference-web` crate instead.
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
 
+#[cfg(not(target_arch = "wasm32"))]
 use ultralytics_inference::cli::args::{Cli, Commands};
+#[cfg(not(target_arch = "wasm32"))]
 use ultralytics_inference::cli::predict::run_prediction;
+#[cfg(not(target_arch = "wasm32"))]
 use ultralytics_inference::logging::set_verbose;
 
 /// Entry point for the Ultralytics YOLO Inference CLI.
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     ultralytics_inference::io::init_logging();
 

@@ -239,7 +239,8 @@ fn fused_zerocopy_preprocess(
     target_size: (usize, usize),
     geom: &LetterboxGeometry,
 ) -> Array4<f32> {
-    use rayon::prelude::*;
+    #[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
+    use crate::par::*;
     use std::mem::MaybeUninit;
     use std::sync::atomic::{AtomicPtr, Ordering};
 

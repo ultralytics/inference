@@ -1,5 +1,8 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+[workspace]
+members = [".", "crates/web"]
+
 [package]
 name = "ultralytics-inference"
 version = "0.0.19"
@@ -60,16 +63,48 @@ path = "src/main.rs"
 # Core - Image loading and processing
 image = "^0.25"
 jpeg-decoder = "^0.3"
-fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
+# Base feature set is wasm-compatible; the `rayon` feature is added for native
+# targets only (see the `cfg(not(target_arch = "wasm32"))` table below) because
+# rayon cannot build for `wasm32-unknown-unknown`, which has no OS threads.
+fast_image_resize = { version = "^6.0", features = ["image"] }
 # SIMD for fast preprocessing
 wide = "^1.5"
 
 # LRU cache for preprocessing LUT
 lru = "^0.18"
 
-# Numerical computing (must match ort's ndarray version 0.17)
-ndarray = { version = "^0.17", features = ["rayon"] }
+# Numerical computing (must match ort's ndarray version 0.17). The `rayon`
+# feature is native-only; see the target table below.
+ndarray = { version = "^0.17" }
 
+# Core - FP16 support (required by ort's half feature)
+half = { version = "^2.7", features = ["num-traits"] }
+bytemuck = { version = "^1.25", features = ["derive"] }
+
+cudarc = { version = "0.19.7", optional = true, default-features = false, features = [
+    "driver",
+    "nvrtc",
+    "dynamic-loading",
+    "cuda-version-from-build-system",
+] }
+
+# Terminal-colored log output (pure Rust, builds on wasm)
+colored = "^3.1.1"
+
+# Optional - Visualization and Video support
+minifb = { version = "^0.28.0", optional = true }
+video-rs = { version = ">=0.10.5, <0.12", features = ["ndarray"], optional = true }
+
+# Optional - Image annotation (for --save feature)
+imageproc = { version = "^0.27", optional = true }
+ab_glyph = { version = "^0.2", optional = true }
+
+# Native-only dependencies. None of these build for `wasm32-unknown-unknown`
+# (ort links the native ONNX Runtime, ureq/dirs use OS sockets and paths, rayon
+# needs OS threads, clap is only used by the CLI binary). The browser build
+# routes inference through the `crates/web` companion crate and `ort-web`
+# instead, so the core library compiles for wasm without any of these.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # ONNX Runtime 1.24.2
 ort = { version = "2.0.0-rc.12", default-features = false, features = [
     "std",
@@ -80,32 +115,13 @@ ort = { version = "2.0.0-rc.12", default-features = false, features = [
     "tls-native",
     "num-complex",
 ] }
-
-# Core - FP16 support (required by ort's half feature)
-half = { version = "^2.7", features = ["num-traits"] }
 ureq = "^3.3.0"
 dirs = "^6.0"
 rayon = "^1.12"
-bytemuck = { version = "^1.25", features = ["derive"] }
-
-cudarc = { version = "0.19.7", optional = true, default-features = false, features = [
-    "driver",
-    "nvrtc",
-    "dynamic-loading",
-    "cuda-version-from-build-system",
-] }
-
-# Core - CLI arguments parsing
 clap = { version = "^4.6.1", features = ["derive"] }
-colored = "^3.1.1"
-
-# Optional - Visualization and Video support
-minifb = { version = "^0.28.0", optional = true }
-video-rs = { version = ">=0.10.5, <0.12", features = ["ndarray"], optional = true }
-
-# Optional - Image annotation (for --save feature)
-imageproc = { version = "^0.27", optional = true }
-ab_glyph = { version = "^0.2", optional = true }
+# rayon-backed parallelism for ndarray and fast_image_resize, native only.
+ndarray = { version = "^0.17", features = ["rayon"] }
+fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
 
 [features]
 default = ["annotate", "visualize"]
