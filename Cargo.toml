@@ -104,10 +104,6 @@ imageproc = { version = "^0.27", optional = true }
 ab_glyph = { version = "^0.2", optional = true }
 
 # Native-only dependencies. None of these build for `wasm32-unknown-unknown`
-# (ort links the native ONNX Runtime, ureq/dirs use OS sockets and paths, rayon
-# needs OS threads, clap is only used by the CLI binary). The browser build
-# routes inference through the `crates/web` companion crate and `ort-web`
-# instead, so the core library compiles for wasm without any of these.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # ONNX Runtime 1.24.2
 ort = { version = "2.0.0-rc.12", default-features = false, features = [
