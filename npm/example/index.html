@@ -54,16 +54,27 @@
             log(`Model ready. Task: ${model.task}`);
           }
 
+          log("Running inference...");
           const t0 = performance.now();
           const results = await model.predict(imageUrl);
           log(`Inference: ${(performance.now() - t0).toFixed(1)} ms`);
-
-          // One call draws boxes / OBB / pose / labels onto the canvas.
-          await annotate(canvas, imageUrl, results);
-
           log(`Detections: ${results.boxes.length}`);
+          log("Result summary: " + JSON.stringify({
+            task: results.task,
+            orig_width: results.orig_width,
+            orig_height: results.orig_height,
+            boxes: results.boxes.length,
+            obb: results.obb.length,
+            keypoints: results.keypoints.length,
+            probs: results.probs ? results.probs.top1_name : null,
+          }));
+
+          log("Drawing...");
+          await annotate(canvas, imageUrl, results);
+          log("Done.");
         } catch (e) {
-          log(`Error: ${e.message ?? e}`);
+          log("ERROR: " + (e && e.stack ? e.stack : e && e.message ? e.message : String(e)));
+          console.error(e);
         }
       });
     </script>

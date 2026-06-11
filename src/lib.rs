@@ -335,6 +335,7 @@ pub mod cuda_guide {}
 // Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
+pub mod colors;
 pub mod device;
 pub mod error;
 pub mod inference;

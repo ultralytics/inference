@@ -30,6 +30,8 @@ export interface Box {
   confidence: number;
   class_id: number;
   class_name: string;
+  /** Ultralytics palette color for this class (`#rrggbb`), supplied by the engine. */
+  color: string;
 }
 
 /** A single oriented bounding box (`xywhr`, angle in radians). */
@@ -42,11 +44,15 @@ export interface OrientedBox {
   confidence: number;
   class_id: number;
   class_name: string;
+  /** Ultralytics palette color for this class (`#rrggbb`), supplied by the engine. */
+  color: string;
 }
 
 /** Keypoints for one detection: `[x, y, confidence]` per keypoint. */
 export interface Keypoints {
   points: Array<[number, number, number]>;
+  /** Palette color for this instance (`#rrggbb`), supplied by the engine. */
+  color: string;
 }
 
 /** Classification probabilities (top-5). */
@@ -56,6 +62,8 @@ export interface Probs {
   top1_conf: number;
   top5: number[];
   top5_conf: number[];
+  /** Palette color for the top-1 class (`#rrggbb`), supplied by the engine. */
+  color: string;
 }
 
 /** Inference results, shaped to mirror the Ultralytics Python `Results` API. */
@@ -234,12 +242,17 @@ export class YOLO {
   }
 }
 
-// Ultralytics color palette (one color per class id, cycled).
-const PALETTE = [
-  "#FF3838", "#FF9D97", "#FF701F", "#FFB21D", "#CFD231", "#48F90A", "#92CC17",
-  "#3DDB86", "#1A9334", "#00D4BB", "#2C99A8", "#00C2FF", "#344593", "#6473FF",
-  "#0018EC", "#8438FF", "#520085", "#CB38FF", "#FF95C8", "#FF37C7",
-];
+// Colors come from the Rust engine (the Ultralytics palette) on each detection,
+// so there is no palette duplicated here.
+
+/** Pick black or white text for readability over a given hex background. */
+function textColorFor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  // Perceived luminance (same threshold Ultralytics uses).
+  return r * 0.299 + g * 0.587 + b * 0.114 > 140 ? "#000000" : "#FFFFFF";
+}
 
 // COCO 17-keypoint skeleton (0-indexed pairs) for pose rendering.
 const COCO_SKELETON: Array<[number, number]> = [
@@ -247,8 +260,6 @@ const COCO_SKELETON: Array<[number, number]> = [
   [5, 7], [6, 8], [7, 9], [8, 10], [1, 2], [0, 1], [0, 2], [1, 3], [2, 4],
   [3, 5], [4, 6],
 ];
-
-const colorFor = (classId: number): string => PALETTE[((classId % PALETTE.length) + PALETTE.length) % PALETTE.length];
 
 /**
  * Draw inference results onto a canvas, on top of the source image.
@@ -305,21 +316,20 @@ export async function annotate(
     const ly = Math.max(0, y - h);
     ctx.fillStyle = color;
     ctx.fillRect(x, ly, w, h);
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = textColorFor(color);
     ctx.fillText(text, x + pad, ly + pad);
   };
 
   // Axis-aligned boxes (detect / segment / pose).
   for (const b of results.boxes) {
-    const color = colorFor(b.class_id);
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = b.color;
     ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
-    label(`${b.class_name} ${(b.confidence * 100).toFixed(0)}%`, b.x1, b.y1, color);
+    label(`${b.class_name} ${(b.confidence * 100).toFixed(0)}%`, b.x1, b.y1, b.color);
   }
 
   // Oriented boxes (obb): draw the rotated rectangle.
   for (const o of results.obb) {
-    const color = colorFor(o.class_id);
+    const color = o.color;
     ctx.strokeStyle = color;
     const cos = Math.cos(o.angle);
     const sin = Math.sin(o.angle);
@@ -340,7 +350,7 @@ export async function annotate(
   if (showKpts) {
     const radius = Math.max(2, Math.round(width / 300));
     for (const kp of results.keypoints) {
-      ctx.strokeStyle = "#00FF88";
+      ctx.strokeStyle = kp.color;
       ctx.lineWidth = Math.max(1, Math.round(lineWidth / 2));
       if (kp.points.length === 17) {
         for (const [a, b] of COCO_SKELETON) {
@@ -353,7 +363,7 @@ export async function annotate(
           ctx.stroke();
         }
       }
-      ctx.fillStyle = "#FF3838";
+      ctx.fillStyle = kp.color;
       for (const [x, y, c] of kp.points) {
         if (c < kptThresh) continue;
         ctx.beginPath();
@@ -370,7 +380,7 @@ export async function annotate(
       `${results.probs.top1_name} ${(results.probs.top1_conf * 100).toFixed(1)}%`,
       0,
       fontSize + 8,
-      PALETTE[0],
+      results.probs.color,
     );
   }
 }

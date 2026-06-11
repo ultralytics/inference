@@ -31,6 +31,7 @@ use ort_web::sync_outputs;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+use ultralytics_inference::colors::Color;
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::postprocess;
 use ultralytics_inference::preprocessing::preprocess_image_with_precision;
@@ -333,6 +334,7 @@ fn map_ort<M>(e: ort::Error<M>) -> JsError {
 }
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
+/// `color` is the Ultralytics palette color for the class (`#rrggbb`).
 #[derive(Serialize)]
 struct JsBox {
     x1: f32,
@@ -342,6 +344,7 @@ struct JsBox {
     confidence: f32,
     class_id: usize,
     class_name: String,
+    color: String,
 }
 
 /// One oriented box (`xywhr` + score), mirroring `OBB`.
@@ -355,12 +358,15 @@ struct JsObb {
     confidence: f32,
     class_id: usize,
     class_name: String,
+    color: String,
 }
 
-/// Keypoints for one detection (`[[x, y, conf], ...]`).
+/// Keypoints for one detection (`[[x, y, conf], ...]`), with the instance's
+/// palette `color`.
 #[derive(Serialize)]
 struct JsKeypoints {
     points: Vec<[f32; 3]>,
+    color: String,
 }
 
 /// Classification probabilities (top-5), mirroring `Probs`.
@@ -371,6 +377,7 @@ struct JsProbs {
     top1_conf: f32,
     top5: Vec<usize>,
     top5_conf: Vec<f32>,
+    color: String,
 }
 
 /// JS-facing results payload. Fields are populated per task; unused ones are
@@ -410,6 +417,7 @@ impl JsResults {
                     confidence: conf[i],
                     class_id,
                     class_name: name_of(class_id),
+                    color: Color::from_index(class_id).to_hex(),
                 });
             }
         }
@@ -430,6 +438,7 @@ impl JsResults {
                     confidence: conf[i],
                     class_id,
                     class_name: name_of(class_id),
+                    color: Color::from_index(class_id).to_hex(),
                 });
             }
         }
@@ -443,7 +452,11 @@ impl JsResults {
                 for j in 0..npt {
                     points.push([data[[i, j, 0]], data[[i, j, 1]], data[[i, j, 2]]]);
                 }
-                keypoints.push(JsKeypoints { points });
+                // Color the skeleton with the matching detection's palette color.
+                let color = boxes
+                    .get(i)
+                    .map_or_else(|| Color::from_index(0).to_hex(), |b| b.color.clone());
+                keypoints.push(JsKeypoints { points, color });
             }
         }
 
@@ -455,6 +468,7 @@ impl JsResults {
                 top1_conf: p.top1conf(),
                 top5: p.top5(),
                 top5_conf: p.top5conf(),
+                color: Color::from_index(top1).to_hex(),
             }
         });
 
