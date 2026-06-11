@@ -135,15 +135,14 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
         // Self-hosted: pick the entrypoint + binary for the chosen build. The
         // wrapper (.mjs) name defaults to the binary with `.wasm` -> `.mjs`.
         Some(base) => {
-            let dist = if webgpu {
-                ort_web::Dist::new(base.clone())
-                    .with_script_name("ort.webgpu.min.js")
-                    .with_binary_name("ort-wasm-simd-threaded.jsep.wasm")
+            let (script, binary) = if webgpu {
+                ("ort.webgpu.min.js", "ort-wasm-simd-threaded.jsep.wasm")
             } else {
-                ort_web::Dist::new(base.clone())
-                    .with_script_name("ort.wasm.min.js")
-                    .with_binary_name("ort-wasm-simd-threaded.wasm")
+                ("ort.wasm.min.js", "ort-wasm-simd-threaded.wasm")
             };
+            let dist = ort_web::Dist::new(base.clone())
+                .with_script_name(script)
+                .with_binary_name(binary);
             ort_web::api(dist).await
         }
         None => {
