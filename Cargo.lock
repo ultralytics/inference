@@ -1754,6 +1754,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ort-web"
+version = "0.2.1+1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbfb28fde2a1443c2905a2a523a722f78b0cd7ffa677bebcd3d2d25bd959862"
+dependencies = [
+ "js-sys",
+ "ort",
+ "ort-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2357,6 +2373,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2662,6 +2689,20 @@ dependencies = [
 [[package]]
 name = "ultralytics-inference-web"
 version = "0.0.19"
+dependencies = [
+ "console_error_panic_hook",
+ "half",
+ "image",
+ "js-sys",
+ "ndarray",
+ "ort",
+ "ort-web",
+ "serde",
+ "serde-wasm-bindgen",
+ "ultralytics-inference",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
 
 [[package]]
 name = "unicode-ident"

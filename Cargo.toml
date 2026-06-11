@@ -2,6 +2,10 @@
 
 [workspace]
 members = [".", "crates/web"]
+# The browser crate only builds for wasm32; keep it out of plain `cargo build`,
+# `cargo test`, etc. run from the workspace root (use `wasm-pack` or
+# `-p ultralytics-inference-web --target wasm32-unknown-unknown` for it).
+default-members = ["."]
 
 [package]
 name = "ultralytics-inference"
