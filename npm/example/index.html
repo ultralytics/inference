@@ -1,0 +1,95 @@
+<!-- Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ultralytics YOLO · WebGPU (WASM) demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+      label { display: block; margin: 0.5rem 0 0.2rem; font-weight: 600; }
+      input { width: 100%; padding: 0.4rem; box-sizing: border-box; }
+      button { margin-top: 1rem; padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+      #status { margin-top: 1rem; white-space: pre-wrap; font-family: monospace; }
+      canvas { margin-top: 1rem; max-width: 100%; border: 1px solid #ccc; }
+    </style>
+  </head>
+  <body>
+    <h1>Ultralytics YOLO in the browser (WebGPU)</h1>
+    <p>
+      Runs an Ultralytics YOLO ONNX model entirely client-side on the GPU. Requires a
+      WebGPU-capable browser (Chrome/Edge) served over <code>https</code> or
+      <code>localhost</code>.
+    </p>
+
+    <label for="model">Model URL (.onnx, exported with Ultralytics metadata)</label>
+    <input id="model" value="yolo26n.onnx" />
+
+    <label for="image">Image URL</label>
+    <input id="image" value="bus.jpg" />
+
+    <button id="run">Load &amp; Predict</button>
+    <div id="status"></div>
+    <canvas id="out"></canvas>
+
+    <script type="module">
+      import { YOLO } from "../dist/index.js";
+
+      const statusEl = document.getElementById("status");
+      const log = (msg) => (statusEl.textContent += msg + "\n");
+
+      let model = null;
+      let loadedFor = null;
+
+      document.getElementById("run").addEventListener("click", async () => {
+        statusEl.textContent = "";
+        const modelUrl = document.getElementById("model").value;
+        const imageUrl = document.getElementById("image").value;
+        try {
+          if (loadedFor !== modelUrl) {
+            log(`Loading model ${modelUrl} (first load also fetches the ONNX Runtime wasm)...`);
+            model = await YOLO.load(modelUrl);
+            loadedFor = modelUrl;
+            log(`Model ready. Task: ${model.task}`);
+          }
+
+          log(`Running inference on ${imageUrl}...`);
+          const t0 = performance.now();
+          const results = await model.predict(imageUrl, { conf: 0.25, iou: 0.7 });
+          log(`Done in ${(performance.now() - t0).toFixed(1)} ms`);
+          log(`Detections: ${results.boxes.length}`);
+
+          await draw(imageUrl, results);
+          for (const b of results.boxes) {
+            log(`  ${b.class_name} ${(b.confidence * 100).toFixed(1)}%`);
+          }
+        } catch (e) {
+          log(`Error: ${e.message ?? e}`);
+        }
+      });
+
+      async function draw(imageUrl, results) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        await new Promise((res, rej) => {
+          img.onload = res;
+          img.onerror = rej;
+          img.src = imageUrl;
+        });
+        const canvas = document.getElementById("out");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        ctx.lineWidth = Math.max(2, img.naturalWidth / 300);
+        ctx.strokeStyle = "#00ff88";
+        ctx.fillStyle = "#00ff88";
+        ctx.font = `${Math.max(14, img.naturalWidth / 40)}px sans-serif`;
+        for (const b of results.boxes) {
+          ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+          ctx.fillText(`${b.class_name} ${(b.confidence * 100).toFixed(0)}%`, b.x1, Math.max(12, b.y1 - 4));
+        }
+      }
+    </script>
+  </body>
+</html>
