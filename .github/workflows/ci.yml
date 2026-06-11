@@ -221,7 +221,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       # Builds the wasm (wasm-pack) and the TypeScript wrapper.
       - name: Build npm package

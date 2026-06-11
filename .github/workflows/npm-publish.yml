@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - id: check_version
         # Single source of truth: the version in Cargo.toml. Publish only if that
         # exact version is not already on the npm registry.
@@ -77,7 +77,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Sync package version from Cargo.toml
