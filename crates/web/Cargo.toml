@@ -38,6 +38,7 @@ wasm-bindgen = "0.2.110"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 ndarray = "0.17"

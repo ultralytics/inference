@@ -14,86 +14,71 @@
  * const model = await YOLO.load("yolo26n.onnx");
  * const results = await model.predict("bus.jpg");
  * for (const box of results.boxes) {
- *   console.log(box.class_name, box.confidence, box.x1, box.y1, box.x2, box.y2);
+ *   console.log(box.name, box.conf, box.x1, box.y1, box.x2, box.y2);
  * }
  * ```
  */
 
-import init, { YoloModel, start } from "../pkg/ultralytics_inference_web.js";
+import init, { YoloModel, start, pose_palette } from "../pkg/ultralytics_inference_web.js";
 
-/** A single detected box in original-image pixel coordinates (`xyxy`). */
+/** Pose drawing scheme supplied by the engine (skeleton + palette colors). */
+interface PoseScheme {
+  skeleton: Array<[number, number]>;
+  keypoint_colors: string[];
+  limb_colors: string[];
+}
+
+let poseSchemeCache: PoseScheme | null = null;
+/** The Ultralytics pose skeleton + per-keypoint/limb colors (constant). */
+function poseScheme(): PoseScheme {
+  poseSchemeCache ??= pose_palette() as PoseScheme;
+  return poseSchemeCache;
+}
+
+// Field names mirror the Rust/Ultralytics `Results` API 1-1. Every detection
+// carries its palette `color` (`#rrggbb`), supplied by the engine.
+
+/** Axis-aligned box, pixel `xyxy`. */
 export interface Box {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  confidence: number;
-  class_id: number;
-  class_name: string;
-  /** Ultralytics palette color for this class (`#rrggbb`), supplied by the engine. */
-  color: string;
+  x1: number; y1: number; x2: number; y2: number;
+  conf: number; cls: number; name: string; color: string;
 }
 
-/** A single oriented bounding box (`xywhr`, angle in radians). */
-export interface OrientedBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  angle: number;
-  confidence: number;
-  class_id: number;
-  class_name: string;
-  /** Ultralytics palette color for this class (`#rrggbb`), supplied by the engine. */
-  color: string;
+/** Oriented box, `xywhr` (angle in radians). */
+export interface Obb {
+  x: number; y: number; w: number; h: number; angle: number;
+  conf: number; cls: number; name: string; color: string;
 }
 
-/** Keypoints for one detection: `[x, y, confidence]` per keypoint. */
+/** Keypoints for one detection: `[x, y, conf]` per point. */
 export interface Keypoints {
   points: Array<[number, number, number]>;
-  /** Palette color for this instance (`#rrggbb`), supplied by the engine. */
   color: string;
 }
 
-/** Classification probabilities (top-5). */
+/** Classification probabilities. */
 export interface Probs {
-  top1: number;
-  top1_name: string;
-  top1_conf: number;
-  top5: number[];
-  top5_conf: number[];
-  /** Palette color for the top-1 class (`#rrggbb`), supplied by the engine. */
-  color: string;
+  top1: number; top5: number[]; top1conf: number; top5conf: number[];
+  name: string; color: string;
 }
 
-/** Per-stage timing in milliseconds (mirrors Ultralytics `results.speed`). */
+/** Per-stage timing in ms. */
 export interface Speed {
-  /** Image decode + letterbox/normalize. */
-  preprocess: number;
-  /** GPU inference (`run_async`) + cross-context output sync. */
-  inference: number;
-  /** NMS, decoding, and coordinate scaling. */
-  postprocess: number;
+  preprocess: number; inference: number; postprocess: number;
 }
 
-/** Inference results, shaped to mirror the Ultralytics Python `Results` API. */
+/** Inference results, mirroring the Ultralytics `Results` API. */
 export interface Results {
-  /** Task name: `detect`, `segment`, `pose`, `classify`, `obb`, or `semantic`. */
   task: string;
-  orig_width: number;
-  orig_height: number;
-  /** Per-stage timing in milliseconds. */
-  speed: Speed;
-  /** Axis-aligned detections (detect/segment/pose tasks). */
+  width: number;
+  height: number;
   boxes: Box[];
-  /** Oriented detections (obb task). */
-  obb: OrientedBox[];
-  /** Per-detection keypoints (pose task). */
+  obb: Obb[];
   keypoints: Keypoints[];
-  /** Classification probabilities (classify task), else `null`. */
   probs: Probs | null;
-  /** Number of instance masks produced (segment task). */
-  mask_count: number;
+  /** Segment masks as a translucent RGBA overlay (`width*height*4`), else empty. */
+  masks: Uint8Array;
+  speed: Speed;
 }
 
 /** Options for {@link YOLO.load}. */
@@ -103,6 +88,32 @@ export interface LoadOptions {
    * Only needed if your bundler does not resolve it automatically.
    */
   wasmUrl?: string | URL;
+  /**
+   * Optional base URL to self-host the ONNX Runtime Web build instead of
+   * fetching it from `cdn.pyke.io`. The directory must contain
+   * `ort.webgpu.min.js`, `ort-wasm-simd-threaded.jsep.wasm`, and
+   * `ort-wasm-simd-threaded.jsep.mjs`. Use an absolute URL ending in `/`.
+   */
+  ortBaseUrl?: string | URL;
+  /**
+   * Which accelerator to use. `"auto"` (default) picks WebGPU when the browser
+   * has a working adapter, otherwise the portable CPU/wasm build. `"webgpu"` or
+   * `"cpu"` force one.
+   */
+  backend?: "auto" | "webgpu" | "cpu";
+}
+
+/** Pick WebGPU vs CPU: respect an explicit choice, else feature-detect an adapter. */
+async function wantWebGPU(pref?: "auto" | "webgpu" | "cpu"): Promise<boolean> {
+  if (pref === "cpu") return false;
+  if (pref === "webgpu") return true;
+  const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
+  if (!gpu) return false;
+  try {
+    return !!(await gpu.requestAdapter());
+  } catch {
+    return false;
+  }
 }
 
 /** Options for {@link YOLO.predict}. */
@@ -123,7 +134,7 @@ export interface AnnotateOptions {
   labels?: boolean;
   /** Draw pose keypoints and skeleton. Default `true`. */
   keypoints?: boolean;
-  /** Keypoint confidence threshold for drawing. Default `0.5`. */
+  /** Keypoint confidence threshold for drawing. Default `0.25` (matches Ultralytics). */
   keypointThreshold?: number;
 }
 
@@ -137,6 +148,7 @@ export type ImageInput =
   | ImageData
   | HTMLImageElement
   | HTMLCanvasElement
+  | HTMLVideoElement
   | ImageBitmap;
 
 let initialized = false;
@@ -149,42 +161,50 @@ async function ensureInit(wasmUrl?: string | URL): Promise<void> {
   initialized = true;
 }
 
-/** Encode an arbitrary image input to PNG/JPEG bytes the wasm side can decode. */
-async function toImageBytes(input: ImageInput): Promise<Uint8Array> {
-  if (input instanceof Uint8Array) return input;
-  if (input instanceof ArrayBuffer) return new Uint8Array(input);
-  if (typeof input === "string" || input instanceof URL) {
-    const resp = await fetch(input);
-    if (!resp.ok) throw new Error(`failed to fetch image: ${input} (${resp.status})`);
-    return new Uint8Array(await resp.arrayBuffer());
-  }
-  if (input instanceof Blob) return new Uint8Array(await input.arrayBuffer());
+/** Encoded-image inputs (decoded by the wasm side via the `image` crate). */
+type EncodedInput = string | URL | Blob | ArrayBuffer | Uint8Array;
+/** Drawable inputs that can be read as raw pixels without re-encoding. */
+type DrawableInput = ImageData | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | ImageBitmap;
 
-  // Drawable sources: render to a canvas and encode to PNG.
-  const { width, height } = drawableSize(input);
-  const canvas = makeCanvas(width, height);
-  const ctx = canvas.getContext("2d") as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
-  if (!ctx) throw new Error("could not acquire a 2D canvas context");
-  if (input instanceof ImageData) {
-    ctx.putImageData(input, 0, 0);
-  } else {
-    ctx.drawImage(input as CanvasImageSource, 0, 0);
-  }
-  const blob = await canvasToBlob(canvas);
-  return new Uint8Array(await blob.arrayBuffer());
+function isDrawable(input: ImageInput): input is DrawableInput {
+  return (
+    input instanceof ImageData ||
+    input instanceof HTMLImageElement ||
+    input instanceof HTMLCanvasElement ||
+    input instanceof HTMLVideoElement ||
+    input instanceof ImageBitmap
+  );
 }
 
-function drawableSize(input: ImageData | HTMLImageElement | HTMLCanvasElement | ImageBitmap): {
-  width: number;
-  height: number;
-} {
-  if (input instanceof HTMLImageElement) {
-    return { width: input.naturalWidth, height: input.naturalHeight };
+/** Fetch/normalize an encoded image input to bytes the wasm side can decode. */
+async function toEncodedBytes(input: EncodedInput): Promise<Uint8Array> {
+  if (input instanceof Uint8Array) return input;
+  if (input instanceof ArrayBuffer) return new Uint8Array(input);
+  if (input instanceof Blob) return new Uint8Array(await input.arrayBuffer());
+  const resp = await fetch(input);
+  if (!resp.ok) throw new Error(`failed to fetch image: ${input} (${resp.status})`);
+  return new Uint8Array(await resp.arrayBuffer());
+}
+
+/** Read a drawable source as raw RGBA pixels (the fast path, no re-encoding). */
+function toImageData(input: DrawableInput): { data: Uint8Array; width: number; height: number } {
+  if (input instanceof ImageData) {
+    return { data: new Uint8Array(input.data.buffer), width: input.width, height: input.height };
   }
-  return { width: (input as { width: number }).width, height: (input as { height: number }).height };
+  let width: number;
+  let height: number;
+  if (input instanceof HTMLImageElement) {
+    [width, height] = [input.naturalWidth, input.naturalHeight];
+  } else if (input instanceof HTMLVideoElement) {
+    [width, height] = [input.videoWidth, input.videoHeight];
+  } else {
+    [width, height] = [input.width, input.height];
+  }
+  const canvas = makeCanvas(width, height);
+  const ctx = get2d(canvas, { willReadFrequently: true });
+  ctx.drawImage(input as CanvasImageSource, 0, 0, width, height);
+  const img = ctx.getImageData(0, 0, width, height);
+  return { data: new Uint8Array(img.data.buffer), width, height };
 }
 
 function makeCanvas(width: number, height: number): HTMLCanvasElement | OffscreenCanvas {
@@ -195,11 +215,13 @@ function makeCanvas(width: number, height: number): HTMLCanvasElement | Offscree
   return canvas;
 }
 
-async function canvasToBlob(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<Blob> {
-  if (canvas instanceof OffscreenCanvas) return canvas.convertToBlob({ type: "image/png" });
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("canvas.toBlob failed"))), "image/png");
-  });
+type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
+/** Get a 2D context or throw a clear error. */
+function get2d(canvas: HTMLCanvasElement | OffscreenCanvas, options?: CanvasRenderingContext2DSettings): Ctx2D {
+  const ctx = canvas.getContext("2d", options) as Ctx2D | null;
+  if (!ctx) throw new Error("could not acquire a 2D canvas context");
+  return ctx;
 }
 
 /**
@@ -226,7 +248,9 @@ export class YOLO {
     } else {
       bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
     }
-    return new YOLO(await YoloModel.load_bytes(bytes));
+    const ortBaseUrl = options?.ortBaseUrl ? options.ortBaseUrl.toString() : undefined;
+    const webgpu = await wantWebGPU(options?.backend);
+    return new YOLO(await YoloModel.load_bytes(bytes, ortBaseUrl, webgpu));
   }
 
   /** The model's task (`detect`, `segment`, `pose`, `classify`, `obb`, `semantic`). */
@@ -234,17 +258,35 @@ export class YOLO {
     return this.model.task;
   }
 
+  /** The active accelerator / execution provider (e.g. `"WebGPU"`). */
+  get backend(): string {
+    return this.model.backend;
+  }
+
+  /** Class id -> name map (like Ultralytics `model.names`). */
+  get names(): Record<number, string> {
+    return this.model.names as Record<number, string>;
+  }
+
   /**
    * Run inference on an image.
    *
-   * @param image A URL/path, `Blob`/`File`, raw encoded bytes, `ImageData`,
-   *   `HTMLImageElement`, `HTMLCanvasElement`, or `ImageBitmap`.
+   * Drawable sources (`ImageData`, `HTMLImageElement`, `HTMLCanvasElement`,
+   * `HTMLVideoElement`, `ImageBitmap`) take a fast path that reads raw pixels
+   * with no re-encoding — ideal for webcam/video. URLs, `Blob`s, and raw bytes
+   * are decoded inside wasm.
+   *
+   * @param image The image to run on.
    * @param options Confidence/IoU thresholds.
    */
   async predict(image: ImageInput, options?: PredictOptions): Promise<Results> {
-    const bytes = await toImageBytes(image);
     const conf = options?.conf ?? 0.25;
     const iou = options?.iou ?? 0.7;
+    if (isDrawable(image)) {
+      const { data, width, height } = toImageData(image);
+      return (await this.model.predict_rgba(data, width, height, conf, iou)) as Results;
+    }
+    const bytes = await toEncodedBytes(image);
     return (await this.model.predict(bytes, conf, iou)) as Results;
   }
 
@@ -265,13 +307,6 @@ function textColorFor(hex: string): string {
   // Perceived luminance (same threshold Ultralytics uses).
   return r * 0.299 + g * 0.587 + b * 0.114 > 140 ? "#000000" : "#FFFFFF";
 }
-
-// COCO 17-keypoint skeleton (0-indexed pairs) for pose rendering.
-const COCO_SKELETON: Array<[number, number]> = [
-  [15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11], [6, 12], [5, 6],
-  [5, 7], [6, 8], [7, 9], [8, 10], [1, 2], [0, 1], [0, 2], [1, 3], [2, 4],
-  [3, 5], [4, 6],
-];
 
 /**
  * Draw inference results onto a canvas, on top of the source image.
@@ -297,25 +332,29 @@ export async function annotate(
   options?: AnnotateOptions,
 ): Promise<void> {
   const bitmap = await resolveBitmap(image);
-  const width = results.orig_width || (bitmap as { width: number }).width;
-  const height = results.orig_height || (bitmap as { height: number }).height;
+  const width = results.width || (bitmap as { width: number }).width;
+  const height = results.height || (bitmap as { height: number }).height;
   canvas.width = width;
   canvas.height = height;
 
-  const ctx = canvas.getContext("2d") as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
-  if (!ctx) throw new Error("could not acquire a 2D canvas context");
+  const ctx = get2d(canvas);
 
   ctx.drawImage(bitmap as CanvasImageSource, 0, 0, width, height);
+
+  // Segment: composite the translucent colored mask overlay from the engine.
+  const overlay = results.masks;
+  if (overlay && overlay.length === width * height * 4) {
+    const tmp = makeCanvas(width, height);
+    get2d(tmp).putImageData(new ImageData(new Uint8ClampedArray(overlay), width, height), 0, 0);
+    ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
+  }
 
   const lineWidth = options?.lineWidth ?? Math.max(2, Math.round(width / 320));
   const fontSize = Math.max(12, Math.round(width / 40));
   const font = options?.font ?? `${fontSize}px sans-serif`;
   const showLabels = options?.labels ?? true;
   const showKpts = options?.keypoints ?? true;
-  const kptThresh = options?.keypointThreshold ?? 0.5;
+  const kptThresh = options?.keypointThreshold ?? 0.25;
   ctx.lineWidth = lineWidth;
   ctx.font = font;
   ctx.textBaseline = "top";
@@ -336,7 +375,7 @@ export async function annotate(
   for (const b of results.boxes) {
     ctx.strokeStyle = b.color;
     ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
-    label(`${b.class_name} ${(b.confidence * 100).toFixed(0)}%`, b.x1, b.y1, b.color);
+    label(`${b.name} ${(b.conf * 100).toFixed(0)}%`, b.x1, b.y1, b.color);
   }
 
   // Oriented boxes (obb): draw the rotated rectangle.
@@ -345,8 +384,8 @@ export async function annotate(
     ctx.strokeStyle = color;
     const cos = Math.cos(o.angle);
     const sin = Math.sin(o.angle);
-    const hw = o.width / 2;
-    const hh = o.height / 2;
+    const hw = o.w / 2;
+    const hh = o.h / 2;
     const corners: Array<[number, number]> = [
       [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh],
     ].map(([dx, dy]) => [o.x + dx * cos - dy * sin, o.y + dx * sin + dy * cos]);
@@ -355,33 +394,33 @@ export async function annotate(
     for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i][0], corners[i][1]);
     ctx.closePath();
     ctx.stroke();
-    label(`${o.class_name} ${(o.confidence * 100).toFixed(0)}%`, corners[0][0], corners[0][1], color);
+    label(`${o.name} ${(o.conf * 100).toFixed(0)}%`, corners[0][0], corners[0][1], color);
   }
 
-  // Pose keypoints + skeleton.
-  if (showKpts) {
+  // Pose keypoints + skeleton, colored with the engine's pose palette (per-limb
+  // and per-keypoint), matching the native/Python renderer.
+  if (showKpts && results.keypoints.length) {
+    const { skeleton, keypoint_colors, limb_colors } = poseScheme();
     const radius = Math.max(2, Math.round(width / 300));
+    ctx.lineWidth = Math.max(1, Math.round(lineWidth / 1.5));
     for (const kp of results.keypoints) {
-      ctx.strokeStyle = kp.color;
-      ctx.lineWidth = Math.max(1, Math.round(lineWidth / 2));
-      if (kp.points.length === 17) {
-        for (const [a, b] of COCO_SKELETON) {
-          const pa = kp.points[a];
-          const pb = kp.points[b];
-          if (pa[2] < kptThresh || pb[2] < kptThresh) continue;
-          ctx.beginPath();
-          ctx.moveTo(pa[0], pa[1]);
-          ctx.lineTo(pb[0], pb[1]);
-          ctx.stroke();
-        }
-      }
-      ctx.fillStyle = kp.color;
-      for (const [x, y, c] of kp.points) {
-        if (c < kptThresh) continue;
+      skeleton.forEach(([a, b], li) => {
+        const pa = kp.points[a];
+        const pb = kp.points[b];
+        if (!pa || !pb || pa[2] < kptThresh || pb[2] < kptThresh) return;
+        ctx.strokeStyle = limb_colors[li] ?? kp.color;
+        ctx.beginPath();
+        ctx.moveTo(pa[0], pa[1]);
+        ctx.lineTo(pb[0], pb[1]);
+        ctx.stroke();
+      });
+      kp.points.forEach(([x, y, c], ki) => {
+        if (c < kptThresh) return;
+        ctx.fillStyle = keypoint_colors[ki] ?? kp.color;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
-      }
+      });
     }
     ctx.lineWidth = lineWidth;
   }
@@ -389,7 +428,7 @@ export async function annotate(
   // Classification: top-1 banner.
   if (results.probs) {
     label(
-      `${results.probs.top1_name} ${(results.probs.top1_conf * 100).toFixed(1)}%`,
+      `${results.probs.name} ${(results.probs.top1conf * 100).toFixed(1)}%`,
       0,
       fontSize + 8,
       results.probs.color,
@@ -397,18 +436,20 @@ export async function annotate(
   }
 }
 
-/** Resolve any {@link ImageInput} to something drawable on a canvas. */
-async function resolveBitmap(input: ImageInput): Promise<ImageBitmap | HTMLImageElement> {
+/** Resolve any {@link ImageInput} to something `drawImage` accepts. */
+async function resolveBitmap(input: ImageInput): Promise<CanvasImageSource> {
   if (typeof input === "string" || input instanceof URL) {
     const resp = await fetch(input);
     if (!resp.ok) throw new Error(`failed to fetch image: ${input} (${resp.status})`);
     return createImageBitmap(await resp.blob());
   }
+  if (input instanceof Blob) return createImageBitmap(input);
   if (input instanceof Uint8Array) return createImageBitmap(new Blob([input as BlobPart]));
   if (input instanceof ArrayBuffer) return createImageBitmap(new Blob([input]));
-  // Blob, ImageData, HTMLImageElement, HTMLCanvasElement, ImageBitmap are all
-  // accepted directly by createImageBitmap.
-  return createImageBitmap(input as ImageBitmapSource);
+  if (input instanceof ImageData) return createImageBitmap(input);
+  // <img>, <canvas>, <video>, ImageBitmap are valid drawImage sources as-is —
+  // createImageBitmap on a live <video> can throw InvalidStateError.
+  return input;
 }
 
 export default YOLO;
