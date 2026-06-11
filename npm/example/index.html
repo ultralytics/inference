@@ -1,4 +1,5 @@
 <!-- Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license -->
+
 <!doctype html>
 <html lang="en">
   <head>
@@ -6,20 +7,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ultralytics YOLO · WebGPU (WASM) demo</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
-      label { display: block; margin: 0.5rem 0 0.2rem; font-weight: 600; }
-      input { width: 100%; padding: 0.4rem; box-sizing: border-box; }
-      button { margin-top: 1rem; padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
-      #status { margin-top: 1rem; white-space: pre-wrap; font-family: monospace; }
-      canvas { margin-top: 1rem; max-width: 100%; border: 1px solid #ccc; }
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 900px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      label {
+        display: block;
+        margin: 0.5rem 0 0.2rem;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 0.4rem;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 1rem;
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      #status {
+        margin-top: 1rem;
+        white-space: pre-wrap;
+        font-family: monospace;
+      }
+      canvas {
+        margin-top: 1rem;
+        max-width: 100%;
+        border: 1px solid #ccc;
+      }
     </style>
   </head>
   <body>
     <h1>Ultralytics YOLO in the browser (WebGPU)</h1>
     <p>
-      Runs an Ultralytics YOLO ONNX model entirely client-side on the GPU. Requires a
-      WebGPU-capable browser (Chrome/Edge) served over <code>https</code> or
-      <code>localhost</code>.
+      Runs an Ultralytics YOLO ONNX model entirely client-side on the GPU. Requires a WebGPU-capable browser
+      (Chrome/Edge) served over <code>https</code> or <code>localhost</code>.
     </p>
 
     <label for="model">Model URL (.onnx, exported with Ultralytics metadata)</label>
@@ -60,17 +86,22 @@
           const total = performance.now() - t0;
           const s = results.speed;
           log(`Total predict(): ${total.toFixed(1)} ms (includes image fetch + decode)`);
-          log(`  preprocess: ${s.preprocess.toFixed(1)} ms | inference+sync: ${s.inference.toFixed(1)} ms | postprocess: ${s.postprocess.toFixed(1)} ms`);
+          log(
+            `  preprocess: ${s.preprocess.toFixed(1)} ms | inference+sync: ${s.inference.toFixed(1)} ms | postprocess: ${s.postprocess.toFixed(1)} ms`,
+          );
           log(`Detections: ${results.boxes.length}`);
-          log("Result summary: " + JSON.stringify({
-            task: results.task,
-            orig_width: results.orig_width,
-            orig_height: results.orig_height,
-            boxes: results.boxes.length,
-            obb: results.obb.length,
-            keypoints: results.keypoints.length,
-            probs: results.probs ? results.probs.top1_name : null,
-          }));
+          log(
+            "Result summary: " +
+              JSON.stringify({
+                task: results.task,
+                orig_width: results.orig_width,
+                orig_height: results.orig_height,
+                boxes: results.boxes.length,
+                obb: results.obb.length,
+                keypoints: results.keypoints.length,
+                probs: results.probs ? results.probs.top1_name : null,
+              }),
+          );
 
           log("Drawing...");
           await annotate(canvas, imageUrl, results);

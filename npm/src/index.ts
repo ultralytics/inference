@@ -40,14 +40,27 @@ function poseScheme(): PoseScheme {
 
 /** Axis-aligned box, pixel `xyxy`. */
 export interface Box {
-  x1: number; y1: number; x2: number; y2: number;
-  conf: number; cls: number; name: string; color: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  conf: number;
+  cls: number;
+  name: string;
+  color: string;
 }
 
 /** Oriented box, `xywhr` (angle in radians). */
 export interface Obb {
-  x: number; y: number; w: number; h: number; angle: number;
-  conf: number; cls: number; name: string; color: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  angle: number;
+  conf: number;
+  cls: number;
+  name: string;
+  color: string;
 }
 
 /** Keypoints for one detection: `[x, y, conf]` per point. */
@@ -58,13 +71,19 @@ export interface Keypoints {
 
 /** Classification probabilities. */
 export interface Probs {
-  top1: number; top5: number[]; top1conf: number; top5conf: number[];
-  name: string; color: string;
+  top1: number;
+  top5: number[];
+  top1conf: number;
+  top5conf: number[];
+  name: string;
+  color: string;
 }
 
 /** Per-stage timing in ms. */
 export interface Speed {
-  preprocess: number; inference: number; postprocess: number;
+  preprocess: number;
+  inference: number;
+  postprocess: number;
 }
 
 /** Inference results, mirroring the Ultralytics `Results` API. */
@@ -387,7 +406,10 @@ export async function annotate(
     const hw = o.w / 2;
     const hh = o.h / 2;
     const corners: Array<[number, number]> = [
-      [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh],
+      [-hw, -hh],
+      [hw, -hh],
+      [hw, hh],
+      [-hw, hh],
     ].map(([dx, dy]) => [o.x + dx * cos - dy * sin, o.y + dx * sin + dy * cos]);
     ctx.beginPath();
     ctx.moveTo(corners[0][0], corners[0][1]);
@@ -427,12 +449,7 @@ export async function annotate(
 
   // Classification: top-1 banner.
   if (results.probs) {
-    label(
-      `${results.probs.name} ${(results.probs.top1conf * 100).toFixed(1)}%`,
-      0,
-      fontSize + 8,
-      results.probs.color,
-    );
+    label(`${results.probs.name} ${(results.probs.top1conf * 100).toFixed(1)}%`, 0, fontSize + 8, results.probs.color);
   }
 }
 

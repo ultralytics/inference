@@ -20,10 +20,10 @@ pub use shim::{IntoParallelIterator, ParallelIterator, ParallelSliceMut};
 
 /// Sequential stand-ins for the small slice of the rayon prelude used by the
 /// shared pipeline. Each method delegates to the equivalent `std` iterator, so
-/// behaviour is identical (just single-threaded).
+/// behavior is identical (just single-threaded).
 #[cfg(target_arch = "wasm32")]
 mod shim {
-    /// Sequential analogue of `rayon::iter::IntoParallelIterator`.
+    /// Sequential analog of `rayon::iter::IntoParallelIterator`.
     pub trait IntoParallelIterator {
         /// Element type yielded by the iterator.
         type Item;
@@ -41,7 +41,7 @@ mod shim {
         }
     }
 
-    /// Sequential analogue of `rayon::slice::ParallelSliceMut` (the subset used
+    /// Sequential analog of `rayon::slice::ParallelSliceMut` (the subset used
     /// here: chunked mutable iteration).
     pub trait ParallelSliceMut<T> {
         /// Mutable, non-overlapping chunks of length `chunk_size` (mirrors

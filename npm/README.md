@@ -62,7 +62,7 @@ raw-pixel fast path with no re-encoding, so a render loop is smooth:
 ```ts
 const model = await YOLO.load("yolo26n.onnx");
 async function frame() {
-  const results = await model.predict(video);   // <video> element
+  const results = await model.predict(video); // <video> element
   await annotate(canvas, video, results);
   requestAnimationFrame(frame);
 }
@@ -75,16 +75,16 @@ async function frame() {
 
 Field names match the Rust/Ultralytics `Results` API 1-1:
 
-| Field | Type | Tasks |
-| --- | --- | --- |
-| `task` | `string` | all |
-| `width` / `height` | `number` | all |
-| `boxes` | `{ x1, y1, x2, y2, conf, cls, name, color }[]` | detect, segment, pose |
-| `obb` | `{ x, y, w, h, angle, conf, cls, name, color }[]` | obb |
-| `keypoints` | `{ points: [x, y, conf][], color }[]` | pose |
-| `probs` | `{ top1, top5, top1conf, top5conf, name, color } \| null` | classify |
-| `masks` | `Uint8Array` (RGBA overlay, `width*height*4`) | segment |
-| `speed` | `{ preprocess, inference, postprocess }` ms | all |
+| Field              | Type                                                      | Tasks                 |
+| ------------------ | --------------------------------------------------------- | --------------------- |
+| `task`             | `string`                                                  | all                   |
+| `width` / `height` | `number`                                                  | all                   |
+| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color }[]`            | detect, segment, pose |
+| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`         | obb                   |
+| `keypoints`        | `{ points: [x, y, conf][], color }[]`                     | pose                  |
+| `probs`            | `{ top1, top5, top1conf, top5conf, name, color } \| null` | classify              |
+| `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment               |
+| `speed`            | `{ preprocess, inference, postprocess }` ms               | all                   |
 
 `model.names` is the class id -> name map (like `model.names` in Python). Every
 detection carries its Ultralytics palette `color`, and `annotate()` draws the
@@ -100,10 +100,13 @@ the native renderer — none of which is duplicated in JS.
   with `YOLO.load(model, { backend: "webgpu" | "cpu" })`.
 - **Model format**: export your model to ONNX with Ultralytics so the metadata
   (task, class names, `imgsz`) is embedded:
+
   ```python
   from ultralytics import YOLO
+
   YOLO("yolo26n.pt").export(format="onnx")
   ```
+
 - **Runtime assets**: on first load, `ort-web` fetches the ONNX Runtime Web wasm
   bundle (~25 MB, browser-cached afterward) from `cdn.pyke.io`. If you set a
   Content-Security-Policy, allow that origin in `script-src`/`connect-src`. To
@@ -124,7 +127,7 @@ This package builds the wasm from the Rust crate with
 [`wasm-pack`](https://rustwasm.github.io/wasm-pack/):
 
 ```bash
-npm run build      # wasm-pack build + tsc
+npm run build # wasm-pack build + tsc
 ```
 
 See `example/index.html` for a complete, runnable demo (serve the `npm/` folder
