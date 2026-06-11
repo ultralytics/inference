@@ -56,7 +56,7 @@
   "bugs": {
     "url": "https://github.com/ultralytics/inference/issues"
   },
-  "homepage": "https://github.com/ultralytics/inference/tree/main/web#readme",
+  "homepage": "https://www.ultralytics.com",
   "devDependencies": {
     "typescript": "^5.4.0"
   }
