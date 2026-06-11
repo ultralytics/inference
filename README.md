@@ -586,11 +586,11 @@ ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose o
 - [x] Class filtering support
 - [x] Auto-download all YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes n/s/m/l/x, all tasks)
 - [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
+- [x] WebAssembly (WASM) browser inference on WebGPU (npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo))
 
 ### In Progress
 
 - [ ] Python bindings (PyO3)
-- [ ] WebAssembly (WASM) support for browser inference
 
 ## 💡 Contributing
 
