@@ -44,6 +44,10 @@
   ],
   "license": "AGPL-3.0",
   "author": "Ultralytics",
+  "contributors": [
+    "Glenn Jocher <glenn.jocher@ultralytics.com>",
+    "Onuralp Sezer <onuralp.sezer@ultralytics.com>"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ultralytics/inference.git",
