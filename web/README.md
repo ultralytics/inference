@@ -88,7 +88,18 @@ async function frame() {
 }
 ```
 
-## Models
+## ✨ Models
+
+<a href="https://docs.ultralytics.com/tasks" target="_blank">
+    <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/docs/ultralytics-yolov8-tasks-banner.avif" alt="Ultralytics YOLO supported tasks">
+</a>
+<br>
+<br>
+
+Runs [YOLOv8](https://docs.ultralytics.com/models/yolov8),
+[YOLO11](https://docs.ultralytics.com/models/yolo11), and
+[YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for detection,
+segmentation, pose, OBB, classification, and semantic segmentation.
 
 Pass a bare ONNX name and it is **auto-downloaded** from the
 [Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the
