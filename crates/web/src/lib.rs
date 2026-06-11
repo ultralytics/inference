@@ -63,26 +63,119 @@ async fn ensure_backend() -> Result<(), JsError> {
     Ok(())
 }
 
-/// Read the Ultralytics YAML metadata embedded in an ONNX model's custom
-/// metadata properties and parse it with the core crate's parser.
-fn parse_metadata(session: &Session) -> Result<ModelMetadata, JsError> {
-    let meta = session
-        .metadata()
-        .map_err(|e| JsError::new(&format!("failed to read model metadata: {e}")))?;
-    let mut map: HashMap<String, String> = HashMap::new();
-    if let Ok(keys) = meta.custom_keys() {
-        for key in keys {
-            if let Some(value) = meta.custom(&key) {
-                map.insert(key, value);
-            }
+/// Parse the Ultralytics metadata embedded in an ONNX model's `metadata_props`.
+///
+/// `ort-web` does not implement ONNX session metadata retrieval, so we read the
+/// `metadata_props` (key/value pairs such as `task`, `names`, `imgsz`) straight
+/// from the model protobuf, rebuild the `key: value` YAML the native path uses,
+/// and hand it to the shared parser.
+fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
+    let props = parse_metadata_props(model_bytes);
+    if props.is_empty() {
+        return Err(JsError::new(
+            "no metadata found in ONNX model. Export it with Ultralytics \
+             (`model.export(format='onnx')`) so the task, class names, and imgsz \
+             are embedded.",
+        ));
+    }
+    let combined = props
+        .iter()
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    ModelMetadata::from_yaml_str(&combined)
+        .map_err(|e| JsError::new(&format!("failed to parse model metadata: {e}")))
+}
+
+/// Read a protobuf base-128 varint at `pos`, advancing it. Returns `None` on a
+/// truncated/oversized value.
+fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
+    let mut result = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let byte = *buf.get(*pos)?;
+        *pos += 1;
+        result |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(result);
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
         }
     }
-    ModelMetadata::from_onnx_metadata(&map).map_err(|e| {
-        JsError::new(&format!(
-            "{e}. Export the model with `model.export(format='onnx')` so the \
-             Ultralytics metadata (task, classes, imgsz) is embedded."
-        ))
-    })
+}
+
+/// Extract `ModelProto.metadata_props` (field 14, repeated
+/// `StringStringEntryProto`) into a key/value map by walking the top-level
+/// protobuf fields. Large fields such as the graph are skipped by length without
+/// being decoded.
+fn parse_metadata_props(buf: &[u8]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let mut pos = 0;
+    while pos < buf.len() {
+        let Some(tag) = read_varint(buf, &mut pos) else {
+            break;
+        };
+        let field = tag >> 3;
+        match tag & 7 {
+            0 => {
+                if read_varint(buf, &mut pos).is_none() {
+                    break;
+                }
+            }
+            1 => pos += 8,
+            5 => pos += 4,
+            2 => {
+                let Some(len) = read_varint(buf, &mut pos) else {
+                    break;
+                };
+                let len = len as usize;
+                let Some(sub) = buf.get(pos..pos + len) else {
+                    break;
+                };
+                pos += len;
+                if field == 14
+                    && let Some((key, value)) = parse_string_string_entry(sub)
+                {
+                    map.insert(key, value);
+                }
+            }
+            _ => break,
+        }
+    }
+    map
+}
+
+/// Parse a `StringStringEntryProto` (field 1 = key, field 2 = value).
+fn parse_string_string_entry(buf: &[u8]) -> Option<(String, String)> {
+    let mut pos = 0;
+    let mut key = None;
+    let mut value = None;
+    while pos < buf.len() {
+        let tag = read_varint(buf, &mut pos)?;
+        let field = tag >> 3;
+        match tag & 7 {
+            2 => {
+                let len = read_varint(buf, &mut pos)? as usize;
+                let bytes = buf.get(pos..pos + len)?;
+                pos += len;
+                let text = String::from_utf8_lossy(bytes).into_owned();
+                match field {
+                    1 => key = Some(text),
+                    2 => value = Some(text),
+                    _ => {}
+                }
+            }
+            0 => {
+                read_varint(buf, &mut pos)?;
+            }
+            1 => pos += 8,
+            5 => pos += 4,
+            _ => return None,
+        }
+    }
+    Some((key?, value.unwrap_or_default()))
 }
 
 /// A loaded YOLO model ready for inference in the browser.
@@ -100,34 +193,19 @@ pub struct YoloModel {
 
 #[wasm_bindgen]
 impl YoloModel {
-    /// Load a model from a URL (served alongside the page or from a CDN).
+    /// Load a model from raw ONNX bytes (fetched by the JS wrapper).
     ///
-    /// Initializes the WebGPU backend on first use, then commits an ONNX Runtime
+    /// Initializes the WebGPU backend on first use, reads the embedded
+    /// Ultralytics metadata from the model bytes, then commits an ONNX Runtime
     /// session with the WebGPU execution provider. Equivalent to Python's
     /// `YOLO('model.onnx')`.
-    ///
-    /// # Errors
-    /// Returns a JS error if the backend cannot start, the model cannot be
-    /// fetched/committed, or the model lacks Ultralytics metadata.
-    pub async fn load_url(url: String) -> Result<YoloModel, JsError> {
-        ensure_backend().await?;
-        let session = Session::builder()
-            .map_err(map_ort)?
-            .with_execution_providers([WebGPU::default().build().error_on_failure()])
-            .map_err(map_ort)?
-            .commit_from_url(&url)
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load model from {url}: {e}")))?;
-        Self::from_session(session)
-    }
-
-    /// Load a model from raw ONNX bytes already in memory (e.g. fetched by JS).
     ///
     /// # Errors
     /// Returns a JS error if the backend cannot start, the bytes are not a valid
     /// model, or the model lacks Ultralytics metadata.
     pub async fn load_bytes(bytes: Vec<u8>) -> Result<YoloModel, JsError> {
         ensure_backend().await?;
+        let metadata = build_metadata(&bytes)?;
         let session = Session::builder()
             .map_err(map_ort)?
             .with_execution_providers([WebGPU::default().build().error_on_failure()])
@@ -135,7 +213,7 @@ impl YoloModel {
             .commit_from_memory(&bytes)
             .await
             .map_err(|e| JsError::new(&format!("failed to load model from bytes: {e}")))?;
-        Self::from_session(session)
+        Self::from_session(session, metadata)
     }
 
     /// The model's task (`"detect"`, `"segment"`, `"pose"`, `"classify"`,
@@ -168,10 +246,9 @@ impl YoloModel {
 }
 
 impl YoloModel {
-    /// Finish constructing a model from a committed session by parsing metadata
-    /// and resolving the input size.
-    fn from_session(session: Session) -> Result<Self, JsError> {
-        let metadata = parse_metadata(&session)?;
+    /// Finish constructing a model from a committed session and its parsed
+    /// metadata by resolving the input size and output names.
+    fn from_session(session: Session, metadata: ModelMetadata) -> Result<Self, JsError> {
         let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
         let output_names = session
             .outputs()

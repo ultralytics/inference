@@ -93,6 +93,20 @@ export interface PredictOptions {
   iou?: number;
 }
 
+/** Options for {@link annotate}. */
+export interface AnnotateOptions {
+  /** Box/line width in pixels. Defaults to a value scaled to the image size. */
+  lineWidth?: number;
+  /** Font CSS string. Defaults to a size scaled to the image. */
+  font?: string;
+  /** Draw `class_name confidence%` labels. Default `true`. */
+  labels?: boolean;
+  /** Draw pose keypoints and skeleton. Default `true`. */
+  keypoints?: boolean;
+  /** Keypoint confidence threshold for drawing. Default `0.5`. */
+  keypointThreshold?: number;
+}
+
 /** Image-like inputs accepted by {@link YOLO.predict}. */
 export type ImageInput =
   | string
@@ -184,13 +198,15 @@ export class YOLO {
    */
   static async load(source: string | URL | ArrayBuffer | Uint8Array, options?: LoadOptions): Promise<YOLO> {
     await ensureInit(options?.wasmUrl);
-    let model: YoloModel;
+    let bytes: Uint8Array;
     if (typeof source === "string" || source instanceof URL) {
-      model = await YoloModel.load_url(source.toString());
+      const resp = await fetch(source);
+      if (!resp.ok) throw new Error(`failed to fetch model: ${source} (${resp.status})`);
+      bytes = new Uint8Array(await resp.arrayBuffer());
     } else {
-      model = await YoloModel.load_bytes(source instanceof Uint8Array ? source : new Uint8Array(source));
+      bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
     }
-    return new YOLO(model);
+    return new YOLO(await YoloModel.load_bytes(bytes));
   }
 
   /** The model's task (`detect`, `segment`, `pose`, `classify`, `obb`, `semantic`). */
@@ -216,6 +232,161 @@ export class YOLO {
   free(): void {
     this.model.free();
   }
+}
+
+// Ultralytics color palette (one color per class id, cycled).
+const PALETTE = [
+  "#FF3838", "#FF9D97", "#FF701F", "#FFB21D", "#CFD231", "#48F90A", "#92CC17",
+  "#3DDB86", "#1A9334", "#00D4BB", "#2C99A8", "#00C2FF", "#344593", "#6473FF",
+  "#0018EC", "#8438FF", "#520085", "#CB38FF", "#FF95C8", "#FF37C7",
+];
+
+// COCO 17-keypoint skeleton (0-indexed pairs) for pose rendering.
+const COCO_SKELETON: Array<[number, number]> = [
+  [15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11], [6, 12], [5, 6],
+  [5, 7], [6, 8], [7, 9], [8, 10], [1, 2], [0, 1], [0, 2], [1, 3], [2, 4],
+  [3, 5], [4, 6],
+];
+
+const colorFor = (classId: number): string => PALETTE[((classId % PALETTE.length) + PALETTE.length) % PALETTE.length];
+
+/**
+ * Draw inference results onto a canvas, on top of the source image.
+ *
+ * Handles every task: axis-aligned boxes, oriented boxes (OBB), pose keypoints
+ * with the COCO skeleton, and a top-1 banner for classification. The canvas is
+ * resized to the original image dimensions so detection coordinates line up.
+ *
+ * ```ts
+ * const results = await model.predict("bus.jpg");
+ * await annotate(document.querySelector("canvas"), "bus.jpg", results);
+ * ```
+ *
+ * @param canvas Target `<canvas>` (or `OffscreenCanvas`).
+ * @param image The same image passed to `predict` (URL, Blob, bytes, element, ...).
+ * @param results The `Results` returned by {@link YOLO.predict}.
+ * @param options Styling options.
+ */
+export async function annotate(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  image: ImageInput,
+  results: Results,
+  options?: AnnotateOptions,
+): Promise<void> {
+  const bitmap = await resolveBitmap(image);
+  const width = results.orig_width || (bitmap as { width: number }).width;
+  const height = results.orig_height || (bitmap as { height: number }).height;
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d") as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!ctx) throw new Error("could not acquire a 2D canvas context");
+
+  ctx.drawImage(bitmap as CanvasImageSource, 0, 0, width, height);
+
+  const lineWidth = options?.lineWidth ?? Math.max(2, Math.round(width / 320));
+  const fontSize = Math.max(12, Math.round(width / 40));
+  const font = options?.font ?? `${fontSize}px sans-serif`;
+  const showLabels = options?.labels ?? true;
+  const showKpts = options?.keypoints ?? true;
+  const kptThresh = options?.keypointThreshold ?? 0.5;
+  ctx.lineWidth = lineWidth;
+  ctx.font = font;
+  ctx.textBaseline = "top";
+
+  const label = (text: string, x: number, y: number, color: string) => {
+    if (!showLabels) return;
+    const pad = Math.round(fontSize * 0.2);
+    const w = ctx.measureText(text).width + pad * 2;
+    const h = fontSize + pad * 2;
+    const ly = Math.max(0, y - h);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, ly, w, h);
+    ctx.fillStyle = "#000";
+    ctx.fillText(text, x + pad, ly + pad);
+  };
+
+  // Axis-aligned boxes (detect / segment / pose).
+  for (const b of results.boxes) {
+    const color = colorFor(b.class_id);
+    ctx.strokeStyle = color;
+    ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+    label(`${b.class_name} ${(b.confidence * 100).toFixed(0)}%`, b.x1, b.y1, color);
+  }
+
+  // Oriented boxes (obb): draw the rotated rectangle.
+  for (const o of results.obb) {
+    const color = colorFor(o.class_id);
+    ctx.strokeStyle = color;
+    const cos = Math.cos(o.angle);
+    const sin = Math.sin(o.angle);
+    const hw = o.width / 2;
+    const hh = o.height / 2;
+    const corners: Array<[number, number]> = [
+      [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh],
+    ].map(([dx, dy]) => [o.x + dx * cos - dy * sin, o.y + dx * sin + dy * cos]);
+    ctx.beginPath();
+    ctx.moveTo(corners[0][0], corners[0][1]);
+    for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i][0], corners[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+    label(`${o.class_name} ${(o.confidence * 100).toFixed(0)}%`, corners[0][0], corners[0][1], color);
+  }
+
+  // Pose keypoints + skeleton.
+  if (showKpts) {
+    const radius = Math.max(2, Math.round(width / 300));
+    for (const kp of results.keypoints) {
+      ctx.strokeStyle = "#00FF88";
+      ctx.lineWidth = Math.max(1, Math.round(lineWidth / 2));
+      if (kp.points.length === 17) {
+        for (const [a, b] of COCO_SKELETON) {
+          const pa = kp.points[a];
+          const pb = kp.points[b];
+          if (pa[2] < kptThresh || pb[2] < kptThresh) continue;
+          ctx.beginPath();
+          ctx.moveTo(pa[0], pa[1]);
+          ctx.lineTo(pb[0], pb[1]);
+          ctx.stroke();
+        }
+      }
+      ctx.fillStyle = "#FF3838";
+      for (const [x, y, c] of kp.points) {
+        if (c < kptThresh) continue;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.lineWidth = lineWidth;
+  }
+
+  // Classification: top-1 banner.
+  if (results.probs) {
+    label(
+      `${results.probs.top1_name} ${(results.probs.top1_conf * 100).toFixed(1)}%`,
+      0,
+      fontSize + 8,
+      PALETTE[0],
+    );
+  }
+}
+
+/** Resolve any {@link ImageInput} to something drawable on a canvas. */
+async function resolveBitmap(input: ImageInput): Promise<ImageBitmap | HTMLImageElement> {
+  if (typeof input === "string" || input instanceof URL) {
+    const resp = await fetch(input);
+    if (!resp.ok) throw new Error(`failed to fetch image: ${input} (${resp.status})`);
+    return createImageBitmap(await resp.blob());
+  }
+  if (input instanceof Uint8Array) return createImageBitmap(new Blob([input as BlobPart]));
+  if (input instanceof ArrayBuffer) return createImageBitmap(new Blob([input]));
+  // Blob, ImageData, HTMLImageElement, HTMLCanvasElement, ImageBitmap are all
+  // accepted directly by createImageBitmap.
+  return createImageBitmap(input as ImageBitmapSource);
 }
 
 export default YOLO;

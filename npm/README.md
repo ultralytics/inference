@@ -21,7 +21,7 @@ npm install ultralytics-inference
 ## Quick start
 
 ```ts
-import { YOLO } from "ultralytics-inference";
+import { YOLO, annotate } from "ultralytics-inference";
 
 // Loads the model and initializes WebGPU + ONNX Runtime Web on first use.
 const model = await YOLO.load("yolo26n.onnx");
@@ -30,6 +30,10 @@ const results = await model.predict("bus.jpg");
 for (const box of results.boxes) {
   console.log(box.class_name, box.confidence.toFixed(2), [box.x1, box.y1, box.x2, box.y2]);
 }
+
+// Draw boxes / OBB / pose skeletons / labels onto a canvas in one call —
+// no manual canvas code required.
+await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
 
 `predict()` accepts a URL/path, a `Blob`/`File`, raw encoded image bytes

@@ -23,7 +23,7 @@
     </p>
 
     <label for="model">Model URL (.onnx, exported with Ultralytics metadata)</label>
-    <input id="model" value="yolo26n.onnx" />
+    <input id="model" value="yolo11n.onnx" />
 
     <label for="image">Image URL</label>
     <input id="image" value="bus.jpg" />
@@ -33,9 +33,10 @@
     <canvas id="out"></canvas>
 
     <script type="module">
-      import { YOLO } from "../dist/index.js";
+      import { YOLO, annotate } from "../dist/index.js";
 
       const statusEl = document.getElementById("status");
+      const canvas = document.getElementById("out");
       const log = (msg) => (statusEl.textContent += msg + "\n");
 
       let model = null;
@@ -47,49 +48,24 @@
         const imageUrl = document.getElementById("image").value;
         try {
           if (loadedFor !== modelUrl) {
-            log(`Loading model ${modelUrl} (first load also fetches the ONNX Runtime wasm)...`);
+            log(`Loading ${modelUrl} (first load also fetches the ONNX Runtime wasm)...`);
             model = await YOLO.load(modelUrl);
             loadedFor = modelUrl;
             log(`Model ready. Task: ${model.task}`);
           }
 
-          log(`Running inference on ${imageUrl}...`);
           const t0 = performance.now();
-          const results = await model.predict(imageUrl, { conf: 0.25, iou: 0.7 });
-          log(`Done in ${(performance.now() - t0).toFixed(1)} ms`);
-          log(`Detections: ${results.boxes.length}`);
+          const results = await model.predict(imageUrl);
+          log(`Inference: ${(performance.now() - t0).toFixed(1)} ms`);
 
-          await draw(imageUrl, results);
-          for (const b of results.boxes) {
-            log(`  ${b.class_name} ${(b.confidence * 100).toFixed(1)}%`);
-          }
+          // One call draws boxes / OBB / pose / labels onto the canvas.
+          await annotate(canvas, imageUrl, results);
+
+          log(`Detections: ${results.boxes.length}`);
         } catch (e) {
           log(`Error: ${e.message ?? e}`);
         }
       });
-
-      async function draw(imageUrl, results) {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        await new Promise((res, rej) => {
-          img.onload = res;
-          img.onerror = rej;
-          img.src = imageUrl;
-        });
-        const canvas = document.getElementById("out");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        ctx.lineWidth = Math.max(2, img.naturalWidth / 300);
-        ctx.strokeStyle = "#00ff88";
-        ctx.fillStyle = "#00ff88";
-        ctx.font = `${Math.max(14, img.naturalWidth / 40)}px sans-serif`;
-        for (const b of results.boxes) {
-          ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
-          ctx.fillText(`${b.class_name} ${(b.confidence * 100).toFixed(0)}%`, b.x1, Math.max(12, b.y1 - 4));
-        }
-      }
     </script>
   </body>
 </html>
