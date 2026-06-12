@@ -2,7 +2,7 @@
 
 <a href="https://www.ultralytics.com/"><img src="https://raw.githubusercontent.com/ultralytics/assets/main/logo/Ultralytics_Logotype_Original.svg" width="320" alt="Ultralytics logo"></a>
 
-# Ultralytics Inference
+# Ultralytics YOLO npm Inference
 
 [![npm version](https://img.shields.io/npm/v/@ultralytics/yolo?logo=npm&logoColor=white&label=npm&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 [![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
@@ -34,7 +34,7 @@ via [`ort-web`](https://ort.pyke.io/backends/web), and all pre/postprocessing,
 colors, and the pose skeleton come from that shared Rust code, so results and
 visuals match the native and Python paths.
 
-## Install
+## 📦 Install
 
 ```bash
 npm install @ultralytics/yolo
@@ -48,7 +48,7 @@ It ships as an ES module with TypeScript types and works in any modern bundler
 (Vite, webpack, esbuild, Bun) or directly via a CDN such as
 [esm.sh](https://esm.sh/@ultralytics/yolo).
 
-## Quick start
+## 🚀 Quick Start
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -74,7 +74,7 @@ const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
 console.log(model.device); // "webgpu" or "cpu"
 ```
 
-### Webcam / video
+### Webcam / Video
 
 Drawable sources (`<video>`, canvas, `ImageBitmap`, `ImageData`) take a
 raw-pixel fast path with no re-encoding, so a render loop is smooth:
@@ -119,7 +119,7 @@ only). A value containing a `/` or a scheme is used as a URL/path as-is.
 > proxy. The bare-name shortcut is convenient when you mirror the assets on such
 > a host.
 
-## Results shape
+## 📐 Results Shape
 
 `predict()` resolves to a `Results` object shaped like the Ultralytics
 `Results`:
@@ -143,7 +143,7 @@ detection carries its Ultralytics palette `color`, and `annotate()` draws the
 `masks` overlay and the pose skeleton with the same per-limb/keypoint colors as
 the native renderer. None of this is duplicated in JS.
 
-## Requirements & notes
+## ⚙️ Requirements & Notes
 
 - **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure
   context** (`https://` or `http://localhost`) gives the fast path. Without
@@ -175,7 +175,7 @@ the native renderer. None of this is duplicated in JS.
   creation. See the [ort-web docs](https://ort.pyke.io/backends/web) to review or
   disable it.
 
-## Building from source
+## 🔨 Building From Source
 
 This package builds the wasm from the Rust crate with
 [`wasm-pack`](https://github.com/wasm-bindgen/wasm-pack):
