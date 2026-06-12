@@ -94,8 +94,10 @@ pub(crate) struct JsResults {
 }
 
 impl JsResults {
-    /// Convert core [`Results`] into the serializable JS payload.
-    pub(crate) fn from_results(r: &Results) -> Self {
+    /// Convert core [`Results`] into the serializable JS payload, labeling it with
+    /// the model's declared `task` (the caller already holds it, so there is no
+    /// need to guess it back from which result fields are populated).
+    pub(crate) fn from_results(r: &Results, task: Task) -> Self {
         // Class id -> display name and palette color, shared by every detection type.
         let name = |c: usize| r.names.get(&c).cloned().unwrap_or_default();
         let hex = |c: usize| Color::from_index(c).to_hex();
@@ -162,7 +164,7 @@ impl JsResults {
         });
 
         Self {
-            task: format!("{:?}", task_of(r)).to_lowercase(),
+            task: task.as_str().to_owned(),
             width: r.orig_shape.1,
             height: r.orig_shape.0,
             boxes,
@@ -237,21 +239,4 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
     }
 
     Vec::new()
-}
-
-/// Infer the task label from which result fields are populated.
-fn task_of(r: &Results) -> Task {
-    if r.obb.is_some() {
-        Task::Obb
-    } else if r.keypoints.is_some() {
-        Task::Pose
-    } else if r.masks.is_some() {
-        Task::Segment
-    } else if r.probs.is_some() {
-        Task::Classify
-    } else if r.semantic_mask.is_some() {
-        Task::Semantic
-    } else {
-        Task::Detect
-    }
 }

@@ -443,6 +443,18 @@ fn map_ort<M>(e: ort::Error<M>) -> JsError {
     JsError::new(&format!("ort error: {e}"))
 }
 
+/// Build a `.map_err` closure that prefixes any displayable error with `context`,
+/// so call sites read `.map_err(err_ctx("inference failed"))`.
+fn err_ctx<E: std::fmt::Display>(context: &'static str) -> impl FnOnce(E) -> JsError {
+    move |e| JsError::new(&format!("{context}: {e}"))
+}
+
+/// Serialize a value to a `JsValue`, mapping a failure to a JS error naming `what`.
+fn to_js<T: Serialize>(value: &T, what: &str) -> Result<JsValue, JsError> {
+    serde_wasm_bindgen::to_value(value)
+        .map_err(|e| JsError::new(&format!("failed to serialize {what}: {e}")))
+}
+
 /// The Ultralytics pose drawing scheme: skeleton connectivity plus the per-limb
 /// and per-keypoint palette colors. Lets the JS annotator draw pose exactly like
 /// the native/Python renderer without duplicating any palette.
