@@ -514,7 +514,7 @@ impl YoloModel {
             self.metadata.end2end,
             self.metadata.kpt_shape,
         );
-        let payload = JsResults::from_results(&results);
+        let payload = JsResults::from_results(&results, self.metadata.task);
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|e| JsError::new(&format!("failed to serialize results: {e}")))
     }
@@ -606,8 +606,10 @@ struct JsResults {
 }
 
 impl JsResults {
-    /// Convert core [`Results`] into the serializable JS payload.
-    fn from_results(r: &Results) -> Self {
+    /// Convert core [`Results`] into the serializable JS payload, labeling it with
+    /// the model's declared `task` (the caller already holds it, so there is no
+    /// need to guess it back from which result fields are populated).
+    fn from_results(r: &Results, task: Task) -> Self {
         // Class id -> display name and palette color, shared by every detection type.
         let name = |c: usize| r.names.get(&c).cloned().unwrap_or_default();
         let hex = |c: usize| Color::from_index(c).to_hex();
@@ -674,7 +676,7 @@ impl JsResults {
         });
 
         Self {
-            task: format!("{:?}", task_of(r)).to_lowercase(),
+            task: format!("{task:?}").to_lowercase(),
             width: r.orig_shape.1,
             height: r.orig_shape.0,
             boxes,
@@ -749,23 +751,6 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
     }
 
     Vec::new()
-}
-
-/// Infer the task label from which result fields are populated.
-fn task_of(r: &Results) -> Task {
-    if r.obb.is_some() {
-        Task::Obb
-    } else if r.keypoints.is_some() {
-        Task::Pose
-    } else if r.masks.is_some() {
-        Task::Segment
-    } else if r.probs.is_some() {
-        Task::Classify
-    } else if r.semantic_mask.is_some() {
-        Task::Semantic
-    } else {
-        Task::Detect
-    }
 }
 
 /// The Ultralytics pose drawing scheme: skeleton connectivity plus the per-limb
