@@ -33,6 +33,8 @@ use ultralytics_inference::visualizer::skeleton::{
 };
 use ultralytics_inference::{InferenceConfig, Task};
 
+mod onnx_meta;
+
 /// Default inference image size used when a model does not record `imgsz` in its
 /// metadata. Mirrors the native crate's fallback.
 const DEFAULT_IMGSZ: usize = 640;
@@ -154,7 +156,7 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
             ort_web::api(feature).await
         }
     }
-    .map_err(|e| JsError::new(&format!("failed to initialize ort-web backend: {e}")))?;
+    .map_err(err_ctx("failed to initialize ort-web backend"))?;
     ort::set_api(api);
     BACKEND.with(|b| *b.borrow_mut() = Some(requested));
     Ok(())
@@ -167,7 +169,7 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
 /// from the model protobuf, rebuild the `key: value` YAML the native path uses,
 /// and hand it to the shared parser.
 fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
-    let props = parse_metadata_props(model_bytes);
+    let props = onnx_meta::parse_metadata_props(model_bytes);
     if props.is_empty() {
         return Err(JsError::new(
             "no metadata found in ONNX model. Export it with Ultralytics \
@@ -180,92 +182,7 @@ fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
         .map(|(k, v)| format!("{k}: {v}"))
         .collect::<Vec<_>>()
         .join("\n");
-    ModelMetadata::from_yaml_str(&combined)
-        .map_err(|e| JsError::new(&format!("failed to parse model metadata: {e}")))
-}
-
-/// Read a protobuf base-128 varint at `pos`, advancing it. Returns `None` on a
-/// truncated/oversized value.
-fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
-    let mut result = 0u64;
-    let mut shift = 0u32;
-    loop {
-        let byte = *buf.get(*pos)?;
-        *pos += 1;
-        result |= u64::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return Some(result);
-        }
-        shift += 7;
-        if shift >= 64 {
-            return None;
-        }
-    }
-}
-
-/// Read the next protobuf field at `pos`, advancing it. Returns the field number
-/// and, for length-delimited fields (wire type 2), the payload bytes; varint and
-/// fixed-width fields are skipped and yield `None` payload. Returns `None` at the
-/// end of the buffer or on a malformed field.
-fn read_field<'a>(buf: &'a [u8], pos: &mut usize) -> Option<(u64, Option<&'a [u8]>)> {
-    let tag = read_varint(buf, pos)?;
-    let payload = match tag & 7 {
-        0 => {
-            read_varint(buf, pos)?;
-            None
-        }
-        1 => {
-            *pos += 8;
-            None
-        }
-        5 => {
-            *pos += 4;
-            None
-        }
-        2 => {
-            let len = read_varint(buf, pos)? as usize;
-            let sub = buf.get(*pos..*pos + len)?;
-            *pos += len;
-            Some(sub)
-        }
-        _ => return None,
-    };
-    Some((tag >> 3, payload))
-}
-
-/// Extract `ModelProto.metadata_props` (field 14, repeated
-/// `StringStringEntryProto`) into a key/value map. Other fields (including the
-/// large graph) are skipped without being decoded.
-fn parse_metadata_props(buf: &[u8]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    let mut pos = 0;
-    while let Some((field, payload)) = read_field(buf, &mut pos) {
-        if field == 14
-            && let Some(sub) = payload
-            && let Some((key, value)) = parse_string_string_entry(sub)
-        {
-            map.insert(key, value);
-        }
-    }
-    map
-}
-
-/// Parse a `StringStringEntryProto` (field 1 = key, field 2 = value).
-fn parse_string_string_entry(buf: &[u8]) -> Option<(String, String)> {
-    let mut pos = 0;
-    let mut key = None;
-    let mut value = None;
-    while let Some((field, payload)) = read_field(buf, &mut pos) {
-        if let Some(sub) = payload {
-            let text = String::from_utf8_lossy(sub).into_owned();
-            match field {
-                1 => key = Some(text),
-                2 => value = Some(text),
-                _ => {}
-            }
-        }
-    }
-    Some((key?, value.unwrap_or_default()))
+    ModelMetadata::from_yaml_str(&combined).map_err(err_ctx("failed to parse model metadata"))
 }
 
 /// A loaded YOLO model ready for inference in the browser.
@@ -322,7 +239,7 @@ impl YoloModel {
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn task(&self) -> String {
-        format!("{:?}", self.metadata.task).to_lowercase()
+        self.metadata.task.as_str().to_owned()
     }
 
     /// The active device: `"webgpu"` or `"cpu"` (the fallback when WebGPU is
@@ -339,8 +256,7 @@ impl YoloModel {
     /// Returns a JS error only if serialization fails (not expected).
     #[wasm_bindgen(getter)]
     pub fn names(&self) -> Result<JsValue, JsError> {
-        serde_wasm_bindgen::to_value(&*self.metadata.names)
-            .map_err(|e| JsError::new(&format!("failed to serialize names: {e}")))
+        to_js(&*self.metadata.names, "names")
     }
 
     /// Run inference on a single encoded image (JPEG or PNG bytes).
@@ -359,8 +275,7 @@ impl YoloModel {
         iou: f32,
         classes: Option<Vec<u32>>,
     ) -> Result<JsValue, JsError> {
-        let dynimg = image::load_from_memory(&image)
-            .map_err(|e| JsError::new(&format!("failed to decode image: {e}")))?;
+        let dynimg = image::load_from_memory(&image).map_err(err_ctx("failed to decode image"))?;
         self.run(dynimg, conf, iou, classes).await
     }
 
@@ -411,7 +326,7 @@ impl YoloModel {
         builder
             .commit_from_memory(bytes)
             .await
-            .map_err(|e| JsError::new(&format!("failed to load model from bytes: {e}")))
+            .map_err(err_ctx("failed to load model from bytes"))
     }
 
     /// Finish constructing a model from a committed session and its parsed
@@ -456,7 +371,7 @@ impl YoloModel {
         let rgb = dynimg.to_rgb8();
         let (w, h) = rgb.dimensions();
         let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
-            .map_err(|e| JsError::new(&format!("failed to build image array: {e}")))?;
+            .map_err(err_ctx("failed to build image array"))?;
 
         // Classification uses center-crop (like Ultralytics); all other tasks
         // use letterbox. Both share the f32 NCHW output.
@@ -474,11 +389,11 @@ impl YoloModel {
             .session
             .run_async(ort::inputs![input.view()], &run_options)
             .await
-            .map_err(|e| JsError::new(&format!("inference failed: {e}")))?;
+            .map_err(err_ctx("inference failed"))?;
         // Outputs live in the ONNX Runtime wasm context; copy them back to Rust.
         sync_outputs(&mut outputs)
             .await
-            .map_err(|e| JsError::new(&format!("failed to sync outputs: {e}")))?;
+            .map_err(err_ctx("failed to sync outputs"))?;
 
         // Borrow each output's data directly (no copy, important for the large
         // semantic logits, ~160 MB) and feed it to the shared postprocessor while
@@ -515,8 +430,7 @@ impl YoloModel {
             self.metadata.kpt_shape,
         );
         let payload = JsResults::from_results(&results, self.metadata.task);
-        serde_wasm_bindgen::to_value(&payload)
-            .map_err(|e| JsError::new(&format!("failed to serialize results: {e}")))
+        to_js(&payload, "results")
     }
 }
 
@@ -524,6 +438,18 @@ impl YoloModel {
 /// a JS error.
 fn map_ort<M>(e: ort::Error<M>) -> JsError {
     JsError::new(&format!("ort error: {e}"))
+}
+
+/// Build a `.map_err` closure that prefixes any displayable error with `context`,
+/// so call sites read `.map_err(err_ctx("inference failed"))`.
+fn err_ctx<E: std::fmt::Display>(context: &'static str) -> impl FnOnce(E) -> JsError {
+    move |e| JsError::new(&format!("{context}: {e}"))
+}
+
+/// Serialize a value to a `JsValue`, mapping a failure to a JS error naming `what`.
+fn to_js<T: Serialize>(value: &T, what: &str) -> Result<JsValue, JsError> {
+    serde_wasm_bindgen::to_value(value)
+        .map_err(|e| JsError::new(&format!("failed to serialize {what}: {e}")))
 }
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
@@ -676,7 +602,7 @@ impl JsResults {
         });
 
         Self {
-            task: format!("{task:?}").to_lowercase(),
+            task: task.as_str().to_owned(),
             width: r.orig_shape.1,
             height: r.orig_shape.0,
             boxes,
@@ -784,8 +710,7 @@ pub fn pose_palette() -> Result<JsValue, JsError> {
             .map(|&i| Color::from_pose_index(i).to_hex())
             .collect(),
     };
-    serde_wasm_bindgen::to_value(&scheme)
-        .map_err(|e| JsError::new(&format!("failed to serialize pose palette: {e}")))
+    to_js(&scheme, "pose palette")
 }
 
 /// Install a panic hook that logs Rust panics to the browser console.
