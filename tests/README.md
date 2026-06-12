@@ -28,4 +28,4 @@ cargo llvm-cov --features annotate,video,visualize --workspace --html
 ## ✨ Contributing
 
 We love contributions! If you find an issue or have an idea for improving the tests, please open an issue or submit a pull
-request. See our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) for details.
+request. See our [Contributing Guide](https://docs.ultralytics.com/help/contributing) for details.

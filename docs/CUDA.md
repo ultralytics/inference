@@ -53,7 +53,7 @@ export PATH=/usr/local/cuda/bin:$PATH
 export CUDARC_CUDA_VERSION=13020
 ```
 
-Supported toolkits: 11.4, 11.5, 11.6, 11.7, 11.8, 12.0, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.8, 12.9, 13.0, 13.1, 13.2. (Full list and feature names: [cudarc Cargo.toml](https://github.com/coreylowman/cudarc/blob/main/Cargo.toml).)
+Supported toolkits: 11.4, 11.5, 11.6, 11.7, 11.8, 12.0, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.8, 12.9, 13.0, 13.1, 13.2. (Full list and feature names: [cudarc Cargo.toml](https://github.com/chelsea0x3b/cudarc/blob/main/Cargo.toml).)
 
 If you need to pin a specific version at compile time instead, override the cudarc dep in your project's `Cargo.toml`:
 
