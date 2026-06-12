@@ -35,8 +35,8 @@ use ultralytics_inference::{InferenceConfig, Task};
 
 use payload::JsResults;
 
-mod payload;
 mod onnx_meta;
+mod payload;
 
 /// Default inference image size used when a model does not record `imgsz` in its
 /// metadata. Mirrors the native crate's fallback.
