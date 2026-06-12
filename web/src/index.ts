@@ -148,6 +148,11 @@ async function resolveDevice(pref?: "auto" | "webgpu" | "cpu"): Promise<string> 
 /** Ultralytics model assets release (ONNX exports of yolo26 / yolo11 / yolov8). */
 const ASSETS = "https://github.com/ultralytics/assets/releases/download/v8.4.0/";
 
+/** Ultralytics default thresholds (mirrored in the option JSDoc above). */
+const DEFAULT_CONF = 0.25;
+const DEFAULT_IOU = 0.7;
+const DEFAULT_KEYPOINT_THRESHOLD = 0.25;
+
 /**
  * Resolve a model reference to a URL. A bare ONNX name (e.g. `"yolo26n.onnx"`,
  * `"yolo11s-seg.onnx"`, `"yolov8n.onnx"`) auto-downloads from the Ultralytics
@@ -233,13 +238,19 @@ function isDrawable(input: ImageInput): input is DrawableInput {
   );
 }
 
+/** Fetch a URL and throw a clear error naming `what` if the response is not OK. */
+async function fetchOk(url: string | URL, what: string): Promise<Response> {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`failed to fetch ${what}: ${url} (${resp.status})`);
+  return resp;
+}
+
 /** Fetch/normalize an encoded image input to bytes the wasm side can decode. */
 async function toEncodedBytes(input: EncodedInput): Promise<Uint8Array> {
   if (input instanceof Uint8Array) return input;
   if (input instanceof ArrayBuffer) return new Uint8Array(input);
   if (input instanceof Blob) return new Uint8Array(await input.arrayBuffer());
-  const resp = await fetch(input);
-  if (!resp.ok) throw new Error(`failed to fetch image: ${input} (${resp.status})`);
+  const resp = await fetchOk(input, "image");
   return new Uint8Array(await resp.arrayBuffer());
 }
 
@@ -299,8 +310,7 @@ export class YOLO {
     let bytes: Uint8Array;
     if (typeof source === "string" || source instanceof URL) {
       const url = resolveModel(source.toString());
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`failed to fetch model: ${url} (${resp.status})`);
+      const resp = await fetchOk(url, "model");
       bytes = new Uint8Array(await resp.arrayBuffer());
     } else {
       bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
@@ -337,8 +347,8 @@ export class YOLO {
    * @param options Confidence/IoU thresholds.
    */
   async predict(image: ImageInput, options?: PredictOptions): Promise<Results> {
-    const conf = options?.conf ?? 0.25;
-    const iou = options?.iou ?? 0.7;
+    const conf = options?.conf ?? DEFAULT_CONF;
+    const iou = options?.iou ?? DEFAULT_IOU;
     const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
@@ -412,7 +422,7 @@ export async function annotate(
   const font = options?.font ?? `${fontSize}px sans-serif`;
   const showLabels = options?.labels ?? true;
   const showKpts = options?.keypoints ?? true;
-  const kptThresh = options?.keypointThreshold ?? 0.25;
+  const kptThresh = options?.keypointThreshold ?? DEFAULT_KEYPOINT_THRESHOLD;
   ctx.lineWidth = lineWidth;
   ctx.font = font;
   ctx.textBaseline = "top";
@@ -495,8 +505,7 @@ export async function annotate(
 /** Resolve any {@link ImageInput} to something `drawImage` accepts. */
 async function resolveBitmap(input: ImageInput): Promise<CanvasImageSource> {
   if (typeof input === "string" || input instanceof URL) {
-    const resp = await fetch(input);
-    if (!resp.ok) throw new Error(`failed to fetch image: ${input} (${resp.status})`);
+    const resp = await fetchOk(input, "image");
     return createImageBitmap(await resp.blob());
   }
   if (input instanceof Blob) return createImageBitmap(input);
