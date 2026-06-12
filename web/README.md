@@ -13,7 +13,7 @@
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://reddit.com/r/ultralytics)
 
-Run [Ultralytics](https://ultralytics.com) YOLO models directly in the browser,
+Run [Ultralytics](https://www.ultralytics.com/) YOLO models directly in the browser,
 with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm
 fallback) and covers detection, segmentation, pose, classification, OBB, and
 semantic segmentation, behind a small TypeScript API with a built-in
@@ -178,7 +178,7 @@ the native renderer. None of this is duplicated in JS.
 ## Building from source
 
 This package builds the wasm from the Rust crate with
-[`wasm-pack`](https://github.com/rustwasm/wasm-pack):
+[`wasm-pack`](https://github.com/wasm-bindgen/wasm-pack):
 
 ```bash
 npm run build # wasm-pack build + tsc
@@ -194,7 +194,7 @@ suggesting features, or submitting code changes, your involvement is crucial.
 
 - **Report Issues**: Found a bug? [Open an issue](https://github.com/ultralytics/inference/issues)
 - **Feature Requests**: Have an idea? [Share it](https://github.com/ultralytics/inference/issues)
-- **Pull Requests**: Read our [Contributing Guide](https://docs.ultralytics.com/help/contributing/) first
+- **Pull Requests**: Read our [Contributing Guide](https://docs.ultralytics.com/help/contributing) first
 - **Feedback**: Take our [Survey](https://www.ultralytics.com/survey?utm_source=github&utm_medium=social&utm_campaign=Survey)
 
 A heartfelt thank you 🙏 goes out to all our contributors! Your efforts help make Ultralytics tools better for everyone.
