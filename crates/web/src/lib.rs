@@ -4,7 +4,7 @@
 //!
 //! Runs YOLO ONNX models in the browser on WebGPU via ONNX Runtime Web (bridged
 //! by [`ort-web`](https://ort.pyke.io/backends/web)), reusing the core crate's
-//! preprocessing/postprocessing so results match the native and Python paths.
+//! preprocessing/postprocessing so results match the native path.
 //! The published npm package wraps this behind a small `YOLO` class. The whole
 //! crate is gated to `wasm32`; elsewhere it compiles to an empty library.
 #![cfg(target_arch = "wasm32")]
@@ -209,8 +209,7 @@ impl YoloModel {
     ///
     /// Initializes the accelerated backend on first use, reads the embedded
     /// Ultralytics metadata from the model bytes, then commits an ONNX Runtime
-    /// session on the requested execution provider. Equivalent to Python's
-    /// `YOLO('model.onnx')`.
+    /// session on the requested execution provider.
     ///
     /// `device` is `"webgpu"` or `"cpu"` (the browser picks the GPU adapter
     /// automatically). WebGPU is registered with `error_on_failure`, so if the
@@ -457,7 +456,7 @@ fn to_js<T: Serialize>(value: &T, what: &str) -> Result<JsValue, JsError> {
 
 /// The Ultralytics pose drawing scheme: skeleton connectivity plus the per-limb
 /// and per-keypoint palette colors. Lets the JS annotator draw pose exactly like
-/// the native/Python renderer without duplicating any palette.
+/// the native renderer without duplicating any palette.
 #[derive(Serialize)]
 struct PoseScheme {
     /// Keypoint index pairs connected by limbs.
