@@ -156,7 +156,7 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
             ort_web::api(feature).await
         }
     }
-    .map_err(|e| JsError::new(&format!("failed to initialize ort-web backend: {e}")))?;
+    .map_err(err_ctx("failed to initialize ort-web backend"))?;
     ort::set_api(api);
     BACKEND.with(|b| *b.borrow_mut() = Some(requested));
     Ok(())
@@ -182,8 +182,7 @@ fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
         .map(|(k, v)| format!("{k}: {v}"))
         .collect::<Vec<_>>()
         .join("\n");
-    ModelMetadata::from_yaml_str(&combined)
-        .map_err(|e| JsError::new(&format!("failed to parse model metadata: {e}")))
+    ModelMetadata::from_yaml_str(&combined).map_err(err_ctx("failed to parse model metadata"))
 }
 
 /// A loaded YOLO model ready for inference in the browser.
@@ -240,7 +239,7 @@ impl YoloModel {
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn task(&self) -> String {
-        format!("{:?}", self.metadata.task).to_lowercase()
+        self.metadata.task.as_str().to_owned()
     }
 
     /// The active device: `"webgpu"` or `"cpu"` (the fallback when WebGPU is
@@ -257,8 +256,7 @@ impl YoloModel {
     /// Returns a JS error only if serialization fails (not expected).
     #[wasm_bindgen(getter)]
     pub fn names(&self) -> Result<JsValue, JsError> {
-        serde_wasm_bindgen::to_value(&*self.metadata.names)
-            .map_err(|e| JsError::new(&format!("failed to serialize names: {e}")))
+        to_js(&*self.metadata.names, "names")
     }
 
     /// Run inference on a single encoded image (JPEG or PNG bytes).
@@ -277,8 +275,7 @@ impl YoloModel {
         iou: f32,
         classes: Option<Vec<u32>>,
     ) -> Result<JsValue, JsError> {
-        let dynimg = image::load_from_memory(&image)
-            .map_err(|e| JsError::new(&format!("failed to decode image: {e}")))?;
+        let dynimg = image::load_from_memory(&image).map_err(err_ctx("failed to decode image"))?;
         self.run(dynimg, conf, iou, classes).await
     }
 
@@ -329,7 +326,7 @@ impl YoloModel {
         builder
             .commit_from_memory(bytes)
             .await
-            .map_err(|e| JsError::new(&format!("failed to load model from bytes: {e}")))
+            .map_err(err_ctx("failed to load model from bytes"))
     }
 
     /// Finish constructing a model from a committed session and its parsed
@@ -374,7 +371,7 @@ impl YoloModel {
         let rgb = dynimg.to_rgb8();
         let (w, h) = rgb.dimensions();
         let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
-            .map_err(|e| JsError::new(&format!("failed to build image array: {e}")))?;
+            .map_err(err_ctx("failed to build image array"))?;
 
         // Classification uses center-crop (like Ultralytics); all other tasks
         // use letterbox. Both share the f32 NCHW output.
@@ -392,11 +389,11 @@ impl YoloModel {
             .session
             .run_async(ort::inputs![input.view()], &run_options)
             .await
-            .map_err(|e| JsError::new(&format!("inference failed: {e}")))?;
+            .map_err(err_ctx("inference failed"))?;
         // Outputs live in the ONNX Runtime wasm context; copy them back to Rust.
         sync_outputs(&mut outputs)
             .await
-            .map_err(|e| JsError::new(&format!("failed to sync outputs: {e}")))?;
+            .map_err(err_ctx("failed to sync outputs"))?;
 
         // Borrow each output's data directly (no copy, important for the large
         // semantic logits, ~160 MB) and feed it to the shared postprocessor while
@@ -433,8 +430,7 @@ impl YoloModel {
             self.metadata.kpt_shape,
         );
         let payload = JsResults::from_results(&results, self.metadata.task);
-        serde_wasm_bindgen::to_value(&payload)
-            .map_err(|e| JsError::new(&format!("failed to serialize results: {e}")))
+        to_js(&payload, "results")
     }
 }
 
@@ -442,6 +438,17 @@ impl YoloModel {
 /// a JS error.
 fn map_ort<M>(e: ort::Error<M>) -> JsError {
     JsError::new(&format!("ort error: {e}"))
+}
+
+/// Build a `.map_err` closure that prefixes any displayable error with `context`,
+/// so call sites read `.map_err(err_ctx("inference failed"))`.
+fn err_ctx<E: std::fmt::Display>(context: &'static str) -> impl FnOnce(E) -> JsError {
+    move |e| JsError::new(&format!("{context}: {e}"))
+}
+
+/// Serialize a value to a `JsValue`, mapping a failure to a JS error naming `what`.
+fn to_js<T: Serialize>(value: &T, what: &str) -> Result<JsValue, JsError> {
+    serde_wasm_bindgen::to_value(value).map_err(|e| JsError::new(&format!("failed to serialize {what}: {e}")))
 }
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
@@ -594,7 +601,7 @@ impl JsResults {
         });
 
         Self {
-            task: format!("{task:?}").to_lowercase(),
+            task: task.as_str().to_owned(),
             width: r.orig_shape.1,
             height: r.orig_shape.0,
             boxes,
@@ -702,8 +709,7 @@ pub fn pose_palette() -> Result<JsValue, JsError> {
             .map(|&i| Color::from_pose_index(i).to_hex())
             .collect(),
     };
-    serde_wasm_bindgen::to_value(&scheme)
-        .map_err(|e| JsError::new(&format!("failed to serialize pose palette: {e}")))
+    to_js(&scheme, "pose palette")
 }
 
 /// Install a panic hook that logs Rust panics to the browser console.
