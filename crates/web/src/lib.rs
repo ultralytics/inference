@@ -448,7 +448,8 @@ fn err_ctx<E: std::fmt::Display>(context: &'static str) -> impl FnOnce(E) -> JsE
 
 /// Serialize a value to a `JsValue`, mapping a failure to a JS error naming `what`.
 fn to_js<T: Serialize>(value: &T, what: &str) -> Result<JsValue, JsError> {
-    serde_wasm_bindgen::to_value(value).map_err(|e| JsError::new(&format!("failed to serialize {what}: {e}")))
+    serde_wasm_bindgen::to_value(value)
+        .map_err(|e| JsError::new(&format!("failed to serialize {what}: {e}")))
 }
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
