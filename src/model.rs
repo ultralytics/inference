@@ -328,7 +328,31 @@ impl YOLOModel {
                 provider_name
             );
             session_builder = session_builder.with_execution_providers(eps).map_err(|e| {
-                InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}"))
+                // The GPU EPs are marked `error_on_failure` only on the
+                // cuda-preprocess fast path (see `build_cuda_ep`), so a dlopen
+                // failure surfaces here as a clear, actionable error instead of
+                // silently falling back to CPU and then panicking later at
+                // `bind_input` with "no data transfer registered" (#251).
+                let gpu = matches!(
+                    provider_name,
+                    "CUDAExecutionProvider" | "TensorRTExecutionProvider"
+                );
+                if gpu {
+                    InferenceError::ModelLoadError(format!(
+                        "{provider_name} failed to load, so the cuda-preprocess fast path \
+                         cannot run on the GPU: {e}\n\
+                         Hint: ensure the matching CUDA runtime and cuDNN 9 (plus TensorRT 10 \
+                         for TensorRt) are installed and on the library path. If the bundled \
+                         ONNX Runtime picked the wrong CUDA major version, rebuild with \
+                         `ORT_CUDA_VERSION=12` or `ORT_CUDA_VERSION=13` to match your CUDA \
+                         install. To use CPU preprocessing instead, set \
+                         `InferenceConfig::with_cuda_preprocess(false)`."
+                    ))
+                } else {
+                    InferenceError::ModelLoadError(format!(
+                        "Failed to set execution providers: {e}"
+                    ))
+                }
             })?;
         }
         // CPU is the default - no warning needed when no accelerators are registered
@@ -509,8 +533,16 @@ impl YOLOModel {
         // ORT inference enqueued behind the preprocess kernel without an
         // explicit synchronize. SAFETY: caller (load_with_config) keeps the
         // CudaStreamHandle alive for the lifetime of the Session.
+        //
+        // `error_on_failure()` is set ONLY on the cuda-preprocess arm: when the
+        // fast path is active we feed ORT a CUDA *device pointer*, so a silent
+        // CPU fallback (e.g. missing libcudnn.so.9 / CUDA-version mismatch in the
+        // bundled ORT provider) would leave the input node on CPU and panic at
+        // bind_input with "no data transfer registered". Failing loudly here
+        // surfaces the real cause (#251). The `None` arm keeps the default
+        // graceful multi-EP fallback for the plain CUDA path.
         match compute_stream {
-            Some(s) => unsafe { ep.with_compute_stream(s).build() },
+            Some(s) => unsafe { ep.with_compute_stream(s).build().error_on_failure() },
             None => ep.build(),
         }
     }
@@ -551,9 +583,11 @@ impl YOLOModel {
             .with_timing_cache_path(cache_str)
             .with_max_workspace_size(4 * 1024 * 1024 * 1024)
             .with_builder_optimization_level(5);
-        // SAFETY: see build_cuda_ep above.
+        // SAFETY: see build_cuda_ep above. `error_on_failure()` is scoped to the
+        // cuda-preprocess arm for the same reason documented there: a silent CPU
+        // fallback while we hand ORT a device pointer panics at bind_input (#251).
         match compute_stream {
-            Some(s) => unsafe { ep.with_compute_stream(s).build() },
+            Some(s) => unsafe { ep.with_compute_stream(s).build().error_on_failure() },
             None => ep.build(),
         }
     }
