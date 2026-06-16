@@ -349,7 +349,9 @@ impl YOLOModel {
                          `InferenceConfig::with_cuda_preprocess(false)`."
                     ))
                 } else {
-                    InferenceError::ModelLoadError(format!("Failed to set execution providers: {e}"))
+                    InferenceError::ModelLoadError(format!(
+                        "Failed to set execution providers: {e}"
+                    ))
                 }
             })?;
         }
