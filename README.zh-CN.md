@@ -468,6 +468,9 @@ cargo build --release --features "cuda,tensorrt"
 
 ## 🌐 浏览器 / WebGPU（WASM）
 
+[![npm version](https://img.shields.io/npm/v/@ultralytics/yolo?logo=npm&logoColor=white&label=npm&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
+[![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
+
 同一套引擎可编译为 WebAssembly，在浏览器中通过 **WebGPU** 运行。前向推理由官方
 ONNX Runtime Web 构建执行，并通过
 [`ort-web`](https://ort.pyke.io/backends/web) 桥接到 Rust；预处理与后处理复用
