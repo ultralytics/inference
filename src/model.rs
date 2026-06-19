@@ -465,7 +465,7 @@ impl YOLOModel {
 
         // Finalize the GPU preprocessor now that we know the model input edge.
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
-        // has been wired into the EPs above — dropping the last `Arc<CudaStream>`
+        // has been wired into the EPs above - dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
         // opened we always finalize the preprocessor, sizing the input buffer to
         // the resolved (possibly non-square) model input; `predict_image`'s
@@ -1064,7 +1064,7 @@ impl YOLOModel {
 
         // Semantic fast form: the ONNX emits a single uint8 class map. Extract
         // it directly (no f32 logits, no CPU argmax) and run the dedicated
-        // mask post-processor — mirrors the CPU `run_inference_u8_with` path.
+        // mask post-processor - mirrors the CPU `run_inference_u8_with` path.
         if semantic_u8 {
             let name = self.output_names.first().ok_or_else(|| {
                 InferenceError::InferenceError("semantic model has no output".into())
@@ -1098,7 +1098,7 @@ impl YOLOModel {
             return Ok(vec![result]);
         }
 
-        // Minimal PreprocessResult — postprocess reads orig_shape, scale, padding.
+        // Minimal PreprocessResult - postprocess reads orig_shape, scale, padding.
         // tensor/tensor_f16 are unused in the GPU path (preprocess ran on device).
         let pre = crate::preprocessing::PreprocessResult {
             tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
@@ -1652,7 +1652,7 @@ impl YOLOModel {
         inference_ms: f64,
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        // All outputs are direct borrows from ORT — no fallback path, no unsafe needed.
+        // All outputs are direct borrows from ORT - no fallback path, no unsafe needed.
         let views: Vec<(&[u8], Vec<usize>)> = output_names
             .iter()
             .map(|name| {

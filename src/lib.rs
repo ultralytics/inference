@@ -24,7 +24,7 @@
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
 //! - **Supported YOLO Versions** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports)
 //! - **All Tasks** - Detection, segmentation, pose estimation, classification, OBB, and semantic segmentation (YOLO26 only)
-//! - **Ultralytics API** - Results API matches the Python package for easy migration
+//! - **Ultralytics API** - Results API for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
 //! - **Multiple Sources** - Images, directories, glob patterns, video, webcam, streams
 //!
@@ -140,7 +140,7 @@
 //!
 //! ## Task-Specific Examples
 //!
-//! The library supports all YOLO tasks. Export models from Python:
+//! The library supports all YOLO tasks. Export models to ONNX:
 //!
 //! ```bash
 //! # Detection (default)
@@ -370,7 +370,7 @@ pub mod model;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source;
 
-// CUDA-side preprocess + zero-copy device input — internal fast path used by
+// CUDA-side preprocess + zero-copy device input - internal fast path used by
 // `YOLOModel` when the `cuda-preprocess` feature is enabled and the device is
 // CUDA/TensorRT. Gated by `InferenceConfig::with_cuda_preprocess(false)` to
 // opt back into CPU preprocess.
