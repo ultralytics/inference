@@ -2,8 +2,8 @@
 
 //! Results classes for YOLO inference output.
 //!
-//! This module provides Ultralytics-compatible result classes that match
-//! the Python API for easy migration and consistent usage patterns.
+//! This module provides Ultralytics-compatible result classes with an
+//! API for easy migration and consistent usage patterns.
 
 use std::collections::HashMap;
 use std::sync::Arc;

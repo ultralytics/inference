@@ -7,7 +7,7 @@
 //! launch, writing directly into the device-side input buffer that ONNX
 //! Runtime's TRT/CUDA EP reads via [`ort::value::TensorRefMut::from_raw`].
 //!
-//! The whole module is `pub(crate)` — public API consumers reach this path
+//! The whole module is `pub(crate)` - public API consumers reach this path
 //! through [`crate::YOLOModel`] + [`crate::InferenceConfig`]'s
 //! `with_cuda_preprocess` flag.
 
@@ -159,7 +159,7 @@ pub(crate) struct CudaPreprocessor {
     frame_dev_capacity: usize,
 
     /// Persistent device buffer for the model input tensor (`3 * dst_h * dst_w` f32).
-    /// Pointer is stable for the buffer's lifetime — cached so callers can
+    /// Pointer is stable for the buffer's lifetime - cached so callers can
     /// hand it to ORT via `TensorRefMut::from_raw` without re-querying.
     input_dev: CudaSlice<f32>,
     input_dev_ptr: u64,
@@ -218,7 +218,7 @@ impl CudaPreprocessor {
         self.input_dev_ptr
     }
 
-    /// Model input dimensions `(height, width)` — may be non-square.
+    /// Model input dimensions `(height, width)` - may be non-square.
     pub(crate) const fn dst_hw(&self) -> (usize, usize) {
         (self.dst_h, self.dst_w)
     }
