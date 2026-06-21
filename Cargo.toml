@@ -84,7 +84,7 @@ ndarray = { version = "^0.17" }
 half = { version = "^2.7", features = ["num-traits"] }
 bytemuck = { version = "^1.25", features = ["derive"] }
 
-cudarc = { version = "0.19.7", optional = true, default-features = false, features = [
+cudarc = { version = "^0.19.8", optional = true, default-features = false, features = [
     "driver",
     "nvrtc",
     "dynamic-loading",
