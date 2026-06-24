@@ -34,6 +34,20 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # macos-latest's default Xcode 16.4 toolchain is missing libclang_rt.osx.a,
+      # which breaks CoreML test linking (ld: library 'clang_rt.osx' not found).
+      # Pin to a known-good Xcode until the runner image is fixed.
+      - name: Select Xcode (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          for v in 16.3 16.2 16.1; do
+            if [ -d "/Applications/Xcode_${v}.app" ]; then
+              sudo xcode-select -s "/Applications/Xcode_${v}.app"
+              break
+            fi
+          done
+          xcodebuild -version
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
