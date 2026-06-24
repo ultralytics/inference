@@ -34,19 +34,20 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # macos-latest's default Xcode 16.4 toolchain is missing libclang_rt.osx.a,
-      # which breaks CoreML test linking (ld: library 'clang_rt.osx' not found).
-      # Pin to a known-good Xcode until the runner image is fixed.
+      # macos-latest's default Xcode 16.4 toolchain dangles libclang_rt.osx.a
+      # (ld: library 'clang_rt.osx' not found). Select a present, known-good
+      # Xcode and export its version so the Rust cache key is scoped to it -
+      # otherwise a cache built under one image's Xcode dangles on another.
       - name: Select Xcode (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          for v in 16.3 16.2 16.1; do
-            if [ -d "/Applications/Xcode_${v}.app" ]; then
-              sudo xcode-select -s "/Applications/Xcode_${v}.app"
-              break
-            fi
+          sel=""
+          for p in /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_26*.app; do
+            for d in $p; do [ -d "$d" ] && { sel="$d"; break 2; }; done
           done
+          [ -n "$sel" ] && sudo xcode-select -s "$sel"
           xcodebuild -version
+          echo "XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -58,6 +59,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: xcode-${{ env.XCODE_VER }}
 
       - name: Ensure toolchain
         run: rustup show
@@ -131,18 +134,19 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # macos-latest's default Xcode 16.4 toolchain is missing libclang_rt.osx.a,
-      # which breaks linking (ld: library 'clang_rt.osx' not found).
-      # Pin to a known-good Xcode until the runner image is fixed.
+      # macos-latest's default Xcode 16.4 toolchain dangles libclang_rt.osx.a
+      # (ld: library 'clang_rt.osx' not found). Select a present, known-good
+      # Xcode and export its version so the Rust cache key is scoped to it -
+      # otherwise a cache built under one image's Xcode dangles on another.
       - name: Select Xcode (macOS)
         run: |
-          for v in 16.3 16.2 16.1; do
-            if [ -d "/Applications/Xcode_${v}.app" ]; then
-              sudo xcode-select -s "/Applications/Xcode_${v}.app"
-              break
-            fi
+          sel=""
+          for p in /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_26*.app; do
+            for d in $p; do [ -d "$d" ] && { sel="$d"; break 2; }; done
           done
+          [ -n "$sel" ] && sudo xcode-select -s "$sel"
           xcodebuild -version
+          echo "XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: brew install ffmpeg
@@ -156,7 +160,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          key: ffmpeg-${{ env.FFMPEG_VERSION }}
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-xcode-${{ env.XCODE_VER }}
 
       - name: Ensure toolchain
         run: rustup show
