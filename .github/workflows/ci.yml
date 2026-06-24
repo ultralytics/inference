@@ -41,11 +41,7 @@ jobs:
       - name: Select Xcode (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          sel=""
-          for p in /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_26*.app; do
-            for d in $p; do [ -d "$d" ] && { sel="$d"; break 2; }; done
-          done
-          [ -n "$sel" ] && sudo xcode-select -s "$sel"
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -vE 'beta|16\.4' | sort -V | tail -1)"
           xcodebuild -version
           echo "XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')" >> "$GITHUB_ENV"
 
@@ -140,11 +136,7 @@ jobs:
       # otherwise a cache built under one image's Xcode dangles on another.
       - name: Select Xcode (macOS)
         run: |
-          sel=""
-          for p in /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_26*.app; do
-            for d in $p; do [ -d "$d" ] && { sel="$d"; break 2; }; done
-          done
-          [ -n "$sel" ] && sudo xcode-select -s "$sel"
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -vE 'beta|16\.4' | sort -V | tail -1)"
           xcodebuild -version
           echo "XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')" >> "$GITHUB_ENV"
 
