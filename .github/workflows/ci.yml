@@ -214,7 +214,7 @@ jobs:
         run: cargo clippy -p ultralytics-inference-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
         with:
           tool: wasm-pack
 
@@ -256,7 +256,7 @@ jobs:
         run: rustup show
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
         with:
           tool: cargo-llvm-cov
 
