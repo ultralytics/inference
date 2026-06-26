@@ -162,6 +162,9 @@
 //! yolo export model=yolo26n-sem.pt format=onnx
 //! ```
 //!
+//! Add `quantize=16` for an FP16 (half-precision) ONNX, or `quantize=8` for INT8
+//! (Ultralytics >= 8.4; replaces the deprecated `half`/`int8` flags).
+//!
 //! The task is auto-detected from ONNX metadata:
 //!
 //! ```no_run
