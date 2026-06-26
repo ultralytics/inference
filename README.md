@@ -106,8 +106,8 @@ yolo export model=yolo26n.pt format=onnx quantize=16
 from ultralytics import YOLO
 
 model = YOLO("yolo26n.pt")
-model.export(format="onnx")                 # FP32 (default)
-model.export(format="onnx", quantize=16)    # FP16 (half precision)
+model.export(format="onnx")  # FP32 (default)
+model.export(format="onnx", quantize=16)  # FP16 (half precision)
 ```
 
 > **Precision / quantization:** Ultralytics ≥8.4 uses a single `quantize`
