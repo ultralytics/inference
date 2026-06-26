@@ -158,8 +158,13 @@ the native renderer. None of this is duplicated in JS.
   ```python
   from ultralytics import YOLO
 
-  YOLO("yolo26n.pt").export(format="onnx")
+  YOLO("yolo26n.pt").export(format="onnx")                 # FP32 (default)
+  YOLO("yolo26n.pt").export(format="onnx", quantize=16)    # FP16 (~50% smaller)
   ```
+
+  > Ultralytics ≥8.4 uses the `quantize` argument instead of the deprecated
+  > `half=True` / `int8=True` flags. For ONNX the supported values are
+  > `32`/`fp32` (default), `16`/`fp16`, and `8`/`int8`.
 
 - **Runtime assets**: on first load, `ort-web` fetches the ONNX Runtime Web wasm
   bundle (~25 MB, browser-cached afterward) from `cdn.pyke.io`. If you set a
