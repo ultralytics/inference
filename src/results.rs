@@ -718,13 +718,11 @@ impl Keypoints {
         #[allow(clippy::cast_precision_loss)]
         let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
 
-        for mut point in xyn.axis_iter_mut(Axis(2)) {
-            if point.shape()[0] > 0 {
-                point.mapv_inplace(|v| v / w);
-            }
-            if point.shape()[0] > 1 {
-                point.mapv_inplace(|v| v / h);
-            }
+        // Axis(2) has two lanes: index 0 holds x (normalize by width), index 1
+        // holds y (normalize by height).
+        for (axis_idx, mut lane) in xyn.axis_iter_mut(Axis(2)).enumerate() {
+            let divisor = if axis_idx == 0 { w } else { h };
+            lane.mapv_inplace(|v| v / divisor);
         }
 
         xyn
@@ -1141,10 +1139,11 @@ mod tests {
         assert_eq!(xy.shape(), [1, 2, 2]);
         assert!((xy[[0, 0, 0]] - 320.0).abs() < 1e-6);
         assert!((xy[[0, 0, 1]] - 240.0).abs() < 1e-6);
-        // xyn keeps shape and produces finite, normalized-down values.
+        // xyn normalizes x by width and y by height independently.
         let xyn = kpts.xyn();
         assert_eq!(xyn.shape(), [1, 2, 2]);
-        assert!(xyn.iter().all(|v| v.is_finite()));
+        assert!((xyn[[0, 0, 0]] - 0.5).abs() < 1e-6); // 320 / 640
+        assert!((xyn[[0, 0, 1]] - 0.5).abs() < 1e-6); // 240 / 480
         assert!(kpts.conf().is_some());
 
         // (N, K, 2) => no confidence.
