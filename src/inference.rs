@@ -422,4 +422,36 @@ mod tests {
         assert!(!config_filtered.keep_class(0));
         assert!(!config_filtered.keep_class(2));
     }
+
+    #[test]
+    fn test_remaining_builders() {
+        let config = InferenceConfig::new()
+            .with_batch(4)
+            .with_half(true)
+            .with_cuda_preprocess(false)
+            .with_device(crate::Device::Cpu)
+            .with_save(false)
+            .with_save_frames(true)
+            .with_rect(false);
+
+        assert_eq!(config.batch, Some(4));
+        assert!(config.half);
+        assert!(!config.cuda_preprocess);
+        assert_eq!(config.device, Some(crate::Device::Cpu));
+        assert!(!config.save);
+        assert!(config.save_frames);
+        assert!(!config.rect);
+    }
+
+    #[test]
+    fn test_default_constants() {
+        // Defaults applied by `default()` match the public constants.
+        let c = InferenceConfig::default();
+        assert_eq!(c.max_det, InferenceConfig::DEFAULT_MAX_DET);
+        assert_eq!(c.save, InferenceConfig::DEFAULT_SAVE);
+        assert_eq!(c.rect, InferenceConfig::DEFAULT_RECT);
+        assert!(c.batch.is_none());
+        assert!(c.device.is_none());
+        assert!(c.classes.is_none());
+    }
 }

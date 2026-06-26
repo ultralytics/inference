@@ -306,3 +306,129 @@ impl SaveResults {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::SourceMeta;
+
+    #[test]
+    fn test_ensure_dir_creates_nested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("a").join("b").join("c");
+        assert!(!nested.exists());
+        ensure_dir(&nested).unwrap();
+        assert!(nested.exists());
+        // Idempotent: a second call on an existing dir is a no-op success.
+        ensure_dir(&nested).unwrap();
+        assert!(nested.exists());
+    }
+
+    #[test]
+    fn test_find_next_run_dir_numbering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_string_lossy().into_owned();
+
+        // First call returns the un-suffixed prefix when nothing exists yet.
+        let first = find_next_run_dir(&base, "predict");
+        assert!(first.ends_with("predict"));
+
+        // Once `predict` exists, the next is `predict2`, then `predict3`, ...
+        std::fs::create_dir_all(&first).unwrap();
+        let second = find_next_run_dir(&base, "predict");
+        assert!(second.ends_with("predict2"));
+
+        std::fs::create_dir_all(&second).unwrap();
+        let third = find_next_run_dir(&base, "predict");
+        assert!(third.ends_with("predict3"));
+    }
+
+    #[test]
+    fn test_init_logging_is_idempotent() {
+        // Safe to call multiple times.
+        init_logging();
+        init_logging();
+    }
+
+    #[test]
+    fn test_save_results_writes_image() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut saver = SaveResults::new(tmp.path().to_path_buf(), false);
+
+        let img = image::DynamicImage::new_rgb8(8, 8);
+        let meta = SourceMeta {
+            path: "frame.jpg".to_string(),
+            ..SourceMeta::default()
+        };
+
+        saver.save(false, &meta, &img).unwrap();
+        assert!(tmp.path().join("frame.jpg").exists());
+
+        // finish() is a clean no-op when no video writer was opened.
+        saver.finish().unwrap();
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn test_video_writer_roundtrip() {
+        // Encode a few frames to a real mp4 and confirm a non-empty file is produced.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("out.mp4");
+        let mut writer = VideoWriter::new(&path, 32, 32, 10.0).unwrap();
+        for _ in 0..3 {
+            writer
+                .write_frame(&image::DynamicImage::new_rgb8(32, 32))
+                .unwrap();
+        }
+        // Mismatched frame size is rejected.
+        assert!(
+            writer
+                .write_frame(&image::DynamicImage::new_rgb8(16, 16))
+                .is_err()
+        );
+        writer.finish().unwrap();
+
+        assert!(path.exists());
+        assert!(std::fs::metadata(&path).unwrap().len() > 0);
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn test_save_results_video_source_writes_frame_image_when_save_frames() {
+        // With save_frames=true a video source still goes down the image path,
+        // landing under a `{stem}_frames/` subdirectory.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut saver = SaveResults::new(tmp.path().to_path_buf(), true);
+
+        let img = image::DynamicImage::new_rgb8(8, 8);
+        let meta = SourceMeta {
+            frame_idx: 0,
+            path: "clip.mp4".to_string(),
+            ..SourceMeta::default()
+        };
+
+        saver.save(true, &meta, &img).unwrap();
+        assert!(tmp.path().join("clip_frames").join("clip_1.jpg").exists());
+        saver.finish().unwrap();
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn test_save_results_video_branch_writes_mp4() {
+        // Video source with save_frames=false routes through the VideoWriter and
+        // produces a single .mp4 named after the source.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut saver = SaveResults::new(tmp.path().to_path_buf(), false);
+        let img = image::DynamicImage::new_rgb8(32, 32);
+        let meta = SourceMeta {
+            frame_idx: 0,
+            path: "movie.mp4".to_string(),
+            fps: Some(10.0),
+            ..SourceMeta::default()
+        };
+        saver.save(true, &meta, &img).unwrap();
+        saver.save(true, &meta, &img).unwrap();
+        saver.finish().unwrap();
+        assert!(tmp.path().join("movie.mp4").exists());
+    }
+}

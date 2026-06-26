@@ -898,4 +898,211 @@ mod tests {
         let dir = Source::Directory(PathBuf::from("./images"));
         assert!(dir.is_batch());
     }
+
+    #[test]
+    fn test_from_str_url_classification() {
+        // Image extension over HTTP -> ImageUrl; otherwise treated as a stream.
+        assert!(matches!(
+            Source::from("https://example.com/cat.png"),
+            Source::ImageUrl(_)
+        ));
+        assert!(matches!(
+            Source::from("http://example.com/dog.JPEG?size=large"),
+            Source::ImageUrl(_)
+        ));
+        assert!(matches!(
+            Source::from("https://example.com/live/stream"),
+            Source::Stream(_)
+        ));
+        assert!(matches!(
+            Source::from("rtmp://example.com/live"),
+            Source::Stream(_)
+        ));
+    }
+
+    #[test]
+    fn test_from_str_video_extensions() {
+        for ext in ["mp4", "avi", "mov", "mkv", "webm", "m4v", "mpeg", "mpg"] {
+            let s = format!("clip.{ext}");
+            assert!(
+                matches!(Source::from(s.as_str()), Source::Video(_)),
+                "{ext}"
+            );
+        }
+        // Uppercase extension is normalized.
+        assert!(matches!(Source::from("CLIP.MP4"), Source::Video(_)));
+    }
+
+    #[test]
+    fn test_is_image_url_helper() {
+        assert!(Source::is_image_url("a/b/c.jpg"));
+        assert!(Source::is_image_url("a.PNG?x=1"));
+        assert!(Source::is_image_url("a.tiff"));
+        assert!(!Source::is_image_url("a.mp4"));
+        assert!(!Source::is_image_url("no_extension"));
+    }
+
+    #[test]
+    fn test_from_conversions() {
+        assert!(matches!(
+            Source::from(String::from("a.jpg")),
+            Source::Image(_)
+        ));
+        assert!(matches!(
+            Source::from(PathBuf::from("a.jpg")),
+            Source::Image(_)
+        ));
+        assert!(matches!(Source::from(Path::new("a.jpg")), Source::Image(_)));
+        assert!(matches!(
+            Source::from(image::DynamicImage::new_rgb8(2, 2)),
+            Source::ImageBuffer(_)
+        ));
+        assert!(matches!(
+            Source::from(Array3::<u8>::zeros((2, 2, 3))),
+            Source::Array(_)
+        ));
+        assert!(matches!(Source::from(3u32), Source::Webcam(3)));
+        assert!(matches!(Source::from(5i32), Source::Webcam(5)));
+    }
+
+    #[test]
+    fn test_path_accessor() {
+        assert!(Source::Image(PathBuf::from("a.jpg")).path().is_some());
+        assert!(Source::Video(PathBuf::from("a.mp4")).path().is_some());
+        assert!(Source::Directory(PathBuf::from("d")).path().is_some());
+        assert!(Source::Webcam(0).path().is_none());
+        assert!(Source::Stream("rtsp://x".into()).path().is_none());
+    }
+
+    #[test]
+    fn test_source_meta_default() {
+        let m = SourceMeta::default();
+        assert_eq!(m.frame_idx, 0);
+        assert_eq!(m.total_frames, Some(1));
+        assert!(m.path.is_empty());
+        assert!(m.fps.is_none());
+    }
+
+    /// Write a tiny valid image to `path`.
+    fn write_image(path: &Path) {
+        image::DynamicImage::new_rgb8(4, 4).save(path).unwrap();
+    }
+
+    #[test]
+    fn test_collect_images_from_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_image(&tmp.path().join("b.png"));
+        write_image(&tmp.path().join("a.jpg"));
+        std::fs::write(tmp.path().join("notes.txt"), b"ignore me").unwrap();
+
+        let paths = SourceIterator::collect_images_from_dir(tmp.path()).unwrap();
+        // Only the two images, sorted by name.
+        assert_eq!(paths.len(), 2);
+        assert!(paths[0].ends_with("a.jpg"));
+        assert!(paths[1].ends_with("b.png"));
+
+        // Non-directory path is an error.
+        assert!(SourceIterator::collect_images_from_dir(Path::new("definitely/missing")).is_err());
+    }
+
+    #[test]
+    fn test_collect_images_from_glob() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_image(&tmp.path().join("a.jpg"));
+        write_image(&tmp.path().join("b.png"));
+
+        // Extension-filtered glob picks only the matching extension.
+        let pattern = format!("{}/*.jpg", tmp.path().display());
+        let jpgs = SourceIterator::collect_images_from_glob(&pattern).unwrap();
+        assert_eq!(jpgs.len(), 1);
+        assert!(jpgs[0].ends_with("a.jpg"));
+
+        // Bare `*` (no extension) falls back to any image file.
+        let all_pattern = format!("{}/*", tmp.path().display());
+        let all = SourceIterator::collect_images_from_glob(&all_pattern).unwrap();
+        assert_eq!(all.len(), 2);
+
+        // Missing directory is an error.
+        assert!(SourceIterator::collect_images_from_glob("missing_dir/*.jpg").is_err());
+
+        // No star: treated as a single literal path.
+        let single = SourceIterator::collect_images_from_glob("just/a/file.jpg").unwrap();
+        assert_eq!(single, vec![PathBuf::from("just/a/file.jpg")]);
+    }
+
+    #[test]
+    fn test_iterator_image_buffer_yields_once() {
+        let src = Source::ImageBuffer(image::DynamicImage::new_rgb8(4, 4));
+        let mut it = SourceIterator::new(src).unwrap();
+        assert!(it.next().is_some());
+        assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn test_iterator_array_yields_once() {
+        let src = Source::Array(Array3::<u8>::zeros((4, 4, 3)));
+        let mut it = SourceIterator::new(src).unwrap();
+        let first = it.next().unwrap();
+        assert!(first.is_ok());
+        assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn test_iterator_over_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_image(&tmp.path().join("a.jpg"));
+        write_image(&tmp.path().join("b.png"));
+
+        let src = Source::Directory(tmp.path().to_path_buf());
+        let it = SourceIterator::new(src).unwrap();
+        let count = it.flatten().count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_iterator_image_list_and_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let good = tmp.path().join("a.jpg");
+        write_image(&good);
+        let missing = tmp.path().join("missing.jpg");
+
+        let src = Source::ImageList(vec![good, missing]);
+        let mut it = SourceIterator::new(src).unwrap();
+        assert!(it.next().unwrap().is_ok()); // good image decodes
+        assert!(it.next().unwrap().is_err()); // missing path errors, no panic
+        assert!(it.next().is_none());
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn test_iterator_over_video_file() {
+        use crate::io::VideoWriter;
+
+        // Encode a short real mp4, then decode it back through the iterator.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("clip.mp4");
+        let mut writer = VideoWriter::new(&path, 32, 32, 10.0).unwrap();
+        for _ in 0..5 {
+            writer
+                .write_frame(&image::DynamicImage::new_rgb8(32, 32))
+                .unwrap();
+        }
+        writer.finish().unwrap();
+
+        let src = Source::Video(path);
+        assert!(src.is_video());
+        let mut it = SourceIterator::new(src).unwrap();
+        // Decode at least the first frame back as an image.
+        let (frame, _meta) = it.next().expect("a frame").expect("decodes");
+        assert_eq!(frame.width(), 32);
+        // Drain the rest; the iterator terminates cleanly at end-of-stream.
+        let mut decoded = 1;
+        for item in it.by_ref() {
+            if item.is_ok() {
+                decoded += 1;
+            }
+        }
+        assert!(decoded >= 1);
+        assert!(it.next().is_none());
+    }
 }
