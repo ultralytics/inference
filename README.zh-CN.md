@@ -94,8 +94,11 @@ ultralytics-inference help
 ### 将 YOLO 模型导出为 ONNX
 
 ```bash
-# 使用 Ultralytics CLI
+# 使用 Ultralytics CLI（FP32，默认）
 yolo export model=yolo26n.pt format=onnx
+
+# FP16（半精度）——模型体积约小 50%
+yolo export model=yolo26n.pt format=onnx quantize=16
 ```
 
 ```python
@@ -103,8 +106,17 @@ yolo export model=yolo26n.pt format=onnx
 from ultralytics import YOLO
 
 model = YOLO("yolo26n.pt")
-model.export(format="onnx")
+model.export(format="onnx")  # FP32（默认）
+model.export(format="onnx", quantize=16)  # FP16（半精度）
 ```
+
+> **精度 / 量化：** Ultralytics ≥8.4 使用统一的 `quantize` 参数，取代已弃用的
+> `half=True` / `int8=True` 标志。对于 ONNX，支持的取值为 `32`/`fp32`（FP32，默认）、
+> `16`/`fp16`（FP16）和 `8`/`int8`（INT8——需通过 `data=` 提供校准数据集）。旧的
+> `half=True`（→ `quantize=16`）和 `int8=True`（→ `quantize=8`）仍可用，但会
+> 触发弃用警告。详见
+> [导出文档](https://docs.ultralytics.com/modes/export) 和
+> [ONNX 集成指南](https://docs.ultralytics.com/integrations/onnx)。
 
 ### 运行推理
 
