@@ -163,7 +163,8 @@
 //! ```
 //!
 //! Add `quantize=16` for an FP16 (half-precision) ONNX, or `quantize=8` for INT8
-//! (Ultralytics >= 8.4; replaces the deprecated `half`/`int8` flags).
+//! (which also needs a calibration dataset via `data=`). Requires Ultralytics
+//! >= 8.4; `quantize` replaces the deprecated `half`/`int8` flags.
 //!
 //! The task is auto-detected from ONNX metadata:
 //!
