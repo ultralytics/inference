@@ -982,4 +982,150 @@ mod tests {
         assert_eq!(annotated.width(), 100);
         assert_eq!(annotated.height(), 100);
     }
+
+    use crate::results::{Boxes, Keypoints, Obb, Probs, SemanticMask};
+    use ndarray::array;
+
+    fn base_results(names: HashMap<usize, String>) -> Results {
+        Results::new(
+            Array3::<u8>::zeros((128, 128, 3)),
+            "img.jpg".to_string(),
+            Arc::new(names),
+            Speed::default(),
+            (128, 128),
+        )
+    }
+
+    #[test]
+    fn test_render_scale_grows_with_image() {
+        let (small_font, small_thick) = render_scale(64, 64);
+        let (big_font, big_thick) = render_scale(2000, 2000);
+        assert!(big_font >= small_font);
+        assert!(big_thick >= small_thick);
+        assert!(small_thick >= 1);
+    }
+
+    #[test]
+    fn test_get_class_color_wraps() {
+        // Indexing beyond the palette wraps rather than panicking.
+        let _ = get_class_color(0);
+        let _ = get_class_color(1000);
+    }
+
+    #[test]
+    fn test_find_next_run_dir_numbering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_string_lossy().into_owned();
+        let first = find_next_run_dir(&base, "predict");
+        assert!(first.ends_with("predict"));
+        std::fs::create_dir_all(&first).unwrap();
+        let second = find_next_run_dir(&base, "predict");
+        assert!(second.ends_with("predict2"));
+    }
+
+    #[test]
+    fn test_annotate_detection_draws() {
+        let names = HashMap::from([(0usize, "person".to_string())]);
+        let mut r = base_results(names);
+        r.boxes = Some(Boxes::new(
+            array![[10.0, 10.0, 80.0, 90.0, 0.95, 0.0]],
+            (128, 128),
+        ));
+        let img = DynamicImage::new_rgb8(128, 128);
+        let out = annotate_image(&img, &r, None);
+        assert_eq!(out.width(), 128);
+    }
+
+    #[test]
+    fn test_annotate_detection_unicode_label() {
+        // Non-ASCII class name selects the unicode font branch.
+        let names = HashMap::from([(0usize, "人".to_string())]);
+        let mut r = base_results(names);
+        r.boxes = Some(Boxes::new(
+            array![[5.0, 5.0, 60.0, 60.0, 0.8, 0.0]],
+            (128, 128),
+        ));
+        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
+        assert_eq!(out.height(), 128);
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn test_annotate_pose_draws() {
+        let mut r = base_results(HashMap::from([(0usize, "person".to_string())]));
+        // One pose, 17 COCO keypoints with (x, y, conf).
+        let mut kpt = Array3::<f32>::zeros((1, 17, 3));
+        for k in 0..17 {
+            kpt[[0, k, 0]] = 20.0 + k as f32;
+            kpt[[0, k, 1]] = 30.0 + k as f32;
+            kpt[[0, k, 2]] = 0.9;
+        }
+        r.keypoints = Some(Keypoints::new(kpt, (128, 128)));
+        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
+        assert_eq!(out.width(), 128);
+    }
+
+    #[test]
+    fn test_annotate_obb_draws() {
+        let mut r = base_results(HashMap::from([(0usize, "ship".to_string())]));
+        r.obb = Some(Obb::new(
+            array![[64.0, 64.0, 40.0, 20.0, 0.5, 0.9, 0.0]],
+            (128, 128),
+        ));
+        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
+        assert_eq!(out.width(), 128);
+    }
+
+    #[test]
+    fn test_annotate_classification_draws() {
+        let mut r = base_results(HashMap::from([
+            (0usize, "cat".to_string()),
+            (1, "dog".to_string()),
+        ]));
+        r.probs = Some(Probs::new(array![0.2, 0.8]));
+        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, Some(2));
+        assert_eq!(out.width(), 128);
+    }
+
+    #[test]
+    fn test_annotate_many_overlapping_boxes() {
+        // Overlapping boxes exercise the label-collision avoidance and rect_intersect paths.
+        let names = HashMap::from([(0usize, "person".to_string()), (1, "car".to_string())]);
+        let mut r = base_results(names);
+        r.boxes = Some(Boxes::new(
+            array![
+                [10.0, 10.0, 70.0, 70.0, 0.95, 0.0],
+                [12.0, 12.0, 72.0, 72.0, 0.90, 1.0],
+                [14.0, 8.0, 74.0, 68.0, 0.85, 0.0],
+                [0.0, 0.0, 40.0, 40.0, 0.80, 1.0]
+            ],
+            (128, 128),
+        ));
+        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
+        assert_eq!(out.width(), 128);
+    }
+
+    #[test]
+    fn test_annotate_classification_topk() {
+        let names: HashMap<usize, String> = (0..6).map(|i| (i, format!("class{i}"))).collect();
+        let mut r = base_results(names);
+        r.probs = Some(Probs::new(array![0.05, 0.05, 0.1, 0.2, 0.3, 0.3]));
+        // top_k larger than typical to drive the top-k label loop.
+        let out = annotate_image(&DynamicImage::new_rgb8(200, 200), &r, Some(5));
+        assert_eq!(out.height(), 200);
+    }
+
+    #[test]
+    fn test_annotate_semantic_draws() {
+        let mut r = base_results(HashMap::from([
+            (0usize, "bg".to_string()),
+            (1, "road".to_string()),
+        ]));
+        // The semantic mask is a per-pixel class map matching the image size.
+        let mut mask_data = ndarray::Array2::<u16>::zeros((128, 128));
+        mask_data[[10, 10]] = 1;
+        r.semantic_mask = Some(SemanticMask::new(mask_data, (128, 128)));
+        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
+        assert_eq!(out.width(), 128);
+    }
 }

@@ -466,4 +466,35 @@ mod tests {
         assert_eq!(generate_bar(1.0, 10), "━━━━━━━━━━");
         assert_eq!(generate_bar(0.5, 10), "━━━━━─────");
     }
+
+    #[test]
+    fn test_format_time_hours_branch() {
+        // >= 3600s uses the H:MM:SS.s layout.
+        let s = format_time(3661.5);
+        assert!(s.starts_with("1:01:"), "got {s}");
+    }
+
+    #[test]
+    fn test_generate_bar_clamps_overshoot() {
+        // progress > 1.0 never exceeds the bar width.
+        assert_eq!(generate_bar(2.0, 6), "━━━━━━");
+    }
+
+    #[test]
+    fn test_downloadable_models_membership() {
+        let models = downloadable_models();
+        assert!(models.iter().any(|m| m == "yolo26n.onnx"));
+        assert!(models.iter().any(|m| m == "yolo11n-seg.onnx"));
+        assert!(models.iter().any(|m| m == "yolov8n.onnx"));
+        // `-sem` is a yolo26-only variant.
+        assert!(models.iter().any(|m| m == "yolo26n-sem.onnx"));
+        assert!(!models.iter().any(|m| m == "yolo11n-sem.onnx"));
+    }
+
+    #[test]
+    fn test_supported_models_help_text() {
+        let help = supported_models_help();
+        assert!(help.contains("Auto-download is supported for:"));
+        assert!(help.contains("yolo26"));
+    }
 }

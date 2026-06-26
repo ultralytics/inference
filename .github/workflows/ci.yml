@@ -284,7 +284,10 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Coverage
-        run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info
+        # Exclude code that host-side unit tests cannot exercise: the CUDA kernel
+        # (needs an NVIDIA GPU), the minifb viewer window (GUI), the thin CLI
+        # entry point, and the wasm32-only web crate.
+        run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/cuda_inference\.rs|src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0

@@ -35,3 +35,43 @@ pub const LIMB_COLOR_INDICES: [usize; 19] = [
 
 /// Keypoint color indices into `POSE_COLORS`.
 pub const KPT_COLOR_INDICES: [usize; 17] = [16, 16, 16, 16, 16, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0, 0, 0];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// COCO-Pose uses 17 keypoints; every skeleton endpoint must index one of them.
+    const NUM_KEYPOINTS: usize = 17;
+
+    #[test]
+    fn test_skeleton_indices_in_range() {
+        for pair in SKELETON {
+            for &idx in &pair {
+                assert!(idx < NUM_KEYPOINTS, "skeleton index {idx} out of range");
+            }
+            assert_ne!(
+                pair[0], pair[1],
+                "skeleton bone connects a keypoint to itself"
+            );
+        }
+    }
+
+    #[test]
+    fn test_palette_lengths_match_spec() {
+        // One color per bone, one color per keypoint.
+        assert_eq!(SKELETON.len(), LIMB_COLOR_INDICES.len());
+        assert_eq!(KPT_COLOR_INDICES.len(), NUM_KEYPOINTS);
+    }
+
+    #[test]
+    fn test_color_indices_within_pose_palette() {
+        // The pose palette has 20 entries (indices 0..=19).
+        const POSE_PALETTE_LEN: usize = 20;
+        for &c in &LIMB_COLOR_INDICES {
+            assert!(c < POSE_PALETTE_LEN, "limb color index {c} out of palette");
+        }
+        for &c in &KPT_COLOR_INDICES {
+            assert!(c < POSE_PALETTE_LEN, "kpt color index {c} out of palette");
+        }
+    }
+}

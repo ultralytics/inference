@@ -439,4 +439,68 @@ channels: 3
         assert_eq!(metadata.stride, 32);
         assert_eq!(metadata.imgsz, None);
     }
+
+    #[test]
+    fn test_parse_kpt_shape_variants() {
+        assert_eq!(ModelMetadata::parse_kpt_shape("[17, 3]"), Some((17, 3)));
+        assert_eq!(ModelMetadata::parse_kpt_shape("(17, 2)"), Some((17, 2)));
+        assert_eq!(ModelMetadata::parse_kpt_shape("[17]"), None);
+        assert_eq!(ModelMetadata::parse_kpt_shape("garbage"), None);
+    }
+
+    #[test]
+    fn test_python_dict_names() {
+        let yaml = "task: detect\nnames: {0: 'person', 1: 'bicycle', 2: 'car'}";
+        let m = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(m.num_classes(), 3);
+        assert_eq!(m.class_name(1), Some("bicycle"));
+    }
+
+    #[test]
+    fn test_pose_kpt_shape_and_half_flags() {
+        let yaml = "task: pose\nkpt_shape: [17, 3]\nhalf: true\nend2end: True";
+        let m = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(m.task, Task::Pose);
+        assert_eq!(m.kpt_shape, Some((17, 3)));
+        assert!(m.half);
+        assert!(m.end2end);
+
+        // half can also arrive embedded in an args dict.
+        let yaml2 = "task: detect\nargs: {'half': True, 'imgsz': 640}";
+        let m2 = ModelMetadata::from_yaml_str(yaml2).unwrap();
+        assert!(m2.half);
+    }
+
+    #[test]
+    fn test_invalid_fields_error() {
+        assert!(ModelMetadata::from_yaml_str("task: notarealtask").is_err());
+        assert!(ModelMetadata::from_yaml_str("task: detect\nstride: abc").is_err());
+        assert!(ModelMetadata::from_yaml_str("task: detect\nbatch: xyz").is_err());
+    }
+
+    #[test]
+    fn test_from_onnx_metadata_keys_and_error() {
+        // Standard "metadata" key.
+        let map = HashMap::from([("metadata".to_string(), SAMPLE_METADATA.to_string())]);
+        let m = ModelMetadata::from_onnx_metadata(&map).unwrap();
+        assert_eq!(m.task, Task::Detect);
+
+        // Fallback: any value containing "task:".
+        let map = HashMap::from([("whatever".to_string(), "task: pose\nstride: 32".to_string())]);
+        let m = ModelMetadata::from_onnx_metadata(&map).unwrap();
+        assert_eq!(m.task, Task::Pose);
+
+        // No usable metadata -> error.
+        let map = HashMap::from([("unrelated".to_string(), "no yaml here".to_string())]);
+        assert!(ModelMetadata::from_onnx_metadata(&map).is_err());
+    }
+
+    #[test]
+    fn test_model_name_extraction() {
+        let m = ModelMetadata::from_yaml_str(SAMPLE_METADATA).unwrap();
+        assert_eq!(m.model_name(), "YOLO11n");
+        // Falls back to "YOLO" when the description has no yolo token.
+        let plain = ModelMetadata::default();
+        assert_eq!(plain.model_name(), "YOLO");
+    }
 }

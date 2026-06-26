@@ -718,13 +718,11 @@ impl Keypoints {
         #[allow(clippy::cast_precision_loss)]
         let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
 
-        for mut point in xyn.axis_iter_mut(Axis(2)) {
-            if point.shape()[0] > 0 {
-                point.mapv_inplace(|v| v / w);
-            }
-            if point.shape()[0] > 1 {
-                point.mapv_inplace(|v| v / h);
-            }
+        // Axis(2) has two lanes: index 0 holds x (normalize by width), index 1
+        // holds y (normalize by height).
+        for (axis_idx, mut lane) in xyn.axis_iter_mut(Axis(2)).enumerate() {
+            let divisor = if axis_idx == 0 { w } else { h };
+            lane.mapv_inplace(|v| v / divisor);
         }
 
         xyn
@@ -1088,5 +1086,221 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.semantic_mask.as_ref().unwrap().classes_present(), 3);
+    }
+
+    #[test]
+    fn test_boxes_tracking_columns() {
+        // 7 columns => tracking: [x1, y1, x2, y2, track_id, conf, cls]
+        let data = array![[0.0, 0.0, 10.0, 10.0, 42.0, 0.9, 3.0]];
+        let boxes = Boxes::new(data, (100, 100));
+        assert!(boxes.is_track());
+        assert!((boxes.conf()[0] - 0.9).abs() < 1e-6);
+        assert!((boxes.cls()[0] - 3.0).abs() < 1e-6);
+        assert!((boxes.id().unwrap()[0] - 42.0).abs() < 1e-6);
+
+        // 6 columns => no tracking id.
+        let plain = Boxes::new(array![[0.0, 0.0, 10.0, 10.0, 0.9, 3.0]], (100, 100));
+        assert!(!plain.is_track());
+        assert!(plain.id().is_none());
+    }
+
+    #[test]
+    fn test_boxes_xywhn() {
+        let boxes = Boxes::new(array![[0.0, 0.0, 320.0, 240.0, 0.9, 0.0]], (480, 640));
+        let xywhn = boxes.xywhn();
+        // center (160,120) normalized -> (0.25, 0.25); size (320,240) -> (0.5, 0.5)
+        assert!((xywhn[[0, 0]] - 0.25).abs() < 1e-6);
+        assert!((xywhn[[0, 1]] - 0.25).abs() < 1e-6);
+        assert!((xywhn[[0, 2]] - 0.5).abs() < 1e-6);
+        assert!((xywhn[[0, 3]] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_masks_accessors() {
+        let masks = Masks::new(Array3::zeros((3, 8, 8)), (16, 16));
+        assert_eq!(masks.len(), 3);
+        assert!(!masks.is_empty());
+        assert_eq!(masks.orig_shape, (16, 16));
+        let empty = Masks::new(Array3::zeros((0, 8, 8)), (16, 16));
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_keypoints_with_and_without_conf() {
+        // (N, K, 3) => has visibility/confidence channel.
+        let mut data = Array3::zeros((1, 2, 3));
+        data[[0, 0, 0]] = 320.0;
+        data[[0, 0, 1]] = 240.0;
+        data[[0, 0, 2]] = 0.8;
+        let kpts = Keypoints::new(data, (480, 640));
+        assert_eq!(kpts.len(), 1);
+        assert!(!kpts.is_empty());
+        let xy = kpts.xy();
+        assert_eq!(xy.shape(), [1, 2, 2]);
+        assert!((xy[[0, 0, 0]] - 320.0).abs() < 1e-6);
+        assert!((xy[[0, 0, 1]] - 240.0).abs() < 1e-6);
+        // xyn normalizes x by width and y by height independently.
+        let xyn = kpts.xyn();
+        assert_eq!(xyn.shape(), [1, 2, 2]);
+        assert!((xyn[[0, 0, 0]] - 0.5).abs() < 1e-6); // 320 / 640
+        assert!((xyn[[0, 0, 1]] - 0.5).abs() < 1e-6); // 240 / 480
+        assert!(kpts.conf().is_some());
+
+        // (N, K, 2) => no confidence.
+        let no_conf = Keypoints::new(Array3::zeros((1, 2, 2)), (480, 640));
+        assert!(no_conf.conf().is_none());
+    }
+
+    #[test]
+    fn test_probs_top_k_and_conf() {
+        let probs = Probs::new(array![0.1, 0.7, 0.15, 0.05]);
+        assert_eq!(probs.top1(), 1);
+        assert_eq!(probs.top_k(2), vec![1, 2]);
+        assert_eq!(probs.top5(), vec![1, 2, 0, 3]); // only 4 classes
+        assert!((probs.top1conf() - 0.7).abs() < 1e-6);
+        let c5 = probs.top5conf();
+        assert!((c5[0] - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_obb_accessors_and_geometry() {
+        // [x, y, w, h, rotation, conf, cls] with zero rotation.
+        let data = array![[50.0, 50.0, 20.0, 10.0, 0.0, 0.9, 1.0]];
+        let obb = Obb::new(data, (100, 100));
+        assert_eq!(obb.len(), 1);
+        assert!(!obb.is_empty());
+        assert!(!obb.is_empty());
+        assert!((obb.conf()[0] - 0.9).abs() < 1e-6);
+        assert!((obb.cls()[0] - 1.0).abs() < 1e-6);
+        assert!(obb.id().is_none());
+        assert_eq!(obb.xywhr().shape(), [1, 5]);
+
+        // With zero rotation the axis-aligned bbox is the centered w×h rectangle.
+        let xyxy = obb.xyxy();
+        assert!((xyxy[[0, 0]] - 40.0).abs() < 1e-4); // 50 - 10
+        assert!((xyxy[[0, 1]] - 45.0).abs() < 1e-4); // 50 - 5
+        assert!((xyxy[[0, 2]] - 60.0).abs() < 1e-4); // 50 + 10
+        assert!((xyxy[[0, 3]] - 55.0).abs() < 1e-4); // 50 + 5
+        assert_eq!(obb.xyxyxyxy().shape(), [1, 4, 2]);
+
+        // 8 columns => tracking id present.
+        let tracked = Obb::new(
+            array![[50.0, 50.0, 20.0, 10.0, 0.0, 7.0, 0.9, 1.0]],
+            (100, 100),
+        );
+        assert!(tracked.id().is_some());
+    }
+
+    #[test]
+    fn test_results_len_dispatch() {
+        let names = Arc::new(HashMap::new());
+        let make = || {
+            Results::new(
+                Array3::zeros((4, 4, 3)),
+                String::new(),
+                Arc::clone(&names),
+                Speed::default(),
+                (4, 4),
+            )
+        };
+
+        let mut r = make();
+        r.boxes = Some(Boxes::new(array![[0.0, 0.0, 1.0, 1.0, 0.9, 0.0]], (4, 4)));
+        assert_eq!(r.len(), 1);
+        assert_eq!(r.orig_shape(), (4, 4));
+        assert_eq!(r.inference_shape(), (4, 4));
+
+        let mut r = make();
+        r.keypoints = Some(Keypoints::new(Array3::zeros((2, 3, 3)), (4, 4)));
+        assert_eq!(r.len(), 2);
+
+        let mut r = make();
+        r.probs = Some(Probs::new(array![0.2, 0.8]));
+        assert_eq!(r.len(), 1);
+
+        let empty = make();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_detection_summary_variants() {
+        let names = Arc::new(HashMap::from([
+            (0, "person".to_string()),
+            (5, "bus".to_string()),
+        ]));
+        let mut r = Results::new(
+            Array3::zeros((4, 4, 3)),
+            String::new(),
+            Arc::clone(&names),
+            Speed::default(),
+            (4, 4),
+        );
+
+        // No detections.
+        assert_eq!(r.detection_summary(), "(no detections)");
+
+        // Two persons + one bus -> pluralized, class-id sorted.
+        r.boxes = Some(Boxes::new(
+            array![
+                [0.0, 0.0, 1.0, 1.0, 0.9, 0.0],
+                [0.0, 0.0, 1.0, 1.0, 0.8, 0.0],
+                [0.0, 0.0, 1.0, 1.0, 0.7, 5.0]
+            ],
+            (4, 4),
+        ));
+        assert_eq!(r.detection_summary(), "2 persons, 1 bus");
+    }
+
+    #[test]
+    fn test_summary_boxes_and_probs() {
+        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
+        let mut r = Results::new(
+            Array3::zeros((10, 10, 3)),
+            String::new(),
+            Arc::clone(&names),
+            Speed::default(),
+            (10, 10),
+        );
+        r.boxes = Some(Boxes::new(array![[0.0, 0.0, 5.0, 5.0, 0.9, 0.0]], (10, 10)));
+
+        let raw = r.summary(false);
+        assert_eq!(raw.len(), 1);
+        assert!(matches!(raw[0].get("name"), Some(SummaryValue::String(s)) if s == "person"));
+        assert!(matches!(raw[0].get("box"), Some(SummaryValue::Box(_))));
+
+        // Probs summary returns a single top-1 entry.
+        let mut rp = Results::new(
+            Array3::zeros((4, 4, 3)),
+            String::new(),
+            names,
+            Speed::default(),
+            (4, 4),
+        );
+        rp.probs = Some(Probs::new(array![0.1, 0.9]));
+        let ps = rp.summary(true);
+        assert_eq!(ps.len(), 1);
+        assert!(matches!(ps[0].get("class"), Some(SummaryValue::Int(1))));
+    }
+
+    #[cfg(feature = "annotate")]
+    #[test]
+    fn test_results_save_writes_file() {
+        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
+        let mut r = Results::new(
+            Array3::zeros((16, 16, 3)),
+            "x.jpg".to_string(),
+            names,
+            Speed::default(),
+            (16, 16),
+        );
+        r.boxes = Some(Boxes::new(
+            array![[1.0, 1.0, 10.0, 10.0, 0.9, 0.0]],
+            (16, 16),
+        ));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("annotated.png");
+        r.save(&out).unwrap();
+        assert!(out.exists());
     }
 }

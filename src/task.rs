@@ -204,4 +204,30 @@ mod tests {
         assert!(Task::Semantic.has_semantic_mask());
         assert!(!Task::Detect.has_semantic_mask());
     }
+
+    #[test]
+    fn test_task_suffix_and_default_model() {
+        let cases = [
+            (Task::Detect, "detect", "", "yolo26n.onnx"),
+            (Task::Segment, "segment", "-seg", "yolo26n-seg.onnx"),
+            (Task::Pose, "pose", "-pose", "yolo26n-pose.onnx"),
+            (Task::Classify, "classify", "-cls", "yolo26n-cls.onnx"),
+            (Task::Obb, "obb", "-obb", "yolo26n-obb.onnx"),
+            (Task::Semantic, "semantic", "-sem", "yolo26n-sem.onnx"),
+        ];
+        for (task, name, suffix, model) in cases {
+            assert_eq!(task.as_str(), name);
+            assert_eq!(task.model_suffix(), suffix);
+            assert_eq!(task.default_model(), model);
+        }
+    }
+
+    #[test]
+    fn test_task_from_str_aliases_and_errors() {
+        assert_eq!("KEYPOINT".parse::<Task>().unwrap(), Task::Pose);
+        assert_eq!("oriented".parse::<Task>().unwrap(), Task::Obb);
+        assert_eq!("semseg".parse::<Task>().unwrap(), Task::Semantic);
+        assert_eq!("Classification".parse::<Task>().unwrap(), Task::Classify);
+        assert!("not_a_task".parse::<Task>().is_err());
+    }
 }

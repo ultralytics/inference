@@ -101,4 +101,26 @@ mod tests {
         let err = InferenceError::ModelLoadError("test".to_string());
         assert!(std::error::Error::source(&err).is_none());
     }
+
+    #[test]
+    fn test_error_display_all_variants() {
+        let cases = [
+            (InferenceError::ImageError("m".into()), "Image error: m"),
+            (InferenceError::ConfigError("m".into()), "Config error: m"),
+            (
+                InferenceError::VisualizerError("m".into()),
+                "Visualizer error: m",
+            ),
+            (InferenceError::VideoError("m".into()), "Video error: m"),
+            (
+                InferenceError::FeatureNotEnabled("m".into()),
+                "Feature not enabled: m",
+            ),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(err.to_string(), expected);
+            // Non-IO variants have no underlying source.
+            assert!(std::error::Error::source(&err).is_none());
+        }
+    }
 }
