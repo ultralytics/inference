@@ -894,10 +894,6 @@ fn draw_classification(
 
             for &class_id in &top_indices {
                 let score = probs.data[class_id];
-                if score < 0.01 {
-                    continue;
-                }
-
                 let class_name = result.names.get(&class_id).map_or("class", String::as_str);
 
                 let label = format!("{class_name} {score:.2}");

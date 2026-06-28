@@ -7,7 +7,8 @@
 [![npm version](https://img.shields.io/npm/v/@ultralytics/yolo?logo=npm&logoColor=white&label=npm&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 [![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/ultralytics/inference/blob/main/LICENSE)
+[![License](https://img.shields.io/npm/l/@ultralytics/yolo?label=license&color=blue)](https://github.com/ultralytics/inference/blob/main/LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2606.03748-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2606.03748)
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
@@ -135,7 +136,7 @@ Field names match the Rust/Ultralytics `Results` API 1-1:
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                     | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, color } \| null` | classify              |
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment, semantic     |
-| `semantic`         | `Uint16Array` (class id per pixel, `width*height`)        | semantic              |
+| `semantic_mask`    | `Uint16Array` (class id per pixel, `width*height`)        | semantic              |
 | `speed`            | `{ preprocess, inference, postprocess }` ms               | all                   |
 
 `model.names` is the class id to name map (like `model.names` in Python). Every
