@@ -135,7 +135,7 @@ Field names match the Rust/Ultralytics `Results` API 1-1:
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                     | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, color } \| null` | classify              |
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment, semantic     |
-| `semantic`         | `Uint16Array` (class id per pixel, `width*height`)        | semantic              |
+| `semantic_mask`    | `Uint16Array` (class id per pixel, `width*height`)        | semantic              |
 | `speed`            | `{ preprocess, inference, postprocess }` ms               | all                   |
 
 `model.names` is the class id to name map (like `model.names` in Python). Every

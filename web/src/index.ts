@@ -104,7 +104,7 @@ export interface Results {
    * `undefined` for other tasks. The sentinel `65535` marks background or
    * class-filtered pixels. The `masks` overlay is its renderable form.
    */
-  semantic?: Uint16Array;
+  semantic_mask?: Uint16Array;
   speed: Speed;
 }
 
@@ -165,13 +165,13 @@ function resolveModel(src: string): string {
 }
 
 /**
- * Reinterpret the wasm payload's little-endian `semantic` bytes as a
+ * Reinterpret the wasm payload's little-endian `semantic_mask` bytes as a
  * `Uint16Array` of class ids (a zero-copy view), leaving every other field as-is.
  */
 function decodeResults(raw: unknown): Results {
-  const r = raw as Results & { semantic?: Uint8Array | Uint16Array };
-  const sem = r.semantic as Uint8Array | undefined;
-  r.semantic = sem && sem.length ? new Uint16Array(sem.buffer, sem.byteOffset, sem.length / 2) : undefined;
+  const r = raw as Results & { semantic_mask?: Uint8Array | Uint16Array };
+  const sem = r.semantic_mask as Uint8Array | undefined;
+  r.semantic_mask = sem && sem.length ? new Uint16Array(sem.buffer, sem.byteOffset, sem.length / 2) : undefined;
   return r as Results;
 }
 

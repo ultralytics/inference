@@ -90,7 +90,7 @@ pub(crate) struct JsResults {
     /// `Uint16Array`. The IGNORE sentinel `65535` marks background or
     /// class-filtered pixels.
     #[serde(with = "serde_bytes")]
-    semantic: Vec<u8>,
+    semantic_mask: Vec<u8>,
     /// Per-stage timing in ms: `{ preprocess, inference, postprocess }`.
     speed: JsSpeed,
 }
@@ -175,7 +175,7 @@ impl JsResults {
             keypoints,
             probs,
             masks: build_mask_overlay(r),
-            semantic: r.semantic_mask.as_ref().map_or_else(Vec::new, |sem| {
+            semantic_mask: r.semantic_mask.as_ref().map_or_else(Vec::new, |sem| {
                 let mut bytes = Vec::with_capacity(sem.data.len() * 2);
                 for &v in &sem.data {
                     bytes.extend_from_slice(&v.to_le_bytes());
