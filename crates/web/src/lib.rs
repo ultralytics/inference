@@ -416,8 +416,7 @@ impl YoloModel {
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
-        // (ArgMax + Cast folded into the graph). Extract it as `u8` and feed the
-        // dedicated semantic-mask postprocessor instead of the f32 logits path.
+        // (ArgMax + Cast folded into the graph).
         let results = if self.semantic {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
