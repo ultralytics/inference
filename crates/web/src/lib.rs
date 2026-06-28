@@ -414,6 +414,8 @@ impl YoloModel {
         }
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
+        // Postprocess time runs from output extraction to the postprocess call.
+        let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, now_ms() - t_post);
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
@@ -429,15 +431,13 @@ impl YoloModel {
             } else {
                 &shape
             };
-            let t_end = now_ms();
-            let speed = Speed::new(t_inf - t_pre, t_post - t_inf, t_end - t_post);
             postprocess_semantic_mask(
                 data,
                 img_shape,
                 names,
                 orig_img,
                 String::new(),
-                speed,
+                speed(),
                 inference_shape,
             )
         } else {
@@ -453,8 +453,6 @@ impl YoloModel {
                         })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
-            let t_end = now_ms();
-            let speed = Speed::new(t_inf - t_pre, t_post - t_inf, t_end - t_post);
             postprocess(
                 views,
                 self.metadata.task,
@@ -463,7 +461,7 @@ impl YoloModel {
                 names,
                 orig_img,
                 String::new(),
-                speed,
+                speed(),
                 inference_shape,
                 self.metadata.end2end,
                 self.metadata.kpt_shape,
