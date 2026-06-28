@@ -201,9 +201,6 @@ pub struct YoloModel {
     imgsz: (usize, usize),
     /// Active device label (`"webgpu"` or `"cpu"`).
     device: &'static str,
-    /// `true` when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only
-    /// output is a `[B, H, W] uint8` class map.
-    semantic: bool,
 }
 
 #[wasm_bindgen]
@@ -342,25 +339,31 @@ impl YoloModel {
         device: Device,
     ) -> Result<Self, JsError> {
         let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
-        let (output_names, semantic) = {
-            let outputs = session.outputs();
-            let semantic = outputs.len() == 1
-                && matches!(
-                    outputs[0].dtype(),
-                    ValueType::Tensor { ty: TensorElementType::Uint8, shape, .. }
-                        if shape.len() == 3
-                );
-            let names: Vec<String> = outputs.iter().map(|o| o.name().to_string()).collect();
-            (names, semantic)
-        };
+        let output_names = session
+            .outputs()
+            .iter()
+            .map(|o| o.name().to_string())
+            .collect();
         Ok(Self {
             session,
             metadata,
             output_names,
             imgsz,
             device: device.label(),
-            semantic,
         })
+    }
+
+    /// Returns `true` when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only
+    /// output is a `[B, H, W] uint8` class map. Lets `run` skip f32 logits extraction
+    /// and use the dedicated semantic-mask postprocessor (matches native model.rs).
+    fn semantic_baked(&self) -> bool {
+        let outputs = self.session.outputs();
+        outputs.len() == 1
+            && matches!(
+                outputs[0].dtype(),
+                ValueType::Tensor { ty: TensorElementType::Uint8, shape, .. }
+                    if shape.len() == 3
+            )
     }
 
     /// Core async predict: decode -> preprocess -> `run_async` -> sync -> postprocess.
@@ -393,6 +396,9 @@ impl YoloModel {
             preprocess_image_with_precision(&dynimg, self.imgsz, self.metadata.stride, false)
         };
 
+        // Resolve the output dtype path before borrowing the session for inference.
+        let semantic_baked = self.semantic_baked();
+
         // Upload the NCHW f32 tensor into the ORT (WebGPU) context and run.
         let t_inf = now_ms();
         let input = Tensor::from_array(pre.tensor.clone()).map_err(map_ort)?;
@@ -419,7 +425,7 @@ impl YoloModel {
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
-        let results = if self.semantic {
+        let results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
                 .try_extract_tensor::<u8>()
