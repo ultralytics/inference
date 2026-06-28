@@ -202,8 +202,7 @@ pub struct YoloModel {
     /// Active device label (`"webgpu"` or `"cpu"`).
     device: &'static str,
     /// `true` when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only
-    /// output is a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction
-    /// and feed the dedicated semantic-mask postprocessor (matches native model.rs).
+    /// output is a `[B, H, W] uint8` class map.
     semantic: bool,
 }
 
