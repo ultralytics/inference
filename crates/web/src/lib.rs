@@ -426,7 +426,11 @@ impl YoloModel {
                 .map_err(|e| JsError::new(&format!("failed to extract output '{name}': {e}")))?;
             let shape: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
             // Drop the leading batch dim so the shape is `[H, W]` (or pass through).
-            let img_shape: &[usize] = if shape.len() == 3 { &shape[1..] } else { &shape };
+            let img_shape: &[usize] = if shape.len() == 3 {
+                &shape[1..]
+            } else {
+                &shape
+            };
             let t_end = now_ms();
             let speed = Speed::new(t_inf - t_pre, t_post - t_inf, t_end - t_post);
             postprocess_semantic_mask(
@@ -441,12 +445,14 @@ impl YoloModel {
         } else {
             // Borrow each output's data directly (no copy) and feed it to the shared
             // f32 postprocessor while `outputs` is still alive.
-            let mut views: Vec<(&[f32], Vec<usize>)> =
-                Vec::with_capacity(self.output_names.len());
+            let mut views: Vec<(&[f32], Vec<usize>)> = Vec::with_capacity(self.output_names.len());
             for name in &self.output_names {
-                let (shape, data) = outputs[name.as_str()].try_extract_tensor::<f32>().map_err(
-                    |e| JsError::new(&format!("failed to extract output '{name}': {e}")),
-                )?;
+                let (shape, data) =
+                    outputs[name.as_str()]
+                        .try_extract_tensor::<f32>()
+                        .map_err(|e| {
+                            JsError::new(&format!("failed to extract output '{name}': {e}"))
+                        })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
             let t_end = now_ms();
