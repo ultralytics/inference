@@ -76,6 +76,8 @@ export interface Probs {
   top1conf: number;
   top5conf: number[];
   name: string;
+  /** Display names for each {@link top5} class. */
+  top5names: string[];
   color: string;
 }
 
@@ -380,7 +382,7 @@ function textColorFor(hex: string): string {
  * Draw inference results onto a canvas, on top of the source image.
  *
  * Handles every task: axis-aligned boxes, oriented boxes (OBB), pose keypoints
- * with the COCO skeleton, and a top-1 banner for classification. The canvas is
+ * with the COCO skeleton, and a top-5 list for classification. The canvas is
  * resized to the original image dimensions so detection coordinates line up.
  *
  * ```ts
@@ -496,9 +498,19 @@ export async function annotate(
     ctx.lineWidth = lineWidth;
   }
 
-  // Classification: top-1 banner.
-  if (results.probs) {
-    label(`${results.probs.name} ${(results.probs.top1conf * 100).toFixed(1)}%`, 0, fontSize + 8, results.probs.color);
+  // Classification: top-5 list on a translucent black panel (matches the native
+  // and Python renderers, which list the top classes rather than a single banner).
+  if (results.probs && showLabels) {
+    const { top5, top5conf, top5names } = results.probs;
+    const lines = top5.map((_, i) => `${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`);
+    const pad = Math.round(fontSize * 0.3);
+    const lineH = Math.round(fontSize * 1.25);
+    const boxW = Math.max(...lines.map((t) => ctx.measureText(t).width)) + pad * 2;
+    const boxH = lines.length * lineH + pad * 2;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+    ctx.fillRect(pad, pad, boxW, boxH);
+    ctx.fillStyle = "#ffffff";
+    lines.forEach((t, i) => ctx.fillText(t, pad * 2, pad * 2 + i * lineH));
   }
 }
 

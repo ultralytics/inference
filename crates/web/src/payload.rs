@@ -65,6 +65,8 @@ struct JsProbs {
     top1conf: f32,
     top5conf: Vec<f32>,
     name: String,
+    /// Display names for each `top5` class, so `annotate` can draw the full list.
+    top5names: Vec<String>,
     color: String,
 }
 
@@ -160,6 +162,7 @@ impl JsResults {
             top1conf: p.top1conf(),
             top5conf: p.top5conf(),
             name: name(p.top1()),
+            top5names: p.top5().into_iter().map(name).collect(),
             color: hex(p.top1()),
         });
 
