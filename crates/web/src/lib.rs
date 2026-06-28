@@ -16,13 +16,13 @@ use std::sync::Arc;
 use ndarray::Array3;
 use ort::ep::WebGPU;
 use ort::session::{RunOptions, Session};
-use ort::value::Tensor;
+use ort::value::{Tensor, TensorElementType, ValueType};
 use ort_web::sync_outputs;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
-use ultralytics_inference::postprocessing::postprocess;
+use ultralytics_inference::postprocessing::{postprocess, postprocess_semantic_mask};
 use ultralytics_inference::preprocessing::{
     preprocess_image_center_crop, preprocess_image_with_precision,
 };
@@ -201,6 +201,10 @@ pub struct YoloModel {
     imgsz: (usize, usize),
     /// Active device label (`"webgpu"` or `"cpu"`).
     device: &'static str,
+    /// `true` when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only
+    /// output is a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction
+    /// and feed the dedicated semantic-mask postprocessor (matches native model.rs).
+    semantic: bool,
 }
 
 #[wasm_bindgen]
@@ -339,17 +343,24 @@ impl YoloModel {
         device: Device,
     ) -> Result<Self, JsError> {
         let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
-        let output_names = session
-            .outputs()
-            .iter()
-            .map(|o| o.name().to_string())
-            .collect();
+        let (output_names, semantic) = {
+            let outputs = session.outputs();
+            let semantic = outputs.len() == 1
+                && matches!(
+                    outputs[0].dtype(),
+                    ValueType::Tensor { ty: TensorElementType::Uint8, shape, .. }
+                        if shape.len() == 3
+                );
+            let names: Vec<String> = outputs.iter().map(|o| o.name().to_string()).collect();
+            (names, semantic)
+        };
         Ok(Self {
             session,
             metadata,
             output_names,
             imgsz,
             device: device.label(),
+            semantic,
         })
     }
 
@@ -397,40 +408,63 @@ impl YoloModel {
             .await
             .map_err(err_ctx("failed to sync outputs"))?;
 
-        // Borrow each output's data directly (no copy, important for the large
-        // semantic logits, ~160 MB) and feed it to the shared postprocessor while
-        // `outputs` is still alive.
         let t_post = now_ms();
-        let mut views: Vec<(&[f32], Vec<usize>)> = Vec::with_capacity(self.output_names.len());
-        for name in &self.output_names {
-            let (shape, data) = outputs[name.as_str()]
-                .try_extract_tensor::<f32>()
-                .map_err(|e| JsError::new(&format!("failed to extract output '{name}': {e}")))?;
-            views.push((data, shape.iter().map(|&d| d as usize).collect()));
-        }
-
         let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
         if let Some(classes) = classes {
             config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
         }
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
-        let t_end = now_ms();
-        let speed = Speed::new(t_inf - t_pre, t_post - t_inf, t_end - t_post);
 
-        let results = postprocess(
-            views,
-            self.metadata.task,
-            &pre,
-            &config,
-            names,
-            orig_img,
-            String::new(),
-            speed,
-            inference_shape,
-            self.metadata.end2end,
-            self.metadata.kpt_shape,
-        );
+        // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
+        // (ArgMax + Cast folded into the graph). Extract it as `u8` and feed the
+        // dedicated semantic-mask postprocessor instead of the f32 logits path.
+        let results = if self.semantic {
+            let name = &self.output_names[0];
+            let (shape, data) = outputs[name.as_str()]
+                .try_extract_tensor::<u8>()
+                .map_err(|e| JsError::new(&format!("failed to extract output '{name}': {e}")))?;
+            let shape: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+            // Drop the leading batch dim so the shape is `[H, W]` (or pass through).
+            let img_shape: &[usize] = if shape.len() == 3 { &shape[1..] } else { &shape };
+            let t_end = now_ms();
+            let speed = Speed::new(t_inf - t_pre, t_post - t_inf, t_end - t_post);
+            postprocess_semantic_mask(
+                data,
+                img_shape,
+                names,
+                orig_img,
+                String::new(),
+                speed,
+                inference_shape,
+            )
+        } else {
+            // Borrow each output's data directly (no copy) and feed it to the shared
+            // f32 postprocessor while `outputs` is still alive.
+            let mut views: Vec<(&[f32], Vec<usize>)> =
+                Vec::with_capacity(self.output_names.len());
+            for name in &self.output_names {
+                let (shape, data) = outputs[name.as_str()].try_extract_tensor::<f32>().map_err(
+                    |e| JsError::new(&format!("failed to extract output '{name}': {e}")),
+                )?;
+                views.push((data, shape.iter().map(|&d| d as usize).collect()));
+            }
+            let t_end = now_ms();
+            let speed = Speed::new(t_inf - t_pre, t_post - t_inf, t_end - t_post);
+            postprocess(
+                views,
+                self.metadata.task,
+                &pre,
+                &config,
+                names,
+                orig_img,
+                String::new(),
+                speed,
+                inference_shape,
+                self.metadata.end2end,
+                self.metadata.kpt_shape,
+            )
+        };
         let payload = JsResults::from_results(&results, self.metadata.task);
         to_js(&payload, "results")
     }
