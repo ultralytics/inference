@@ -134,8 +134,9 @@ export interface LoadOptions {
    * (often ~2x faster on WebGPU), reusing this package's Rust pre/postprocessing.
    *
    * `"litert"` requires the optional peer dependency `@litertjs/core` to be
-   * installed, a `.tflite` model, and an Ultralytics `metadata.yaml` sidecar (see
-   * {@link LoadOptions.metadataUrl}).
+   * installed and a single-file `.tflite` model. Metadata (task, class names,
+   * `imgsz`) is read from the `.tflite` itself, just like the `.onnx` path — no
+   * sidecar needed.
    */
   backend?: "ort" | "litert";
   /**
@@ -144,12 +145,6 @@ export interface LoadOptions {
    * and pointing here (absolute URL ending in `/`).
    */
   litertWasmUrl?: string | URL;
-  /**
-   * For `backend: "litert"`: URL/path to the Ultralytics `metadata.yaml` sidecar
-   * (task, class names, `imgsz`, stride). Defaults to the model URL with its
-   * `.tflite` extension replaced by `.yaml`.
-   */
-  metadataUrl?: string | URL;
 }
 
 /**
@@ -550,22 +545,14 @@ export class YOLO {
     return new YOLO(new OrtEngine(await YoloModel.load_bytes(bytes, ortBaseUrl, device)));
   }
 
-  /** Load the LiteRT (`.tflite`) backend: model bytes + `metadata.yaml` sidecar. */
+  /** Load the LiteRT (`.tflite`) backend. Metadata (task, class names, `imgsz`)
+   * is read from the single `.tflite` file, the same as the `.onnx` path. */
   private static async loadLiteRt(
     source: string | URL | ArrayBuffer | Uint8Array,
     options?: LoadOptions,
   ): Promise<YOLO> {
     const tflite = await fetchModelBytes(source);
-    const metaUrl =
-      options?.metadataUrl?.toString() ??
-      (typeof source === "string" || source instanceof URL
-        ? source.toString().replace(/\.tflite$/i, ".yaml")
-        : undefined);
-    if (!metaUrl) {
-      throw new Error('backend "litert" needs a `metadataUrl` when the model is passed as raw bytes');
-    }
-    const metadataYaml = await (await fetchOk(metaUrl, "metadata.yaml")).text();
-    const pipeline = new YoloPipeline(metadataYaml);
+    const pipeline = new YoloPipeline(tflite);
     const wasmUrl = options?.litertWasmUrl ? options.litertWasmUrl.toString() : DEFAULT_LITERT_WASM;
     const accelerator = options?.device === "cpu" ? "wasm" : "webgpu";
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);

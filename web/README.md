@@ -193,10 +193,8 @@ npm install @litertjs/core   # optional peer dependency, only for the litert bac
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("/models/yolo11n_float32.tflite", {
+const model = await YOLO.load("/models/yolo11n.tflite", {
   backend: "litert",
-  // metadata.yaml sidecar; defaults to the model URL with `.tflite` → `.yaml`.
-  metadataUrl: "/models/yolo11n_float32.yaml",
   // LiteRT.js wasm assets; defaults to the jsDelivr CDN. Self-host by copying
   // node_modules/@litertjs/core/wasm/ and pointing here (URL ending in `/`).
   litertWasmUrl: "/litert/",
@@ -208,15 +206,13 @@ console.log(model.device); // "webgpu" or "wasm"
 
 Notes:
 
-- **Model + metadata**: export with Ultralytics to `.tflite` (float32 for WebGPU)
-  alongside its `metadata.yaml` sidecar (task, class names, `imgsz`, stride). The
-  sidecar is required because TFLite does not embed Ultralytics metadata the way
-  ONNX does.
+- **Model**: export with Ultralytics to `.tflite` (float32 for WebGPU). It loads
+  from the single file — the metadata (task, class names, `imgsz`, stride) is read
+  straight from the `.tflite`, the same as the `.onnx` path. No sidecar.
 - **Tasks**: detection is supported today; other tasks are in progress.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
   so serve with `Cross-Origin-Opener-Policy: same-origin` and
-  `Cross-Origin-Embedder-Policy: require-corp` (the bundled `npm run serve` does
-  this).
+  `Cross-Origin-Embedder-Policy: require-corp`.
 
 ## 🔨 Building From Source
 
@@ -225,12 +221,10 @@ This package builds the wasm from the Rust crate with
 
 ```bash
 npm run build # wasm-pack build + tsc
-npm run serve # static server with COOP/COEP headers, then open http://localhost:8080/example/
 ```
 
-`npm run serve` (see `serve.mjs`) serves the package over `localhost` (a secure
-context) with the cross-origin isolation headers the threaded runtimes want. Open
-<http://localhost:8080/example/> in a WebGPU browser.
+Serve the built package over `localhost` (a secure context) with the two
+cross-origin isolation headers above, then open it in a WebGPU browser.
 
 ## 💡 Contributing
 

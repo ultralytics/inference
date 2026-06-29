@@ -38,6 +38,7 @@ use payload::JsResults;
 
 mod onnx_meta;
 mod payload;
+mod tflite_meta;
 
 /// Default inference image size used when a model does not record `imgsz` in its
 /// metadata. Mirrors the native crate's fallback.
@@ -187,6 +188,22 @@ fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
         .collect::<Vec<_>>()
         .join("\n");
     ModelMetadata::from_yaml_str(&combined).map_err(err_ctx("failed to parse model metadata"))
+}
+
+/// Parse the Ultralytics metadata embedded in a single-file `.tflite`.
+///
+/// LiteRT exports append a small zip holding `metadata.json` to the model bytes,
+/// so — exactly like the ONNX path's [`build_metadata`] — the browser reads the
+/// task, class names, and `imgsz` straight from the model file.
+fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
+    let text = tflite_meta::metadata_text(model_bytes).ok_or_else(|| {
+        JsError::new(
+            "no Ultralytics metadata found in the .tflite model. Export it with \
+             Ultralytics (`model.export(format='litert')`) so the task, class names, \
+             and imgsz are embedded.",
+        )
+    })?;
+    ModelMetadata::from_yaml_str(&text).map_err(err_ctx("failed to parse .tflite metadata"))
 }
 
 /// A loaded YOLO model ready for inference in the browser.
@@ -465,16 +482,17 @@ pub struct YoloPipeline {
 
 #[wasm_bindgen]
 impl YoloPipeline {
-    /// Build a pipeline from the Ultralytics `metadata.yaml` sidecar shipped next
-    /// to a `.tflite` export (the same YAML the ONNX path reconstructs from
-    /// `metadata_props`).
+    /// Build a pipeline from a single-file `.tflite` model, reading the
+    /// Ultralytics metadata (task, class names, `imgsz`, ...) embedded in the
+    /// model bytes — the same way [`YoloModel::load_bytes`] reads it from an ONNX
+    /// model, so the ONNX and LiteRT paths load identically from one file.
     ///
     /// # Errors
-    /// Returns a JS error if the YAML cannot be parsed into model metadata.
+    /// Returns a JS error if the model carries no Ultralytics metadata or it
+    /// cannot be parsed.
     #[wasm_bindgen(constructor)]
-    pub fn new(metadata_yaml: String) -> Result<YoloPipeline, JsError> {
-        let metadata = ModelMetadata::from_yaml_str(&metadata_yaml)
-            .map_err(err_ctx("failed to parse metadata.yaml"))?;
+    pub fn new(tflite: &[u8]) -> Result<YoloPipeline, JsError> {
+        let metadata = build_tflite_metadata(tflite)?;
         let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
         Ok(Self {
             metadata,
