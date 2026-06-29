@@ -5,7 +5,7 @@
 //! An Ultralytics LiteRT export appends a small zip archive to the end of the
 //! TFLite flatbuffer holding one `metadata.json` entry (task, class names,
 //! `imgsz`, `stride`, ...). The flatbuffer is read from the front by offset, so
-//! the trailing zip is ignored by the runtime — the metadata travels inside the
+//! the trailing zip is ignored by the runtime; the metadata travels inside the
 //! model file. This mirrors the ONNX path's [`onnx_meta`](crate::onnx_meta): the
 //! browser reads the metadata straight from the model bytes.
 //!

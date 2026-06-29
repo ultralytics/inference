@@ -2262,13 +2262,15 @@ mod tests {
             "test.jpg".to_string(),
             Speed::default(),
             (640, 640),
-            true,             // end2end (yolo26)
-            Some((17, 3)),    // kpt_shape
+            true,          // end2end (yolo26)
+            Some((17, 3)), // kpt_shape
         );
 
         let boxes = results.boxes.expect("end2end pose should produce boxes");
         assert_eq!(boxes.data.shape()[0], 3, "three detections above conf 0.25");
-        let kpts = results.keypoints.expect("end2end pose should produce keypoints");
+        let kpts = results
+            .keypoints
+            .expect("end2end pose should produce keypoints");
         assert_eq!(kpts.data.shape(), [3, 17, 3]);
         #[allow(clippy::float_cmp)]
         {

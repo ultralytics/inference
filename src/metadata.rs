@@ -200,8 +200,13 @@ impl ModelMetadata {
                 continue;
             };
             // Inline form: [a, b] / (a, b) / a, b
-            let rest = rest.trim().trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
-            let inline: Vec<usize> = rest.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            let rest = rest
+                .trim()
+                .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
+            let inline: Vec<usize> = rest
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
             if inline.len() >= 2 {
                 return Some((inline[0], inline[1]));
             }

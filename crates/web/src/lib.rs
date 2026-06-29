@@ -167,43 +167,49 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
     Ok(())
 }
 
+/// Parse Ultralytics `key: value` metadata `text` into [`ModelMetadata`], shared
+/// by the ONNX and `.tflite` readers. Returns `missing` as a JS error when the
+/// model carries no metadata (empty/absent text).
+fn metadata_from_text(text: Option<String>, missing: &str) -> Result<ModelMetadata, JsError> {
+    let text = text
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| JsError::new(missing))?;
+    ModelMetadata::from_yaml_str(&text).map_err(err_ctx("failed to parse model metadata"))
+}
+
 /// Parse the Ultralytics metadata embedded in an ONNX model's `metadata_props`.
 ///
 /// `ort-web` does not implement ONNX session metadata retrieval, so we read the
 /// `metadata_props` (key/value pairs such as `task`, `names`, `imgsz`) straight
-/// from the model protobuf, rebuild the `key: value` YAML the native path uses,
-/// and hand it to the shared parser.
+/// from the model protobuf and rebuild the `key: value` text the shared parser
+/// consumes.
 fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
     let props = onnx_meta::parse_metadata_props(model_bytes);
-    if props.is_empty() {
-        return Err(JsError::new(
-            "no metadata found in ONNX model. Export it with Ultralytics \
-             (`model.export(format='onnx')`) so the task, class names, and imgsz \
-             are embedded.",
-        ));
-    }
-    let combined = props
-        .iter()
-        .map(|(k, v)| format!("{k}: {v}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    ModelMetadata::from_yaml_str(&combined).map_err(err_ctx("failed to parse model metadata"))
+    let text = (!props.is_empty()).then(|| {
+        props
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    metadata_from_text(
+        text,
+        "no metadata found in ONNX model. Export it with Ultralytics \
+         (`model.export(format='onnx')`) so the task, class names, and imgsz are embedded.",
+    )
 }
 
 /// Parse the Ultralytics metadata embedded in a single-file `.tflite`.
 ///
 /// LiteRT exports append a small zip holding `metadata.json` to the model bytes,
-/// so — exactly like the ONNX path's [`build_metadata`] — the browser reads the
-/// task, class names, and `imgsz` straight from the model file.
+/// so, like the ONNX path's [`build_metadata`], the browser reads the task, class
+/// names, and `imgsz` straight from the model file.
 fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
-    let text = tflite_meta::metadata_text(model_bytes).ok_or_else(|| {
-        JsError::new(
-            "no Ultralytics metadata found in the .tflite model. Export it with \
-             Ultralytics (`model.export(format='litert')`) so the task, class names, \
-             and imgsz are embedded.",
-        )
-    })?;
-    ModelMetadata::from_yaml_str(&text).map_err(err_ctx("failed to parse .tflite metadata"))
+    metadata_from_text(
+        tflite_meta::metadata_text(model_bytes),
+        "no Ultralytics metadata found in the .tflite model. Export it with Ultralytics \
+         (`model.export(format='litert')`) so the task, class names, and imgsz are embedded.",
+    )
 }
 
 /// A loaded YOLO model ready for inference in the browser.
@@ -526,7 +532,7 @@ pub struct YoloPipeline {
 impl YoloPipeline {
     /// Build a pipeline from a single-file `.tflite` model, reading the
     /// Ultralytics metadata (task, class names, `imgsz`, ...) embedded in the
-    /// model bytes — the same way [`YoloModel::load_bytes`] reads it from an ONNX
+    /// model bytes, the same way [`YoloModel::load_bytes`] reads it from an ONNX
     /// model, so the ONNX and LiteRT paths load identically from one file.
     ///
     /// # Errors
@@ -579,7 +585,7 @@ impl YoloPipeline {
 
     /// Preprocess raw RGBA pixels (e.g. a webcam `ImageData`) into the NCHW f32
     /// input tensor an Ultralytics LiteRT/TFLite model expects, normalized to
-    /// `[0, 1]` — the same preprocessing as the ONNX path.
+    /// `[0, 1]`, the same preprocessing as the ONNX path.
     ///
     /// Returns the tensor as a `Float32Array` (shape `[1, 3, H, W]`); the
     /// letterbox geometry and original image are stashed for the matching
@@ -635,7 +641,7 @@ impl YoloPipeline {
     /// Postprocess an external engine's raw outputs into the standard `Results`.
     ///
     /// `outputs` are the model's output tensors (one for most tasks; two for
-    /// segmentation — detection head + mask prototypes). `shapes` encodes each
+    /// segmentation: detection head + mask prototypes). `shapes` encodes each
     /// output's dims flat as `[rank0, dims0..., rank1, dims1...]`. `inference_ms`
     /// is the time the JS engine reported, used only for the `speed` breakdown.
     /// Consumes the frame stashed by the preceding
@@ -739,8 +745,8 @@ fn decode_shapes(flat: &[u32], count: usize) -> Result<Vec<Vec<usize>>, JsError>
 
 /// Scale a normalized detection head's coordinates to model-input pixels in place.
 ///
-/// Ultralytics LiteRT exports (`ai_edge_torch`) emit `cx, cy, w, h` — and, for
-/// pose, keypoint `x, y` — normalized to `[0, 1]`, while the shared postprocess
+/// Ultralytics LiteRT exports (`ai_edge_torch`) emit `cx, cy, w, h` (and, for
+/// pose, keypoint `x, y`) normalized to `[0, 1]`, while the shared postprocess
 /// (built for ONNX) expects pixel coordinates in the model input space. Handles
 /// channel-major `[1, C, N]` (e.g. `[1, 84, 8400]`) and `[1, N, C]` layouts. A
 /// max-coordinate guard makes it a no-op for exports that already use pixel
@@ -767,7 +773,13 @@ fn denormalize_head(
     if c_count < 4 || n == 0 {
         return;
     }
-    let idx = |c: usize, p: usize| if channel_major { c * n + p } else { p * c_count + c };
+    let idx = |c: usize, p: usize| {
+        if channel_major {
+            c * n + p
+        } else {
+            p * c_count + c
+        }
+    };
 
     // Only scale when coords look normalized, so a pixel-coord export is untouched.
     let mut max_coord = 0.0f32;

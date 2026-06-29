@@ -178,7 +178,10 @@ function resolveModel(src: string): string {
  */
 function inferBackend(source: string | URL | ArrayBuffer | Uint8Array): "ort" | "litert" {
   if (typeof source === "string" || source instanceof URL) {
-    return /\.tflite$/i.test(source.toString()) ? "litert" : "ort";
+    // Match on the pathname only so `model.tflite?v=1` or a signed CDN URL with
+    // a query/hash is still detected correctly.
+    const path = (source instanceof URL ? source.pathname : source).split(/[?#]/, 1)[0];
+    return /\.tflite$/i.test(path) ? "litert" : "ort";
   }
   const b = source instanceof Uint8Array ? source : new Uint8Array(source);
   const tflite = b.length >= 8 && b[4] === 0x54 && b[5] === 0x46 && b[6] === 0x4c && b[7] === 0x33;
@@ -412,11 +415,13 @@ class LiteRtBackend {
     const shapes: number[][] = [];
     for (const t of tensors) {
       const host = await t.moveTo("wasm");
-      // Copy out before deleting — toTypedArray() may view the freed buffer.
+      // Copy out before deleting; toTypedArray() may view the freed buffer.
       outputs.push(new Float32Array(host.toTypedArray() as Float32Array));
       shapes.push(Array.from(host.type.layout.dimensions));
       host.delete?.();
-      t.delete?.();
+      // moveTo("wasm") returns the same tensor when it is already on wasm; only
+      // delete the original separately when it is a distinct GPU tensor.
+      if (t !== host) t.delete?.();
     }
     if (gpuIn !== cpuIn) gpuIn.delete?.();
     cpuIn.delete?.();
@@ -477,6 +482,11 @@ class OrtEngine implements Engine {
 
 /** LiteRT.js engine: Rust preprocess → LiteRT inference → Rust postprocess. */
 class LiteRtEngine implements Engine {
+  // `YoloPipeline` keeps exactly one pending frame in wasm state between
+  // `preprocess_rgba` and `postprocess`, so predictions must not interleave.
+  // Serialize them: a new call waits for the in-flight one to finish.
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly pipeline: YoloPipeline,
     private readonly backend: LiteRtBackend,
@@ -491,7 +501,31 @@ class LiteRtEngine implements Engine {
     return this.pipeline.names as Record<number, string>;
   }
 
-  async predictDrawable(
+  predictDrawable(
+    data: Uint8Array,
+    width: number,
+    height: number,
+    conf: number,
+    iou: number,
+    classes?: Uint32Array,
+  ): Promise<unknown> {
+    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes));
+  }
+
+  /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
+  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
+    return this.serialize(async () => {
+      const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
+      try {
+        const { data, width, height } = toImageData(bitmap);
+        return await this.runDrawable(data, width, height, conf, iou, classes);
+      } finally {
+        bitmap.close();
+      }
+    });
+  }
+
+  private async runDrawable(
     data: Uint8Array,
     width: number,
     height: number,
@@ -507,15 +541,14 @@ class LiteRtEngine implements Engine {
     return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes);
   }
 
-  /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
-  async predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
-    const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
-    try {
-      const { data, width, height } = toImageData(bitmap);
-      return await this.predictDrawable(data, width, height, conf, iou, classes);
-    } finally {
-      bitmap.close();
-    }
+  /** Chain `fn` after any in-flight prediction so wasm frame state is never shared. */
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(fn, fn);
+    this.queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   free(): void {
