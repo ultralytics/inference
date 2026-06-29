@@ -834,4 +834,71 @@ mod tests {
         assert_eq!((h, w), rect_size);
         assert_eq!(res.padding, (5.0, 0.0));
     }
+
+    #[test]
+    fn test_calculate_rect_size_square_is_stride_aligned() {
+        let (h, w) = calculate_rect_size(640, 640, (640, 640), 32);
+        assert_eq!((h, w), (640, 640));
+        // Result is always a multiple of the stride.
+        let (h, w) = calculate_rect_size(800, 600, (640, 640), 32);
+        assert_eq!(h % 32, 0);
+        assert_eq!(w % 32, 0);
+    }
+
+    #[test]
+    fn test_letterbox_params_tall_pads_width() {
+        // Tall image (height > width) letterboxed into a square pads left/right.
+        let (geom, _) = calculate_letterbox_params(480, 640, (640, 640), 32);
+        assert!(geom.pad_left > 0);
+        assert_eq!(geom.pad_top, 0);
+    }
+
+    #[test]
+    fn test_preprocess_image_public_wrapper() {
+        let img = image::DynamicImage::new_rgb8(320, 240);
+        let res = preprocess_image(&img, (640, 640), 32);
+        let (_, c, h, w) = res.tensor.dim();
+        assert_eq!((c, h, w), (3, 640, 640));
+        assert!(res.tensor_f16.is_none());
+    }
+
+    #[test]
+    fn test_preprocess_image_fp16_path() {
+        let img = image::DynamicImage::new_rgb8(320, 240);
+        let res = preprocess_image_with_precision(&img, (640, 640), 32, true);
+        // half=true also produces the FP16 tensor mirroring the FP32 one.
+        let f16 = res.tensor_f16.expect("fp16 tensor present");
+        assert_eq!(f16.dim(), res.tensor.dim());
+    }
+
+    #[test]
+    fn test_preprocess_various_aspect_ratios() {
+        // Tall, wide, square, and tiny inputs all produce the requested tensor size.
+        for (w, h) in [(100u32, 400u32), (400, 100), (1, 1), (640, 640)] {
+            let img = image::DynamicImage::new_rgb8(w, h);
+            let res = preprocess_image(&img, (320, 320), 32);
+            let (_, c, th, tw) = res.tensor.dim();
+            assert_eq!((c, th, tw), (3, 320, 320));
+            assert_eq!(res.orig_shape, (h, w));
+        }
+    }
+
+    #[test]
+    fn test_x_lut_cache_reuse() {
+        // Two preprocess calls at the same width reuse the cached x-LUT (cache-hit path).
+        let img = image::DynamicImage::new_rgb8(200, 150);
+        let a = preprocess_image(&img, (320, 320), 32);
+        let b = preprocess_image(&img, (320, 320), 32);
+        assert_eq!(a.tensor.dim(), b.tensor.dim());
+    }
+
+    #[test]
+    fn test_calculate_rect_size_various() {
+        // Portrait and landscape both round up to stride multiples and stay within target.
+        let (h, w) = calculate_rect_size(400, 1000, (640, 640), 32);
+        assert_eq!((h % 32, w % 32), (0, 0));
+        assert!(h <= 640 && w <= 640);
+        let (h, w) = calculate_rect_size(1000, 400, (640, 640), 32);
+        assert_eq!((h % 32, w % 32), (0, 0));
+    }
 }

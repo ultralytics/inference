@@ -222,4 +222,23 @@ mod tests {
         let args = Cli::parse_from(["app", "version"]);
         assert!(matches!(args.command, Commands::Version));
     }
+
+    #[test]
+    fn test_parse_classes_formats() {
+        assert_eq!(parse_classes("0").unwrap(), vec![0]);
+        assert_eq!(parse_classes("0,1,2").unwrap(), vec![0, 1, 2]);
+        assert_eq!(parse_classes("[0, 1, 2]").unwrap(), vec![0, 1, 2]);
+        assert_eq!(parse_classes("(3, 4)").unwrap(), vec![3, 4]);
+        assert_eq!(parse_classes(" 5 , 6 ").unwrap(), vec![5, 6]);
+        // Empty / bracket-only inputs yield an empty selection.
+        assert_eq!(parse_classes("").unwrap(), Vec::<usize>::new());
+        assert_eq!(parse_classes("[]").unwrap(), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn test_parse_classes_invalid() {
+        let err = parse_classes("0,abc").unwrap_err();
+        assert!(err.contains("Invalid class ID 'abc'"));
+        assert!(parse_classes("-1").is_err()); // usize rejects negatives
+    }
 }

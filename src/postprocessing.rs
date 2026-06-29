@@ -2641,4 +2641,485 @@ mod tests {
             }
         }
     }
+
+    fn unit_preprocess(orig: (u32, u32)) -> PreprocessResult {
+        PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: orig,
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        }
+    }
+
+    #[test]
+    fn test_end2end_shape_predicates() {
+        assert!(is_end2end_detect_shape(&[1, 300, 6]));
+        assert!(!is_end2end_detect_shape(&[1, 300, 7]));
+        assert!(!is_end2end_detect_shape(&[1, 8400, 6])); // > 4096 preds
+        assert!(is_end2end_obb_shape(&[1, 300, 7]));
+        assert!(!is_end2end_obb_shape(&[1, 300, 6]));
+        assert!(is_end2end_pose_shape(&[1, 300, 6 + 51], 17, 3));
+        assert!(!is_end2end_pose_shape(&[1, 300, 6 + 50], 17, 3));
+        // Segment predicate needs proto channel count to disambiguate nm.
+        assert!(is_end2end_segment_shape(&[1, 300, 6 + 32], Some(32)));
+        assert!(!is_end2end_segment_shape(&[1, 300, 6 + 32], None));
+    }
+
+    #[test]
+    fn test_parse_detect_shape_2d_and_fallback() {
+        // 2D [features, preds] with metadata.
+        let (nc, np, t) = parse_detect_shape(&[84, 8400], 80);
+        assert_eq!((nc, np, t), (80, 8400, false));
+        // No metadata: layout inferred from which dim is smaller.
+        let (nc, np, t) = parse_detect_shape(&[84, 8400], 0);
+        assert_eq!((nc, np, t), (80, 8400, false));
+        // No metadata, transposed [preds, features].
+        let (nc, np, t) = parse_detect_shape(&[8400, 84], 0);
+        assert_eq!((nc, np, t), (80, 8400, true));
+        // Degenerate small dims -> zero predictions.
+        let (_, np, _) = parse_detect_shape(&[2, 3], 80);
+        assert_eq!(np, 0);
+        // Unsupported rank -> zero predictions.
+        let (_, np, _) = parse_detect_shape(&[1, 2, 3, 4], 80);
+        assert_eq!(np, 0);
+    }
+
+    #[test]
+    fn test_scale_and_clip_box_clips_to_bounds() {
+        let pre = unit_preprocess((50, 50));
+        // Box extends past the 50x50 image; expect clamping into [0, 50].
+        let out = scale_and_clip_box(&[-10.0, -10.0, 100.0, 100.0], &pre);
+        let expected = [0.0f32, 0.0, 50.0, 50.0];
+        for (o, e) in out.iter().zip(expected.iter()) {
+            assert!((o - e).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_output_to_2d_layouts() {
+        // Already [preds, features].
+        let a = output_to_2d(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3, true);
+        assert_eq!(a.shape(), [2, 3]);
+        assert!((a[[0, 0]] - 1.0).abs() < 1e-6);
+        // [features, preds] gets transposed to [preds, features].
+        let b = output_to_2d(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3, false);
+        assert_eq!(b.shape(), [2, 3]);
+        // Shape mismatch -> empty array.
+        let c = output_to_2d(&[1.0, 2.0, 3.0], 2, 3, true);
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn test_letterbox_crop_bounds() {
+        // Square model matching square image -> no padding, full crop.
+        assert_eq!(letterbox_crop_bounds(64, 64, 64, 64), Some((0, 0, 64, 64)));
+        // Wide image letterboxed into a square has vertical padding (top > 0).
+        let (top, left, ch, cw) = letterbox_crop_bounds(64, 64, 32, 64).unwrap();
+        assert!(top > 0 && left == 0 && ch > 0 && cw == 64);
+        // Degenerate zero-size returns None instead of panicking.
+        assert_eq!(letterbox_crop_bounds(0, 64, 32, 64), None);
+    }
+
+    #[test]
+    fn test_postprocess_classify_softmax_and_passthrough() {
+        let names = make_names(3);
+        let img = ndarray::Array3::zeros((8, 8, 3));
+
+        // Logits (sum != 1) get softmaxed; argmax index is preserved.
+        let r = postprocess_classify(
+            &[1.0, 2.0, 3.0],
+            Arc::clone(&names),
+            img.clone(),
+            String::new(),
+            Speed::default(),
+            (8, 8),
+        );
+        let probs = r.probs.unwrap();
+        assert_eq!(probs.top1(), 2);
+        assert!((probs.data.sum() - 1.0).abs() < 1e-5);
+
+        // Already-normalized probabilities pass through unchanged.
+        let r = postprocess_classify(
+            &[0.1, 0.2, 0.7],
+            Arc::clone(&names),
+            img.clone(),
+            String::new(),
+            Speed::default(),
+            (8, 8),
+        );
+        assert!((r.probs.unwrap().top1conf() - 0.7).abs() < 1e-6);
+
+        // Empty output -> no probs.
+        let r = postprocess_classify(&[], names, img, String::new(), Speed::default(), (8, 8));
+        assert!(r.probs.is_none());
+    }
+
+    #[test]
+    fn test_postprocess_obb_single_box() {
+        let names = make_names(1);
+        let pre = unit_preprocess((100, 100));
+        let config = InferenceConfig::default();
+        // [features=6, preds=1] layout: [cx, cy, w, h, class_score, angle]
+        let output = [50.0, 50.0, 20.0, 10.0, 0.9, 0.0];
+        let r = postprocess_obb(
+            &output,
+            &[1, 6, 1],
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((100, 100, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+        let obb = r.obb.unwrap();
+        assert_eq!(obb.len(), 1);
+        assert!((obb.conf()[0] - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_postprocess_detect_end2end_thresholds() {
+        let names = make_names(1);
+        let pre = unit_preprocess((100, 100));
+        let config = InferenceConfig::default(); // conf threshold 0.25
+        // Row0 above threshold, row1 below -> only one detection kept.
+        let output = [
+            10.0, 10.0, 50.0, 50.0, 0.9, 0.0, // keep
+            10.0, 10.0, 20.0, 20.0, 0.1, 0.0, // drop (sorted-desc break)
+        ];
+        let r = postprocess_detect_end2end(
+            &output,
+            &[1, 2, 6],
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((100, 100, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+        assert_eq!(r.boxes.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_postprocess_semantic_mask_fast_and_slow() {
+        let names = make_names(3);
+        // Fast path: model output already at original resolution (lh==oh, lw==ow).
+        let out: Vec<u8> = vec![0, 1, 1, 2];
+        let r = postprocess_semantic_mask(
+            &out,
+            &[1, 2, 2],
+            Arc::clone(&names),
+            ndarray::Array3::zeros((2, 2, 3)),
+            String::new(),
+            Speed::default(),
+            (2, 2),
+        );
+        let sm = r.semantic_mask.unwrap();
+        assert_eq!(sm.data.shape(), [2, 2]);
+        assert_eq!(sm.classes_present(), 3);
+
+        // Slow path: mask smaller than the original image triggers NN upsample.
+        let small: Vec<u8> = vec![5u8; 4 * 4];
+        let r = postprocess_semantic_mask(
+            &small,
+            &[1, 4, 4],
+            names,
+            ndarray::Array3::zeros((8, 8, 3)),
+            String::new(),
+            Speed::default(),
+            (8, 8),
+        );
+        let sm = r.semantic_mask.unwrap();
+        assert_eq!(sm.data.shape(), [8, 8]);
+        assert!(sm.data.iter().all(|&v| v == 5));
+    }
+
+    #[test]
+    fn test_detect_multiclass_nms_and_class_filter() {
+        // nc=2 -> features = 6. Three predictions, [features, preds] layout:
+        //   pred0: class0 @0.90, pred1: class0 @0.85 (overlaps pred0 -> NMS-suppressed),
+        //   pred2: class1 @0.95 (distinct location).
+        let names = make_names(2);
+        let pre = unit_preprocess((256, 256));
+        let output = vec![
+            50.0f32, 52.0, 200.0, // cx
+            50.0, 52.0, 200.0, // cy
+            40.0, 40.0, 40.0, // w
+            40.0, 40.0, 40.0, // h
+            0.9, 0.85, 0.1, // class0 scores
+            0.1, 0.2, 0.95, // class1 scores
+        ];
+
+        // Default config: overlapping same-class boxes are suppressed -> 2 kept.
+        let r = postprocess_detect(
+            &output,
+            &[1, 6, 3],
+            &pre,
+            &InferenceConfig::default(),
+            Arc::clone(&names),
+            ndarray::Array3::zeros((256, 256, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+        let boxes = r.boxes.expect("detections");
+        assert_eq!(boxes.len(), 2);
+
+        // Class filter keeps only class 1 -> a single detection.
+        let config = InferenceConfig::default().with_classes(vec![1]);
+        let r = postprocess_detect(
+            &output,
+            &[1, 6, 3],
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((256, 256, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+        );
+        let boxes = r.boxes.expect("detections");
+        assert_eq!(boxes.len(), 1);
+        assert!((boxes.cls()[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_dispatch_detect_standard() {
+        let names = make_names(1); // nc=1 -> features = 5
+        let pre = unit_preprocess((100, 100));
+        let config = InferenceConfig::default();
+        // [1, 5, 1]: [cx, cy, w, h, class_score]
+        let output = vec![50.0f32, 50.0, 20.0, 20.0, 0.9];
+        let r = postprocess(
+            vec![(&output, vec![1, 5, 1])],
+            Task::Detect,
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((100, 100, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false,
+            None,
+        );
+        assert_eq!(r.boxes.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_dispatch_classify_and_obb() {
+        let pre = unit_preprocess((100, 100));
+        let config = InferenceConfig::default();
+        let img = ndarray::Array3::zeros((100, 100, 3));
+
+        let probs = vec![0.1f32, 0.2, 0.7];
+        let r = postprocess(
+            vec![(&probs, vec![1, 3])],
+            Task::Classify,
+            &pre,
+            &config,
+            make_names(3),
+            img.clone(),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false,
+            None,
+        );
+        assert_eq!(r.probs.unwrap().top1(), 2);
+
+        // OBB standard route: [1, 6, 1] = [cx, cy, w, h, class_score, angle]
+        let obb_out = vec![50.0f32, 50.0, 20.0, 10.0, 0.9, 0.0];
+        let r = postprocess(
+            vec![(&obb_out, vec![1, 6, 1])],
+            Task::Obb,
+            &pre,
+            &config,
+            make_names(1),
+            img,
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false,
+            None,
+        );
+        assert_eq!(r.obb.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_dispatch_segment_with_protos() {
+        let names = make_names(1); // nc=1, nm from proto = 2 -> features = 7
+        let pre = unit_preprocess((16, 16));
+        let config = InferenceConfig::default();
+
+        // output0 [1, 7, 1] feature-major: [cx, cy, w, h, score, coeff0, coeff1]
+        let det = vec![8.0f32, 8.0, 6.0, 6.0, 0.9, 0.3, 0.7];
+        // protos [1, 2, 4, 4]
+        let protos = vec![0.5f32; 2 * 4 * 4];
+
+        let r = postprocess(
+            vec![(&det, vec![1, 7, 1]), (&protos, vec![1, 2, 4, 4])],
+            Task::Segment,
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((16, 16, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false,
+            None,
+        );
+        let boxes = r.boxes.expect("segment yields detection boxes");
+        assert_eq!(boxes.len(), 1);
+        assert!(r.masks.is_some());
+    }
+
+    #[test]
+    fn test_dispatch_segment_end2end() {
+        let names = make_names(1); // nm from proto = 2 -> feats = 8
+        let pre = unit_preprocess((16, 16));
+        let config = InferenceConfig::default();
+        // output0 [1, 1, 8]: [x1, y1, x2, y2, conf, cls, coeff0, coeff1]
+        let det = vec![2.0f32, 2.0, 12.0, 12.0, 0.9, 0.0, 0.3, 0.7];
+        let protos = vec![0.5f32; 2 * 4 * 4];
+        let r = postprocess(
+            vec![(&det, vec![1, 1, 8]), (&protos, vec![1, 2, 4, 4])],
+            Task::Segment,
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((16, 16, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            true, // force end2end segment path
+            None,
+        );
+        assert_eq!(r.boxes.unwrap().len(), 1);
+        assert!(r.masks.is_some());
+    }
+
+    #[test]
+    fn test_dispatch_segment_missing_protos_is_empty() {
+        let det = vec![8.0f32, 8.0, 6.0, 6.0, 0.9, 0.3, 0.7];
+        let r = postprocess(
+            vec![(&det, vec![1, 7, 1])], // only one output, no protos
+            Task::Segment,
+            &unit_preprocess((16, 16)),
+            &InferenceConfig::default(),
+            make_names(1),
+            ndarray::Array3::zeros((16, 16, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false,
+            None,
+        );
+        assert!(r.masks.is_none());
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn test_dispatch_pose_end2end() {
+        let names = make_names(1);
+        let pre = unit_preprocess((100, 100));
+        let config = InferenceConfig::default();
+        let (nk, kd) = (17usize, 3usize);
+        let feats = 6 + nk * kd; // 57
+        // One detection: [x1, y1, x2, y2, conf, cls, kpts...]
+        let mut row = vec![10.0f32, 10.0, 50.0, 50.0, 0.9, 0.0];
+        for k in 0..nk {
+            row.push(20.0 + k as f32); // kx
+            row.push(30.0 + k as f32); // ky
+            row.push(0.8); // kconf
+        }
+        let r = postprocess(
+            vec![(&row, vec![1, 1, feats])],
+            Task::Pose,
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((100, 100, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            true, // force end2end
+            Some((nk, kd)),
+        );
+        assert_eq!(r.boxes.unwrap().len(), 1);
+        let kpts = r.keypoints.unwrap();
+        assert_eq!(kpts.data.shape(), [1, 17, 3]);
+    }
+
+    #[test]
+    fn test_dispatch_obb_end2end() {
+        let names = make_names(1);
+        let pre = unit_preprocess((100, 100));
+        let config = InferenceConfig::default();
+        // [1, 1, 7] layout: [cx, cy, w, h, conf, cls, angle]
+        let row = vec![50.0f32, 50.0, 20.0, 10.0, 0.9, 0.0, 0.3];
+        let r = postprocess(
+            vec![(&row, vec![1, 1, 7])],
+            Task::Obb,
+            &pre,
+            &config,
+            names,
+            ndarray::Array3::zeros((100, 100, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false, // routed via is_end2end_obb_shape (shape[2]==7)
+            None,
+        );
+        assert_eq!(r.obb.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_dispatch_semantic_class_filter_ignores() {
+        // Two-class semantic logits [1, 2, 2, 2]; class filter keeps only class 0,
+        // so class-1 pixels become IGNORE.
+        let nc = 2;
+        let (h, w) = (2usize, 2usize);
+        // Channel-major logits: favor class 1 everywhere.
+        let mut logits = vec![0.0f32; nc * h * w];
+        for px in 0..(h * w) {
+            logits[h * w + px] = 5.0; // class-1 channel high
+        }
+        let config = InferenceConfig::new().with_classes(vec![0]);
+        let r = postprocess(
+            vec![(&logits, vec![1, nc, h, w])],
+            Task::Semantic,
+            &unit_preprocess((h as u32, w as u32)),
+            &config,
+            make_names(nc),
+            ndarray::Array3::zeros((h, w, 3)),
+            String::new(),
+            Speed::default(),
+            (h as u32, w as u32),
+            false,
+            None,
+        );
+        let sm = r.semantic_mask.unwrap();
+        // All originally class-1 pixels are filtered out to IGNORE.
+        assert!(sm.data.iter().all(|&v| v == SemanticMask::IGNORE));
+    }
+
+    #[test]
+    fn test_postprocess_semantic_mask_degenerate() {
+        let names = make_names(1);
+        // Empty output -> no mask, no panic.
+        let r = postprocess_semantic_mask(
+            &[],
+            &[1, 0, 0],
+            names,
+            ndarray::Array3::zeros((4, 4, 3)),
+            String::new(),
+            Speed::default(),
+            (4, 4),
+        );
+        assert!(r.semantic_mask.is_none());
+    }
 }

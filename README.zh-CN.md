@@ -13,11 +13,13 @@
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://www.reddit.com/r/Ultralytics/)
 [![codecov](https://codecov.io/github/ultralytics/inference/branch/main/graph/badge.svg)](https://app.codecov.io/github/ultralytics/inference)
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
+[![arXiv](https://img.shields.io/badge/arXiv-2606.03748-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2606.03748)
 
 [![Crates.io](https://img.shields.io/crates/v/ultralytics-inference?logo=rust&logoColor=white&label=crates.io&color=CE422B)](https://crates.io/crates/ultralytics-inference)
-[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs)](https://docs.rs/ultralytics-inference)
+[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs&color=CE422B)](https://docs.rs/ultralytics-inference)
 [![Downloads](https://img.shields.io/crates/d/ultralytics-inference?logo=rust&logoColor=white&label=downloads&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 [![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&logoColor=white&color=CE422B)](https://crates.io/crates/ultralytics-inference)
+[![License](https://img.shields.io/crates/l/ultralytics-inference?label=license&color=blue)](https://github.com/ultralytics/inference/blob/main/LICENSE)
 [![dependency status](https://deps.rs/repo/github/ultralytics/inference/status.svg)](https://deps.rs/repo/github/ultralytics/inference)
 
 ## ✨ 功能
@@ -94,8 +96,11 @@ ultralytics-inference help
 ### 将 YOLO 模型导出为 ONNX
 
 ```bash
-# 使用 Ultralytics CLI
+# 使用 Ultralytics CLI（FP32，默认）
 yolo export model=yolo26n.pt format=onnx
+
+# FP16（半精度）——模型体积约小 50%
+yolo export model=yolo26n.pt format=onnx quantize=16
 ```
 
 ```python
@@ -103,8 +108,17 @@ yolo export model=yolo26n.pt format=onnx
 from ultralytics import YOLO
 
 model = YOLO("yolo26n.pt")
-model.export(format="onnx")
+model.export(format="onnx")  # FP32（默认）
+model.export(format="onnx", quantize=16)  # FP16（半精度）
 ```
+
+> **精度 / 量化：** Ultralytics ≥8.4 使用统一的 `quantize` 参数，取代已弃用的
+> `half=True` / `int8=True` 标志。对于 ONNX，支持的取值为 `32`/`fp32`（FP32，默认）、
+> `16`/`fp16`（FP16）和 `8`/`int8`（INT8——需通过 `data=` 提供校准数据集）。旧的
+> `half=True`（→ `quantize=16`）和 `int8=True`（→ `quantize=8`）仍可用，但会
+> 触发弃用警告。详见
+> [导出文档](https://docs.ultralytics.com/modes/export) 和
+> [ONNX 集成指南](https://docs.ultralytics.com/integrations/onnx)。
 
 ### 运行推理
 
@@ -159,7 +173,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.23 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.24 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -179,7 +193,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.23 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.24 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -275,7 +289,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.23"
+ultralytics-inference = "0.0.24"
 ```
 
 ```toml

@@ -1923,4 +1923,89 @@ mod tests {
         let (major, _minor) = version.unwrap();
         assert!(major >= 10, "macOS major version should be >= 10");
     }
+
+    #[test]
+    fn test_apply_postprocess_time_stamps_all_results() {
+        let names = Arc::new(HashMap::new());
+        let mut batch: Vec<Vec<Results>> = vec![
+            vec![Results::new(
+                Array3::zeros((4, 4, 3)),
+                String::new(),
+                Arc::clone(&names),
+                Speed::new(0.0, 0.0, 0.0),
+                (4, 4),
+            )],
+            vec![Results::new(
+                Array3::zeros((4, 4, 3)),
+                String::new(),
+                Arc::clone(&names),
+                Speed::new(0.0, 0.0, 0.0),
+                (4, 4),
+            )],
+        ];
+        YOLOModel::apply_postprocess_time(&mut batch, Instant::now(), 2.0);
+        for img in &batch {
+            for r in img {
+                assert!(r.speed.postprocess.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn test_concat_f32_and_f16_batch() {
+        let img = image::DynamicImage::new_rgb8(64, 48);
+        let r0 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
+        let r1 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
+
+        let f32_batch = YOLOModel::concat_f32_batch(&[r0, r1]).unwrap();
+        assert_eq!(f32_batch.dim().0, 2); // two images stacked on the batch axis
+
+        let r0 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
+        let r1 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
+        let f16_batch = YOLOModel::concat_f16_batch(&[r0, r1]).unwrap();
+        assert_eq!(f16_batch.dim().0, 2);
+    }
+
+    #[test]
+    fn test_concat_views_shape_mismatch_errors() {
+        let a = ndarray::Array4::<f32>::zeros((1, 3, 4, 4));
+        let b = ndarray::Array4::<f32>::zeros((1, 3, 5, 5));
+        let views = [a.view(), b.view()];
+        assert!(YOLOModel::concat_views(&views, "FP32").is_err());
+    }
+
+    #[test]
+    fn test_semantic_mask_batch_results_builds_per_image() {
+        // Baked-in ArgMax semantic output: one 2x2 uint8 class map for one image.
+        let names = Arc::new(HashMap::from([
+            (0usize, "bg".to_string()),
+            (1, "road".to_string()),
+        ]));
+        let data: Vec<u8> = vec![0, 1, 1, 0];
+        let outputs: Vec<(&[u8], Vec<usize>)> = vec![(data.as_slice(), vec![1, 2, 2])];
+
+        let img = image::DynamicImage::new_rgb8(2, 2);
+        let preprocessed = vec![crate::preprocessing::preprocess_image(&img, (32, 32), 32)];
+        let image_arrays = vec![Array3::<u8>::zeros((2, 2, 3))];
+        let paths = vec!["frame.jpg".to_string()];
+
+        let batch = YOLOModel::semantic_mask_batch_results(
+            &outputs,
+            10.0,
+            1.0,
+            1.0,
+            preprocessed,
+            image_arrays,
+            &paths,
+            &names,
+        );
+        assert_eq!(batch.len(), 1);
+        let results = &batch[0][0];
+        let sm = results
+            .semantic_mask
+            .as_ref()
+            .expect("semantic mask present");
+        assert_eq!(sm.data.shape(), [2, 2]);
+        assert!(results.speed.postprocess.is_some());
+    }
 }

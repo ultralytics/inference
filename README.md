@@ -13,11 +13,13 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://www.reddit.com/r/Ultralytics/)
 [![codecov](https://codecov.io/github/ultralytics/inference/branch/main/graph/badge.svg)](https://app.codecov.io/github/ultralytics/inference)
 [![CI](https://github.com/ultralytics/inference/actions/workflows/ci.yml/badge.svg)](https://github.com/ultralytics/inference/actions/workflows/ci.yml)
+[![arXiv](https://img.shields.io/badge/arXiv-2606.03748-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2606.03748)
 
 [![Crates.io](https://img.shields.io/crates/v/ultralytics-inference?logo=rust&logoColor=white&label=crates.io&color=CE422B)](https://crates.io/crates/ultralytics-inference)
-[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs)](https://docs.rs/ultralytics-inference)
+[![docs.rs](https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs&color=CE422B)](https://docs.rs/ultralytics-inference)
 [![Downloads](https://img.shields.io/crates/d/ultralytics-inference?logo=rust&logoColor=white&label=downloads&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 [![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&logoColor=white&color=CE422B)](https://crates.io/crates/ultralytics-inference)
+[![License](https://img.shields.io/crates/l/ultralytics-inference?label=license&color=blue)](https://github.com/ultralytics/inference/blob/main/LICENSE)
 [![dependency status](https://deps.rs/repo/github/ultralytics/inference/status.svg)](https://deps.rs/repo/github/ultralytics/inference)
 
 ## ✨ Features
@@ -94,8 +96,11 @@ ultralytics-inference help
 ### Export a YOLO Model to ONNX
 
 ```bash
-# Using Ultralytics CLI
+# Using Ultralytics CLI (FP32, default)
 yolo export model=yolo26n.pt format=onnx
+
+# FP16 (half precision) — ~50% smaller model
+yolo export model=yolo26n.pt format=onnx quantize=16
 ```
 
 ```python
@@ -103,8 +108,18 @@ yolo export model=yolo26n.pt format=onnx
 from ultralytics import YOLO
 
 model = YOLO("yolo26n.pt")
-model.export(format="onnx")
+model.export(format="onnx")  # FP32 (default)
+model.export(format="onnx", quantize=16)  # FP16 (half precision)
 ```
+
+> **Precision / quantization:** Ultralytics ≥8.4 uses a single `quantize`
+> argument instead of the deprecated `half=True` / `int8=True` flags. For ONNX
+> the supported values are `32`/`fp32` (FP32, the default), `16`/`fp16` (FP16),
+> and `8`/`int8` (INT8 — requires a calibration dataset via `data=`). The old
+> `half=True` (→ `quantize=16`) and `int8=True` (→ `quantize=8`) still work but
+> emit a deprecation warning. See the
+> [export docs](https://docs.ultralytics.com/modes/export) and the
+> [ONNX integration guide](https://docs.ultralytics.com/integrations/onnx).
 
 ### Run Inference
 
@@ -159,7 +174,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.23 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.24 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -179,7 +194,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.23 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.24 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -275,7 +290,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.23"
+ultralytics-inference = "0.0.24"
 ```
 
 ```toml
