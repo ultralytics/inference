@@ -195,7 +195,7 @@ It is picked automatically from the file extension: pass a `.tflite` to
 only setup is the optional peer dependency.
 
 ```bash
-npm install @litertjs/core   # optional peer dependency, only for .tflite models
+npm install @litertjs/core # optional peer dependency, only for .tflite models
 ```
 
 ```ts
@@ -232,6 +232,7 @@ Notes:
 
   If you load an end2end `.tflite` anyway, the backend auto-switches it to wasm
   (slower) and logs a warning rather than returning empty results.
+
 - **Tasks**: detect, segment, pose, obb, classify, and semantic are all supported.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
   so serve with `Cross-Origin-Opener-Policy: same-origin` and
