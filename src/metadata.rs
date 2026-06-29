@@ -173,6 +173,13 @@ impl ModelMetadata {
             metadata.imgsz = Self::parse_imgsz(yaml_str, imgsz_line);
         }
 
+        // kpt_shape may be inline (`[17, 3]`, handled in the loop above) or a
+        // multi-line YAML block list (Ultralytics `.tflite` metadata.yaml writes
+        // it as a block); fall back to a block scan when not parsed inline.
+        if metadata.kpt_shape.is_none() && yaml_str.contains("kpt_shape:") {
+            metadata.kpt_shape = Self::parse_int_pair(yaml_str, "kpt_shape");
+        }
+
         // Parse names block if not already parsed inline
         if names.is_empty() {
             names = Self::parse_names_block(yaml_str);
@@ -180,6 +187,44 @@ impl ModelMetadata {
 
         metadata.names = Arc::new(names);
         Ok(metadata)
+    }
+
+    /// Parse a two-integer YAML value for `key`, accepting either the inline form
+    /// (`key: [a, b]` / `key: a, b`) or a multi-line block list (`key:` then
+    /// `- a` / `- b` on following lines). Returns the first two integers.
+    fn parse_int_pair(yaml_str: &str, key: &str) -> Option<(usize, usize)> {
+        let prefix = format!("{key}:");
+        let lines: Vec<&str> = yaml_str.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            let Some(rest) = line.trim_start().strip_prefix(&prefix) else {
+                continue;
+            };
+            // Inline form: [a, b] / (a, b) / a, b
+            let rest = rest.trim().trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
+            let inline: Vec<usize> = rest.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            if inline.len() >= 2 {
+                return Some((inline[0], inline[1]));
+            }
+            // Multi-line block list on following `- value` lines.
+            let mut vals = Vec::new();
+            for following in lines.iter().skip(i + 1) {
+                let t = following.trim();
+                if let Some(v) = t.strip_prefix('-') {
+                    if let Ok(n) = v.trim().parse::<usize>() {
+                        vals.push(n);
+                    }
+                } else if !t.is_empty() && !t.starts_with('#') {
+                    break;
+                }
+                if vals.len() >= 2 {
+                    break;
+                }
+            }
+            if vals.len() >= 2 {
+                return Some((vals[0], vals[1]));
+            }
+        }
+        None
     }
 
     /// Parse a `kpt_shape` value like "[17, 3]" or "(17, 3)" into a tuple.
@@ -438,5 +483,23 @@ channels: 3
         assert_eq!(metadata.task, Task::Detect);
         assert_eq!(metadata.stride, 32);
         assert_eq!(metadata.imgsz, None);
+    }
+
+    #[test]
+    fn test_parse_multiline_kpt_shape_and_imgsz() {
+        // Ultralytics `.tflite` metadata.yaml writes imgsz and kpt_shape as
+        // multi-line YAML block lists rather than inline `[a, b]`.
+        let yaml = "task: pose\nstride: 32\nimgsz:\n- 640\n- 640\nkpt_shape:\n- 17\n- 3\n";
+        let metadata = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(metadata.task, Task::Pose);
+        assert_eq!(metadata.imgsz, Some((640, 640)));
+        assert_eq!(metadata.kpt_shape, Some((17, 3)));
+    }
+
+    #[test]
+    fn test_parse_inline_kpt_shape() {
+        let yaml = "task: pose\nkpt_shape: [17, 3]\nstride: 32";
+        let metadata = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(metadata.kpt_shape, Some((17, 3)));
     }
 }
