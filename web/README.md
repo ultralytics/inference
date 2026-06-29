@@ -180,7 +180,7 @@ the native renderer. None of this is duplicated in JS.
 An alternative inference engine that runs an Ultralytics **`.tflite`** export
 through [**LiteRT.js**](https://developers.google.com/edge/litert/web) (Google's
 LiteRT for Web), which is often **~2× faster than ONNX Runtime Web on WebGPU**.
-Only the inference engine changes — the preprocessing, postprocessing, drawing,
+Only the inference engine changes; the preprocessing, postprocessing, drawing,
 and `Results` shape are the same shared Rust code, so output matches the `ort`
 path.
 
@@ -207,9 +207,21 @@ console.log(model.device); // "webgpu" or "wasm"
 Notes:
 
 - **Model**: export with Ultralytics to `.tflite` (float32 for WebGPU). It loads
-  from the single file — the metadata (task, class names, `imgsz`, stride) is read
+  from the single file. The metadata (task, class names, `imgsz`, stride) is read
   straight from the `.tflite`, the same as the `.onnx` path. No sidecar.
-- **Tasks**: detection is supported today; other tasks are in progress.
+- **Export end2end-free models** (`end2end=False`): YOLO26 (and YOLOv10) default
+  to an end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
+  **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.
+  Export them with `end2end=False` so the standard head is used and NMS runs in
+  this package's Rust, keeping inference on WebGPU:
+
+  ```bash
+  yolo export model=yolo26n.pt format=litert end2end=False
+  ```
+
+  If you load an end2end `.tflite` anyway, the backend auto-switches it to wasm
+  (slower) and logs a warning rather than returning empty results.
+- **Tasks**: detect, segment, pose, obb, classify, and semantic are all supported.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
   so serve with `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.

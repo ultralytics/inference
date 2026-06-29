@@ -508,6 +508,15 @@ impl YoloPipeline {
         self.metadata.task.as_str().to_owned()
     }
 
+    /// Whether this is an end-to-end (NMS-free) export, e.g. YOLO26. Its head runs
+    /// the NMS/top-k with `int64`/`gather_nd` ops that the LiteRT WebGPU delegate
+    /// cannot execute, so such models must run on the CPU (wasm) accelerator.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn end2end(&self) -> bool {
+        self.metadata.end2end
+    }
+
     /// Class id -> name map (like `model.names`), as a JS object.
     ///
     /// # Errors

@@ -352,6 +352,20 @@ async function importLiteRt(): Promise<LiteRtModule> {
   }
 }
 
+// LiteRT.js initializes its wasm runtime once per page; calling `loadLiteRt`
+// again throws "LiteRT is already loading / loaded". Cache the first init so
+// loading a second model (e.g. switching models in a demo) reuses it.
+let litertInit: Promise<void> | null = null;
+function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<void> {
+  if (!litertInit) {
+    litertInit = litert.loadLiteRt(wasmUrl).catch((e) => {
+      litertInit = null; // let a later load retry if the first init failed
+      throw e;
+    });
+  }
+  return litertInit;
+}
+
 /** Runs a `.tflite` model with LiteRT.js — inference only; pre/post stay in Rust. */
 class LiteRtBackend {
   private constructor(
@@ -368,7 +382,7 @@ class LiteRtBackend {
     accelerator: "webgpu" | "wasm",
   ): Promise<LiteRtBackend> {
     const litert = await importLiteRt();
-    await litert.loadLiteRt(wasmUrl);
+    await ensureLiteRtRuntime(litert, wasmUrl);
     try {
       const model = await litert.loadAndCompile(tflite, { accelerator });
       return new LiteRtBackend(litert, model, accelerator);
@@ -554,7 +568,17 @@ export class YOLO {
     const tflite = await fetchModelBytes(source);
     const pipeline = new YoloPipeline(tflite);
     const wasmUrl = options?.litertWasmUrl ? options.litertWasmUrl.toString() : DEFAULT_LITERT_WASM;
-    const accelerator = options?.device === "cpu" ? "wasm" : "webgpu";
+    let accelerator: "webgpu" | "wasm" = options?.device === "cpu" ? "wasm" : "webgpu";
+    // End-to-end exports (YOLO26) do NMS/top-k with int64 + gather_nd ops the
+    // LiteRT WebGPU delegate cannot run: it fails to invoke and returns zeros.
+    // Force CPU/wasm so the model works. For WebGPU speed, re-export the model
+    // with `end2end=False` so the standard head (with NMS in Rust) is used.
+    if (accelerator === "webgpu" && pipeline.end2end) {
+      accelerator = "wasm";
+      console.warn(
+        "LiteRT: this is an end2end (NMS-free) model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with `end2end=False` for WebGPU.",
+      );
+    }
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
     return new YOLO(new LiteRtEngine(pipeline, backend));
   }
