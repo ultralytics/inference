@@ -190,17 +190,18 @@ Only the inference engine changes; the preprocessing, postprocessing, drawing,
 and `Results` shape are the same shared Rust code, so output matches the `ort`
 path.
 
-It is **opt-in**: install the optional peer dependency and select the backend.
+It is picked automatically from the file extension: pass a `.tflite` to
+`YOLO.load` and it runs on LiteRT.js (a `.onnx` runs on ONNX Runtime Web). The
+only setup is the optional peer dependency.
 
 ```bash
-npm install @litertjs/core   # optional peer dependency, only for the litert backend
+npm install @litertjs/core   # optional peer dependency, only for .tflite models
 ```
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
 const model = await YOLO.load("/models/yolo11n.tflite", {
-  backend: "litert",
   // LiteRT.js wasm assets; defaults to the jsDelivr CDN. Self-host by copying
   // node_modules/@litertjs/core/wasm/ and pointing here (URL ending in `/`).
   litertWasmUrl: "/litert/",
@@ -215,6 +216,10 @@ Notes:
 - **Model**: export with Ultralytics to `.tflite` (float32 for WebGPU). It loads
   from the single file. The metadata (task, class names, `imgsz`, stride) is read
   straight from the `.tflite`, the same as the `.onnx` path. No sidecar.
+- **Requires Ultralytics `>= 8.4.83`**: the single-file LiteRT export (with
+  embedded metadata) ships in
+  [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
+  later. Earlier versions emit the legacy TFLite format and won't load here.
 - **Export end2end-free models** (`end2end=False`): YOLO26 (and YOLOv10) default
   to an end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
   **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.

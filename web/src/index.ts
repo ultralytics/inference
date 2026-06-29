@@ -131,20 +131,10 @@ export interface LoadOptions {
    */
   device?: "auto" | "webgpu" | "cpu";
   /**
-   * Inference engine. `"ort"` (default) runs the `.onnx` model in WebAssembly via
-   * ONNX Runtime Web. `"litert"` runs a `.tflite` model through **LiteRT.js**
-   * (often ~2x faster on WebGPU), reusing this package's Rust pre/postprocessing.
-   *
-   * `"litert"` requires the optional peer dependency `@litertjs/core` to be
-   * installed and a single-file `.tflite` model. Metadata (task, class names,
-   * `imgsz`) is read from the `.tflite` itself, just like the `.onnx` path — no
-   * sidecar needed.
-   */
-  backend?: "ort" | "litert";
-  /**
-   * For `backend: "litert"`: base URL of the `@litertjs/core` wasm assets folder.
-   * Defaults to the jsDelivr CDN. Self-host by copying `node_modules/@litertjs/core/wasm/`
-   * and pointing here (absolute URL ending in `/`).
+   * Base URL of the `@litertjs/core` wasm assets folder, used when the model is a
+   * `.tflite` (run through LiteRT.js). Defaults to the jsDelivr CDN. Self-host by
+   * copying `node_modules/@litertjs/core/wasm/` and pointing here (absolute URL
+   * ending in `/`). Requires the optional `@litertjs/core` peer dependency.
    */
   litertWasmUrl?: string | URL;
 }
@@ -179,6 +169,20 @@ const DEFAULT_KEYPOINT_THRESHOLD = 0.25;
  */
 function resolveModel(src: string): string {
   return /^[\w.-]+\.onnx$/i.test(src) ? ASSETS + src : src;
+}
+
+/**
+ * Pick the inference backend from the model itself: `.tflite` -> `litert`,
+ * anything else (`.onnx`) -> `ort`. Raw bytes are sniffed for the TFLite
+ * flatbuffer identifier (`TFL3` at offset 4).
+ */
+function inferBackend(source: string | URL | ArrayBuffer | Uint8Array): "ort" | "litert" {
+  if (typeof source === "string" || source instanceof URL) {
+    return /\.tflite$/i.test(source.toString()) ? "litert" : "ort";
+  }
+  const b = source instanceof Uint8Array ? source : new Uint8Array(source);
+  const tflite = b.length >= 8 && b[4] === 0x54 && b[5] === 0x46 && b[6] === 0x4c && b[7] === 0x33;
+  return tflite ? "litert" : "ort";
 }
 
 /**
@@ -539,23 +543,19 @@ export class YOLO {
   /**
    * Load a model and initialize the inference backend.
    *
-   * @param source Model URL/path, or its raw bytes (`.onnx` for `ort`, `.tflite`
-   *   for `litert`).
-   * @param options Loader options, including the {@link LoadOptions.backend}.
+   * The engine is chosen from the model: a `.tflite` runs on LiteRT.js, an
+   * `.onnx` on ONNX Runtime Web.
+   *
+   * @param source Model URL/path, or its raw bytes (`.onnx` or `.tflite`).
+   * @param options Loader options.
    */
   static async load(source: string | URL | ArrayBuffer | Uint8Array, options?: LoadOptions): Promise<YOLO> {
     await ensureInit(options?.wasmUrl);
-    if ((options?.backend ?? "ort") === "litert") {
+    if (inferBackend(source) === "litert") {
       return YOLO.loadLiteRt(source, options);
     }
-    let bytes: Uint8Array;
-    if (typeof source === "string" || source instanceof URL) {
-      const url = resolveModel(source.toString());
-      const resp = await fetchOk(url, "model");
-      bytes = new Uint8Array(await resp.arrayBuffer());
-    } else {
-      bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
-    }
+    // A bare `.onnx` name resolves to the Ultralytics assets release.
+    const bytes = await fetchModelBytes(typeof source === "string" ? resolveModel(source) : source);
     const ortBaseUrl = options?.ortBaseUrl ? options.ortBaseUrl.toString() : undefined;
     const device = await resolveDevice(options?.device);
     return new YOLO(new OrtEngine(await YoloModel.load_bytes(bytes, ortBaseUrl, device)));
