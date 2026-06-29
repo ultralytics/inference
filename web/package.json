@@ -29,6 +29,7 @@
     "build:wasm": "wasm-pack build ../crates/web --release --target web --out-dir \"$PWD/pkg\" --out-name ultralytics_inference_web && rm -f \"$PWD/pkg/.gitignore\"",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:ts",
+    "serve": "node serve.mjs",
     "prepack": "cp ../LICENSE ./LICENSE",
     "clean": "rm -rf dist pkg LICENSE"
   },
@@ -57,7 +58,16 @@
     "url": "https://github.com/ultralytics/inference/issues"
   },
   "homepage": "https://www.ultralytics.com",
+  "peerDependencies": {
+    "@litertjs/core": "^2.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@litertjs/core": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@litertjs/core": "^2.5.0",
     "typescript": "^5.4.0"
   }
 }

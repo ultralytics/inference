@@ -175,6 +175,49 @@ the native renderer. None of this is duplicated in JS.
   creation. See the [ort-web docs](https://ort.pyke.io/backends/web) to review or
   disable it.
 
+## ⚡ LiteRT.js backend (optional)
+
+An alternative inference engine that runs an Ultralytics **`.tflite`** export
+through [**LiteRT.js**](https://developers.google.com/edge/litert/web) (Google's
+LiteRT for Web), which is often **~2× faster than ONNX Runtime Web on WebGPU**.
+Only the inference engine changes — the preprocessing, postprocessing, drawing,
+and `Results` shape are the same shared Rust code, so output matches the `ort`
+path.
+
+It is **opt-in**: install the optional peer dependency and select the backend.
+
+```bash
+npm install @litertjs/core   # optional peer dependency, only for the litert backend
+```
+
+```ts
+import { YOLO, annotate } from "@ultralytics/yolo";
+
+const model = await YOLO.load("/models/yolo11n_float32.tflite", {
+  backend: "litert",
+  // metadata.yaml sidecar; defaults to the model URL with `.tflite` → `.yaml`.
+  metadataUrl: "/models/yolo11n_float32.yaml",
+  // LiteRT.js wasm assets; defaults to the jsDelivr CDN. Self-host by copying
+  // node_modules/@litertjs/core/wasm/ and pointing here (URL ending in `/`).
+  litertWasmUrl: "/litert/",
+});
+
+const results = await model.predict(video); // same API, same Results
+console.log(model.device); // "webgpu" or "wasm"
+```
+
+Notes:
+
+- **Model + metadata**: export with Ultralytics to `.tflite` (float32 for WebGPU)
+  alongside its `metadata.yaml` sidecar (task, class names, `imgsz`, stride). The
+  sidecar is required because TFLite does not embed Ultralytics metadata the way
+  ONNX does.
+- **Tasks**: detection is supported today; other tasks are in progress.
+- **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
+  so serve with `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp` (the bundled `npm run serve` does
+  this).
+
 ## 🔨 Building From Source
 
 This package builds the wasm from the Rust crate with
@@ -182,10 +225,12 @@ This package builds the wasm from the Rust crate with
 
 ```bash
 npm run build # wasm-pack build + tsc
+npm run serve # static server with COOP/COEP headers, then open http://localhost:8080/example/
 ```
 
-Serve the built `dist/` + `pkg/` over `localhost` (a secure context) and open it
-in a WebGPU browser.
+`npm run serve` (see `serve.mjs`) serves the package over `localhost` (a secure
+context) with the cross-origin isolation headers the threaded runtimes want. Open
+<http://localhost:8080/example/> in a WebGPU browser.
 
 ## 💡 Contributing
 
