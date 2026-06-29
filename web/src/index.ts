@@ -335,10 +335,7 @@ interface LiteRtCompiledModel {
 }
 interface LiteRtModule {
   loadLiteRt(wasmPath: string): Promise<void>;
-  loadAndCompile(
-    model: Uint8Array | string,
-    opts: { accelerator: string | string[] },
-  ): Promise<LiteRtCompiledModel>;
+  loadAndCompile(model: Uint8Array | string, opts: { accelerator: string | string[] }): Promise<LiteRtCompiledModel>;
   Tensor: new (data: Float32Array, shape: number[]) => LiteRtTensor;
 }
 
@@ -382,11 +379,7 @@ class LiteRtBackend {
 
   /** Import LiteRT.js, init its wasm, and compile the model, falling back from
    * WebGPU to wasm (CPU) if the GPU accelerator cannot compile. */
-  static async load(
-    tflite: Uint8Array,
-    wasmUrl: string,
-    accelerator: "webgpu" | "wasm",
-  ): Promise<LiteRtBackend> {
+  static async load(tflite: Uint8Array, wasmUrl: string, accelerator: "webgpu" | "wasm"): Promise<LiteRtBackend> {
     const litert = await importLiteRt();
     await ensureLiteRtRuntime(litert, wasmUrl);
     try {
