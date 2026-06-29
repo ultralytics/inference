@@ -666,6 +666,11 @@ impl YoloPipeline {
             .ok_or_else(|| JsError::new("postprocess called before preprocess_rgba"))?;
 
         let mut bufs: Vec<Vec<f32>> = outputs.iter().map(|a| a.to_vec()).collect();
+        if bufs.is_empty() {
+            return Err(JsError::new(
+                "external engine returned no output tensors (the model may have failed to run)",
+            ));
+        }
         let mut shape_vecs = decode_shapes(&shapes, bufs.len())?;
 
         // Order so the detection head (rank 3, e.g. [1, C, 8400]) is first and the
@@ -745,14 +750,11 @@ fn decode_shapes(flat: &[u32], count: usize) -> Result<Vec<Vec<usize>>, JsError>
 
 /// Scale a normalized detection head's coordinates to model-input pixels in place.
 ///
-/// Ultralytics LiteRT exports (`ai_edge_torch`) emit `cx, cy, w, h` (and, for
-/// pose, keypoint `x, y`) normalized to `[0, 1]`, while the shared postprocess
-/// (built for ONNX) expects pixel coordinates in the model input space. Handles
-/// channel-major `[1, C, N]` (e.g. `[1, 84, 8400]`) and `[1, N, C]` layouts. A
-/// max-coordinate guard makes it a no-op for exports that already use pixel
-/// coordinates, and it does nothing for tasks without boxes (classify/semantic).
-/// The OBB angle channel and pose keypoint confidence are intentionally left
-/// untouched.
+/// Some LiteRT exports emit box (and pose keypoint) coordinates normalized to
+/// `[0, 1]`, while the shared postprocess expects model-input pixels. Handles both
+/// `[1, C, N]` and `[1, N, C]` layouts; a max-coordinate guard makes it a no-op for
+/// pixel-coordinate exports and for box-less tasks (classify/semantic). The OBB
+/// angle and keypoint confidence channels are left untouched.
 fn denormalize_head(
     buf: &mut [f32],
     shape: &[usize],

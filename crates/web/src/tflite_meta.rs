@@ -2,14 +2,10 @@
 
 //! Reader for the Ultralytics metadata embedded in a single-file `.tflite`.
 //!
-//! An Ultralytics LiteRT export appends a small zip archive to the end of the
-//! TFLite flatbuffer holding one `metadata.json` entry (task, class names,
-//! `imgsz`, `stride`, ...). The flatbuffer is read from the front by offset, so
-//! the trailing zip is ignored by the runtime; the metadata travels inside the
-//! model file. This mirrors the ONNX path's [`onnx_meta`](crate::onnx_meta): the
-//! browser reads the metadata straight from the model bytes.
-//!
-//! These helpers are pure (`&[u8] -> String`) and carry no wasm/JS types.
+//! A LiteRT export appends a small zip (one `metadata.json` entry) after the
+//! TFLite flatbuffer; the runtime reads the flatbuffer by offset and ignores the
+//! trailing zip. Mirrors the ONNX [`onnx_meta`](crate::onnx_meta) path. Pure
+//! `&[u8]` helpers with no wasm/JS types.
 
 use serde_json::Value;
 

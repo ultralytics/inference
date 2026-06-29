@@ -171,21 +171,24 @@ function resolveModel(src: string): string {
   return /^[\w.-]+\.onnx$/i.test(src) ? ASSETS + src : src;
 }
 
+/** Whether `bytes` begin with a TFLite flatbuffer (the `TFL3` identifier at offset 4). */
+function isTflite(bytes: Uint8Array): boolean {
+  return bytes.length >= 8 && bytes[4] === 0x54 && bytes[5] === 0x46 && bytes[6] === 0x4c && bytes[7] === 0x33;
+}
+
 /**
- * Pick the inference backend from the model itself: `.tflite` -> `litert`,
- * anything else (`.onnx`) -> `ort`. Raw bytes are sniffed for the TFLite
- * flatbuffer identifier (`TFL3` at offset 4).
+ * Pick the inference backend from the model: `.tflite` -> `litert`, `.onnx` ->
+ * `ort`. When the source has no known extension (raw bytes, extensionless or
+ * signed URL), the already-fetched `bytes` are sniffed for the `TFL3` identifier.
  */
-function inferBackend(source: string | URL | ArrayBuffer | Uint8Array): "ort" | "litert" {
+function inferBackend(source: string | URL | ArrayBuffer | Uint8Array, bytes: Uint8Array): "ort" | "litert" {
   if (typeof source === "string" || source instanceof URL) {
-    // Match on the pathname only so `model.tflite?v=1` or a signed CDN URL with
-    // a query/hash is still detected correctly.
+    // Match on the pathname only so `model.tflite?v=1` or a signed URL still works.
     const path = (source instanceof URL ? source.pathname : source).split(/[?#]/, 1)[0];
-    return /\.tflite$/i.test(path) ? "litert" : "ort";
+    if (/\.tflite$/i.test(path)) return "litert";
+    if (/\.onnx$/i.test(path)) return "ort";
   }
-  const b = source instanceof Uint8Array ? source : new Uint8Array(source);
-  const tflite = b.length >= 8 && b[4] === 0x54 && b[5] === 0x46 && b[6] === 0x4c && b[7] === 0x33;
-  return tflite ? "litert" : "ort";
+  return isTflite(bytes) ? "litert" : "ort";
 }
 
 /**
@@ -402,23 +405,28 @@ class LiteRtBackend {
   ): Promise<{ outputs: Float32Array[]; shapes: number[][]; inferenceMs: number }> {
     const t0 = performance.now();
     const cpuIn = new this.litert.Tensor(input, shape);
-    const gpuIn = this.device === "wasm" ? cpuIn : await cpuIn.moveTo("webgpu");
-    const tensors = await this.model.run(gpuIn);
-    const outputs: Float32Array[] = [];
-    const shapes: number[][] = [];
-    for (const t of tensors) {
-      const host = await t.moveTo("wasm");
-      // Copy out before deleting; toTypedArray() may view the freed buffer.
-      outputs.push(new Float32Array(host.toTypedArray() as Float32Array));
-      shapes.push(Array.from(host.type.layout.dimensions));
-      host.delete?.();
-      // moveTo("wasm") returns the same tensor when it is already on wasm; only
-      // delete the original separately when it is a distinct GPU tensor.
-      if (t !== host) t.delete?.();
+    let gpuIn: LiteRtTensor | undefined;
+    try {
+      gpuIn = this.device === "wasm" ? cpuIn : await cpuIn.moveTo("webgpu");
+      const tensors = await this.model.run(gpuIn);
+      const outputs: Float32Array[] = [];
+      const shapes: number[][] = [];
+      for (const t of tensors) {
+        const host = await t.moveTo("wasm");
+        // Copy out before deleting; toTypedArray() may view the freed buffer.
+        outputs.push(new Float32Array(host.toTypedArray() as Float32Array));
+        shapes.push(Array.from(host.type.layout.dimensions));
+        host.delete?.();
+        // moveTo("wasm") returns the same tensor when it is already on wasm; only
+        // delete the original separately when it is a distinct GPU tensor.
+        if (t !== host) t.delete?.();
+      }
+      return { outputs, shapes, inferenceMs: performance.now() - t0 };
+    } finally {
+      // Free the input tensors on both success and failure (per-frame loops leak fast).
+      if (gpuIn && gpuIn !== cpuIn) gpuIn.delete?.();
+      cpuIn.delete?.();
     }
-    if (gpuIn !== cpuIn) gpuIn.delete?.();
-    cpuIn.delete?.();
-    return { outputs, shapes, inferenceMs: performance.now() - t0 };
   }
 
   free(): void {
@@ -577,11 +585,12 @@ export class YOLO {
    */
   static async load(source: string | URL | ArrayBuffer | Uint8Array, options?: LoadOptions): Promise<YOLO> {
     await ensureInit(options?.wasmUrl);
-    if (inferBackend(source) === "litert") {
-      return YOLO.loadLiteRt(source, options);
-    }
-    // A bare `.onnx` name resolves to the Ultralytics assets release.
+    // Fetch once (a bare `.onnx` name resolves to the Ultralytics assets release),
+    // then pick the backend from the extension, or the bytes when it is unknown.
     const bytes = await fetchModelBytes(typeof source === "string" ? resolveModel(source) : source);
+    if (inferBackend(source, bytes) === "litert") {
+      return YOLO.loadLiteRt(bytes, options);
+    }
     const ortBaseUrl = options?.ortBaseUrl ? options.ortBaseUrl.toString() : undefined;
     const device = await resolveDevice(options?.device);
     return new YOLO(new OrtEngine(await YoloModel.load_bytes(bytes, ortBaseUrl, device)));
@@ -589,11 +598,7 @@ export class YOLO {
 
   /** Load the LiteRT (`.tflite`) backend. Metadata (task, class names, `imgsz`)
    * is read from the single `.tflite` file, the same as the `.onnx` path. */
-  private static async loadLiteRt(
-    source: string | URL | ArrayBuffer | Uint8Array,
-    options?: LoadOptions,
-  ): Promise<YOLO> {
-    const tflite = await fetchModelBytes(source);
+  private static async loadLiteRt(tflite: Uint8Array, options?: LoadOptions): Promise<YOLO> {
     const pipeline = new YoloPipeline(tflite);
     const wasmUrl = options?.litertWasmUrl ? options.litertWasmUrl.toString() : DEFAULT_LITERT_WASM;
     let accelerator: "webgpu" | "wasm" = options?.device === "cpu" ? "wasm" : "webgpu";

@@ -509,6 +509,27 @@ channels: 3
     }
 
     #[test]
+    fn test_parse_int_pair_inline_and_block() {
+        // Inline forms: `[a, b]`, `(a, b)`, `a, b`.
+        assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape: [17, 3]", "kpt_shape"),
+            Some((17, 3))
+        );
+        assert_eq!(
+            ModelMetadata::parse_int_pair("foo: 5, 6", "foo"),
+            Some((5, 6))
+        );
+        // Multi-line block list.
+        assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape:\n- 17\n- 3", "kpt_shape"),
+            Some((17, 3))
+        );
+        // Missing or single value yields None.
+        assert_eq!(ModelMetadata::parse_int_pair("foo: 5", "foo"), None);
+        assert_eq!(ModelMetadata::parse_int_pair("other: 1, 2", "foo"), None);
+    }
+
+    #[test]
     fn test_parse_kpt_shape_variants() {
         assert_eq!(ModelMetadata::parse_kpt_shape("[17, 3]"), Some((17, 3)));
         assert_eq!(ModelMetadata::parse_kpt_shape("(17, 2)"), Some((17, 2)));
