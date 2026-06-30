@@ -192,7 +192,8 @@ path.
 
 The backend is picked from the file extension: a `.tflite` runs on LiteRT.js, a
 `.onnx` on ONNX Runtime Web. The LiteRT.js wasm loads from a CDN by default, so
-the only setup is making the `@litertjs/core` module resolve.
+the only setup is making `@litertjs/core` resolve (along with its `@litertjs/wasm-utils`
+dependency, which npm installs automatically and the import map below lists explicitly).
 
 **With npm (a bundler):**
 
