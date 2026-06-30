@@ -75,6 +75,14 @@ const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
 console.log(model.device); // "webgpu" or "cpu"
 ```
 
+`YOLO.load` also takes a `Blob`/`File`, so you can load a model the user drops or
+picks. The backend is detected from the bytes, so the same call handles `.onnx`
+and `.tflite`:
+
+```ts
+const model = await YOLO.load(fileInput.files[0]); // a dropped/picked .onnx or .tflite
+```
+
 ### Webcam / Video
 
 Drawable sources (`<video>`, canvas, `ImageBitmap`, `ImageData`) take a
