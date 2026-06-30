@@ -181,7 +181,7 @@ the native renderer. None of this is duplicated in JS.
   creation. See the [ort-web docs](https://ort.pyke.io/backends/web) to review or
   disable it.
 
-## ⚡ LiteRT.js backend (optional)
+## ⚡ LiteRT.js backend
 
 An alternative inference engine that runs an Ultralytics **`.tflite`** export
 through [**LiteRT.js**](https://developers.google.com/edge/litert/web) (Google's

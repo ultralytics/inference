@@ -146,9 +146,6 @@ impl ModelMetadata {
                     "end2end" => {
                         metadata.end2end = value == "true" || value == "True";
                     }
-                    "kpt_shape" => {
-                        metadata.kpt_shape = Self::parse_kpt_shape(value);
-                    }
                     "args" => {
                         // Parse args dict for half flag: {'half': True, ...}
                         if value.contains("'half': True")
@@ -172,12 +169,9 @@ impl ModelMetadata {
         // parsed with the same helper as kpt_shape.
         metadata.imgsz = Self::parse_int_pair(yaml_str, "imgsz");
 
-        // kpt_shape may be inline (`[17, 3]`, handled in the loop above) or a
-        // multi-line YAML block list (Ultralytics `.tflite` metadata.yaml writes
-        // it as a block); fall back to a block scan when not parsed inline.
-        if metadata.kpt_shape.is_none() && yaml_str.contains("kpt_shape:") {
-            metadata.kpt_shape = Self::parse_int_pair(yaml_str, "kpt_shape");
-        }
+        // kpt_shape is a two-integer list (inline `[17, 3]` or a `- 17` block),
+        // parsed with the same helper as imgsz.
+        metadata.kpt_shape = Self::parse_int_pair(yaml_str, "kpt_shape");
 
         // Parse names block if not already parsed inline
         if names.is_empty() {
@@ -229,22 +223,6 @@ impl ModelMetadata {
             }
         }
         None
-    }
-
-    /// Parse a `kpt_shape` value like "[17, 3]" or "(17, 3)" into a tuple.
-    fn parse_kpt_shape(value: &str) -> Option<(usize, usize)> {
-        let inner = value
-            .trim()
-            .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
-        let parts: Vec<usize> = inner
-            .split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect();
-        if parts.len() >= 2 {
-            Some((parts[0], parts[1]))
-        } else {
-            None
-        }
     }
 
     /// Parse the names block from YAML or Python dict format.
@@ -469,6 +447,10 @@ channels: 3
             Some((17, 3))
         );
         assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape: (17, 2)", "kpt_shape"),
+            Some((17, 2))
+        );
+        assert_eq!(
             ModelMetadata::parse_int_pair("foo: 5, 6", "foo"),
             Some((5, 6))
         );
@@ -477,17 +459,13 @@ channels: 3
             ModelMetadata::parse_int_pair("kpt_shape:\n- 17\n- 3", "kpt_shape"),
             Some((17, 3))
         );
-        // Missing or single value yields None.
+        // A single value, junk, or wrong key yields None.
+        assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape: [17]", "kpt_shape"),
+            None
+        );
         assert_eq!(ModelMetadata::parse_int_pair("foo: 5", "foo"), None);
         assert_eq!(ModelMetadata::parse_int_pair("other: 1, 2", "foo"), None);
-    }
-
-    #[test]
-    fn test_parse_kpt_shape_variants() {
-        assert_eq!(ModelMetadata::parse_kpt_shape("[17, 3]"), Some((17, 3)));
-        assert_eq!(ModelMetadata::parse_kpt_shape("(17, 2)"), Some((17, 2)));
-        assert_eq!(ModelMetadata::parse_kpt_shape("[17]"), None);
-        assert_eq!(ModelMetadata::parse_kpt_shape("garbage"), None);
     }
 
     #[test]
