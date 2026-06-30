@@ -97,9 +97,9 @@ async function frame() {
 <br>
 <br>
 
-Runs [YOLOv8](https://docs.ultralytics.com/models/yolov8),
-[YOLO11](https://docs.ultralytics.com/models/yolo11), and
-[YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for detection,
+Runs [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8),
+[Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and
+[Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for detection,
 segmentation, pose, OBB, classification, and semantic segmentation.
 
 Pass a bare ONNX name and it is **auto-downloaded** from the
@@ -110,8 +110,8 @@ same weights the native crate and Python use):
 await YOLO.load("yolo26n.onnx"); // auto-downloads from the release: .../download/v8.4.0/yolo26n.onnx
 ```
 
-Auto-download covers **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x`
-with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26
+Auto-download covers **Ultralytics YOLO26**, **Ultralytics YOLO11**, and **Ultralytics YOLOv8** in sizes `n/s/m/l/x`
+with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, Ultralytics YOLO26
 only). A value containing a `/` or a scheme is used as a URL/path as-is.
 
 > **CORS note:** GitHub release assets do not send `Access-Control-Allow-Origin`,
@@ -243,7 +243,7 @@ Notes:
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Export end2end-free models** (`end2end=False`): YOLO26 defaults to an
+- **Export end2end-free models** (`end2end=False`): Ultralytics YOLO26 defaults to an
   end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
   **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.
   Export them with `end2end=False` so the standard head is used and NMS runs in
