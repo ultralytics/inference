@@ -220,6 +220,36 @@ fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
     )
 }
 
+/// Build the original RGB image (HWC u8, for postprocess coordinate scaling) and
+/// the NCHW f32 input tensor. Classification center-crops, every other task
+/// letterboxes. Shared by the ONNX and LiteRT paths.
+fn preprocess_image(
+    dynimg: &image::DynamicImage,
+    imgsz: (usize, usize),
+    stride: u32,
+    task: Task,
+) -> Result<(Array3<u8>, PreprocessResult), JsError> {
+    let rgb = dynimg.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
+        .map_err(err_ctx("failed to build image array"))?;
+    let pre = if task == Task::Classify {
+        preprocess_image_center_crop(dynimg, imgsz, false)
+    } else {
+        preprocess_image_with_precision(dynimg, imgsz, stride, false)
+    };
+    Ok((orig_img, pre))
+}
+
+/// Build the shared `InferenceConfig` from the JS thresholds and class filter.
+fn make_config(conf: f32, iou: f32, classes: Option<Vec<u32>>) -> InferenceConfig {
+    let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
+    if let Some(classes) = classes {
+        config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
+    }
+    config
+}
+
 /// A loaded ONNX model that runs end to end in wasm (preprocess, inference on
 /// ONNX Runtime Web, and postprocess), for the `.onnx` path.
 ///
@@ -416,19 +446,12 @@ impl YoloModel {
     ) -> Result<JsValue, JsError> {
         let t_pre = now_ms();
 
-        // Original image as HWC u8 (RGB), needed by postprocessing for coordinate scaling.
-        let rgb = dynimg.to_rgb8();
-        let (w, h) = rgb.dimensions();
-        let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
-            .map_err(err_ctx("failed to build image array"))?;
-
-        // Classification uses center-crop (like Ultralytics); all other tasks
-        // use letterbox. Both share the f32 NCHW output.
-        let pre = if self.metadata.task == Task::Classify {
-            preprocess_image_center_crop(&dynimg, self.imgsz, false)
-        } else {
-            preprocess_image_with_precision(&dynimg, self.imgsz, self.metadata.stride, false)
-        };
+        let (orig_img, pre) = preprocess_image(
+            &dynimg,
+            self.imgsz,
+            self.metadata.stride,
+            self.metadata.task,
+        )?;
 
         // Resolve the output dtype path before borrowing the session for inference.
         let semantic_baked = self.semantic_baked();
@@ -448,10 +471,7 @@ impl YoloModel {
             .map_err(err_ctx("failed to sync outputs"))?;
 
         let t_post = now_ms();
-        let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
-        if let Some(classes) = classes {
-            config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
-        }
+        let config = make_config(conf, iou, classes);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
         // Postprocess time runs from output extraction to the postprocess call.
@@ -621,19 +641,12 @@ impl YoloPipeline {
             .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))?;
         let dynimg = image::DynamicImage::ImageRgba8(img);
 
-        // Original RGB (HWC u8) for postprocess coordinate scaling / mask compositing.
-        let rgb = dynimg.to_rgb8();
-        let (w, h) = rgb.dimensions();
-        let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
-            .map_err(err_ctx("failed to build image array"))?;
-
-        // Classification uses center-crop (like Ultralytics); all other tasks use
-        // letterbox. Identical to the ONNX path's preprocessing.
-        let pre = if self.metadata.task == Task::Classify {
-            preprocess_image_center_crop(&dynimg, self.imgsz, false)
-        } else {
-            preprocess_image_with_precision(&dynimg, self.imgsz, self.metadata.stride, false)
-        };
+        let (orig_img, pre) = preprocess_image(
+            &dynimg,
+            self.imgsz,
+            self.metadata.stride,
+            self.metadata.task,
+        )?;
         let data = pre
             .tensor
             .as_slice()
@@ -708,10 +721,7 @@ impl YoloPipeline {
             .map(|(b, s)| (b.as_slice(), s.clone()))
             .collect();
 
-        let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
-        if let Some(classes) = classes {
-            config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
-        }
+        let config = make_config(conf, iou, classes);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
         // Postprocess time is unknown until the call returns, so pass 0 here and
