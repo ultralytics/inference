@@ -546,6 +546,19 @@ channels: 3
     }
 
     #[test]
+    fn test_tflite_style_metadata_text() {
+        // The `.tflite` reader rebuilds this text (Python-dict names map, inline
+        // lists) and hands it to `from_yaml_str`, exactly like the ONNX path.
+        let text = "task: detect\nimgsz: [640, 640]\nstride: 32\nend2end: false\nnames: {0: 'person', 1: 'traffic light', 2: 'car'}";
+        let m = ModelMetadata::from_yaml_str(text).unwrap();
+        assert_eq!(m.task, Task::Detect);
+        assert_eq!(m.imgsz, Some((640, 640)));
+        assert_eq!(m.num_classes(), 3);
+        // A class name containing a space must survive parsing.
+        assert_eq!(m.class_name(1), Some("traffic light"));
+    }
+
+    #[test]
     fn test_pose_kpt_shape_and_half_flags() {
         let yaml = "task: pose\nkpt_shape: [17, 3]\nhalf: true\nend2end: True";
         let m = ModelMetadata::from_yaml_str(yaml).unwrap();

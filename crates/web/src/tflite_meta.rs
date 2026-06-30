@@ -75,8 +75,9 @@ fn extract_metadata_json(buf: &[u8]) -> Option<String> {
 /// Flatten Ultralytics `metadata.json` into the `key: value` lines the shared
 /// [`ModelMetadata::from_yaml_str`](ultralytics_inference::metadata::ModelMetadata::from_yaml_str)
 /// parser consumes (the same shape the ONNX path rebuilds from `metadata_props`).
-/// Class names become one `id: name` line each; `imgsz`/`kpt_shape` become inline
-/// lists; the nested `args` object is dropped (the parser reads none of it).
+/// Class names become a `names: {0: 'person', ...}` map (the same Python-dict form
+/// the ONNX path emits); `imgsz`/`kpt_shape` become inline lists; the nested
+/// `args` object is dropped (the parser reads none of it).
 fn metadata_lines_from_json(json: &str) -> Option<String> {
     let value: Value = serde_json::from_str(json).ok()?;
     let obj = value.as_object()?;
@@ -85,9 +86,11 @@ fn metadata_lines_from_json(json: &str) -> Option<String> {
         match key.as_str() {
             "names" => {
                 if let Some(names) = val.as_object() {
-                    for (id, name) in names {
-                        lines.push(format!("{id}: {}", name.as_str().unwrap_or_default()));
-                    }
+                    let entries: Vec<String> = names
+                        .iter()
+                        .map(|(id, name)| format!("{id}: '{}'", name.as_str().unwrap_or_default()))
+                        .collect();
+                    lines.push(format!("names: {{{}}}", entries.join(", ")));
                 }
             }
             "imgsz" | "kpt_shape" => {
