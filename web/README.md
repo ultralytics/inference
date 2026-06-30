@@ -213,11 +213,13 @@ code as above:
 
 ```html
 <script type="importmap">
-  { "imports": {
-    "@ultralytics/yolo": "https://esm.sh/@ultralytics/yolo",
-    "@litertjs/core": "https://esm.sh/@litertjs/core",
-    "@litertjs/wasm-utils": "https://esm.sh/@litertjs/wasm-utils"
-  } }
+  {
+    "imports": {
+      "@ultralytics/yolo": "https://esm.sh/@ultralytics/yolo",
+      "@litertjs/core": "https://esm.sh/@litertjs/core",
+      "@litertjs/wasm-utils": "https://esm.sh/@litertjs/wasm-utils"
+    }
+  }
 </script>
 ```
 
