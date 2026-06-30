@@ -243,8 +243,8 @@ Notes:
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Export end2end-free models** (`end2end=False`): YOLO26 (and YOLOv10) default
-  to an end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
+- **Export end2end-free models** (`end2end=False`): YOLO26 defaults to an
+  end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
   **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.
   Export them with `end2end=False` so the standard head is used and NMS runs in
   this package's Rust, keeping inference on WebGPU:
