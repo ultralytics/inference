@@ -190,35 +190,35 @@ Only the inference engine changes; the preprocessing, postprocessing, drawing,
 and `Results` shape are the same shared Rust code, so output matches the `ort`
 path.
 
-It is picked automatically from the file extension: pass a `.tflite` to
-`YOLO.load` and it runs on LiteRT.js (a `.onnx` runs on ONNX Runtime Web). Two
-pieces of LiteRT.js are needed, and the **wasm needs no setup** (it loads from a
-CDN by default):
+The backend is picked from the file extension: a `.tflite` runs on LiteRT.js, a
+`.onnx` on ONNX Runtime Web. The LiteRT.js wasm loads from a CDN by default, so
+the only setup is making the `@litertjs/core` module resolve.
 
-- **The `@litertjs/core` module** must resolve. With a bundler, install it:
-  ```bash
-  npm install @litertjs/core
-  ```
-  With no build step, map it to a CDN instead (no install):
-  ```html
-  <script type="importmap">
-    { "imports": {
-      "@litertjs/core": "https://esm.sh/@litertjs/core",
-      "@litertjs/wasm-utils": "https://esm.sh/@litertjs/wasm-utils"
-    } }
-  </script>
-  ```
-- **The wasm assets** default to the jsDelivr CDN, so nothing to host. Override
-  with `litertWasmUrl` only to self-host (copy `node_modules/@litertjs/core/wasm/`).
+**With npm (a bundler):**
 
-Then it is the same API as the `ort` path, just a `.tflite` model:
+```bash
+npm install @ultralytics/yolo @litertjs/core
+```
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("/models/yolo26n.tflite"); // .tflite -> LiteRT.js, wasm from the CDN
+const model = await YOLO.load("/models/yolo26n.tflite"); // .tflite -> LiteRT.js
 const results = await model.predict("bus.jpg");
 await annotate(document.querySelector("canvas"), "bus.jpg", results);
+```
+
+**Without a build step (CDN):** map the modules to a CDN, then use the exact same
+code as above:
+
+```html
+<script type="importmap">
+  { "imports": {
+    "@ultralytics/yolo": "https://esm.sh/@ultralytics/yolo",
+    "@litertjs/core": "https://esm.sh/@litertjs/core",
+    "@litertjs/wasm-utils": "https://esm.sh/@litertjs/wasm-utils"
+  } }
+</script>
 ```
 
 For webcam or video, pass the `<video>` element each frame:
@@ -228,7 +228,8 @@ const results = await model.predict(video);
 await annotate(canvas, video, results);
 ```
 
-To self-host the wasm instead of the CDN, pass `litertWasmUrl: "/litert/"` to `YOLO.load`.
+The wasm loads from the jsDelivr CDN by default; pass `litertWasmUrl: "/litert/"` to
+`YOLO.load` to self-host it (copy `node_modules/@litertjs/core/wasm/`).
 
 Notes:
 
