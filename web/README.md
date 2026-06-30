@@ -97,9 +97,9 @@ async function frame() {
 <br>
 <br>
 
-Runs [YOLOv8](https://docs.ultralytics.com/models/yolov8),
-[YOLO11](https://docs.ultralytics.com/models/yolo11), and
-[YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for detection,
+Runs [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8),
+[Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and
+[Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for detection,
 segmentation, pose, OBB, classification, and semantic segmentation.
 
 Pass a bare ONNX name and it is **auto-downloaded** from the
@@ -110,8 +110,8 @@ same weights the native crate and Python use):
 await YOLO.load("yolo26n.onnx"); // auto-downloads from the release: .../download/v8.4.0/yolo26n.onnx
 ```
 
-Auto-download covers **yolo26**, **yolo11**, and **yolov8** in sizes `n/s/m/l/x`
-with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, yolo26
+Auto-download covers **Ultralytics YOLO26**, **Ultralytics YOLO11**, and **Ultralytics YOLOv8** in sizes `n/s/m/l/x`
+with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, Ultralytics YOLO26
 only). A value containing a `/` or a scheme is used as a URL/path as-is.
 
 > **CORS note:** GitHub release assets do not send `Access-Control-Allow-Origin`,
@@ -190,26 +190,49 @@ Only the inference engine changes; the preprocessing, postprocessing, drawing,
 and `Results` shape are the same shared Rust code, so output matches the `ort`
 path.
 
-It is picked automatically from the file extension: pass a `.tflite` to
-`YOLO.load` and it runs on LiteRT.js (a `.onnx` runs on ONNX Runtime Web). The
-only setup is the optional peer dependency.
+The backend is picked from the file extension: a `.tflite` runs on LiteRT.js, a
+`.onnx` on ONNX Runtime Web. The LiteRT.js wasm loads from a CDN by default, so
+the only setup is making `@litertjs/core` resolve (along with its `@litertjs/wasm-utils`
+dependency, which npm installs automatically and the import map below lists explicitly).
+
+**With npm (a bundler):**
 
 ```bash
-npm install @litertjs/core # optional peer dependency, only for .tflite models
+npm install @ultralytics/yolo @litertjs/core
 ```
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("/models/yolo26n.tflite", {
-  // LiteRT.js wasm assets; defaults to the jsDelivr CDN. Self-host by copying
-  // node_modules/@litertjs/core/wasm/ and pointing here (URL ending in `/`).
-  litertWasmUrl: "/litert/",
-});
-
-const results = await model.predict(video); // same API, same Results
-console.log(model.device); // "webgpu" or "wasm"
+const model = await YOLO.load("/models/yolo26n.tflite"); // .tflite -> LiteRT.js
+const results = await model.predict("bus.jpg");
+await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
+
+**Without a build step (CDN):** map the modules to a CDN, then use the exact same
+code as above:
+
+```html
+<script type="importmap">
+  {
+    "imports": {
+      "@ultralytics/yolo": "https://esm.sh/@ultralytics/yolo",
+      "@litertjs/core": "https://esm.sh/@litertjs/core",
+      "@litertjs/wasm-utils": "https://esm.sh/@litertjs/wasm-utils"
+    }
+  }
+</script>
+```
+
+For webcam or video, pass the `<video>` element each frame:
+
+```ts
+const results = await model.predict(video);
+await annotate(canvas, video, results);
+```
+
+The wasm loads from the jsDelivr CDN by default; pass `litertWasmUrl: "/litert/"` to
+`YOLO.load` to self-host it (copy `node_modules/@litertjs/core/wasm/`).
 
 Notes:
 
@@ -220,8 +243,8 @@ Notes:
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Export end2end-free models** (`end2end=False`): YOLO26 (and YOLOv10) default
-  to an end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
+- **Export end2end-free models** (`end2end=False`): Ultralytics YOLO26 defaults to an
+  end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
   **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.
   Export them with `end2end=False` so the standard head is used and NMS runs in
   this package's Rust, keeping inference on WebGPU:
