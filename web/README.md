@@ -191,21 +191,32 @@ and `Results` shape are the same shared Rust code, so output matches the `ort`
 path.
 
 It is picked automatically from the file extension: pass a `.tflite` to
-`YOLO.load` and it runs on LiteRT.js (a `.onnx` runs on ONNX Runtime Web). The
-only setup is the optional peer dependency.
+`YOLO.load` and it runs on LiteRT.js (a `.onnx` runs on ONNX Runtime Web). Two
+pieces of LiteRT.js are needed, and the **wasm needs no setup** (it loads from a
+CDN by default):
 
-```bash
-npm install @litertjs/core # optional peer dependency, only for .tflite models
-```
+- **The `@litertjs/core` module** must resolve. With a bundler, install it:
+  ```bash
+  npm install @litertjs/core
+  ```
+  With no build step, map it to a CDN instead (no install):
+  ```html
+  <script type="importmap">
+    { "imports": {
+      "@litertjs/core": "https://esm.sh/@litertjs/core",
+      "@litertjs/wasm-utils": "https://esm.sh/@litertjs/wasm-utils"
+    } }
+  </script>
+  ```
+- **The wasm assets** default to the jsDelivr CDN, so nothing to host. Override
+  with `litertWasmUrl` only to self-host (copy `node_modules/@litertjs/core/wasm/`).
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("/models/yolo26n.tflite", {
-  // LiteRT.js wasm assets; defaults to the jsDelivr CDN. Self-host by copying
-  // node_modules/@litertjs/core/wasm/ and pointing here (URL ending in `/`).
-  litertWasmUrl: "/litert/",
-});
+const model = await YOLO.load("/models/yolo26n.tflite"); // wasm from the CDN by default
+// Or self-host the wasm:
+// const model = await YOLO.load("/models/yolo26n.tflite", { litertWasmUrl: "/litert/" });
 
 const results = await model.predict(video); // same API, same Results
 console.log(model.device); // "webgpu" or "wasm"
