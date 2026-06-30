@@ -63,10 +63,10 @@ fn extract_metadata_json(buf: &[u8]) -> Option<String> {
             let l_extra = le16(buf, local_off + 28)?;
             let data = local_off + 30 + l_name + l_extra;
             let comp = buf.get(data..data + comp_size)?;
+            // Cap the (de)compressed size both ways so a crafted model file cannot
+            // force a huge allocation. Ultralytics metadata is a few KB.
             return match method {
-                0 => String::from_utf8(comp.to_vec()).ok(),
-                // Cap the inflated size so a crafted zip bomb in a user-supplied
-                // model file cannot OOM the page. Ultralytics metadata is a few KB.
+                0 if comp.len() <= MAX_METADATA_BYTES => String::from_utf8(comp.to_vec()).ok(),
                 8 => miniz_oxide::inflate::decompress_to_vec_with_limit(comp, MAX_METADATA_BYTES)
                     .ok()
                     .and_then(|bytes| String::from_utf8(bytes).ok()),

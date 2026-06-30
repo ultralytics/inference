@@ -491,6 +491,17 @@ channels: 3
     }
 
     #[test]
+    fn test_names_block_with_yaml_significant_chars() {
+        // The line parser splits on the first `:` and only treats a line as a
+        // comment when it *starts* with `#`, so class names containing `:` or `#`
+        // round-trip without escaping.
+        let text = "task: detect\nnames:\n  0: ratio 16:9\n  1: #1 pick";
+        let m = ModelMetadata::from_yaml_str(text).unwrap();
+        assert_eq!(m.class_name(0), Some("ratio 16:9"));
+        assert_eq!(m.class_name(1), Some("#1 pick"));
+    }
+
+    #[test]
     fn test_pose_kpt_shape_and_half_flags() {
         let yaml = "task: pose\nkpt_shape: [17, 3]\nhalf: true\nend2end: True";
         let m = ModelMetadata::from_yaml_str(yaml).unwrap();
