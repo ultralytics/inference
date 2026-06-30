@@ -211,16 +211,24 @@ CDN by default):
 - **The wasm assets** default to the jsDelivr CDN, so nothing to host. Override
   with `litertWasmUrl` only to self-host (copy `node_modules/@litertjs/core/wasm/`).
 
+Then it is the same API as the `ort` path, just a `.tflite` model:
+
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("/models/yolo26n.tflite"); // wasm from the CDN by default
-// Or self-host the wasm:
-// const model = await YOLO.load("/models/yolo26n.tflite", { litertWasmUrl: "/litert/" });
-
-const results = await model.predict(video); // same API, same Results
-console.log(model.device); // "webgpu" or "wasm"
+const model = await YOLO.load("/models/yolo26n.tflite"); // .tflite -> LiteRT.js, wasm from the CDN
+const results = await model.predict("bus.jpg");
+await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
+
+For webcam or video, pass the `<video>` element each frame:
+
+```ts
+const results = await model.predict(video);
+await annotate(canvas, video, results);
+```
+
+To self-host the wasm instead of the CDN, pass `litertWasmUrl: "/litert/"` to `YOLO.load`.
 
 Notes:
 
