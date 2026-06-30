@@ -354,9 +354,11 @@ async function importLiteRt(): Promise<LiteRtModule> {
   const pkg = "@litertjs/core";
   try {
     return (await import(/* @vite-ignore */ pkg)) as unknown as LiteRtModule;
-  } catch {
+  } catch (e) {
+    // Keep the original error visible so a real load failure is not mistaken for
+    // a missing install.
     throw new Error(
-      'backend "litert" requires the optional peer dependency "@litertjs/core" (run `npm install @litertjs/core`).',
+      `failed to load the optional peer dependency "@litertjs/core" for the .tflite backend (run \`npm install @litertjs/core\`): ${e}`,
     );
   }
 }

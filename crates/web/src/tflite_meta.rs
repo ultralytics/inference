@@ -9,6 +9,10 @@
 
 use serde_json::Value;
 
+/// Upper bound on the inflated `metadata.json` (a few KB in practice), guarding
+/// against a zip bomb in a user-supplied model file.
+const MAX_METADATA_BYTES: usize = 4 << 20;
+
 /// Read a little-endian `u16` at `pos`.
 fn le16(buf: &[u8], pos: usize) -> Option<usize> {
     Some(u16::from_le_bytes([*buf.get(pos)?, *buf.get(pos + 1)?]) as usize)
@@ -61,7 +65,9 @@ fn extract_metadata_json(buf: &[u8]) -> Option<String> {
             let comp = buf.get(data..data + comp_size)?;
             return match method {
                 0 => String::from_utf8(comp.to_vec()).ok(),
-                8 => miniz_oxide::inflate::decompress_to_vec(comp)
+                // Cap the inflated size so a crafted zip bomb in a user-supplied
+                // model file cannot OOM the page. Ultralytics metadata is a few KB.
+                8 => miniz_oxide::inflate::decompress_to_vec_with_limit(comp, MAX_METADATA_BYTES)
                     .ok()
                     .and_then(|bytes| String::from_utf8(bytes).ok()),
                 _ => None,
@@ -75,9 +81,9 @@ fn extract_metadata_json(buf: &[u8]) -> Option<String> {
 /// Flatten Ultralytics `metadata.json` into the `key: value` lines the shared
 /// [`ModelMetadata::from_yaml_str`](ultralytics_inference::metadata::ModelMetadata::from_yaml_str)
 /// parser consumes (the same shape the ONNX path rebuilds from `metadata_props`).
-/// Class names become a `names: {0: 'person', ...}` map (the same Python-dict form
-/// the ONNX path emits); `imgsz`/`kpt_shape` become inline lists; the nested
-/// `args` object is dropped (the parser reads none of it).
+/// Class names become an unquoted `names:` block (one `id: name` per line, so
+/// apostrophes need no escaping); `imgsz`/`kpt_shape` become inline lists; the
+/// nested `args` object is dropped (the parser reads none of it).
 fn metadata_lines_from_json(json: &str) -> Option<String> {
     let value: Value = serde_json::from_str(json).ok()?;
     let obj = value.as_object()?;
@@ -86,11 +92,10 @@ fn metadata_lines_from_json(json: &str) -> Option<String> {
         match key.as_str() {
             "names" => {
                 if let Some(names) = val.as_object() {
-                    let entries: Vec<String> = names
-                        .iter()
-                        .map(|(id, name)| format!("{id}: '{}'", name.as_str().unwrap_or_default()))
-                        .collect();
-                    lines.push(format!("names: {{{}}}", entries.join(", ")));
+                    lines.push("names:".to_string());
+                    for (id, name) in names {
+                        lines.push(format!("  {id}: {}", name.as_str().unwrap_or_default()));
+                    }
                 }
             }
             "imgsz" | "kpt_shape" => {

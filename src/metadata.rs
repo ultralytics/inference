@@ -478,15 +478,16 @@ channels: 3
 
     #[test]
     fn test_tflite_style_metadata_text() {
-        // The `.tflite` reader rebuilds this text (Python-dict names map, inline
+        // The `.tflite` reader rebuilds this text (unquoted `names:` block, inline
         // lists) and hands it to `from_yaml_str`, exactly like the ONNX path.
-        let text = "task: detect\nimgsz: [640, 640]\nstride: 32\nend2end: false\nnames: {0: 'person', 1: 'traffic light', 2: 'car'}";
+        let text = "task: detect\nimgsz: [640, 640]\nstride: 32\nend2end: false\nnames:\n  0: person\n  1: traffic light\n  2: men's shoe";
         let m = ModelMetadata::from_yaml_str(text).unwrap();
         assert_eq!(m.task, Task::Detect);
         assert_eq!(m.imgsz, Some((640, 640)));
         assert_eq!(m.num_classes(), 3);
-        // A class name containing a space must survive parsing.
+        // Names with a space and an apostrophe must survive (no escaping needed).
         assert_eq!(m.class_name(1), Some("traffic light"));
+        assert_eq!(m.class_name(2), Some("men's shoe"));
     }
 
     #[test]
