@@ -168,10 +168,9 @@ impl ModelMetadata {
             }
         }
 
-        // Parse imgsz which can be a list like [640, 640]
-        if let Some(imgsz_line) = yaml_str.lines().find(|l| l.contains("imgsz:")) {
-            metadata.imgsz = Self::parse_imgsz(yaml_str, imgsz_line);
-        }
+        // imgsz is a two-integer list (`[640, 640]` inline or a `- 640` block),
+        // parsed with the same helper as kpt_shape.
+        metadata.imgsz = Self::parse_int_pair(yaml_str, "imgsz");
 
         // kpt_shape may be inline (`[17, 3]`, handled in the loop above) or a
         // multi-line YAML block list (Ultralytics `.tflite` metadata.yaml writes
@@ -243,52 +242,6 @@ impl ModelMetadata {
             .collect();
         if parts.len() >= 2 {
             Some((parts[0], parts[1]))
-        } else {
-            None
-        }
-    }
-
-    /// Parse the imgsz field which can be a YAML list.
-    fn parse_imgsz(yaml_str: &str, imgsz_line: &str) -> Option<(usize, usize)> {
-        // Check if imgsz is on a single line like "imgsz: [640, 640]"
-        if let Some(bracket_start) = imgsz_line.find('[')
-            && let Some(bracket_end) = imgsz_line.find(']')
-        {
-            let values: Vec<usize> = imgsz_line[bracket_start + 1..bracket_end]
-                .split(',')
-                .filter_map(|s| s.trim().parse().ok())
-                .collect();
-            if values.len() >= 2 {
-                return Some((values[0], values[1]));
-            }
-        }
-
-        // Check for multi-line YAML list format
-        let lines: Vec<&str> = yaml_str.lines().collect();
-        let mut imgsz_values = Vec::new();
-
-        for (i, line) in lines.iter().enumerate() {
-            if line.contains("imgsz:") {
-                // Look at following lines for list items
-                for following in lines.iter().skip(i + 1) {
-                    let trimmed = following.trim();
-                    if trimmed.starts_with('-') {
-                        if let Ok(val) = trimmed.trim_start_matches('-').trim().parse::<usize>() {
-                            imgsz_values.push(val);
-                        }
-                    } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                        break;
-                    }
-                    if imgsz_values.len() >= 2 {
-                        break;
-                    }
-                }
-                break;
-            }
-        }
-
-        if imgsz_values.len() >= 2 {
-            Some((imgsz_values[0], imgsz_values[1]))
         } else {
             None
         }
