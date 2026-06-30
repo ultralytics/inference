@@ -2,11 +2,19 @@
 
 //! Browser/WebAssembly bindings for `ultralytics-inference`.
 //!
-//! Runs YOLO ONNX models in the browser on WebGPU via ONNX Runtime Web (bridged
-//! by [`ort-web`](https://ort.pyke.io/backends/web)), reusing the core crate's
-//! preprocessing/postprocessing so results match the native path.
-//! The published npm package wraps this behind a small `YOLO` class. The whole
-//! crate is gated to `wasm32`; elsewhere it compiles to an empty library.
+//! Reuses the core crate's preprocessing/postprocessing so browser results match
+//! the native path, and offers two ways to run a model:
+//!
+//! - [`YoloModel`] runs an ONNX model end to end in wasm on WebGPU via ONNX
+//!   Runtime Web (bridged by [`ort-web`](https://ort.pyke.io/backends/web)):
+//!   preprocess, inference, and postprocess all happen in Rust.
+//! - [`YoloPipeline`] runs only the Rust preprocess/postprocess for a `.tflite`
+//!   model whose inference happens in JavaScript (LiteRT.js), which has no Rust
+//!   binding to drive from wasm.
+//!
+//! The published npm package wraps both behind a small `YOLO` class that picks
+//! the path from the model file. The whole crate is gated to `wasm32`; elsewhere
+//! it compiles to an empty library.
 #![cfg(target_arch = "wasm32")]
 
 use std::cell::RefCell;
@@ -212,10 +220,12 @@ fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
     )
 }
 
-/// A loaded YOLO model ready for inference in the browser.
+/// A loaded ONNX model that runs end to end in wasm (preprocess, inference on
+/// ONNX Runtime Web, and postprocess), for the `.onnx` path.
 ///
 /// Created via [`YoloModel::load_bytes`]; run with [`YoloModel::predict`]. The
-/// TypeScript wrapper exposes this as `YOLO`.
+/// TypeScript `YOLO` class wraps this for ONNX models, and [`YoloPipeline`] for
+/// `.tflite` ones.
 #[wasm_bindgen]
 pub struct YoloModel {
     session: Session,
