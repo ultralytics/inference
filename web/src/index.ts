@@ -171,6 +171,9 @@ function resolveModel(src: string): string {
   return /^[\w.-]+\.onnx$/i.test(src) ? ASSETS + src : src;
 }
 
+/** A model source: a URL/path, raw bytes, or a `Blob`/`File` (e.g. a dropped file). */
+export type ModelSource = string | URL | ArrayBuffer | Uint8Array | Blob;
+
 /** Whether `bytes` begin with a TFLite flatbuffer (the `TFL3` identifier at offset 4). */
 function isTflite(bytes: Uint8Array): boolean {
   return bytes.length >= 8 && bytes[4] === 0x54 && bytes[5] === 0x46 && bytes[6] === 0x4c && bytes[7] === 0x33;
@@ -178,10 +181,10 @@ function isTflite(bytes: Uint8Array): boolean {
 
 /**
  * Pick the inference backend from the model: `.tflite` -> `litert`, `.onnx` ->
- * `ort`. When the source has no known extension (raw bytes, extensionless or
- * signed URL), the already-fetched `bytes` are sniffed for the `TFL3` identifier.
+ * `ort`. When the source has no known extension (raw bytes, a `Blob`/`File`, or an
+ * extensionless/signed URL), the already-fetched `bytes` are sniffed for `TFL3`.
  */
-function inferBackend(source: string | URL | ArrayBuffer | Uint8Array, bytes: Uint8Array): "ort" | "litert" {
+function inferBackend(source: ModelSource, bytes: Uint8Array): "ort" | "litert" {
   if (typeof source === "string" || source instanceof URL) {
     // Match on the pathname only so `model.tflite?v=1` or a signed URL still works.
     const path = (source instanceof URL ? source.pathname : source).split(/[?#]/, 1)[0];
@@ -576,11 +579,12 @@ class LiteRtEngine implements Engine {
 }
 
 /** Fetch model bytes from a URL/path, or pass provided bytes through. */
-async function fetchModelBytes(source: string | URL | ArrayBuffer | Uint8Array): Promise<Uint8Array> {
+async function fetchModelBytes(source: ModelSource): Promise<Uint8Array> {
   if (typeof source === "string" || source instanceof URL) {
     const resp = await fetchOk(source.toString(), "model");
     return new Uint8Array(await resp.arrayBuffer());
   }
+  if (source instanceof Blob) return new Uint8Array(await source.arrayBuffer());
   return source instanceof Uint8Array ? source : new Uint8Array(source);
 }
 
@@ -597,10 +601,11 @@ export class YOLO {
    * The engine is chosen from the model: a `.tflite` runs on LiteRT.js, an
    * `.onnx` on ONNX Runtime Web.
    *
-   * @param source Model URL/path, or its raw bytes (`.onnx` or `.tflite`).
+   * @param source Model URL/path, raw bytes, or a `Blob`/`File` (e.g. from a file
+   *   input or drag-and-drop). `.onnx` or `.tflite`.
    * @param options Loader options.
    */
-  static async load(source: string | URL | ArrayBuffer | Uint8Array, options?: LoadOptions): Promise<YOLO> {
+  static async load(source: ModelSource, options?: LoadOptions): Promise<YOLO> {
     await ensureInit(options?.wasmUrl);
     // Fetch once (a bare `.onnx` name resolves to the Ultralytics assets release),
     // then pick the backend from the extension, or the bytes when it is unknown.
