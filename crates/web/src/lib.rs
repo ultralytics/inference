@@ -2,17 +2,26 @@
 
 //! Browser/WebAssembly bindings for `ultralytics-inference`.
 //!
-//! Runs YOLO ONNX models in the browser on WebGPU via ONNX Runtime Web (bridged
-//! by [`ort-web`](https://ort.pyke.io/backends/web)), reusing the core crate's
-//! preprocessing/postprocessing so results match the native path.
-//! The published npm package wraps this behind a small `YOLO` class. The whole
-//! crate is gated to `wasm32`; elsewhere it compiles to an empty library.
+//! Reuses the core crate's preprocessing/postprocessing so browser results match
+//! the native path, and offers two ways to run a model:
+//!
+//! - [`YoloModel`] runs an ONNX model end to end in wasm on WebGPU via ONNX
+//!   Runtime Web (bridged by [`ort-web`](https://ort.pyke.io/backends/web)):
+//!   preprocess, inference, and postprocess all happen in Rust.
+//! - [`YoloPipeline`] runs only the Rust preprocess/postprocess for a `.tflite`
+//!   model whose inference happens in JavaScript (LiteRT.js), which has no Rust
+//!   binding to drive from wasm.
+//!
+//! The published npm package wraps both behind a small `YOLO` class that picks
+//! the path from the model file. The whole crate is gated to `wasm32`; elsewhere
+//! it compiles to an empty library.
 #![cfg(target_arch = "wasm32")]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use js_sys::Float32Array;
 use ndarray::Array3;
 use ort::ep::WebGPU;
 use ort::session::{RunOptions, Session};
@@ -24,7 +33,7 @@ use wasm_bindgen::prelude::*;
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{postprocess, postprocess_semantic_mask};
 use ultralytics_inference::preprocessing::{
-    preprocess_image_center_crop, preprocess_image_with_precision,
+    PreprocessResult, preprocess_image_center_crop, preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
 use ultralytics_inference::visualizer::color::Color;
@@ -37,6 +46,7 @@ use payload::JsResults;
 
 mod onnx_meta;
 mod payload;
+mod tflite_meta;
 
 /// Default inference image size used when a model does not record `imgsz` in its
 /// metadata. Mirrors the native crate's fallback.
@@ -165,33 +175,87 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
     Ok(())
 }
 
+/// Parse Ultralytics `key: value` metadata `text` into [`ModelMetadata`], shared
+/// by the ONNX and `.tflite` readers. Returns `missing` as a JS error when the
+/// model carries no metadata (empty/absent text).
+fn metadata_from_text(text: Option<String>, missing: &str) -> Result<ModelMetadata, JsError> {
+    let text = text
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| JsError::new(missing))?;
+    ModelMetadata::from_yaml_str(&text).map_err(err_ctx("failed to parse model metadata"))
+}
+
 /// Parse the Ultralytics metadata embedded in an ONNX model's `metadata_props`.
 ///
 /// `ort-web` does not implement ONNX session metadata retrieval, so we read the
 /// `metadata_props` (key/value pairs such as `task`, `names`, `imgsz`) straight
-/// from the model protobuf, rebuild the `key: value` YAML the native path uses,
-/// and hand it to the shared parser.
+/// from the model protobuf and rebuild the `key: value` text the shared parser
+/// consumes.
 fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
     let props = onnx_meta::parse_metadata_props(model_bytes);
-    if props.is_empty() {
-        return Err(JsError::new(
-            "no metadata found in ONNX model. Export it with Ultralytics \
-             (`model.export(format='onnx')`) so the task, class names, and imgsz \
-             are embedded.",
-        ));
-    }
-    let combined = props
-        .iter()
-        .map(|(k, v)| format!("{k}: {v}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    ModelMetadata::from_yaml_str(&combined).map_err(err_ctx("failed to parse model metadata"))
+    let text = (!props.is_empty()).then(|| {
+        props
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    metadata_from_text(
+        text,
+        "no metadata found in ONNX model. Export it with Ultralytics \
+         (`model.export(format='onnx')`) so the task, class names, and imgsz are embedded.",
+    )
 }
 
-/// A loaded YOLO model ready for inference in the browser.
+/// Parse the Ultralytics metadata embedded in a single-file `.tflite`.
+///
+/// LiteRT exports append a small zip holding `metadata.json` to the model bytes,
+/// so, like the ONNX path's [`build_metadata`], the browser reads the task, class
+/// names, and `imgsz` straight from the model file.
+fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
+    metadata_from_text(
+        tflite_meta::metadata_text(model_bytes),
+        "no Ultralytics metadata found in the .tflite model. Export it with Ultralytics \
+         (`model.export(format='litert')`) so the task, class names, and imgsz are embedded.",
+    )
+}
+
+/// Build the original RGB image (HWC u8, for postprocess coordinate scaling) and
+/// the NCHW f32 input tensor. Classification center-crops, every other task
+/// letterboxes. Shared by the ONNX and LiteRT paths.
+fn preprocess_image(
+    dynimg: &image::DynamicImage,
+    imgsz: (usize, usize),
+    stride: u32,
+    task: Task,
+) -> Result<(Array3<u8>, PreprocessResult), JsError> {
+    let rgb = dynimg.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
+        .map_err(err_ctx("failed to build image array"))?;
+    let pre = if task == Task::Classify {
+        preprocess_image_center_crop(dynimg, imgsz, false)
+    } else {
+        preprocess_image_with_precision(dynimg, imgsz, stride, false)
+    };
+    Ok((orig_img, pre))
+}
+
+/// Build the shared `InferenceConfig` from the JS thresholds and class filter.
+fn make_config(conf: f32, iou: f32, classes: Option<Vec<u32>>) -> InferenceConfig {
+    let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
+    if let Some(classes) = classes {
+        config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
+    }
+    config
+}
+
+/// A loaded ONNX model that runs end to end in wasm (preprocess, inference on
+/// ONNX Runtime Web, and postprocess), for the `.onnx` path.
 ///
 /// Created via [`YoloModel::load_bytes`]; run with [`YoloModel::predict`]. The
-/// TypeScript wrapper exposes this as `YOLO`.
+/// TypeScript `YOLO` class wraps this for ONNX models, and [`YoloPipeline`] for
+/// `.tflite` ones.
 #[wasm_bindgen]
 pub struct YoloModel {
     session: Session,
@@ -382,19 +446,12 @@ impl YoloModel {
     ) -> Result<JsValue, JsError> {
         let t_pre = now_ms();
 
-        // Original image as HWC u8 (RGB), needed by postprocessing for coordinate scaling.
-        let rgb = dynimg.to_rgb8();
-        let (w, h) = rgb.dimensions();
-        let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
-            .map_err(err_ctx("failed to build image array"))?;
-
-        // Classification uses center-crop (like Ultralytics); all other tasks
-        // use letterbox. Both share the f32 NCHW output.
-        let pre = if self.metadata.task == Task::Classify {
-            preprocess_image_center_crop(&dynimg, self.imgsz, false)
-        } else {
-            preprocess_image_with_precision(&dynimg, self.imgsz, self.metadata.stride, false)
-        };
+        let (orig_img, pre) = preprocess_image(
+            &dynimg,
+            self.imgsz,
+            self.metadata.stride,
+            self.metadata.task,
+        )?;
 
         // Resolve the output dtype path before borrowing the session for inference.
         let semantic_baked = self.semantic_baked();
@@ -414,10 +471,7 @@ impl YoloModel {
             .map_err(err_ctx("failed to sync outputs"))?;
 
         let t_post = now_ms();
-        let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
-        if let Some(classes) = classes {
-            config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
-        }
+        let config = make_config(conf, iou, classes);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
         // Postprocess time runs from output extraction to the postprocess call.
@@ -475,6 +529,318 @@ impl YoloModel {
         };
         let payload = JsResults::from_results(&results, self.metadata.task);
         to_js(&payload, "results")
+    }
+}
+
+/// Per-frame state carried from `preprocess_rgba` to the matching `postprocess`.
+struct PendingFrame {
+    /// Letterbox geometry (scale/padding/orig_shape) for coordinate scaling.
+    pre: PreprocessResult,
+    /// Original RGB image (HWC u8), needed for mask compositing.
+    orig_img: Array3<u8>,
+    /// Preprocess time in ms, for the `speed` breakdown.
+    pre_ms: f64,
+}
+
+/// A metadata-only YOLO pre/post pipeline for use with an **external** inference
+/// engine (e.g. LiteRT.js running a `.tflite` model in JavaScript).
+///
+/// Unlike [`YoloModel`], it holds no ONNX Runtime session: JavaScript loads and
+/// runs the model, while this struct reuses the shared Rust preprocessing and
+/// postprocessing so results match every other path. Per frame the flow is
+/// [`preprocess_rgba`](Self::preprocess_rgba) → (JS engine inference) →
+/// [`postprocess`](Self::postprocess). It assumes a single prediction in flight
+/// at a time (as the webcam render loop does).
+#[wasm_bindgen]
+pub struct YoloPipeline {
+    metadata: ModelMetadata,
+    imgsz: (usize, usize),
+    pending: Option<PendingFrame>,
+}
+
+#[wasm_bindgen]
+impl YoloPipeline {
+    /// Build a pipeline from a single-file `.tflite` model, reading the
+    /// Ultralytics metadata (task, class names, `imgsz`, ...) embedded in the
+    /// model bytes, the same way [`YoloModel::load_bytes`] reads it from an ONNX
+    /// model, so the ONNX and LiteRT paths load identically from one file.
+    ///
+    /// # Errors
+    /// Returns a JS error if the model carries no Ultralytics metadata or it
+    /// cannot be parsed.
+    #[wasm_bindgen(constructor)]
+    pub fn new(tflite: &[u8]) -> Result<YoloPipeline, JsError> {
+        let metadata = build_tflite_metadata(tflite)?;
+        let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
+        Ok(Self {
+            metadata,
+            imgsz,
+            pending: None,
+        })
+    }
+
+    /// The model's task (`"detect"`, `"segment"`, ...).
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn task(&self) -> String {
+        self.metadata.task.as_str().to_owned()
+    }
+
+    /// Whether this is an end-to-end (NMS-free) export, e.g. YOLO26. Its head runs
+    /// the NMS/top-k with `int64`/`gather_nd` ops that the LiteRT WebGPU delegate
+    /// cannot execute, so such models must run on the CPU (wasm) accelerator.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn end2end(&self) -> bool {
+        self.metadata.end2end
+    }
+
+    /// Class id -> name map (like `model.names`), as a JS object.
+    ///
+    /// # Errors
+    /// Returns a JS error only if serialization fails (not expected).
+    #[wasm_bindgen(getter)]
+    pub fn names(&self) -> Result<JsValue, JsError> {
+        to_js(&*self.metadata.names, "names")
+    }
+
+    /// The model input shape as `[1, 3, H, W]` (NCHW), for sizing the engine's
+    /// input tensor. Ultralytics LiteRT exports (`ai_edge_torch`) keep the native
+    /// NCHW layout, matching the ONNX path.
+    #[wasm_bindgen(getter, js_name = inputShape)]
+    #[must_use]
+    pub fn input_shape(&self) -> Vec<u32> {
+        vec![1, 3, self.imgsz.0 as u32, self.imgsz.1 as u32]
+    }
+
+    /// Preprocess raw RGBA pixels (e.g. a webcam `ImageData`) into the NCHW f32
+    /// input tensor an Ultralytics LiteRT/TFLite model expects, normalized to
+    /// `[0, 1]`, the same preprocessing as the ONNX path.
+    ///
+    /// Returns the tensor as a `Float32Array` (shape `[1, 3, H, W]`); the
+    /// letterbox geometry and original image are stashed for the matching
+    /// [`postprocess`](Self::postprocess) call.
+    ///
+    /// # Errors
+    /// Returns a JS error if the buffer size is not `width * height * 4`.
+    pub fn preprocess_rgba(
+        &mut self,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> Result<Float32Array, JsError> {
+        let t0 = now_ms();
+        let expected = (width as usize) * (height as usize) * 4;
+        if rgba.len() != expected {
+            return Err(JsError::new(&format!(
+                "rgba buffer is {} bytes, expected {expected} for {width}x{height}",
+                rgba.len()
+            )));
+        }
+        let img = image::RgbaImage::from_raw(width, height, rgba)
+            .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))?;
+        let dynimg = image::DynamicImage::ImageRgba8(img);
+
+        let (orig_img, pre) = preprocess_image(
+            &dynimg,
+            self.imgsz,
+            self.metadata.stride,
+            self.metadata.task,
+        )?;
+        let data = pre
+            .tensor
+            .as_slice()
+            .ok_or_else(|| JsError::new("preprocessed tensor is not contiguous"))?;
+        let out = Float32Array::from(data);
+
+        self.pending = Some(PendingFrame {
+            pre,
+            orig_img,
+            pre_ms: now_ms() - t0,
+        });
+        Ok(out)
+    }
+
+    /// Postprocess an external engine's raw outputs into the standard `Results`.
+    ///
+    /// `outputs` are the model's output tensors (one for most tasks; two for
+    /// segmentation: detection head + mask prototypes). `shapes` encodes each
+    /// output's dims flat as `[rank0, dims0..., rank1, dims1...]`. `inference_ms`
+    /// is the time the JS engine reported, used only for the `speed` breakdown.
+    /// Consumes the frame stashed by the preceding
+    /// [`preprocess_rgba`](Self::preprocess_rgba).
+    ///
+    /// # Errors
+    /// Returns a JS error if called before `preprocess_rgba`, if `shapes` is
+    /// malformed, or on serialization failure.
+    pub fn postprocess(
+        &mut self,
+        outputs: Vec<Float32Array>,
+        shapes: Vec<u32>,
+        inference_ms: f64,
+        conf: f32,
+        iou: f32,
+        classes: Option<Vec<u32>>,
+    ) -> Result<JsValue, JsError> {
+        let t_post = now_ms();
+        let pending = self
+            .pending
+            .take()
+            .ok_or_else(|| JsError::new("postprocess called before preprocess_rgba"))?;
+
+        let mut bufs: Vec<Vec<f32>> = outputs.iter().map(|a| a.to_vec()).collect();
+        if bufs.is_empty() {
+            return Err(JsError::new(
+                "external engine returned no output tensors (the model may have failed to run)",
+            ));
+        }
+        let mut shape_vecs = decode_shapes(&shapes, bufs.len())?;
+
+        // Order so the detection head (rank 3, e.g. [1, C, 8400]) is first and the
+        // segmentation prototype tensor (rank 4) second, matching the shared
+        // postprocessor regardless of the engine's output order.
+        if bufs.len() == 2 && shape_vecs[0].len() == 4 {
+            bufs.swap(0, 1);
+            shape_vecs.swap(0, 1);
+        }
+
+        // Ultralytics LiteRT exports (`ai_edge_torch`) emit box (and pose keypoint)
+        // coordinates normalized to [0, 1]; the shared postprocess expects
+        // model-input pixels. Scale them on the detection head in place.
+        denormalize_head(
+            &mut bufs[0],
+            &shape_vecs[0],
+            self.imgsz,
+            self.metadata.task,
+            self.metadata.kpt_shape,
+        );
+
+        let views: Vec<(&[f32], Vec<usize>)> = bufs
+            .iter()
+            .zip(&shape_vecs)
+            .map(|(b, s)| (b.as_slice(), s.clone()))
+            .collect();
+
+        let config = make_config(conf, iou, classes);
+        let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
+        let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
+        // Postprocess time is unknown until the call returns, so pass 0 here and
+        // stamp the real duration onto the result afterwards (as the native path does).
+        let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
+
+        let mut results = postprocess(
+            views,
+            self.metadata.task,
+            &pending.pre,
+            &config,
+            names,
+            pending.orig_img,
+            String::new(),
+            speed,
+            inference_shape,
+            self.metadata.end2end,
+            self.metadata.kpt_shape,
+        );
+        results.speed.postprocess = Some(now_ms() - t_post);
+        let payload = JsResults::from_results(&results, self.metadata.task);
+        to_js(&payload, "results")
+    }
+}
+
+/// Decode the flat shape encoding `[rank0, dims0..., rank1, dims1...]` into one
+/// `Vec<usize>` per output tensor.
+fn decode_shapes(flat: &[u32], count: usize) -> Result<Vec<Vec<usize>>, JsError> {
+    let mut shapes = Vec::with_capacity(count);
+    let mut i = 0;
+    while i < flat.len() {
+        let rank = flat[i] as usize;
+        i += 1;
+        if i + rank > flat.len() {
+            return Err(JsError::new("malformed output shapes"));
+        }
+        shapes.push(flat[i..i + rank].iter().map(|&d| d as usize).collect());
+        i += rank;
+    }
+    if shapes.len() != count {
+        return Err(JsError::new(&format!(
+            "expected {count} output shapes, decoded {}",
+            shapes.len()
+        )));
+    }
+    Ok(shapes)
+}
+
+/// Scale a normalized detection head's coordinates to model-input pixels in place.
+///
+/// Some LiteRT exports emit box (and pose keypoint) coordinates normalized to
+/// `[0, 1]`, while the shared postprocess expects model-input pixels. Handles both
+/// `[1, C, N]` and `[1, N, C]` layouts; a max-coordinate guard makes it a no-op for
+/// pixel-coordinate exports and for box-less tasks (classify/semantic). The OBB
+/// angle and keypoint confidence channels are left untouched.
+fn denormalize_head(
+    buf: &mut [f32],
+    shape: &[usize],
+    imgsz: (usize, usize),
+    task: Task,
+    kpt_shape: Option<(usize, usize)>,
+) {
+    if !matches!(task, Task::Detect | Task::Segment | Task::Pose | Task::Obb) {
+        return;
+    }
+    if shape.len() != 3 || buf.is_empty() {
+        return;
+    }
+    let (d1, d2) = (shape[1], shape[2]);
+    // Channel-major [1, C, N] when C <= N (e.g. [1, 84, 8400]); else [1, N, C].
+    let channel_major = d1 <= d2;
+    let (n, c_count) = if channel_major { (d2, d1) } else { (d1, d2) };
+    if c_count < 4 || n == 0 {
+        return;
+    }
+    let idx = |c: usize, p: usize| {
+        if channel_major {
+            c * n + p
+        } else {
+            p * c_count + c
+        }
+    };
+
+    // Only scale when coords look normalized, so a pixel-coord export is untouched.
+    let mut max_coord = 0.0f32;
+    for p in 0..n {
+        for c in 0..4 {
+            max_coord = max_coord.max(buf[idx(c, p)].abs());
+        }
+    }
+    if max_coord > 2.0 {
+        return;
+    }
+
+    // cx, w scale by width; cy, h scale by height. imgsz is (height, width).
+    let (w, h) = (imgsz.1 as f32, imgsz.0 as f32);
+    for (c, &m) in [w, h, w, h].iter().enumerate() {
+        for p in 0..n {
+            buf[idx(c, p)] *= m;
+        }
+    }
+
+    // Pose: keypoint x/y (confidence untouched). The keypoint block follows the
+    // box + class channels: it occupies the last `nkpt * ndim` channels.
+    if task == Task::Pose
+        && let Some((nkpt, ndim)) = kpt_shape
+        && ndim >= 2
+    {
+        let start = c_count.saturating_sub(nkpt * ndim);
+        for k in 0..nkpt {
+            let xc = start + k * ndim;
+            let yc = xc + 1;
+            if yc < c_count {
+                for p in 0..n {
+                    buf[idx(xc, p)] *= w;
+                    buf[idx(yc, p)] *= h;
+                }
+            }
+        }
     }
 }
 

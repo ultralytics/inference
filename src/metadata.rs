@@ -146,9 +146,6 @@ impl ModelMetadata {
                     "end2end" => {
                         metadata.end2end = value == "true" || value == "True";
                     }
-                    "kpt_shape" => {
-                        metadata.kpt_shape = Self::parse_kpt_shape(value);
-                    }
                     "args" => {
                         // Parse args dict for half flag: {'half': True, ...}
                         if value.contains("'half': True")
@@ -168,10 +165,13 @@ impl ModelMetadata {
             }
         }
 
-        // Parse imgsz which can be a list like [640, 640]
-        if let Some(imgsz_line) = yaml_str.lines().find(|l| l.contains("imgsz:")) {
-            metadata.imgsz = Self::parse_imgsz(yaml_str, imgsz_line);
-        }
+        // imgsz is a two-integer list (`[640, 640]` inline or a `- 640` block),
+        // parsed with the same helper as kpt_shape.
+        metadata.imgsz = Self::parse_int_pair(yaml_str, "imgsz");
+
+        // kpt_shape is a two-integer list (inline `[17, 3]` or a `- 17` block),
+        // parsed with the same helper as imgsz.
+        metadata.kpt_shape = Self::parse_int_pair(yaml_str, "kpt_shape");
 
         // Parse names block if not already parsed inline
         if names.is_empty() {
@@ -182,66 +182,47 @@ impl ModelMetadata {
         Ok(metadata)
     }
 
-    /// Parse a `kpt_shape` value like "[17, 3]" or "(17, 3)" into a tuple.
-    fn parse_kpt_shape(value: &str) -> Option<(usize, usize)> {
-        let inner = value
-            .trim()
-            .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
-        let parts: Vec<usize> = inner
-            .split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect();
-        if parts.len() >= 2 {
-            Some((parts[0], parts[1]))
-        } else {
-            None
-        }
-    }
-
-    /// Parse the imgsz field which can be a YAML list.
-    fn parse_imgsz(yaml_str: &str, imgsz_line: &str) -> Option<(usize, usize)> {
-        // Check if imgsz is on a single line like "imgsz: [640, 640]"
-        if let Some(bracket_start) = imgsz_line.find('[')
-            && let Some(bracket_end) = imgsz_line.find(']')
-        {
-            let values: Vec<usize> = imgsz_line[bracket_start + 1..bracket_end]
+    /// Parse a two-integer YAML value for `key`, accepting either the inline form
+    /// (`key: [a, b]` / `key: a, b`) or a multi-line block list (`key:` then
+    /// `- a` / `- b` on following lines). Returns the first two integers.
+    fn parse_int_pair(yaml_str: &str, key: &str) -> Option<(usize, usize)> {
+        let prefix = format!("{key}:");
+        let lines: Vec<&str> = yaml_str.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            let Some(rest) = line.trim_start().strip_prefix(&prefix) else {
+                continue;
+            };
+            // Inline form: [a, b] / (a, b) / a, b
+            let rest = rest
+                .trim()
+                .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
+            let inline: Vec<usize> = rest
                 .split(',')
                 .filter_map(|s| s.trim().parse().ok())
                 .collect();
-            if values.len() >= 2 {
-                return Some((values[0], values[1]));
+            if inline.len() >= 2 {
+                return Some((inline[0], inline[1]));
             }
-        }
-
-        // Check for multi-line YAML list format
-        let lines: Vec<&str> = yaml_str.lines().collect();
-        let mut imgsz_values = Vec::new();
-
-        for (i, line) in lines.iter().enumerate() {
-            if line.contains("imgsz:") {
-                // Look at following lines for list items
-                for following in lines.iter().skip(i + 1) {
-                    let trimmed = following.trim();
-                    if trimmed.starts_with('-') {
-                        if let Ok(val) = trimmed.trim_start_matches('-').trim().parse::<usize>() {
-                            imgsz_values.push(val);
-                        }
-                    } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                        break;
+            // Multi-line block list on following `- value` lines.
+            let mut vals = Vec::new();
+            for following in lines.iter().skip(i + 1) {
+                let t = following.trim();
+                if let Some(v) = t.strip_prefix('-') {
+                    if let Ok(n) = v.trim().parse::<usize>() {
+                        vals.push(n);
                     }
-                    if imgsz_values.len() >= 2 {
-                        break;
-                    }
+                } else if !t.is_empty() && !t.starts_with('#') {
+                    break;
                 }
-                break;
+                if vals.len() >= 2 {
+                    break;
+                }
+            }
+            if vals.len() >= 2 {
+                return Some((vals[0], vals[1]));
             }
         }
-
-        if imgsz_values.len() >= 2 {
-            Some((imgsz_values[0], imgsz_values[1]))
-        } else {
-            None
-        }
+        None
     }
 
     /// Parse the names block from YAML or Python dict format.
@@ -441,11 +422,50 @@ channels: 3
     }
 
     #[test]
-    fn test_parse_kpt_shape_variants() {
-        assert_eq!(ModelMetadata::parse_kpt_shape("[17, 3]"), Some((17, 3)));
-        assert_eq!(ModelMetadata::parse_kpt_shape("(17, 2)"), Some((17, 2)));
-        assert_eq!(ModelMetadata::parse_kpt_shape("[17]"), None);
-        assert_eq!(ModelMetadata::parse_kpt_shape("garbage"), None);
+    fn test_parse_multiline_kpt_shape_and_imgsz() {
+        // Ultralytics `.tflite` metadata.yaml writes imgsz and kpt_shape as
+        // multi-line YAML block lists rather than inline `[a, b]`.
+        let yaml = "task: pose\nstride: 32\nimgsz:\n- 640\n- 640\nkpt_shape:\n- 17\n- 3\n";
+        let metadata = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(metadata.task, Task::Pose);
+        assert_eq!(metadata.imgsz, Some((640, 640)));
+        assert_eq!(metadata.kpt_shape, Some((17, 3)));
+    }
+
+    #[test]
+    fn test_parse_inline_kpt_shape() {
+        let yaml = "task: pose\nkpt_shape: [17, 3]\nstride: 32";
+        let metadata = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(metadata.kpt_shape, Some((17, 3)));
+    }
+
+    #[test]
+    fn test_parse_int_pair_inline_and_block() {
+        // Inline forms: `[a, b]`, `(a, b)`, `a, b`.
+        assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape: [17, 3]", "kpt_shape"),
+            Some((17, 3))
+        );
+        assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape: (17, 2)", "kpt_shape"),
+            Some((17, 2))
+        );
+        assert_eq!(
+            ModelMetadata::parse_int_pair("foo: 5, 6", "foo"),
+            Some((5, 6))
+        );
+        // Multi-line block list.
+        assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape:\n- 17\n- 3", "kpt_shape"),
+            Some((17, 3))
+        );
+        // A single value, junk, or wrong key yields None.
+        assert_eq!(
+            ModelMetadata::parse_int_pair("kpt_shape: [17]", "kpt_shape"),
+            None
+        );
+        assert_eq!(ModelMetadata::parse_int_pair("foo: 5", "foo"), None);
+        assert_eq!(ModelMetadata::parse_int_pair("other: 1, 2", "foo"), None);
     }
 
     #[test]
@@ -454,6 +474,31 @@ channels: 3
         let m = ModelMetadata::from_yaml_str(yaml).unwrap();
         assert_eq!(m.num_classes(), 3);
         assert_eq!(m.class_name(1), Some("bicycle"));
+    }
+
+    #[test]
+    fn test_tflite_style_metadata_text() {
+        // The `.tflite` reader rebuilds this text (unquoted `names:` block, inline
+        // lists) and hands it to `from_yaml_str`, exactly like the ONNX path.
+        let text = "task: detect\nimgsz: [640, 640]\nstride: 32\nend2end: false\nnames:\n  0: person\n  1: traffic light\n  2: men's shoe";
+        let m = ModelMetadata::from_yaml_str(text).unwrap();
+        assert_eq!(m.task, Task::Detect);
+        assert_eq!(m.imgsz, Some((640, 640)));
+        assert_eq!(m.num_classes(), 3);
+        // Names with a space and an apostrophe must survive (no escaping needed).
+        assert_eq!(m.class_name(1), Some("traffic light"));
+        assert_eq!(m.class_name(2), Some("men's shoe"));
+    }
+
+    #[test]
+    fn test_names_block_with_yaml_significant_chars() {
+        // The line parser splits on the first `:` and only treats a line as a
+        // comment when it *starts* with `#`, so class names containing `:` or `#`
+        // round-trip without escaping.
+        let text = "task: detect\nnames:\n  0: ratio 16:9\n  1: #1 pick";
+        let m = ModelMetadata::from_yaml_str(text).unwrap();
+        assert_eq!(m.class_name(0), Some("ratio 16:9"));
+        assert_eq!(m.class_name(1), Some("#1 pick"));
     }
 
     #[test]

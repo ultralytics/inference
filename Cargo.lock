@@ -2613,7 +2613,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ultralytics-inference"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -2640,18 +2640,20 @@ dependencies = [
 
 [[package]]
 name = "ultralytics-inference-web"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "console_error_panic_hook",
  "half",
  "image",
  "js-sys",
+ "miniz_oxide",
  "ndarray",
  "ort",
  "ort-web",
  "serde",
  "serde-wasm-bindgen",
  "serde_bytes",
+ "serde_json",
  "ultralytics-inference",
  "wasm-bindgen",
  "wasm-bindgen-futures",

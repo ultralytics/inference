@@ -19,7 +19,7 @@
  * ```
  */
 
-import init, { YoloModel, start, pose_palette } from "../pkg/ultralytics_inference_web.js";
+import init, { YoloModel, YoloPipeline, start, pose_palette } from "../pkg/ultralytics_inference_web.js";
 
 /** Pose drawing scheme supplied by the engine (skeleton + palette colors). */
 interface PoseScheme {
@@ -130,6 +130,13 @@ export interface LoadOptions {
    * falls back to CPU; read {@link YOLO.device} to see what actually ran.
    */
   device?: "auto" | "webgpu" | "cpu";
+  /**
+   * Base URL of the `@litertjs/core` wasm assets folder, used when the model is a
+   * `.tflite` (run through LiteRT.js). Defaults to the jsDelivr CDN. Self-host by
+   * copying `node_modules/@litertjs/core/wasm/` and pointing here (absolute URL
+   * ending in `/`). Requires the optional `@litertjs/core` peer dependency.
+   */
+  litertWasmUrl?: string | URL;
 }
 
 /**
@@ -162,6 +169,26 @@ const DEFAULT_KEYPOINT_THRESHOLD = 0.25;
  */
 function resolveModel(src: string): string {
   return /^[\w.-]+\.onnx$/i.test(src) ? ASSETS + src : src;
+}
+
+/** Whether `bytes` begin with a TFLite flatbuffer (the `TFL3` identifier at offset 4). */
+function isTflite(bytes: Uint8Array): boolean {
+  return bytes.length >= 8 && bytes[4] === 0x54 && bytes[5] === 0x46 && bytes[6] === 0x4c && bytes[7] === 0x33;
+}
+
+/**
+ * Pick the inference backend from the model: `.tflite` -> `litert`, `.onnx` ->
+ * `ort`. When the source has no known extension (raw bytes, extensionless or
+ * signed URL), the already-fetched `bytes` are sniffed for the `TFL3` identifier.
+ */
+function inferBackend(source: string | URL | ArrayBuffer | Uint8Array, bytes: Uint8Array): "ort" | "litert" {
+  if (typeof source === "string" || source instanceof URL) {
+    // Match on the pathname only so `model.tflite?v=1` or a signed URL still works.
+    const path = (source instanceof URL ? source.pathname : source).split(/[?#]/, 1)[0];
+    if (/\.tflite$/i.test(path)) return "litert";
+    if (/\.onnx$/i.test(path)) return "ort";
+  }
+  return isTflite(bytes) ? "litert" : "ort";
 }
 
 /**
@@ -294,47 +321,333 @@ function get2d(canvas: HTMLCanvasElement | OffscreenCanvas, options?: CanvasRend
   return ctx;
 }
 
+// ── Inference engines ───────────────────────────────────────────────────────
+// `YOLO` is backend-agnostic: it holds an `Engine` that runs inference and
+// returns the wasm `Results` payload. `ort` runs the whole pipeline in wasm;
+// `litert` keeps pre/postprocessing in wasm and runs inference in LiteRT.js.
+
+/** Minimal subset of the `@litertjs/core` API this wrapper uses, declared locally
+ * so the package stays an *optional* peer dependency (no build-time coupling). */
+interface LiteRtTensor {
+  // Shape lives at type.layout.dimensions in @litertjs/core (not a top-level `shape`).
+  readonly type: { layout: { dimensions: Int32Array | number[] } };
+  moveTo(backend: string): Promise<LiteRtTensor>;
+  toTypedArray(): Float32Array | Int32Array;
+  delete?(): void;
+}
+interface LiteRtCompiledModel {
+  run(input: LiteRtTensor | LiteRtTensor[]): Promise<LiteRtTensor[]>;
+  delete?(): void;
+}
+interface LiteRtModule {
+  loadLiteRt(wasmPath: string): Promise<void>;
+  loadAndCompile(model: Uint8Array | string, opts: { accelerator: string | string[] }): Promise<LiteRtCompiledModel>;
+  Tensor: new (data: Float32Array, shape: number[]) => LiteRtTensor;
+}
+
+/** Default CDN for the LiteRT.js wasm assets (override via `litertWasmUrl`). */
+const DEFAULT_LITERT_WASM = "https://cdn.jsdelivr.net/npm/@litertjs/core/wasm/";
+
+/** Import the optional `@litertjs/core` peer dep. An indirect specifier keeps it
+ * out of the build graph, so the package never hard-depends on it. */
+async function importLiteRt(): Promise<LiteRtModule> {
+  const pkg = "@litertjs/core";
+  try {
+    return (await import(/* @vite-ignore */ pkg)) as unknown as LiteRtModule;
+  } catch (e) {
+    // Keep the original error visible so a real load failure is not mistaken for
+    // a missing install.
+    throw new Error(
+      `failed to load the optional peer dependency "@litertjs/core" for the .tflite backend (run \`npm install @litertjs/core\`): ${e}`,
+    );
+  }
+}
+
+// LiteRT.js initializes its wasm runtime once per page; calling `loadLiteRt`
+// again throws "LiteRT is already loading / loaded". Cache the first init so
+// loading a second model (e.g. switching models in a demo) reuses it. The init
+// is process-global, so a later load asking for a different `wasmUrl` is rejected
+// (reload to switch) rather than silently reusing the original assets.
+let litertInit: Promise<void> | null = null;
+let litertInitUrl: string | null = null;
+function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<void> {
+  if (litertInit) {
+    if (litertInitUrl !== wasmUrl) {
+      return Promise.reject(
+        new Error(
+          `LiteRT.js wasm is initialized once per page and shared by every model: already loaded from "${litertInitUrl}", cannot switch to "${wasmUrl}". Use the same litertWasmUrl, or reload the page.`,
+        ),
+      );
+    }
+    return litertInit;
+  }
+  litertInitUrl = wasmUrl;
+  litertInit = litert.loadLiteRt(wasmUrl).catch((e) => {
+    litertInit = null; // let a later load retry if the first init failed
+    litertInitUrl = null;
+    throw e;
+  });
+  return litertInit;
+}
+
+/** Runs a `.tflite` model with LiteRT.js; inference only, pre/post stay in Rust. */
+class LiteRtBackend {
+  private constructor(
+    private readonly litert: LiteRtModule,
+    private readonly model: LiteRtCompiledModel,
+    readonly device: string,
+  ) {}
+
+  /** Import LiteRT.js, init its wasm, and compile the model, falling back from
+   * WebGPU to wasm (CPU) if the GPU accelerator cannot compile. */
+  static async load(tflite: Uint8Array, wasmUrl: string, accelerator: "webgpu" | "wasm"): Promise<LiteRtBackend> {
+    const litert = await importLiteRt();
+    await ensureLiteRtRuntime(litert, wasmUrl);
+    try {
+      const model = await litert.loadAndCompile(tflite, { accelerator });
+      return new LiteRtBackend(litert, model, accelerator);
+    } catch (e) {
+      if (accelerator === "wasm") throw e;
+      const model = await litert.loadAndCompile(tflite, { accelerator: "wasm" });
+      return new LiteRtBackend(litert, model, "wasm");
+    }
+  }
+
+  /** Upload the input tensor, run, and read every output back to the CPU. */
+  async run(
+    input: Float32Array,
+    shape: number[],
+  ): Promise<{ outputs: Float32Array[]; shapes: number[][]; inferenceMs: number }> {
+    const t0 = performance.now();
+    const cpuIn = new this.litert.Tensor(input, shape);
+    let gpuIn: LiteRtTensor | undefined;
+    try {
+      gpuIn = this.device === "wasm" ? cpuIn : await cpuIn.moveTo("webgpu");
+      const tensors = await this.model.run(gpuIn);
+      const outputs: Float32Array[] = [];
+      const shapes: number[][] = [];
+      for (const t of tensors) {
+        const host = await t.moveTo("wasm");
+        // Copy out before deleting; toTypedArray() may view the freed buffer.
+        outputs.push(new Float32Array(host.toTypedArray() as Float32Array));
+        shapes.push(Array.from(host.type.layout.dimensions));
+        host.delete?.();
+        // moveTo("wasm") returns the same tensor when it is already on wasm; only
+        // delete the original separately when it is a distinct GPU tensor.
+        if (t !== host) t.delete?.();
+      }
+      return { outputs, shapes, inferenceMs: performance.now() - t0 };
+    } finally {
+      // Free the input tensors on both success and failure (per-frame loops leak fast).
+      if (gpuIn && gpuIn !== cpuIn) gpuIn.delete?.();
+      cpuIn.delete?.();
+    }
+  }
+
+  free(): void {
+    this.model.delete?.();
+  }
+}
+
+/** Backend behind {@link YOLO}: returns the wasm `Results` payload either way. */
+interface Engine {
+  readonly task: string;
+  readonly device: string;
+  readonly names: Record<number, string>;
+  predictDrawable(
+    data: Uint8Array,
+    width: number,
+    height: number,
+    conf: number,
+    iou: number,
+    classes?: Uint32Array,
+  ): Promise<unknown>;
+  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown>;
+  free(): void;
+}
+
+/** ONNX Runtime Web engine: the full pipeline runs inside wasm. */
+class OrtEngine implements Engine {
+  constructor(private readonly model: YoloModel) {}
+  get task(): string {
+    return this.model.task;
+  }
+  get device(): string {
+    return this.model.device;
+  }
+  get names(): Record<number, string> {
+    return this.model.names as Record<number, string>;
+  }
+  predictDrawable(
+    data: Uint8Array,
+    width: number,
+    height: number,
+    conf: number,
+    iou: number,
+    classes?: Uint32Array,
+  ): Promise<unknown> {
+    return this.model.predict_rgba(data, width, height, conf, iou, classes);
+  }
+  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
+    return this.model.predict(bytes, conf, iou, classes);
+  }
+  free(): void {
+    this.model.free();
+  }
+}
+
+/** LiteRT.js engine: Rust preprocess → LiteRT inference → Rust postprocess. */
+class LiteRtEngine implements Engine {
+  // `YoloPipeline` keeps exactly one pending frame in wasm state between
+  // `preprocess_rgba` and `postprocess`, so predictions must not interleave.
+  // Serialize them: a new call waits for the in-flight one to finish.
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(
+    private readonly pipeline: YoloPipeline,
+    private readonly backend: LiteRtBackend,
+  ) {}
+  get task(): string {
+    return this.pipeline.task;
+  }
+  get device(): string {
+    // Report the CPU path as "cpu" (the package-wide label); the LiteRT backend
+    // tracks it internally as "wasm".
+    return this.backend.device === "wasm" ? "cpu" : this.backend.device;
+  }
+  get names(): Record<number, string> {
+    return this.pipeline.names as Record<number, string>;
+  }
+
+  predictDrawable(
+    data: Uint8Array,
+    width: number,
+    height: number,
+    conf: number,
+    iou: number,
+    classes?: Uint32Array,
+  ): Promise<unknown> {
+    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes));
+  }
+
+  /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
+  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
+    return this.serialize(async () => {
+      const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
+      try {
+        const { data, width, height } = toImageData(bitmap);
+        return await this.runDrawable(data, width, height, conf, iou, classes);
+      } finally {
+        bitmap.close();
+      }
+    });
+  }
+
+  private async runDrawable(
+    data: Uint8Array,
+    width: number,
+    height: number,
+    conf: number,
+    iou: number,
+    classes?: Uint32Array,
+  ): Promise<unknown> {
+    const input = this.pipeline.preprocess_rgba(data, width, height);
+    const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
+    // Flatten shapes as [rank, dims..., rank, dims...] for the wasm boundary.
+    const flatShapes: number[] = [];
+    for (const s of shapes) flatShapes.push(s.length, ...s);
+    return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes);
+  }
+
+  /** Chain `fn` after any in-flight prediction so wasm frame state is never shared. */
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(fn, fn);
+    this.queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  free(): void {
+    this.pipeline.free();
+    this.backend.free();
+  }
+}
+
+/** Fetch model bytes from a URL/path, or pass provided bytes through. */
+async function fetchModelBytes(source: string | URL | ArrayBuffer | Uint8Array): Promise<Uint8Array> {
+  if (typeof source === "string" || source instanceof URL) {
+    const resp = await fetchOk(source.toString(), "model");
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+  return source instanceof Uint8Array ? source : new Uint8Array(source);
+}
+
 /**
  * A loaded YOLO model. Loading is asynchronous, so use {@link YOLO.load} instead
  * of a constructor.
  */
 export class YOLO {
-  private constructor(private readonly model: YoloModel) {}
+  private constructor(private readonly engine: Engine) {}
 
   /**
-   * Load a model and initialize the ONNX Runtime backend.
+   * Load a model and initialize the inference backend.
    *
-   * @param source ONNX model URL/path, or its raw bytes.
-   * @param options Optional loader options (e.g. an explicit wasm URL).
+   * The engine is chosen from the model: a `.tflite` runs on LiteRT.js, an
+   * `.onnx` on ONNX Runtime Web.
+   *
+   * @param source Model URL/path, or its raw bytes (`.onnx` or `.tflite`).
+   * @param options Loader options.
    */
   static async load(source: string | URL | ArrayBuffer | Uint8Array, options?: LoadOptions): Promise<YOLO> {
     await ensureInit(options?.wasmUrl);
-    let bytes: Uint8Array;
-    if (typeof source === "string" || source instanceof URL) {
-      const url = resolveModel(source.toString());
-      const resp = await fetchOk(url, "model");
-      bytes = new Uint8Array(await resp.arrayBuffer());
-    } else {
-      bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
+    // Fetch once (a bare `.onnx` name resolves to the Ultralytics assets release),
+    // then pick the backend from the extension, or the bytes when it is unknown.
+    const bytes = await fetchModelBytes(typeof source === "string" ? resolveModel(source) : source);
+    if (inferBackend(source, bytes) === "litert") {
+      return YOLO.loadLiteRt(bytes, options);
     }
     const ortBaseUrl = options?.ortBaseUrl ? options.ortBaseUrl.toString() : undefined;
     const device = await resolveDevice(options?.device);
-    return new YOLO(await YoloModel.load_bytes(bytes, ortBaseUrl, device));
+    return new YOLO(new OrtEngine(await YoloModel.load_bytes(bytes, ortBaseUrl, device)));
+  }
+
+  /** Load the LiteRT (`.tflite`) backend. Metadata (task, class names, `imgsz`)
+   * is read from the single `.tflite` file, the same as the `.onnx` path. */
+  private static async loadLiteRt(tflite: Uint8Array, options?: LoadOptions): Promise<YOLO> {
+    const pipeline = new YoloPipeline(tflite);
+    const wasmUrl = options?.litertWasmUrl ? options.litertWasmUrl.toString() : DEFAULT_LITERT_WASM;
+    // Honor `device` including `"auto"`, which feature-detects WebGPU (so a
+    // browser without it goes straight to wasm instead of a failed compile).
+    let accelerator: "webgpu" | "wasm" = (await resolveDevice(options?.device)) === "webgpu" ? "webgpu" : "wasm";
+    // End-to-end exports (YOLO26) do NMS/top-k with int64 + gather_nd ops the
+    // LiteRT WebGPU delegate cannot run: it fails to invoke and returns zeros.
+    // Force CPU/wasm so the model works. For WebGPU speed, re-export the model
+    // with `end2end=False` so the standard head (with NMS in Rust) is used.
+    if (accelerator === "webgpu" && pipeline.end2end) {
+      accelerator = "wasm";
+      console.warn(
+        "LiteRT: this is an end2end (NMS-free) model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with `end2end=False` for WebGPU.",
+      );
+    }
+    const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
+    return new YOLO(new LiteRtEngine(pipeline, backend));
   }
 
   /** The model's task (`detect`, `segment`, `pose`, `classify`, `obb`, `semantic`). */
   get task(): string {
-    return this.model.task;
+    return this.engine.task;
   }
 
-  /** The active device that ran inference (`"webgpu"` or `"cpu"`). */
+  /** The active device that ran inference (`"webgpu"`, `"wasm"`, or `"cpu"`). */
   get device(): string {
-    return this.model.device;
+    return this.engine.device;
   }
 
   /** Class id -> name map (like Ultralytics `model.names`). */
   get names(): Record<number, string> {
-    return this.model.names as Record<number, string>;
+    return this.engine.names;
   }
 
   /**
@@ -343,7 +656,7 @@ export class YOLO {
    * Drawable sources (`ImageData`, `HTMLImageElement`, `HTMLCanvasElement`,
    * `HTMLVideoElement`, `ImageBitmap`) take a fast path that reads raw pixels
    * with no re-encoding, ideal for webcam/video. URLs, `Blob`s, and raw bytes
-   * are decoded inside wasm.
+   * are decoded (in wasm for `ort`, via a canvas for `litert`).
    *
    * @param image The image to run on.
    * @param options Confidence/IoU thresholds.
@@ -354,15 +667,15 @@ export class YOLO {
     const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return decodeResults(await this.model.predict_rgba(data, width, height, conf, iou, classes));
+      return decodeResults(await this.engine.predictDrawable(data, width, height, conf, iou, classes));
     }
     const bytes = await toEncodedBytes(image);
-    return decodeResults(await this.model.predict(bytes, conf, iou, classes));
+    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes));
   }
 
-  /** Release the underlying wasm model. Call when you are done with it. */
+  /** Release the underlying wasm model/engine. Call when you are done with it. */
   free(): void {
-    this.model.free();
+    this.engine.free();
   }
 }
 

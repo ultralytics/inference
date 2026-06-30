@@ -4,5 +4,6 @@ pkg/
 # Generated from the repo root LICENSE at pack time (prepack)
 LICENSE
 
-# Local demo (page + models + self-hosted ONNX Runtime + sample images), not committed
+# Local demo (page + models + sample images + COOP/COEP dev server), not committed
 example/
+serve.mjs

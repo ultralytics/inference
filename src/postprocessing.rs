@@ -2219,6 +2219,67 @@ mod tests {
     }
 
     #[test]
+    fn test_postprocess_pose_end2end_yolo26_layout() {
+        // YOLO26 end2end pose output: [1, max_det, 6 + 17*3] = [1, 300, 57],
+        // row-major, already in model-input pixels, sorted by confidence desc.
+        // Row = [x1, y1, x2, y2, conf, cls, (kx, ky, kconf) * 17].
+        let max_det = 300;
+        let feats = 6 + 17 * 3; // 57
+        let mut out = vec![0.0f32; max_det * feats];
+        let confs = [0.9f32, 0.6, 0.3]; // three real detections, then zeros
+        for (i, &conf) in confs.iter().enumerate() {
+            let base = i * feats;
+            out[base] = 100.0; // x1
+            out[base + 1] = 120.0; // y1
+            out[base + 2] = 200.0; // x2
+            out[base + 3] = 320.0; // y2
+            out[base + 4] = conf;
+            out[base + 5] = 0.0; // class 0 (person)
+            for k in 0..17 {
+                let off = base + 6 + k * 3;
+                out[off] = 150.0; // kx
+                out[off + 1] = 200.0; // ky
+                out[off + 2] = 0.9; // kconf
+            }
+        }
+
+        let preprocess = PreprocessResult {
+            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
+            tensor_f16: None,
+            orig_shape: (640, 640),
+            scale: (1.0, 1.0),
+            padding: (0.0, 0.0),
+        };
+        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
+
+        let results = postprocess(
+            vec![(out.as_slice(), vec![1, max_det, feats])],
+            Task::Pose,
+            &preprocess,
+            &InferenceConfig::default(),
+            names,
+            ndarray::Array3::zeros((640, 640, 3)),
+            "test.jpg".to_string(),
+            Speed::default(),
+            (640, 640),
+            true,          // end2end (yolo26)
+            Some((17, 3)), // kpt_shape
+        );
+
+        let boxes = results.boxes.expect("end2end pose should produce boxes");
+        assert_eq!(boxes.data.shape()[0], 3, "three detections above conf 0.25");
+        let kpts = results
+            .keypoints
+            .expect("end2end pose should produce keypoints");
+        assert_eq!(kpts.data.shape(), [3, 17, 3]);
+        #[allow(clippy::float_cmp)]
+        {
+            assert_eq!(kpts.data[[0, 0, 0]], 150.0); // kx passes through (scale 1, pad 0)
+            assert_eq!(kpts.data[[0, 0, 2]], 0.9); // kconf
+        }
+    }
+
+    #[test]
     fn test_postprocess_obb_logic() {
         // Mock output for OBB: [1, 6, 100]
         // 6 features = 4 bbox + 1 class + 1 angle
