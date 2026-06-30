@@ -201,7 +201,7 @@ npm install @litertjs/core # optional peer dependency, only for .tflite models
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("/models/yolo11n.tflite", {
+const model = await YOLO.load("/models/yolo26n.tflite", {
   // LiteRT.js wasm assets; defaults to the jsDelivr CDN. Self-host by copying
   // node_modules/@litertjs/core/wasm/ and pointing here (URL ending in `/`).
   litertWasmUrl: "/litert/",
