@@ -363,19 +363,32 @@ async function importLiteRt(): Promise<LiteRtModule> {
 
 // LiteRT.js initializes its wasm runtime once per page; calling `loadLiteRt`
 // again throws "LiteRT is already loading / loaded". Cache the first init so
-// loading a second model (e.g. switching models in a demo) reuses it.
+// loading a second model (e.g. switching models in a demo) reuses it. The init
+// is process-global, so a later load asking for a different `wasmUrl` is rejected
+// (reload to switch) rather than silently reusing the original assets.
 let litertInit: Promise<void> | null = null;
+let litertInitUrl: string | null = null;
 function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<void> {
-  if (!litertInit) {
-    litertInit = litert.loadLiteRt(wasmUrl).catch((e) => {
-      litertInit = null; // let a later load retry if the first init failed
-      throw e;
-    });
+  if (litertInit) {
+    if (litertInitUrl !== wasmUrl) {
+      return Promise.reject(
+        new Error(
+          `LiteRT.js wasm is initialized once per page and shared by every model: already loaded from "${litertInitUrl}", cannot switch to "${wasmUrl}". Use the same litertWasmUrl, or reload the page.`,
+        ),
+      );
+    }
+    return litertInit;
   }
+  litertInitUrl = wasmUrl;
+  litertInit = litert.loadLiteRt(wasmUrl).catch((e) => {
+    litertInit = null; // let a later load retry if the first init failed
+    litertInitUrl = null;
+    throw e;
+  });
   return litertInit;
 }
 
-/** Runs a `.tflite` model with LiteRT.js — inference only; pre/post stay in Rust. */
+/** Runs a `.tflite` model with LiteRT.js; inference only, pre/post stay in Rust. */
 class LiteRtBackend {
   private constructor(
     private readonly litert: LiteRtModule,
@@ -496,7 +509,9 @@ class LiteRtEngine implements Engine {
     return this.pipeline.task;
   }
   get device(): string {
-    return this.backend.device;
+    // Report the CPU path as "cpu" (the package-wide label); the LiteRT backend
+    // tracks it internally as "wasm".
+    return this.backend.device === "wasm" ? "cpu" : this.backend.device;
   }
   get names(): Record<number, string> {
     return this.pipeline.names as Record<number, string>;
@@ -601,7 +616,9 @@ export class YOLO {
   private static async loadLiteRt(tflite: Uint8Array, options?: LoadOptions): Promise<YOLO> {
     const pipeline = new YoloPipeline(tflite);
     const wasmUrl = options?.litertWasmUrl ? options.litertWasmUrl.toString() : DEFAULT_LITERT_WASM;
-    let accelerator: "webgpu" | "wasm" = options?.device === "cpu" ? "wasm" : "webgpu";
+    // Honor `device` including `"auto"`, which feature-detects WebGPU (so a
+    // browser without it goes straight to wasm instead of a failed compile).
+    let accelerator: "webgpu" | "wasm" = (await resolveDevice(options?.device)) === "webgpu" ? "webgpu" : "wasm";
     // End-to-end exports (YOLO26) do NMS/top-k with int64 + gather_nd ops the
     // LiteRT WebGPU delegate cannot run: it fails to invoke and returns zeros.
     // Force CPU/wasm so the model works. For WebGPU speed, re-export the model

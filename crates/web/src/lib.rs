@@ -704,10 +704,11 @@ impl YoloPipeline {
         }
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
-        let t_end = now_ms();
-        let speed = Speed::new(pending.pre_ms, inference_ms, t_end - t_post);
+        // Postprocess time is unknown until the call returns, so pass 0 here and
+        // stamp the real duration onto the result afterwards (as the native path does).
+        let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        let results = postprocess(
+        let mut results = postprocess(
             views,
             self.metadata.task,
             &pending.pre,
@@ -720,6 +721,7 @@ impl YoloPipeline {
             self.metadata.end2end,
             self.metadata.kpt_shape,
         );
+        results.speed.postprocess = Some(now_ms() - t_post);
         let payload = JsResults::from_results(&results, self.metadata.task);
         to_js(&payload, "results")
     }
