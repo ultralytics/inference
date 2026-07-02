@@ -358,7 +358,6 @@ fn normalize_model_path(path: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Returns an error if the model name is not in the supported list, or if the download fails.
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
     let normalized = normalize_model_path(path);
