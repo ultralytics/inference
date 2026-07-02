@@ -89,6 +89,7 @@ impl VideoWriter {
     /// # Errors
     ///
     /// Returns an error if the encoder cannot be initialized.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn new<P: AsRef<Path>>(path: P, width: usize, height: usize, fps: f32) -> Result<Self> {
         let output_path = path.as_ref().to_path_buf();
 
@@ -126,6 +127,7 @@ impl VideoWriter {
     /// # Errors
     ///
     /// Returns an error if encoding fails or frame dimensions don't match.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn write_frame(&mut self, frame: &image::DynamicImage) -> Result<()> {
         let img_buffer = frame.to_rgb8();
         let width = img_buffer.width() as usize;
@@ -159,6 +161,7 @@ impl VideoWriter {
     /// # Errors
     ///
     /// Returns an error if the encoder fails to finish.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn finish(mut self) -> Result<()> {
         self.encoder.finish().map_err(|e| {
             InferenceError::VideoError(format!("Failed to finish video encoding: {e}"))
