@@ -502,17 +502,18 @@ const fn precision_label(is_half: bool) -> &'static str {
 }
 
 fn provider_label(provider: &str) -> &'static str {
-    if provider.contains("CoreML") {
+    let provider = provider.to_ascii_lowercase();
+    if provider.contains("coreml") {
         "CoreML"
-    } else if provider.contains("CUDA") {
+    } else if provider.contains("cuda") {
         "CUDA"
-    } else if provider.contains("TensorRT") {
+    } else if provider.contains("tensorrt") {
         "TensorRT"
-    } else if provider.contains("DirectML") {
+    } else if provider.contains("directml") {
         "DirectML"
-    } else if provider.contains("ROCm") {
+    } else if provider.contains("rocm") {
         "ROCm"
-    } else if provider.contains("OpenVINO") {
+    } else if provider.contains("openvino") {
         "OpenVINO"
     } else {
         "CPU"
@@ -730,7 +731,7 @@ mod tests {
         assert_eq!(precision_label(true), "FP16");
         assert_eq!(provider_label("CoreMLExecutionProvider"), "CoreML");
         assert_eq!(provider_label("CUDAExecutionProvider"), "CUDA");
-        assert_eq!(provider_label("TensorrtExecutionProvider"), "CPU");
+        assert_eq!(provider_label("TensorrtExecutionProvider"), "TensorRT");
         assert_eq!(provider_label("TensorRTExecutionProvider"), "TensorRT");
         assert_eq!(provider_label("DirectMLExecutionProvider"), "DirectML");
         assert_eq!(provider_label("ROCmExecutionProvider"), "ROCm");
