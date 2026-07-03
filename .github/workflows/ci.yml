@@ -34,12 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Some macos-runner Xcode toolchains dangle libclang_rt.osx.a (ld:
-      # library 'clang_rt.osx' not found): the old 16.4, and Release Candidate
-      # builds such as 26.x RC on the macOS 26 image. Select the newest present
-      # stable (non-beta, non-RC) Xcode and export its version so the Rust cache
-      # key is scoped to it - otherwise a cache built under one image's Xcode
-      # dangles on another.
       - name: Select Xcode (macOS)
         if: matrix.os == 'macos-latest'
         run: |
@@ -131,13 +125,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      # Some macos-runner Xcode toolchains dangle libclang_rt.osx.a (ld:
-      # library 'clang_rt.osx' not found): the old 16.4, and Release Candidate
-      # builds such as 26.x RC on the macOS 26 image. Select the newest present
-      # stable (non-beta, non-RC) Xcode and export its version so the Rust cache
-      # key is scoped to it - otherwise a cache built under one image's Xcode
-      # dangles on another.
       - name: Select Xcode (macOS)
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|release[ _]candidate|16\.4' | sort -V | tail -1)"
