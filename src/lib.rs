@@ -2,6 +2,7 @@
 
 #![allow(clippy::multiple_crate_versions)]
 #![deny(dead_code)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! # Ultralytics YOLO Inference Library

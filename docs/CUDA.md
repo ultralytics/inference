@@ -8,7 +8,7 @@
 | `tensorrt`        | ORT TensorRT EP (FP16, engine cache, opt-level 5)   | NVIDIA GPU with TensorRT installed; 2–3× faster than `cuda`                                      |
 | `cuda-preprocess` | GPU-side preprocess + zero-copy device input to TRT | maximum throughput; `YOLOModel::predict_image` transparently uses a fused CUDA preprocess kernel |
 
-`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required — `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](crate::InferenceConfig::with_cuda_preprocess).
+`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required - `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](crate::InferenceConfig::with_cuda_preprocess).
 
 ## Requirements
 
@@ -32,7 +32,7 @@ ultralytics-inference = { version = "0.0.26", features = ["tensorrt"] }
 ultralytics-inference = { version = "0.0.26", features = ["cuda-preprocess"] }
 ```
 
-Then `cargo build --release` — no extra flags needed.
+Then `cargo build --release` - no extra flags needed.
 
 For the CLI / examples in this repo directly:
 
@@ -104,7 +104,7 @@ What to expect and how to avoid surprises:
   to `.gitignore`, not to clean builds) to avoid paying the cost again.
 - **Cache is keyed to the build context.** A new engine is built whenever the
   model file, GPU/driver/TensorRT version, precision (`--half`), or **input
-  shape** changes. **Dynamic-shape models rebuild per new input size** — feed a
+  shape** changes. **Dynamic-shape models rebuild per new input size** - feed a
   consistent size (the fast path uses the model's resolved `imgsz`) to keep it
   to a single cached engine.
 - **Warm up before timing.** The first `predict*` call also triggers an
@@ -182,7 +182,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg \
 ```
 
 This uses the TensorRT EP (FP16 + engine cache). The `cuda-preprocess` kernel
-fast path is **not** used by the CLI — the CLI runs through the batch
+fast path is **not** used by the CLI - the CLI runs through the batch
 processor, which uses CPU preprocess. The GPU preprocess path is reached only
 through `YOLOModel::predict_image` in library code.
 
@@ -195,5 +195,5 @@ through `YOLOModel::predict_image` in library code.
 | `cudarc-* build script failed: \`nvcc --version\` failed`                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).    |
 | `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`. |
 | `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.          |
-| TRT engine build is slow on first run                                      | Expected — engines are cached under `.trt_cache/`. Subsequent runs reuse them.           |
+| TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.           |
 | Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.   |
