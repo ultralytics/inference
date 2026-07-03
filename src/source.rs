@@ -252,6 +252,7 @@ struct BilinearVideoDecoder {
 
 #[cfg(feature = "video")]
 impl BilinearVideoDecoder {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn new(path: &Path) -> Result<Self> {
         ffmpeg::init().map_err(|e| InferenceError::VideoError(format!("FFmpeg init: {e}")))?;
 
@@ -296,6 +297,7 @@ impl BilinearVideoDecoder {
     }
 
     /// Decode the next frame as an RGB24 `DynamicImage`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn decode_next(&mut self) -> Option<Result<DynamicImage>> {
         let mut decoded = ffmpeg::util::frame::video::Video::empty();
 
@@ -335,6 +337,7 @@ impl BilinearVideoDecoder {
     }
 
     /// Convert a decoded video frame to RGB24 `DynamicImage` using BILINEAR scaler.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn frame_to_image(
         &mut self,
         decoded: &ffmpeg::util::frame::video::Video,
@@ -585,6 +588,7 @@ impl SourceIterator {
 
     /// Get the next video frame.
     #[cfg(feature = "video")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[allow(unsafe_code, clippy::too_many_lines)]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
         // Handle Webcam separately using native ffmpeg

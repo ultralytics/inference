@@ -122,6 +122,7 @@ impl YOLOModel {
     /// # Errors
     ///
     /// Returns an error if the model file doesn't exist or can't be loaded.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn load_with_config<P: AsRef<Path>>(path: P, config: InferenceConfig) -> Result<Self> {
         let path = path.as_ref();
 
@@ -775,6 +776,7 @@ impl YOLOModel {
     ///
     /// This pre-allocates memory and optimizes the execution graph for faster
     /// subsequent inferences. Warmup is automatically called on first predict.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn warmup(&mut self) -> Result<()> {
         if self.warmed_up {
             return Ok(());
@@ -816,6 +818,7 @@ impl YOLOModel {
     }
 
     /// Extract metadata from the ONNX model session.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn extract_metadata(session: &Session) -> Result<ModelMetadata> {
         // Get metadata from the model
         let model_metadata = session.metadata().map_err(|e| {
@@ -898,6 +901,7 @@ impl YOLOModel {
     /// # Errors
     ///
     /// Returns an error if the image can't be loaded or inference fails.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict<P: AsRef<Path>>(&mut self, path: P) -> Result<Vec<Results>> {
         let path = path.as_ref();
 
@@ -922,6 +926,7 @@ impl YOLOModel {
     /// # Returns
     ///
     /// Vector of Results.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
         // Fast path: GPU preprocess + zero-copy device input.
         //
@@ -1141,6 +1146,7 @@ impl YOLOModel {
     /// # Errors
     ///
     /// Returns an error if the download or inference fails.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_default(&mut self) -> Result<Vec<Results>> {
         let urls: &[&str] = if self.task() == crate::task::Task::Obb {
             &[DEFAULT_OBB_IMAGE]
@@ -1172,6 +1178,7 @@ impl YOLOModel {
     /// # Errors
     ///
     /// Returns an error if inference fails.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_batch(
         &mut self,
         images: &[DynamicImage],
@@ -1183,6 +1190,7 @@ impl YOLOModel {
     }
 
     /// Internal method to run inference on a batch of image references.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn predict_internal(
         &mut self,
         images: &[&DynamicImage],
@@ -1435,6 +1443,7 @@ impl YOLOModel {
     /// # Returns
     ///
     /// Vector of Results.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_array(&mut self, image: &Array3<u8>, path: String) -> Result<Vec<Results>> {
         // Convert array to DynamicImage
         let dynamic_img = crate::utils::array_to_image(image)?;
@@ -1455,6 +1464,7 @@ impl YOLOModel {
     ///
     /// * Vector of `SourceMeta` and Results pairs.
     #[cfg(feature = "annotate")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[allow(clippy::too_many_lines)]
     pub fn predict_source(
         &mut self,
@@ -1518,6 +1528,7 @@ impl YOLOModel {
     ///
     /// Run a single forward pass for warmup, discarding outputs.
     ///
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run_warmup(
         session: &mut Session,
         input_name: &str,
@@ -1544,6 +1555,7 @@ impl YOLOModel {
     }
 
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run_timed<'s>(
         session: &'s mut Session,
         inputs: Vec<(
@@ -1565,6 +1577,7 @@ impl YOLOModel {
     /// This avoids a ~40 ms memcpy for large semantic segmentation outputs.
     ///
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run_inference_with<R>(
         session: &mut Session,
         input_name: &str,
@@ -1581,6 +1594,7 @@ impl YOLOModel {
     }
 
     /// Build zero-copy slice views over ORT output tensors and call `cb`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn extract_and_invoke<R>(
         outputs: &ort::session::SessionOutputs<'_>,
         output_names: &[String],
@@ -1630,6 +1644,7 @@ impl YOLOModel {
 
     /// Run ONNX inference with FP32 input where outputs are `uint8` tensors
     /// (e.g. a semantic segmentation model that has ArgMax+Cast(uint8) baked in). Zero-copy.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run_inference_u8_with<R>(
         session: &mut Session,
         input_name: &str,
@@ -1646,6 +1661,7 @@ impl YOLOModel {
     }
 
     /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn extract_and_invoke_u8<R>(
         outputs: &ort::session::SessionOutputs<'_>,
         output_names: &[String],
@@ -1673,6 +1689,7 @@ impl YOLOModel {
 
     /// Run ONNX inference with FP16 input where outputs are `uint8` tensors
     /// (e.g. a semantic segmentation model with FP16 input that has ArgMax+Cast(uint8) baked in).
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run_inference_f16_u8_with<R>(
         session: &mut Session,
         input_name: &str,
@@ -1689,6 +1706,7 @@ impl YOLOModel {
     }
 
     /// Run ONNX inference with FP16 input, zero-copy callback (FP16 outputs are converted).
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run_inference_f16_with<R>(
         session: &mut Session,
         input_name: &str,

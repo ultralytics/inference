@@ -140,6 +140,7 @@ const fn is_transient(e: &ureq::Error) -> bool {
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut last_err = InferenceError::ModelLoadError(String::new());
 
@@ -384,6 +385,7 @@ pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
 ///
 /// # Errors
 /// Returns an error if the download fails or file I/O errors occur.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn download_image(url: &str) -> Result<String> {
     let filename = url.rsplit('/').next().unwrap_or("image.jpg");
     let dest = Path::new(filename);
@@ -404,6 +406,7 @@ pub fn download_image(url: &str) -> Result<String> {
 /// Download multiple images from URLs to the current directory.
 /// Skips files that already exist.
 #[must_use]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn download_images(urls: &[&str]) -> Vec<String> {
     urls.iter()
         .filter_map(|url| download_image(url).ok())
