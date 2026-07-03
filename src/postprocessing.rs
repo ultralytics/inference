@@ -422,8 +422,6 @@ fn extract_detect_boxes(
     config: &InferenceConfig,
 ) -> Array2<f32> {
     let feat_count = 4 + num_classes;
-    let (scale_y, scale_x) = preprocess.scale;
-    let (pad_top, pad_left) = preprocess.padding;
     let orig_shape = preprocess.orig_shape;
     let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
     let conf_thresh = config.confidence_threshold;
@@ -464,13 +462,14 @@ fn extract_detect_boxes(
                 let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
                 let h = unsafe { *output.get_unchecked(3 * num_predictions + idx) };
 
-                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
-                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
-                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
-                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+                let bbox = scale_coords(
+                    &xywh_to_xyxy(cx, cy, w, h),
+                    preprocess.scale,
+                    preprocess.padding,
+                );
 
                 candidates.push(Candidate {
-                    bbox: [x1, y1, x2, y2],
+                    bbox,
                     score,
                     class: best_class,
                 });
@@ -519,13 +518,14 @@ fn extract_detect_boxes(
                 let w = unsafe { *output.get_unchecked(base + 2) };
                 let h = unsafe { *output.get_unchecked(base + 3) };
 
-                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
-                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
-                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
-                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+                let bbox = scale_coords(
+                    &xywh_to_xyxy(cx, cy, w, h),
+                    preprocess.scale,
+                    preprocess.padding,
+                );
 
                 candidates.push(Candidate {
-                    bbox: [x1, y1, x2, y2],
+                    bbox,
                     score: best_score,
                     class: best_class,
                 });
