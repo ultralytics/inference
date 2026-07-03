@@ -377,6 +377,19 @@ fn scale_and_clip_box(xyxy: &[f32; 4], preprocess: &PreprocessResult) -> [f32; 4
     clip_coords(&scaled, preprocess.orig_shape)
 }
 
+/// Scale a single keypoint from letterboxed inference space back to the original
+/// image, then clamp it to the image bounds.
+#[inline]
+fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
+    let scaled = scale_coords(&[x, y, x, y], preprocess.scale, preprocess.padding);
+    #[allow(clippy::cast_precision_loss)]
+    let (max_h, max_w) = (
+        preprocess.orig_shape.0 as f32,
+        preprocess.orig_shape.1 as f32,
+    );
+    (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
+}
+
 /// Reshape a flat model output into a `[preds, features]` 2D array.
 ///
 /// When `is_transposed` the data is already laid out `[preds, features]`;
@@ -1049,17 +1062,7 @@ fn postprocess_pose(
             let kpt_conf = output_2d[[i, kpt_offset + 2]];
 
             // Scale keypoint coordinates to original image space
-            let scaled_kpt = scale_coords(
-                &[kpt_x, kpt_y, kpt_x, kpt_y],
-                preprocess.scale,
-                preprocess.padding,
-            );
-            let (oh, ow) = preprocess.orig_shape;
-            #[allow(clippy::cast_precision_loss)]
-            let scaled_x = scaled_kpt[0].max(0.0).min(ow as f32);
-            #[allow(clippy::cast_precision_loss)]
-            let scaled_y = scaled_kpt[1].max(0.0).min(oh as f32);
-
+            let (scaled_x, scaled_y) = scale_keypoint(kpt_x, kpt_y, preprocess);
             keypoints.push([scaled_x, scaled_y, kpt_conf]);
         }
 
@@ -1565,10 +1568,6 @@ fn postprocess_pose_end2end(
         return results;
     }
 
-    let (oh, ow) = preprocess.orig_shape;
-    let (max_w, max_h) = (ow as f32, oh as f32);
-    let (scale_y, scale_x) = preprocess.scale;
-    let (pad_top, pad_left) = preprocess.padding;
     let user_cap = config.max_det.min(max_det);
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1597,10 +1596,9 @@ fn postprocess_pose_end2end(
         let kstart = base + 6;
         for k in 0..nk {
             let off = kstart + k * kpt_dim;
-            let sx = (output[off] - pad_left) / scale_x;
-            let sy = (output[off + 1] - pad_top) / scale_y;
+            let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
             let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
-            flat_kpts.extend_from_slice(&[sx.clamp(0.0, max_w), sy.clamp(0.0, max_h), kconf]);
+            flat_kpts.extend_from_slice(&[sx, sy, kconf]);
         }
         if flat_boxes.len() >= user_cap * 6 {
             break;
