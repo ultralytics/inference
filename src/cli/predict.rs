@@ -18,9 +18,13 @@ use crate::{DISPLAY_NAME, InferenceConfig, Results, VERSION, YOLOModel};
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
+use crate::task::Task;
 use crate::{error, verbose, warn};
 
+const DEFAULT_OBB_IMAGES: &[&str] = &[crate::download::DEFAULT_OBB_IMAGE];
+
 /// Run YOLO model inference.
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
     clippy::too_many_lines,
     clippy::option_if_let_else,
@@ -32,27 +36,17 @@ use crate::{error, verbose, warn};
 )]
 pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments - use default model if not specified
-    let model_is_default = args.model.is_none();
-    let model_path = args.model.clone().unwrap_or_else(|| {
-        args.task
-            .unwrap_or(crate::task::Task::Detect)
-            .default_model()
-    });
+    let (model_path, model_is_default) = resolve_model_path(args);
     let source_path = &args.source;
-    let conf_threshold = args.conf;
-    let iou_threshold = args.iou;
-    let imgsz = args.imgsz;
     let save = args.save;
     let save_frames = args.save_frames;
     let save_json = args.save_json;
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
-    let device: Option<crate::Device> = args.device.as_deref().map(|d| {
-        d.parse().unwrap_or_else(|e| {
-            error!("Invalid device '{d}': {e}");
-            process::exit(1);
-        })
+    let device = parse_device_arg(args.device.as_deref()).unwrap_or_else(|e| {
+        error!("{e}");
+        process::exit(1);
     });
     #[cfg(feature = "visualize")]
     let show = args.show;
@@ -61,39 +55,10 @@ pub fn run_prediction(args: &PredictArgs) {
     }
 
     // Load model first so we can determine appropriate default source based on task
-    let mut config = InferenceConfig::new()
-        .with_confidence(conf_threshold)
-        .with_iou(iou_threshold)
-        .with_half(half)
-        .with_batch(batch_size)
-        .with_save_frames(save_frames)
-        .with_rect(args.rect)
-        .with_max_det(args.max_det);
-
-    // Apply imgsz if specified
-    if let Some(sz) = imgsz {
-        config = config.with_imgsz(sz, sz);
-    }
-
-    // Apply device if specified
-    if let Some(d) = &device {
-        config = config.with_device(d.clone());
-    }
-
-    // Apply class filter if specified
-    if let Some(classes_str) = &args.classes {
-        match crate::cli::args::parse_classes(classes_str) {
-            Ok(classes) => {
-                if !classes.is_empty() {
-                    config = config.with_classes(classes);
-                }
-            }
-            Err(e) => {
-                error!("Error parsing classes: {e}");
-                process::exit(1);
-            }
-        }
-    }
+    let config = build_inference_config(args, device).unwrap_or_else(|e| {
+        error!("{e}");
+        process::exit(1);
+    });
 
     let mut model = match YOLOModel::load_with_config(model_path, config) {
         Ok(m) => m,
@@ -123,10 +88,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let source = source_path.as_ref().map_or_else(
         || {
             // Select default images based on model task
-            let default_urls = match model.task() {
-                crate::task::Task::Obb => &[crate::download::DEFAULT_OBB_IMAGE],
-                _ => crate::download::DEFAULT_IMAGES,
-            };
+            let default_urls = default_source_urls(model.task());
 
             if verbose {
                 warn!(
@@ -163,20 +125,10 @@ pub fn run_prediction(args: &PredictArgs) {
 
     // Determine whether we need an incremented predict dir. `--save` always needs one
     // when annotation support is compiled in; semantic class-map export also needs one.
-    #[cfg(feature = "annotate")]
-    let need_predict_dir = save || (save_json && model.task() == crate::task::Task::Semantic);
-    #[cfg(not(feature = "annotate"))]
-    let need_predict_dir = save_json && model.task() == crate::task::Task::Semantic;
+    let need_predict_dir = needs_predict_dir(save, save_json, model.task());
 
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
-        let parent_dir = match model.task() {
-            crate::task::Task::Detect => "runs/detect",
-            crate::task::Task::Segment => "runs/segment",
-            crate::task::Task::Pose => "runs/pose",
-            crate::task::Task::Classify => "runs/classify",
-            crate::task::Task::Obb => "runs/obb",
-            crate::task::Task::Semantic => "runs/semantic",
-        };
+        let parent_dir = predict_parent_dir(model.task());
         let dir = find_next_run_dir(parent_dir, "predict");
         if let Err(e) = crate::io::ensure_dir(Path::new(&dir)) {
             error!("Failed to create save directory '{dir}': {e}");
@@ -189,7 +141,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
     // Per-image semantic class maps go in `<save_dir>/results/<stem>.png`.
     let results_dir: Option<std::path::PathBuf> = save_dir.as_ref().and_then(|d| {
-        if !save_json || model.task() != crate::task::Task::Semantic {
+        if !needs_results_dir(save_json, model.task()) {
             return None;
         }
         let dir = d.join("results");
@@ -211,25 +163,8 @@ pub fn run_prediction(args: &PredictArgs) {
     }
 
     let is_half = model.metadata().half || half;
-    let precision = if is_half { "FP16" } else { "FP32" };
-    let device_str = {
-        let provider = model.execution_provider();
-        if provider.contains("CoreML") {
-            "CoreML".to_string()
-        } else if provider.contains("CUDA") {
-            "CUDA".to_string()
-        } else if provider.contains("TensorRT") {
-            "TensorRT".to_string()
-        } else if provider.contains("DirectML") {
-            "DirectML".to_string()
-        } else if provider.contains("ROCm") {
-            "ROCm".to_string()
-        } else if provider.contains("OpenVINO") {
-            "OpenVINO".to_string()
-        } else {
-            "CPU".to_string()
-        }
-    };
+    let precision = precision_label(is_half);
+    let device_str = provider_label(model.execution_provider());
     println!("{DISPLAY_NAME} {VERSION} 🚀 Rust ONNX {precision} {device_str}");
     println!("Using ONNX Runtime {}", model.execution_provider());
 
@@ -351,16 +286,8 @@ pub fn run_prediction(args: &PredictArgs) {
                         {
                             // For video/webcam sources every frame shares the same path stem,
                             // so append the frame index to avoid overwriting earlier frames.
-                            let base_stem =
-                                std::path::Path::new(image_path).file_stem().map_or_else(
-                                    || "frame".to_owned(),
-                                    |s| s.to_string_lossy().into_owned(),
-                                );
-                            let stem = if meta.total_frames == Some(1) {
-                                base_stem
-                            } else {
-                                format!("{base_stem}_{:06}", meta.frame_idx)
-                            };
+                            let stem =
+                                semantic_output_stem(image_path, meta.frame_idx, meta.total_frames);
                             let out_path = cdir.join(format!("{stem}.png"));
                             let (h, w) = (sm.data.shape()[0], sm.data.shape()[1]);
                             let max_id = sm.data.iter().copied().max().unwrap_or(0);
@@ -489,6 +416,121 @@ pub fn run_prediction(args: &PredictArgs) {
     verbose!("💡 Learn more at https://docs.ultralytics.com/modes/predict");
 }
 
+fn resolve_model_path(args: &PredictArgs) -> (String, bool) {
+    let model_is_default = args.model.is_none();
+    let model_path = args
+        .model
+        .clone()
+        .unwrap_or_else(|| args.task.unwrap_or(Task::Detect).default_model());
+    (model_path, model_is_default)
+}
+
+fn parse_device_arg(device: Option<&str>) -> Result<Option<crate::Device>, String> {
+    device
+        .map(|d| d.parse().map_err(|e| format!("Invalid device '{d}': {e}")))
+        .transpose()
+}
+
+fn build_inference_config(
+    args: &PredictArgs,
+    device: Option<crate::Device>,
+) -> Result<InferenceConfig, String> {
+    let mut config = InferenceConfig::new()
+        .with_confidence(args.conf)
+        .with_iou(args.iou)
+        .with_half(args.half)
+        .with_batch(args.batch as usize)
+        .with_save_frames(args.save_frames)
+        .with_rect(args.rect)
+        .with_max_det(args.max_det);
+
+    if let Some(sz) = args.imgsz {
+        config = config.with_imgsz(sz, sz);
+    }
+
+    if let Some(d) = device {
+        config = config.with_device(d);
+    }
+
+    if let Some(classes_str) = &args.classes {
+        let classes = crate::cli::args::parse_classes(classes_str)
+            .map_err(|e| format!("Error parsing classes: {e}"))?;
+        if !classes.is_empty() {
+            config = config.with_classes(classes);
+        }
+    }
+
+    Ok(config)
+}
+
+const fn default_source_urls(task: Task) -> &'static [&'static str] {
+    match task {
+        Task::Obb => DEFAULT_OBB_IMAGES,
+        _ => crate::download::DEFAULT_IMAGES,
+    }
+}
+
+fn needs_predict_dir(save: bool, save_json: bool, task: Task) -> bool {
+    #[cfg(feature = "annotate")]
+    {
+        save || needs_results_dir(save_json, task)
+    }
+    #[cfg(not(feature = "annotate"))]
+    {
+        let _ = save;
+        needs_results_dir(save_json, task)
+    }
+}
+
+const fn predict_parent_dir(task: Task) -> &'static str {
+    match task {
+        Task::Detect => "runs/detect",
+        Task::Segment => "runs/segment",
+        Task::Pose => "runs/pose",
+        Task::Classify => "runs/classify",
+        Task::Obb => "runs/obb",
+        Task::Semantic => "runs/semantic",
+    }
+}
+
+fn needs_results_dir(save_json: bool, task: Task) -> bool {
+    save_json && task == Task::Semantic
+}
+
+const fn precision_label(is_half: bool) -> &'static str {
+    if is_half { "FP16" } else { "FP32" }
+}
+
+fn provider_label(provider: &str) -> &'static str {
+    let provider = provider.to_ascii_lowercase();
+    if provider.contains("coreml") {
+        "CoreML"
+    } else if provider.contains("cuda") {
+        "CUDA"
+    } else if provider.contains("tensorrt") {
+        "TensorRT"
+    } else if provider.contains("directml") {
+        "DirectML"
+    } else if provider.contains("rocm") {
+        "ROCm"
+    } else if provider.contains("openvino") {
+        "OpenVINO"
+    } else {
+        "CPU"
+    }
+}
+
+fn semantic_output_stem(image_path: &str, frame_idx: usize, total_frames: Option<usize>) -> String {
+    let base_stem = std::path::Path::new(image_path)
+        .file_stem()
+        .map_or_else(|| "frame".to_owned(), |s| s.to_string_lossy().into_owned());
+    if total_frames == Some(1) {
+        base_stem
+    } else {
+        format!("{base_stem}_{frame_idx:06}")
+    }
+}
+
 /// Count detections per class and format as summary string (e.g., "4 persons, 1 bus").
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn format_detection_summary(result: &Results) -> String {
@@ -514,6 +556,203 @@ mod tests {
 
     fn create_dummy_image() -> Array3<u8> {
         Array3::zeros((100, 100, 3))
+    }
+
+    fn predict_args() -> PredictArgs {
+        PredictArgs {
+            model: None,
+            task: None,
+            source: None,
+            conf: InferenceConfig::DEFAULT_CONF,
+            iou: InferenceConfig::DEFAULT_IOU,
+            max_det: InferenceConfig::DEFAULT_MAX_DET,
+            imgsz: None,
+            rect: InferenceConfig::DEFAULT_RECT,
+            batch: 1,
+            half: InferenceConfig::DEFAULT_HALF,
+            save: InferenceConfig::DEFAULT_SAVE,
+            save_frames: InferenceConfig::DEFAULT_SAVE_FRAMES,
+            save_json: false,
+            show: false,
+            device: None,
+            verbose: true,
+            classes: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_model_path_uses_detect_default() {
+        let args = predict_args();
+
+        let (model_path, model_is_default) = resolve_model_path(&args);
+
+        assert_eq!(model_path, "yolo26n.onnx");
+        assert!(model_is_default);
+    }
+
+    #[test]
+    fn test_resolve_model_path_uses_task_default() {
+        let args = PredictArgs {
+            task: Some(Task::Semantic),
+            ..predict_args()
+        };
+
+        let (model_path, model_is_default) = resolve_model_path(&args);
+
+        assert_eq!(model_path, "yolo26n-sem.onnx");
+        assert!(model_is_default);
+    }
+
+    #[test]
+    fn test_resolve_model_path_keeps_explicit_model() {
+        let args = PredictArgs {
+            model: Some("custom.onnx".to_string()),
+            task: Some(Task::Pose),
+            ..predict_args()
+        };
+
+        let (model_path, model_is_default) = resolve_model_path(&args);
+
+        assert_eq!(model_path, "custom.onnx");
+        assert!(!model_is_default);
+    }
+
+    #[test]
+    fn test_parse_device_arg() {
+        assert_eq!(parse_device_arg(None).unwrap(), None);
+        assert_eq!(
+            parse_device_arg(Some("cuda:2")).unwrap(),
+            Some(crate::Device::Cuda(2))
+        );
+
+        let err = parse_device_arg(Some("neural")).unwrap_err();
+        assert!(err.contains("Invalid device 'neural'"));
+        assert!(err.contains("Unknown device: neural"));
+    }
+
+    #[test]
+    fn test_build_inference_config_from_cli_args() {
+        let args = PredictArgs {
+            conf: 0.42,
+            iou: 0.55,
+            max_det: 77,
+            imgsz: Some(512),
+            rect: false,
+            batch: 4,
+            half: true,
+            save_frames: true,
+            classes: Some("[0, 2, 5]".to_string()),
+            ..predict_args()
+        };
+
+        let config = build_inference_config(&args, Some(crate::Device::OpenVino)).unwrap();
+
+        assert!((config.confidence_threshold - 0.42).abs() < f32::EPSILON);
+        assert!((config.iou_threshold - 0.55).abs() < f32::EPSILON);
+        assert_eq!(config.max_det, 77);
+        assert_eq!(config.imgsz, Some((512, 512)));
+        assert_eq!(config.batch, Some(4));
+        assert!(config.half);
+        assert_eq!(config.device, Some(crate::Device::OpenVino));
+        assert!(config.save_frames);
+        assert!(!config.rect);
+        assert_eq!(config.classes, Some(vec![0, 2, 5]));
+    }
+
+    #[test]
+    fn test_build_inference_config_ignores_empty_class_filter() {
+        let args = PredictArgs {
+            classes: Some("[]".to_string()),
+            ..predict_args()
+        };
+
+        let config = build_inference_config(&args, None).unwrap();
+
+        assert!(config.classes.is_none());
+    }
+
+    #[test]
+    fn test_build_inference_config_rejects_invalid_classes() {
+        let args = PredictArgs {
+            classes: Some("0,truck".to_string()),
+            ..predict_args()
+        };
+
+        let err = build_inference_config(&args, None).unwrap_err();
+
+        assert!(err.contains("Error parsing classes"));
+        assert!(err.contains("Invalid class ID 'truck'"));
+    }
+
+    #[test]
+    fn test_default_source_urls_are_task_specific() {
+        assert_eq!(
+            default_source_urls(Task::Detect),
+            crate::download::DEFAULT_IMAGES
+        );
+        assert_eq!(
+            default_source_urls(Task::Segment),
+            crate::download::DEFAULT_IMAGES
+        );
+        assert_eq!(
+            default_source_urls(Task::Obb),
+            &[crate::download::DEFAULT_OBB_IMAGE]
+        );
+    }
+
+    #[test]
+    fn test_predict_parent_dir_by_task() {
+        assert_eq!(predict_parent_dir(Task::Detect), "runs/detect");
+        assert_eq!(predict_parent_dir(Task::Segment), "runs/segment");
+        assert_eq!(predict_parent_dir(Task::Pose), "runs/pose");
+        assert_eq!(predict_parent_dir(Task::Classify), "runs/classify");
+        assert_eq!(predict_parent_dir(Task::Obb), "runs/obb");
+        assert_eq!(predict_parent_dir(Task::Semantic), "runs/semantic");
+    }
+
+    #[test]
+    fn test_predict_dir_needed_for_saves_and_semantic_json() {
+        assert!(needs_predict_dir(false, true, Task::Semantic));
+        assert!(!needs_predict_dir(false, true, Task::Detect));
+        assert!(needs_results_dir(true, Task::Semantic));
+        assert!(!needs_results_dir(true, Task::Segment));
+        assert!(!needs_results_dir(false, Task::Semantic));
+
+        #[cfg(feature = "annotate")]
+        assert!(needs_predict_dir(true, false, Task::Detect));
+
+        #[cfg(not(feature = "annotate"))]
+        assert!(!needs_predict_dir(true, false, Task::Detect));
+    }
+
+    #[test]
+    fn test_precision_and_provider_labels() {
+        assert_eq!(precision_label(false), "FP32");
+        assert_eq!(precision_label(true), "FP16");
+        assert_eq!(provider_label("CoreMLExecutionProvider"), "CoreML");
+        assert_eq!(provider_label("CUDAExecutionProvider"), "CUDA");
+        assert_eq!(provider_label("TensorrtExecutionProvider"), "TensorRT");
+        assert_eq!(provider_label("TensorRTExecutionProvider"), "TensorRT");
+        assert_eq!(provider_label("DirectMLExecutionProvider"), "DirectML");
+        assert_eq!(provider_label("ROCmExecutionProvider"), "ROCm");
+        assert_eq!(provider_label("OpenVINOExecutionProvider"), "OpenVINO");
+        assert_eq!(provider_label("CPUExecutionProvider"), "CPU");
+    }
+
+    #[test]
+    fn test_semantic_output_stem_single_image_and_frames() {
+        assert_eq!(
+            semantic_output_stem("images/bus.jpg", 0, Some(1)),
+            "bus".to_string()
+        );
+        assert_eq!(
+            semantic_output_stem("stream", 42, Some(100)),
+            "stream_000042".to_string()
+        );
+        assert_eq!(
+            semantic_output_stem("", 3, None),
+            "frame_000003".to_string()
+        );
     }
 
     /// Test `format_detection_summary` with boxes - single detection.
