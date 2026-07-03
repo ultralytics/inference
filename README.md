@@ -99,7 +99,7 @@ ultralytics-inference help
 # Using Ultralytics CLI (FP32, default)
 yolo export model=yolo26n.pt format=onnx
 
-# FP16 (half precision) — ~50% smaller model
+# FP16 (half precision) - ~50% smaller model
 yolo export model=yolo26n.pt format=onnx quantize=16
 ```
 
@@ -115,7 +115,7 @@ model.export(format="onnx", quantize=16)  # FP16 (half precision)
 > **Precision / quantization:** Ultralytics ≥8.4 uses a single `quantize`
 > argument instead of the deprecated `half=True` / `int8=True` flags. For ONNX
 > the supported values are `32`/`fp32` (FP32, the default), `16`/`fp16` (FP16),
-> and `8`/`int8` (INT8 — requires a calibration dataset via `data=`). The old
+> and `8`/`int8` (INT8 - requires a calibration dataset via `data=`). The old
 > `half=True` (→ `quantize=16`) and `int8=True` (→ `quantize=8`) still work but
 > emit a deprecation warning. See the
 > [export docs](https://docs.ultralytics.com/modes/export) and the
