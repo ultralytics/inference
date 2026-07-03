@@ -377,6 +377,19 @@ fn scale_and_clip_box(xyxy: &[f32; 4], preprocess: &PreprocessResult) -> [f32; 4
     clip_coords(&scaled, preprocess.orig_shape)
 }
 
+/// Scale a single keypoint from letterboxed inference space back to the original
+/// image, then clamp it to the image bounds.
+#[inline]
+fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
+    let scaled = scale_coords(&[x, y, x, y], preprocess.scale, preprocess.padding);
+    #[allow(clippy::cast_precision_loss)]
+    let (max_h, max_w) = (
+        preprocess.orig_shape.0 as f32,
+        preprocess.orig_shape.1 as f32,
+    );
+    (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
+}
+
 /// Reshape a flat model output into a `[preds, features]` 2D array.
 ///
 /// When `is_transposed` the data is already laid out `[preds, features]`;
@@ -422,10 +435,7 @@ fn extract_detect_boxes(
     config: &InferenceConfig,
 ) -> Array2<f32> {
     let feat_count = 4 + num_classes;
-    let (scale_y, scale_x) = preprocess.scale;
-    let (pad_top, pad_left) = preprocess.padding;
     let orig_shape = preprocess.orig_shape;
-    let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
     let conf_thresh = config.confidence_threshold;
     let max_det = config.max_det;
     let iou_thresh = config.iou_threshold;
@@ -464,13 +474,14 @@ fn extract_detect_boxes(
                 let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
                 let h = unsafe { *output.get_unchecked(3 * num_predictions + idx) };
 
-                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
-                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
-                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
-                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+                let bbox = scale_coords(
+                    &xywh_to_xyxy(cx, cy, w, h),
+                    preprocess.scale,
+                    preprocess.padding,
+                );
 
                 candidates.push(Candidate {
-                    bbox: [x1, y1, x2, y2],
+                    bbox,
                     score,
                     class: best_class,
                 });
@@ -519,13 +530,14 @@ fn extract_detect_boxes(
                 let w = unsafe { *output.get_unchecked(base + 2) };
                 let h = unsafe { *output.get_unchecked(base + 3) };
 
-                let x1 = (cx - w * 0.5 - pad_left) / scale_x;
-                let y1 = (cy - h * 0.5 - pad_top) / scale_y;
-                let x2 = (cx + w * 0.5 - pad_left) / scale_x;
-                let y2 = (cy + h * 0.5 - pad_top) / scale_y;
+                let bbox = scale_coords(
+                    &xywh_to_xyxy(cx, cy, w, h),
+                    preprocess.scale,
+                    preprocess.padding,
+                );
 
                 candidates.push(Candidate {
-                    bbox: [x1, y1, x2, y2],
+                    bbox,
                     score: best_score,
                     class: best_class,
                 });
@@ -635,10 +647,11 @@ fn extract_detect_boxes(
     let mut result = Array2::zeros((num_kept, 6));
     for (out_idx, &idx) in keep.iter().enumerate() {
         let c = &candidates[idx];
-        result[[out_idx, 0]] = c.bbox[0].clamp(0.0, max_w);
-        result[[out_idx, 1]] = c.bbox[1].clamp(0.0, max_h);
-        result[[out_idx, 2]] = c.bbox[2].clamp(0.0, max_w);
-        result[[out_idx, 3]] = c.bbox[3].clamp(0.0, max_h);
+        let [x1, y1, x2, y2] = clip_coords(&c.bbox, orig_shape);
+        result[[out_idx, 0]] = x1;
+        result[[out_idx, 1]] = y1;
+        result[[out_idx, 2]] = x2;
+        result[[out_idx, 3]] = y2;
         result[[out_idx, 4]] = c.score;
         result[[out_idx, 5]] = c.class as f32;
     }
@@ -1049,17 +1062,7 @@ fn postprocess_pose(
             let kpt_conf = output_2d[[i, kpt_offset + 2]];
 
             // Scale keypoint coordinates to original image space
-            let scaled_kpt = scale_coords(
-                &[kpt_x, kpt_y, kpt_x, kpt_y],
-                preprocess.scale,
-                preprocess.padding,
-            );
-            let (oh, ow) = preprocess.orig_shape;
-            #[allow(clippy::cast_precision_loss)]
-            let scaled_x = scaled_kpt[0].max(0.0).min(ow as f32);
-            #[allow(clippy::cast_precision_loss)]
-            let scaled_y = scaled_kpt[1].max(0.0).min(oh as f32);
-
+            let (scaled_x, scaled_y) = scale_keypoint(kpt_x, kpt_y, preprocess);
             keypoints.push([scaled_x, scaled_y, kpt_conf]);
         }
 
@@ -1372,8 +1375,6 @@ fn postprocess_detect_end2end(
         return results;
     }
 
-    let (oh, ow) = preprocess.orig_shape;
-    let (max_w, max_h) = (ow as f32, oh as f32);
     let user_cap = config.max_det.min(max_det);
 
     let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1388,24 +1389,16 @@ fn postprocess_detect_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let [x1, y1, x2, y2] = scale_coords(
+        let [x1, y1, x2, y2] = scale_and_clip_box(
             &[
                 output[base],
                 output[base + 1],
                 output[base + 2],
                 output[base + 3],
             ],
-            preprocess.scale,
-            preprocess.padding,
+            preprocess,
         );
-        flat.extend_from_slice(&[
-            x1.clamp(0.0, max_w),
-            y1.clamp(0.0, max_h),
-            x2.clamp(0.0, max_w),
-            y2.clamp(0.0, max_h),
-            conf,
-            cls as f32,
-        ]);
+        flat.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
         if flat.len() >= user_cap * 6 {
             break;
         }
@@ -1463,7 +1456,6 @@ fn postprocess_segment_end2end(
     }
 
     let (oh, ow) = preprocess.orig_shape;
-    let (max_w, max_h) = (ow as f32, oh as f32);
     let user_cap = config.max_det.min(max_det);
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1479,24 +1471,16 @@ fn postprocess_segment_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let [x1, y1, x2, y2] = scale_coords(
+        let [x1, y1, x2, y2] = scale_and_clip_box(
             &[
                 output0[base],
                 output0[base + 1],
                 output0[base + 2],
                 output0[base + 3],
             ],
-            preprocess.scale,
-            preprocess.padding,
+            preprocess,
         );
-        flat_boxes.extend_from_slice(&[
-            x1.clamp(0.0, max_w),
-            y1.clamp(0.0, max_h),
-            x2.clamp(0.0, max_w),
-            y2.clamp(0.0, max_h),
-            conf,
-            cls as f32,
-        ]);
+        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
         let coeff_start = base + 6;
         flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
         if flat_boxes.len() >= user_cap * 6 {
@@ -1584,10 +1568,6 @@ fn postprocess_pose_end2end(
         return results;
     }
 
-    let (oh, ow) = preprocess.orig_shape;
-    let (max_w, max_h) = (ow as f32, oh as f32);
-    let (scale_y, scale_x) = preprocess.scale;
-    let (pad_top, pad_left) = preprocess.padding;
     let user_cap = config.max_det.min(max_det);
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1603,31 +1583,22 @@ fn postprocess_pose_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let [x1, y1, x2, y2] = scale_coords(
+        let [x1, y1, x2, y2] = scale_and_clip_box(
             &[
                 output[base],
                 output[base + 1],
                 output[base + 2],
                 output[base + 3],
             ],
-            preprocess.scale,
-            preprocess.padding,
+            preprocess,
         );
-        flat_boxes.extend_from_slice(&[
-            x1.clamp(0.0, max_w),
-            y1.clamp(0.0, max_h),
-            x2.clamp(0.0, max_w),
-            y2.clamp(0.0, max_h),
-            conf,
-            cls as f32,
-        ]);
+        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
         let kstart = base + 6;
         for k in 0..nk {
             let off = kstart + k * kpt_dim;
-            let sx = (output[off] - pad_left) / scale_x;
-            let sy = (output[off + 1] - pad_top) / scale_y;
+            let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
             let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
-            flat_kpts.extend_from_slice(&[sx.clamp(0.0, max_w), sy.clamp(0.0, max_h), kconf]);
+            flat_kpts.extend_from_slice(&[sx, sy, kconf]);
         }
         if flat_boxes.len() >= user_cap * 6 {
             break;
