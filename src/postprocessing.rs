@@ -423,7 +423,6 @@ fn extract_detect_boxes(
 ) -> Array2<f32> {
     let feat_count = 4 + num_classes;
     let orig_shape = preprocess.orig_shape;
-    let (max_w, max_h) = (orig_shape.1 as f32, orig_shape.0 as f32);
     let conf_thresh = config.confidence_threshold;
     let max_det = config.max_det;
     let iou_thresh = config.iou_threshold;
@@ -635,10 +634,11 @@ fn extract_detect_boxes(
     let mut result = Array2::zeros((num_kept, 6));
     for (out_idx, &idx) in keep.iter().enumerate() {
         let c = &candidates[idx];
-        result[[out_idx, 0]] = c.bbox[0].clamp(0.0, max_w);
-        result[[out_idx, 1]] = c.bbox[1].clamp(0.0, max_h);
-        result[[out_idx, 2]] = c.bbox[2].clamp(0.0, max_w);
-        result[[out_idx, 3]] = c.bbox[3].clamp(0.0, max_h);
+        let [x1, y1, x2, y2] = clip_coords(&c.bbox, orig_shape);
+        result[[out_idx, 0]] = x1;
+        result[[out_idx, 1]] = y1;
+        result[[out_idx, 2]] = x2;
+        result[[out_idx, 3]] = y2;
         result[[out_idx, 4]] = c.score;
         result[[out_idx, 5]] = c.class as f32;
     }
@@ -1372,8 +1372,6 @@ fn postprocess_detect_end2end(
         return results;
     }
 
-    let (oh, ow) = preprocess.orig_shape;
-    let (max_w, max_h) = (ow as f32, oh as f32);
     let user_cap = config.max_det.min(max_det);
 
     let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1388,24 +1386,16 @@ fn postprocess_detect_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let [x1, y1, x2, y2] = scale_coords(
+        let [x1, y1, x2, y2] = scale_and_clip_box(
             &[
                 output[base],
                 output[base + 1],
                 output[base + 2],
                 output[base + 3],
             ],
-            preprocess.scale,
-            preprocess.padding,
+            preprocess,
         );
-        flat.extend_from_slice(&[
-            x1.clamp(0.0, max_w),
-            y1.clamp(0.0, max_h),
-            x2.clamp(0.0, max_w),
-            y2.clamp(0.0, max_h),
-            conf,
-            cls as f32,
-        ]);
+        flat.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
         if flat.len() >= user_cap * 6 {
             break;
         }
@@ -1463,7 +1453,6 @@ fn postprocess_segment_end2end(
     }
 
     let (oh, ow) = preprocess.orig_shape;
-    let (max_w, max_h) = (ow as f32, oh as f32);
     let user_cap = config.max_det.min(max_det);
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1479,24 +1468,16 @@ fn postprocess_segment_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let [x1, y1, x2, y2] = scale_coords(
+        let [x1, y1, x2, y2] = scale_and_clip_box(
             &[
                 output0[base],
                 output0[base + 1],
                 output0[base + 2],
                 output0[base + 3],
             ],
-            preprocess.scale,
-            preprocess.padding,
+            preprocess,
         );
-        flat_boxes.extend_from_slice(&[
-            x1.clamp(0.0, max_w),
-            y1.clamp(0.0, max_h),
-            x2.clamp(0.0, max_w),
-            y2.clamp(0.0, max_h),
-            conf,
-            cls as f32,
-        ]);
+        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
         let coeff_start = base + 6;
         flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
         if flat_boxes.len() >= user_cap * 6 {
@@ -1603,24 +1584,16 @@ fn postprocess_pose_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let [x1, y1, x2, y2] = scale_coords(
+        let [x1, y1, x2, y2] = scale_and_clip_box(
             &[
                 output[base],
                 output[base + 1],
                 output[base + 2],
                 output[base + 3],
             ],
-            preprocess.scale,
-            preprocess.padding,
+            preprocess,
         );
-        flat_boxes.extend_from_slice(&[
-            x1.clamp(0.0, max_w),
-            y1.clamp(0.0, max_h),
-            x2.clamp(0.0, max_w),
-            y2.clamp(0.0, max_h),
-            conf,
-            cls as f32,
-        ]);
+        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
         let kstart = base + 6;
         for k in 0..nk {
             let off = kstart + k * kpt_dim;
