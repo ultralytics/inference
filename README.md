@@ -398,6 +398,8 @@ inference/
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch processing pipeline
 │   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)
+│   ├── cuda_inference.rs   # Fused CUDA preprocess kernel (cuda-preprocess feature)
+│   ├── parallel.rs         # Rayon parallelism shims (sequential on wasm)
 │   ├── download.rs         # Model and asset downloading
 │   ├── annotate.rs         # Image annotation (bounding boxes, instance masks, keypoints, semantic overlay)
 │   ├── io.rs               # Result saving (images, videos)
