@@ -239,7 +239,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                     | `false`                           |
 | `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                     | `false`                           |
 | `--show`        |      | 在窗口中显示结果                                                                                                         | `false`                           |
-| `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、openvino、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方 | `cpu`                             |
+| `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、openvino、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方（见 Features 表） | `cpu`                             |
 | `--verbose`     |      | 显示详细输出                                                                                                             | `true`                            |
 | `--classes`     |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                     | 所有类别                          |
 
@@ -397,6 +397,8 @@ inference/
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch 处理流程
 │   ├── device.rs           # Device 枚举（CPU, CUDA, CoreML 等）
+│   ├── cuda_inference.rs   # 融合 CUDA 预处理 kernel（cuda-preprocess feature）
+│   ├── parallel.rs         # Rayon 并行抽象（wasm 上为顺序执行）
 │   ├── download.rs         # 模型和资源下载
 │   ├── annotate.rs         # 图片标注（边界框、实例 mask、关键点、语义叠加）
 │   ├── io.rs               # 结果保存（图片、视频）
