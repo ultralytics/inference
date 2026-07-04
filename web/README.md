@@ -135,17 +135,17 @@ only). A value containing a `/` or a scheme is used as a URL/path as-is.
 
 Field names match the Rust/Ultralytics `Results` API 1-1:
 
-| Field              | Type                                                      | Tasks                 |
-| ------------------ | --------------------------------------------------------- | --------------------- |
-| `task`             | `string`                                                  | all                   |
-| `width` / `height` | `number`                                                  | all                   |
-| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color }[]`            | detect, segment, pose |
-| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`         | obb                   |
-| `keypoints`        | `{ points: [x, y, conf][], color }[]`                     | pose                  |
+| Field              | Type                                                                 | Tasks                 |
+| ------------------ | -------------------------------------------------------------------- | --------------------- |
+| `task`             | `string`                                                             | all                   |
+| `width` / `height` | `number`                                                             | all                   |
+| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color }[]`                       | detect, segment, pose |
+| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`                    | obb                   |
+| `keypoints`        | `{ points: [x, y, conf][], color }[]`                                | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, top5names, color } \| null` | classify              |
-| `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)             | segment, semantic     |
-| `semantic_mask`    | `Uint16Array` (class id per pixel, `width*height`)        | semantic              |
-| `speed`            | `{ preprocess, inference, postprocess }` ms               | all                   |
+| `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)                        | segment, semantic     |
+| `semantic_mask`    | `Uint16Array` (class id per pixel, `width*height`)                   | semantic              |
+| `speed`            | `{ preprocess, inference, postprocess }` ms                          | all                   |
 
 `model.names` is the class id to name map (like `model.names` in Python). Every
 detection carries its Ultralytics palette `color`, and `annotate()` draws the
