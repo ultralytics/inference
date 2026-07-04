@@ -24,7 +24,7 @@ use clap::{Args, Parser, Subcommand};
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
     --show                 Display results in a window [default: false]
-    --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack)
+    --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)
     --verbose              Show verbose output [default: true]
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
@@ -118,7 +118,7 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = false)]
     pub show: bool,
 
-    /// Device to use (cpu, cuda:0, mps, coreml, directml:0, openvino, tensorrt:0, etc.)
+    /// Device to use (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)
     #[arg(long)]
     pub device: Option<String>,
 

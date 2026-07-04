@@ -166,8 +166,7 @@ the CPU path runs and the flag is silently ignored:
 - `cuda_preprocess` is `true` (the default),
 - the device is `Cuda(_)`, `TensorRt(_)`, or unset (auto-detect),
 - the task is not `Classify` (which uses center-crop, not letterbox),
-- the model takes an FP32 input tensor (FP16-input models keep the CPU path),
-- the model input is square (H == W).
+- the model takes an FP32 input tensor (FP16-input models keep the CPU path).
 
 It is wired into `predict_image` specifically (single-frame). `predict_batch`
 and the multi-image batch path always use CPU preprocess.
