@@ -50,6 +50,27 @@ This crate runs [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](h
 - [Rust 1.89+](https://rustup.rs/) (install via rustup)
 - A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo26n.pt format=onnx`)
 
+### System dependencies
+
+Building from source (this includes `cargo install`) compiles native crates, so you need a C compiler. On Linux you additionally need `pkg-config` and the OpenSSL development headers, which the HTTPS model/asset downloader links against. macOS and Windows use their system TLS backends, so a C toolchain is all that is required.
+
+```bash
+# Debian/Ubuntu
+sudo apt install build-essential pkg-config libssl-dev
+
+# Fedora/RHEL
+sudo dnf install gcc gcc-c++ pkgconf-pkg-config openssl-devel
+
+# Arch
+sudo pacman -S base-devel openssl pkgconf
+
+# macOS (Xcode Command Line Tools provide the clang compiler)
+xcode-select --install
+
+# Windows: install the "Desktop development with C++" workload from
+# Visual Studio Build Tools (https://visualstudio.microsoft.com/downloads/)
+```
+
 ### Installation
 
 ```bash
