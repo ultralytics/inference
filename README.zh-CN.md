@@ -50,6 +50,27 @@
 - [Rust 1.89+](https://rustup.rs/)（通过 rustup 安装）。
 - YOLO ONNX 模型（从 Ultralytics 导出：`yolo export model=yolo26n.pt format=onnx`）。
 
+### 系统依赖
+
+从源码构建（包括 `cargo install`）会编译原生 crate，因此需要 C 编译器。在 Linux 上还需要 `pkg-config` 和 OpenSSL 开发头文件，HTTPS 模型/资源下载器会链接它们。macOS 和 Windows 使用系统自带的 TLS 后端，因此只需 C 工具链。
+
+```bash
+# Debian/Ubuntu
+sudo apt install build-essential pkg-config libssl-dev
+
+# Fedora/RHEL
+sudo dnf install gcc gcc-c++ pkgconf-pkg-config openssl-devel
+
+# Arch
+sudo pacman -S base-devel openssl pkgconf
+
+# macOS（Xcode Command Line Tools 提供 clang 编译器）
+xcode-select --install
+
+# Windows：从 Visual Studio Build Tools 安装
+# “使用 C++ 的桌面开发”工作负载（https://visualstudio.microsoft.com/downloads/）
+```
+
 ### 安装
 
 ```bash
