@@ -2,7 +2,7 @@ name: GPU CI
 
 permissions:
   contents: read
-  id-token: write # Codecov OIDC upload
+  id-token: write
 
 on:
   push:
@@ -11,9 +11,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref so the self-hosted pool is not tied up
-# by stale commits. PRs still run in parallel across runners; if the pool
-# saturates, switch to a global serial group or gate on a `gpu` label.
 concurrency:
   group: gpu-${{ github.ref }}
   cancel-in-progress: true
@@ -21,15 +18,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # ORT downloads a CUDA-enabled runtime; this must match the runner's CUDA
-  # major (12 or 13). Wrong value makes the CUDA/TensorRT EP fall back to CPU,
-  # which the cuda-preprocess fast path turns into a hard error (see model.rs).
   ORT_CUDA_VERSION: "12"
 
 jobs:
-  # CUDA execution-provider + fused GPU preprocess tests on self-hosted NVIDIA
-  # runners. Exercises src/cuda_inference.rs and the CUDA/TensorRT EP wiring,
-  # none of which the hosted-runner CI can reach.
   gpu:
     name: gpu / cuda-preprocess
     runs-on: [self-hosted, Linux, X64, gpu-latest]
@@ -43,10 +34,6 @@ jobs:
           nvidia-smi
           nvcc --version
 
-      # Stable (like the `test` job), not nightly: clippy -D warnings must not
-      # trip on bleeding-edge nightly-only lints in unrelated code, and
-      # cargo-llvm-cov instruments on stable (file exclusions are done by regex,
-      # not the nightly coverage(off) attribute).
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -60,8 +47,6 @@ jobs:
       - name: Ensure toolchain
         run: rustup show
 
-      # cuda-preprocess pulls in cuda + tensorrt + cudarc (nvcc-compiled kernel).
-      # --no-default-features drops the minifb visualizer (no display on the runner).
       - name: Clippy (cuda-preprocess)
         run: cargo clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
 
@@ -70,10 +55,6 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # One instrumented run doubles as the test suite and the coverage report.
-      # --include-ignored runs the GPU-gated integration tests; --test-threads=1
-      # serialises GPU access. Unlike the host coverage job this does NOT exclude
-      # src/cuda_inference.rs, so the fused kernel is counted here.
       - name: Test + coverage
         run: |
           cargo llvm-cov --no-default-features --features annotate,cuda-preprocess \
