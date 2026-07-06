@@ -303,3 +303,198 @@ impl CudaPreprocessor {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // Runs only on an NVIDIA GPU: the whole module is `cuda-preprocess`-gated,
+    // so these compile and execute exclusively on the GPU CI runner. Inline
+    // tests reach the preprocessor's private `stream`/`input_dev` fields to copy
+    // the kernel output back to the host and assert on it.
+    use super::*;
+
+    /// Padded background emitted by the kernel (`114/255`).
+    const PAD: f32 = 114.0 / 255.0;
+    /// Tolerance for GPU-computed float comparisons.
+    const EPS: f32 = 1e-4;
+
+    /// Open device 0 and build a preprocessor targeting `dst_h` x `dst_w`.
+    fn preprocessor(dst_h: usize, dst_w: usize) -> CudaPreprocessor {
+        let handle = CudaStreamHandle::open(0).expect("open CUDA device 0");
+        CudaPreprocessor::finalize(handle, dst_h, dst_w).expect("finalize preprocessor")
+    }
+
+    /// Build an HWC RGB buffer filled with a single solid color.
+    fn solid(h: usize, w: usize, r: u8, g: u8, b: u8) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(h * w * 3);
+        for _ in 0..h * w {
+            buf.extend_from_slice(&[r, g, b]);
+        }
+        buf
+    }
+
+    /// Copy the device input buffer back to the host as flat CHW f32 planes.
+    fn readback(pre: &CudaPreprocessor) -> Vec<f32> {
+        pre.stream
+            .clone_dtoh(&pre.input_dev)
+            .expect("device to host copy")
+    }
+
+    #[test]
+    fn stream_handle_open() {
+        let handle = CudaStreamHandle::open(0).expect("open CUDA device 0");
+        assert!(
+            !handle.raw_stream_ptr().is_null(),
+            "compute stream pointer must be non-null"
+        );
+    }
+
+    #[test]
+    fn preprocessor_finalize_allocates() {
+        let pre = preprocessor(640, 640);
+        assert_eq!(pre.dst_hw(), (640, 640));
+        assert_ne!(
+            pre.input_dev_ptr(),
+            0,
+            "device input buffer must be allocated"
+        );
+    }
+
+    #[test]
+    fn preprocess_square_geometry() {
+        let mut pre = preprocessor(640, 640);
+        let (src_h, src_w) = (480u32, 640u32);
+        let frame = solid(src_h as usize, src_w as usize, 200, 100, 50);
+
+        let geom = pre
+            .preprocess(&frame, src_h, src_w, false)
+            .expect("preprocess");
+
+        // 640/640 = 1.0 is the binding axis; the 480-tall image is centered.
+        assert!((geom.scale - 1.0).abs() < EPS, "scale = {}", geom.scale);
+        assert_eq!(geom.pad_x, 0);
+        assert_eq!(geom.pad_y, 80);
+
+        let host = readback(&pre);
+        assert!(
+            host.iter().all(|&v| (0.0..=1.0).contains(&v)),
+            "every output value must be normalized into [0, 1]"
+        );
+    }
+
+    #[test]
+    fn preprocess_non_square_target() {
+        let mut pre = preprocessor(384, 640);
+        assert_eq!(pre.dst_hw(), (384, 640));
+
+        // 640x640 into 384x640: scale 0.6 fills the width, pads the height to 0.
+        let frame = solid(640, 640, 10, 20, 30);
+        let geom = pre.preprocess(&frame, 640, 640, false).expect("preprocess");
+
+        assert_eq!(geom.pad_y, 0);
+        assert!(
+            geom.pad_x > 0,
+            "expected horizontal padding, got {}",
+            geom.pad_x
+        );
+    }
+
+    #[test]
+    fn preprocess_padding_value() {
+        let (dst, src_h, src_w) = (128usize, 64u32, 32u32);
+        let mut pre = preprocessor(dst, dst);
+        let frame = solid(src_h as usize, src_w as usize, 255, 255, 255);
+
+        let geom = pre
+            .preprocess(&frame, src_h, src_w, false)
+            .expect("preprocess");
+        assert!(
+            geom.pad_x > 0,
+            "expected horizontal padding, got {}",
+            geom.pad_x
+        );
+
+        // The top-left pixel is outside the resized image, so it is background.
+        let host = readback(&pre);
+        let hw = dst * dst;
+        for plane in 0..3 {
+            let v = host[plane * hw];
+            assert!(
+                (v - PAD).abs() < EPS,
+                "padding plane {plane} = {v}, want {PAD}"
+            );
+        }
+    }
+
+    #[test]
+    fn preprocess_center_normalize() {
+        let dst = 64usize;
+        let mut pre = preprocessor(dst, dst);
+        // Square input, no letterbox: every pixel is R=255, G=0, B=0.
+        let frame = solid(dst, dst, 255, 0, 0);
+        pre.preprocess(&frame, dst as u32, dst as u32, false)
+            .expect("preprocess");
+
+        let host = readback(&pre);
+        let hw = dst * dst;
+        let idx = (dst / 2) * dst + dst / 2;
+        assert!((host[idx] - 1.0).abs() < EPS, "R plane = {}", host[idx]);
+        assert!(host[hw + idx].abs() < EPS, "G plane = {}", host[hw + idx]);
+        assert!(
+            host[2 * hw + idx].abs() < EPS,
+            "B plane = {}",
+            host[2 * hw + idx]
+        );
+    }
+
+    #[test]
+    fn preprocess_bgr_swap() {
+        let dst = 64usize;
+        let frame = solid(dst, dst, 255, 0, 0); // byte order [255, 0, 0]
+        let hw = dst * dst;
+        let idx = (dst / 2) * dst + dst / 2;
+
+        let mut rgb = preprocessor(dst, dst);
+        rgb.preprocess(&frame, dst as u32, dst as u32, false)
+            .expect("rgb preprocess");
+        let rgb_host = readback(&rgb);
+
+        let mut bgr = preprocessor(dst, dst);
+        bgr.preprocess(&frame, dst as u32, dst as u32, true)
+            .expect("bgr preprocess");
+        let bgr_host = readback(&bgr);
+
+        // RGB reads byte[0]=255 into R; BGR reads the same byte into B.
+        assert!(
+            (rgb_host[idx] - 1.0).abs() < EPS,
+            "rgb R = {}",
+            rgb_host[idx]
+        );
+        assert!(bgr_host[idx].abs() < EPS, "bgr R = {}", bgr_host[idx]);
+        assert!(
+            (bgr_host[2 * hw + idx] - 1.0).abs() < EPS,
+            "bgr B = {}",
+            bgr_host[2 * hw + idx]
+        );
+    }
+
+    #[test]
+    fn preprocess_rejects_wrong_len() {
+        let mut pre = preprocessor(64, 64);
+        let bad = vec![0u8; 10]; // != 64 * 64 * 3
+        let err = pre
+            .preprocess(&bad, 64, 64, false)
+            .expect_err("wrong-length frame must be rejected");
+        assert!(matches!(err, InferenceError::InferenceError(_)));
+    }
+
+    #[test]
+    fn preprocess_frame_buffer_growth() {
+        let mut pre = preprocessor(128, 128);
+        // First a small frame, then a larger one to force `frame_dev` to grow.
+        let small = solid(32, 32, 1, 2, 3);
+        pre.preprocess(&small, 32, 32, false).expect("small frame");
+        let large = solid(256, 256, 4, 5, 6);
+        pre.preprocess(&large, 256, 256, false)
+            .expect("large frame after buffer growth");
+    }
+}
