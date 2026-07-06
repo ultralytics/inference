@@ -522,7 +522,7 @@ fn image_to_tensor_generic<T: Clone>(
     let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
     let (g_slice, b_slice) = rest.split_at_mut(h * w);
 
-    for (i, chunk) in pixels.chunks_exact(3).enumerate() {
+    for (i, chunk) in pixels.as_chunks::<3>().0.iter().enumerate() {
         r_slice[i] = convert(chunk[0]);
         g_slice[i] = convert(chunk[1]);
         b_slice[i] = convert(chunk[2]);
