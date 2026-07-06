@@ -38,7 +38,7 @@ ort = { version = "=2.0.0-rc.12", default-features = false, features = [
     "half",
 ] }
 ort-web = "0.2.1"
-wasm-bindgen = "0.2.110"
+wasm-bindgen = "0.2.126"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
