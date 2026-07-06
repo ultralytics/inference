@@ -12,7 +12,7 @@ use ultralytics_inference::cli::args::PredictArgs;
 use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::task::Task;
 use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
-#[cfg(feature = "coreml")]
+#[cfg(any(feature = "coreml", feature = "cuda"))]
 use ultralytics_inference::{Device, YOLOModel};
 
 /// End-to-end `CoreML` test covering two known regressions:
@@ -277,4 +277,151 @@ fn test_speed_timing() {
     assert_eq!(speed.preprocess, Some(10.0));
     assert_eq!(speed.inference, Some(20.0));
     assert_eq!(speed.postprocess, Some(5.0));
+}
+
+// GPU inference tests. Gated on the `cuda` feature and `#[ignore]`d so they run
+// only on the self-hosted GPU CI (via `--include-ignored`), never on hosted
+// runners. They auto-download `yolo26n.onnx` and the bus.jpg sample.
+
+#[cfg(feature = "cuda")]
+fn load_bus_image() -> String {
+    ultralytics_inference::download::download_image("https://ultralytics.com/images/bus.jpg")
+        .expect("bus.jpg should download")
+}
+
+/// Loading on `Device::Cuda(0)` registers the CUDA execution provider and warms
+/// up without error (warmup runs inside `load_with_config`).
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires NVIDIA GPU; run on GPU CI"]
+fn test_cuda_model_loads_and_warms_up() {
+    let config = InferenceConfig::new().with_device(Device::Cuda(0));
+    let model = YOLOModel::load_with_config("yolo26n.onnx", config)
+        .expect("CUDA model should load and warm up");
+
+    let ep = model.execution_provider();
+    assert!(
+        ep.to_lowercase().contains("cuda"),
+        "expected the CUDA execution provider, got '{ep}'"
+    );
+}
+
+/// End-to-end CUDA inference on bus.jpg yields at least one detection.
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires NVIDIA GPU; run on GPU CI"]
+fn test_cuda_predict_bus_has_detections() {
+    let config = InferenceConfig::new().with_device(Device::Cuda(0));
+    let mut model =
+        YOLOModel::load_with_config("yolo26n.onnx", config).expect("CUDA model should load");
+    let image = load_bus_image();
+
+    let results = model
+        .predict(&image)
+        .expect("CUDA prediction should succeed");
+    let boxes = results
+        .first()
+        .and_then(|r| r.boxes.as_ref())
+        .expect("bus.jpg should produce boxes on CUDA");
+    assert!(
+        !boxes.is_empty(),
+        "expected at least one detection on bus.jpg"
+    );
+}
+
+/// CUDA and CPU produce equivalent detections on the same image. The CPU
+/// baseline pins `Device::Cpu`: with the `cuda-preprocess` feature enabled a
+/// default (`None`) device would silently route through the CUDA fast path.
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires NVIDIA GPU; run on GPU CI"]
+fn test_cuda_cpu_detection_parity() {
+    let image = load_bus_image();
+
+    let mut cuda_model = YOLOModel::load_with_config(
+        "yolo26n.onnx",
+        InferenceConfig::new().with_device(Device::Cuda(0)),
+    )
+    .expect("CUDA model should load");
+    let cuda = cuda_model.predict(&image).expect("CUDA prediction");
+    let cuda_boxes = cuda
+        .first()
+        .and_then(|r| r.boxes.as_ref())
+        .expect("CUDA boxes");
+
+    let mut cpu_model = YOLOModel::load_with_config(
+        "yolo26n.onnx",
+        InferenceConfig::new().with_device(Device::Cpu),
+    )
+    .expect("CPU model should load");
+    let cpu = cpu_model.predict(&image).expect("CPU prediction");
+    let cpu_boxes = cpu
+        .first()
+        .and_then(|r| r.boxes.as_ref())
+        .expect("CPU boxes");
+
+    // Counts match within one box: NMS can keep/drop a borderline candidate
+    // differently under GPU vs CPU rounding.
+    let diff = cuda_boxes.len().abs_diff(cpu_boxes.len());
+    assert!(
+        diff <= 1,
+        "detection count mismatch: cuda={}, cpu={}",
+        cuda_boxes.len(),
+        cpu_boxes.len()
+    );
+
+    // Matched leading boxes (sorted by confidence) agree to a couple of pixels.
+    for (cb, pb) in cuda_boxes
+        .xyxy()
+        .outer_iter()
+        .zip(cpu_boxes.xyxy().outer_iter())
+    {
+        for (x, y) in cb.iter().zip(pb.iter()) {
+            let d = (x - y).abs();
+            assert!(d < 2.0, "box corner differs by {d}px between cuda and cpu");
+        }
+    }
+}
+
+/// The fused GPU preprocess (`cuda-preprocess`) and the CPU preprocess produce
+/// equivalent detections through the same CUDA execution provider.
+#[cfg(feature = "cuda-preprocess")]
+#[test]
+#[ignore = "requires NVIDIA GPU; run on GPU CI"]
+fn test_cuda_preprocess_on_off_parity() {
+    let image = load_bus_image();
+
+    let mut fused = YOLOModel::load_with_config(
+        "yolo26n.onnx",
+        InferenceConfig::new()
+            .with_device(Device::Cuda(0))
+            .with_cuda_preprocess(true),
+    )
+    .expect("model with fused GPU preprocess should load");
+    let fused_res = fused.predict(&image).expect("fused prediction");
+    let fused_boxes = fused_res
+        .first()
+        .and_then(|r| r.boxes.as_ref())
+        .expect("fused boxes");
+
+    let mut cpu_pre = YOLOModel::load_with_config(
+        "yolo26n.onnx",
+        InferenceConfig::new()
+            .with_device(Device::Cuda(0))
+            .with_cuda_preprocess(false),
+    )
+    .expect("model with CPU preprocess should load");
+    let cpu_pre_res = cpu_pre.predict(&image).expect("cpu-preprocess prediction");
+    let cpu_pre_boxes = cpu_pre_res
+        .first()
+        .and_then(|r| r.boxes.as_ref())
+        .expect("cpu-preprocess boxes");
+
+    let diff = fused_boxes.len().abs_diff(cpu_pre_boxes.len());
+    assert!(
+        diff <= 1,
+        "detection count mismatch: fused={}, cpu-preprocess={}",
+        fused_boxes.len(),
+        cpu_pre_boxes.len()
+    );
 }
