@@ -381,6 +381,13 @@ fn draw_label(
         .ceil() as i32;
     let text_h = scale.y.ceil() as i32;
 
+    // A missing or degenerate font can produce a zero-width label. imageproc's
+    // Rect::of_size panics on a zero dimension, and an empty label has nothing
+    // to draw, so bail out early.
+    if text_w <= 0 || text_h <= 0 {
+        return;
+    }
+
     let mut text_x = anchor_x;
     let mut text_y = anchor_y - text_h;
 

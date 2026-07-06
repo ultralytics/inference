@@ -50,6 +50,27 @@
 - [Rust 1.89+](https://rustup.rs/)（通过 rustup 安装）。
 - YOLO ONNX 模型（从 Ultralytics 导出：`yolo export model=yolo26n.pt format=onnx`）。
 
+### 系统依赖
+
+从源码构建（包括 `cargo install`）会编译原生 crate，因此需要 C 编译器。在 Linux 上还需要 `pkg-config` 和 OpenSSL 开发头文件，HTTPS 模型/资源下载器会链接它们。macOS 和 Windows 使用系统自带的 TLS 后端，因此只需 C 工具链。
+
+```bash
+# Debian/Ubuntu
+sudo apt install build-essential pkg-config libssl-dev
+
+# Fedora/RHEL
+sudo dnf install gcc gcc-c++ pkgconf-pkg-config openssl-devel
+
+# Arch
+sudo pacman -S base-devel openssl pkgconf
+
+# macOS（Xcode Command Line Tools 提供 clang 编译器）
+xcode-select --install
+
+# Windows：从 Visual Studio Build Tools 安装
+# “使用 C++ 的桌面开发”工作负载（https://visualstudio.microsoft.com/downloads/）
+```
+
 ### 安装
 
 ```bash
@@ -223,25 +244,25 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **CLI 选项：**
 
-| 选项            | 简写 | 说明                                                                                                                     | 默认值                            |
-| --------------- | ---- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
-| `--model`       | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                          | `yolo26n.onnx`                    |
-| `--task`        |      | 任务类型（`detect`、`segment`、`pose`、`obb`、`classify`、`semantic`\*）；省略 `--model` 时选择 nano 模型                | `detect`                          |
-| `--source`      | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                       | 与任务相关的 Ultralytics URL 资源 |
-| `--conf`        |      | 置信度阈值                                                                                                               | `0.25`                            |
-| `--iou`         |      | NMS IoU 阈值                                                                                                             | `0.7`                             |
-| `--max-det`     |      | 最大检测数量                                                                                                             | `300`                             |
-| `--imgsz`       |      | 推理图片尺寸                                                                                                             | 模型元数据                        |
-| `--rect`        |      | 启用矩形推理（最小填充）                                                                                                 | `true`                            |
-| `--batch`       |      | 推理 batch size                                                                                                          | `1`                               |
-| `--half`        |      | 使用 FP16 半精度推理                                                                                                     | `false`                           |
-| `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                   | `true`                            |
-| `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                     | `false`                           |
-| `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                     | `false`                           |
-| `--show`        |      | 在窗口中显示结果                                                                                                         | `false`                           |
-| `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、openvino、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方 | `cpu`                             |
-| `--verbose`     |      | 显示详细输出                                                                                                             | `true`                            |
-| `--classes`     |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                     | 所有类别                          |
+| 选项            | 简写 | 说明                                                                                                                                       | 默认值                            |
+| --------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
+| `--model`       | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                            | `yolo26n.onnx`                    |
+| `--task`        |      | 任务类型（`detect`、`segment`、`pose`、`obb`、`classify`、`semantic`\*）；省略 `--model` 时选择 nano 模型                                  | `detect`                          |
+| `--source`      | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                         | 与任务相关的 Ultralytics URL 资源 |
+| `--conf`        |      | 置信度阈值                                                                                                                                 | `0.25`                            |
+| `--iou`         |      | NMS IoU 阈值                                                                                                                               | `0.7`                             |
+| `--max-det`     |      | 最大检测数量                                                                                                                               | `300`                             |
+| `--imgsz`       |      | 推理图片尺寸                                                                                                                               | 模型元数据                        |
+| `--rect`        |      | 启用矩形推理（最小填充）                                                                                                                   | `true`                            |
+| `--batch`       |      | 推理 batch size                                                                                                                            | `1`                               |
+| `--half`        |      | 使用 FP16 半精度推理                                                                                                                       | `false`                           |
+| `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                     | `true`                            |
+| `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                       | `false`                           |
+| `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                       | `false`                           |
+| `--show`        |      | 在窗口中显示结果                                                                                                                           | `false`                           |
+| `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、openvino、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方（见 Features 表） | `cpu`                             |
+| `--verbose`     |      | 显示详细输出                                                                                                                               | `true`                            |
+| `--classes`     |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                       | 所有类别                          |
 
 **任务和模型解析：**
 
@@ -397,6 +418,8 @@ inference/
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch 处理流程
 │   ├── device.rs           # Device 枚举（CPU, CUDA, CoreML 等）
+│   ├── cuda_inference.rs   # 融合 CUDA 预处理 kernel（cuda-preprocess feature）
+│   ├── parallel.rs         # Rayon 并行抽象（wasm 上为顺序执行）
 │   ├── download.rs         # 模型和资源下载
 │   ├── annotate.rs         # 图片标注（边界框、实例 mask、关键点、语义叠加）
 │   ├── io.rs               # 结果保存（图片、视频）
