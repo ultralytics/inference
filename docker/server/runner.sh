@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 # Single control script for the containerized self-hosted GPU runner.
 #
 #   ./runner.sh run <TOKEN> [NAME]   first launch; NAME defaults to rust-gpu-runner
@@ -22,8 +24,8 @@ build() { docker build -t "$IMAGE" "$SCRIPT_DIR"; }
 run() {
   local token="${1:?usage: runner.sh run <TOKEN> [NAME]}"
   local display="${2:-$NAME}"
-  docker image inspect "$IMAGE" >/dev/null 2>&1 || build
-  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  docker image inspect "$IMAGE" > /dev/null 2>&1 || build
+  docker rm -f "$NAME" > /dev/null 2>&1 || true
   docker run -d --restart unless-stopped --gpus all \
     --name "$NAME" \
     -e RUNNER_URL="$URL" \
@@ -35,17 +37,23 @@ run() {
 }
 
 case "${1:-}" in
-  build)   build ;;
-  run)     shift; run "$@" ;;
-  start)   docker start "$NAME" ;;
-  stop)    docker stop "$NAME" ;;
+  build) build ;;
+  run)
+    shift
+    run "$@"
+    ;;
+  start) docker start "$NAME" ;;
+  stop) docker stop "$NAME" ;;
   restart) docker restart "$NAME" ;;
-  logs)    docker logs -f "$NAME" ;;
+  logs) docker logs -f "$NAME" ;;
   status)
     docker ps -a --filter "name=$NAME" --format 'table {{.Names}}\t{{.Status}}'
-    docker exec "$NAME" bash -lc 'nvidia-smi; nvcc --version' 2>/dev/null \
+    docker exec "$NAME" bash -lc 'nvidia-smi; nvcc --version' 2> /dev/null \
       || echo "(container not running; GPU/toolkit check skipped)"
     ;;
-  rm)      docker rm -f "$NAME" ;;
-  *) echo "usage: $0 {run <TOKEN> [NAME]|start|stop|restart|logs|status|rm|build}" >&2; exit 1 ;;
+  rm) docker rm -f "$NAME" ;;
+  *)
+    echo "usage: $0 {run <TOKEN> [NAME]|start|stop|restart|logs|status|rm|build}" >&2
+    exit 1
+    ;;
 esac

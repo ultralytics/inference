@@ -34,12 +34,12 @@ then launch once:
 ```bash
 TOKEN=$(gh api -X POST /repos/ultralytics/inference/actions/runners/registration-token --jq .token)
 
-./runner.sh run "$TOKEN"          # builds the image if missing, then starts the runner
-./runner.sh status                # container state + nvidia-smi / nvcc
-./runner.sh logs                  # follow the runner log
-./runner.sh restart               # no token needed; reuses the registration
-./runner.sh stop                  # stop but keep it registered
-./runner.sh rm                    # tear the container down
+./runner.sh run "$TOKEN" # builds the image if missing, then starts the runner
+./runner.sh status       # container state + nvidia-smi / nvcc
+./runner.sh logs         # follow the runner log
+./runner.sh restart      # no token needed; reuses the registration
+./runner.sh stop         # stop but keep it registered
+./runner.sh rm           # tear the container down
 ```
 
 Only `run` needs a token; the entrypoint configures once and persists the registration, so

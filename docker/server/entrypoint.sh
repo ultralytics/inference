@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 # Register once, then run the GitHub Actions runner. On restart the persisted .runner
 # credentials are reused, so a fresh token is only needed for the very first launch.
 set -euo pipefail
@@ -15,12 +17,12 @@ if [ ! -f .runner ]; then
   [ -n "${RUNNER_GROUP:-}" ] && group_args=(--runnergroup "${RUNNER_GROUP}")
 
   ./config.sh \
-    --url    "${RUNNER_URL}" \
-    --token  "${RUNNER_TOKEN}" \
-    --name   "${RUNNER_NAME:-gpu-$(hostname)}" \
+    --url "${RUNNER_URL}" \
+    --token "${RUNNER_TOKEN}" \
+    --name "${RUNNER_NAME:-gpu-$(hostname)}" \
     --labels "${RUNNER_LABELS:-rust-gpu-runner}" \
     "${group_args[@]}" \
-    --work   _work \
+    --work _work \
     --unattended --replace
 fi
 
