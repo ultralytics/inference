@@ -1,0 +1,92 @@
+name: GPU CI
+
+permissions:
+  contents: read
+  id-token: write # Codecov OIDC upload
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref so the self-hosted pool is not tied up
+# by stale commits. PRs still run in parallel across runners; if the pool
+# saturates, switch to a global serial group or gate on a `gpu` label.
+concurrency:
+  group: gpu-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # ORT downloads a CUDA-enabled runtime; this must match the runner's CUDA
+  # major (12 or 13). Wrong value makes the CUDA/TensorRT EP fall back to CPU,
+  # which the cuda-preprocess fast path turns into a hard error (see model.rs).
+  ORT_CUDA_VERSION: "12"
+
+jobs:
+  # CUDA execution-provider + fused GPU preprocess tests on self-hosted NVIDIA
+  # runners. Exercises src/cuda_inference.rs and the CUDA/TensorRT EP wiring,
+  # none of which the hosted-runner CI can reach.
+  gpu:
+    name: gpu / cuda-preprocess
+    runs-on: [self-hosted, Linux, X64, gpu-latest]
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Fail fast before the long CUDA build if the GPU or toolkit is missing.
+      - name: GPU sanity check
+        run: |
+          nvidia-smi
+          nvcc --version
+
+      # Stable (like the `test` job), not nightly: clippy -D warnings must not
+      # trip on bleeding-edge nightly-only lints in unrelated code, and
+      # cargo-llvm-cov instruments on stable (file exclusions are done by regex,
+      # not the nightly coverage(off) attribute).
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: gpu-cuda
+
+      - name: Ensure toolchain
+        run: rustup show
+
+      # cuda-preprocess pulls in cuda + tensorrt + cudarc (nvcc-compiled kernel).
+      # --no-default-features drops the minifb visualizer (no display on the runner).
+      - name: Clippy (cuda-preprocess)
+        run: cargo clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        with:
+          tool: cargo-llvm-cov
+
+      # One instrumented run doubles as the test suite and the coverage report.
+      # --include-ignored runs the GPU-gated integration tests; --test-threads=1
+      # serialises GPU access. Unlike the host coverage job this does NOT exclude
+      # src/cuda_inference.rs, so the fused kernel is counted here.
+      - name: Test + coverage
+        run: |
+          cargo llvm-cov --no-default-features --features annotate,cuda-preprocess \
+            --workspace --lcov --output-path lcov.info \
+            --ignore-filename-regex '(src/visualizer/viewer\.rs|src/main\.rs|crates/web/)' \
+            -- --include-ignored --test-threads=1
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ./lcov.info
+          disable_search: true
+          fail_ci_if_error: true
+          plugins: noop
+          flags: gpu
+          use_oidc: true
