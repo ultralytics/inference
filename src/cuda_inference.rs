@@ -324,10 +324,10 @@ mod tests {
     }
 
     /// Build an HWC RGB buffer filled with a single solid color.
-    fn solid(h: usize, w: usize, r: u8, g: u8, b: u8) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(h * w * 3);
-        for _ in 0..h * w {
-            buf.extend_from_slice(&[r, g, b]);
+    fn solid(height: usize, width: usize, red: u8, green: u8, blue: u8) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(height * width * 3);
+        for _ in 0..height * width {
+            buf.extend_from_slice(&[red, green, blue]);
         }
         buf
     }
@@ -481,10 +481,11 @@ mod tests {
     fn preprocess_rejects_wrong_len() {
         let mut pre = preprocessor(64, 64);
         let bad = vec![0u8; 10]; // != 64 * 64 * 3
-        let err = pre
-            .preprocess(&bad, 64, 64, false)
-            .expect_err("wrong-length frame must be rejected");
-        assert!(matches!(err, InferenceError::InferenceError(_)));
+        let result = pre.preprocess(&bad, 64, 64, false);
+        assert!(
+            matches!(result, Err(InferenceError::InferenceError(_))),
+            "wrong-length frame must be rejected"
+        );
     }
 
     #[test]
