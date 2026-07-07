@@ -31,17 +31,12 @@ use crate::results::{Results, Speed};
 use crate::task::Task;
 use crate::{verbose, warn};
 
-/// Finalize a CUDA/`TensorRT` execution-provider builder, optionally binding it
-/// to an external cudarc compute stream for the `cuda-preprocess` fast path.
+/// Finalize a CUDA/`TensorRT` EP builder, binding it to the `cuda-preprocess`
+/// compute stream when one is supplied.
 ///
-/// When `compute_stream` is `Some`, the EP is bound to the stream so ORT
-/// inference stays enqueued behind the preprocess kernel without an explicit
-/// synchronize, and `error_on_failure()` is set: with the fast path active we
-/// feed ORT a CUDA *device pointer*, so a silent CPU fallback (e.g. missing
-/// `libcudnn.so.9` / CUDA-version mismatch in the bundled ORT provider) would
-/// leave the input node on CPU and panic at `bind_input` (#251). Failing loudly
-/// surfaces the real cause. The `None` arm keeps ORT's default graceful
-/// multi-EP fallback for the plain CUDA/`TensorRT` path.
+/// With a stream, `error_on_failure()` is set because we hand ORT a device
+/// pointer: a silent CPU fallback would panic at `bind_input` (#251). The `None`
+/// arm keeps ORT's default multi-EP fallback.
 ///
 /// SAFETY: `with_compute_stream` requires the `CudaStreamHandle` to outlive
 /// every `Session` bound to it; `load_with_config` guarantees this.
