@@ -219,7 +219,7 @@ pub fn postprocess(
 }
 
 /// Detect if a 3D shape matches YOLO26 end2end detect layout `[1, max_det, 6]`.
-fn is_end2end_detect_shape(shape: &[usize]) -> bool {
+const fn is_end2end_detect_shape(shape: &[usize]) -> bool {
     shape.len() == 3 && shape[2] == 6 && shape[1] <= 4096
 }
 
@@ -233,7 +233,7 @@ fn is_end2end_segment_shape(shape: &[usize], proto_channels: Option<usize>) -> b
 }
 
 /// Detect if a 3D shape matches YOLO26 end2end pose layout `[1, max_det, 6 + nk*dim]`.
-fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
+const fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
     shape.len() == 3 && shape[2] == 6 + nk * kpt_dim && shape[1] <= 4096
 }
 
@@ -245,7 +245,7 @@ fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
 /// the layout is ambiguous: `(12, 3)` and `(18, 2)` both decode the same
 /// tensor. Ambiguous cases fall through to the legacy pose path rather than
 /// silently guessing the wrong dimension.
-fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
+const fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
     if shape.len() != 3 || shape[1] == 0 || shape[1] > 4096 || shape[2] <= 6 {
         return None;
     }
@@ -260,7 +260,7 @@ fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
 }
 
 /// Detect if a 3D shape matches YOLO26 end2end OBB layout `[1, max_det, 7]`.
-fn is_end2end_obb_shape(shape: &[usize]) -> bool {
+const fn is_end2end_obb_shape(shape: &[usize]) -> bool {
     shape.len() == 3 && shape[2] == 7 && shape[1] <= 4096
 }
 
