@@ -31,6 +31,30 @@ use crate::results::{Results, Speed};
 use crate::task::Task;
 use crate::{verbose, warn};
 
+/// Finalize a CUDA/`TensorRT` execution-provider builder, optionally binding it
+/// to an external cudarc compute stream for the `cuda-preprocess` fast path.
+///
+/// When `compute_stream` is `Some`, the EP is bound to the stream so ORT
+/// inference stays enqueued behind the preprocess kernel without an explicit
+/// synchronize, and `error_on_failure()` is set: with the fast path active we
+/// feed ORT a CUDA *device pointer*, so a silent CPU fallback (e.g. missing
+/// `libcudnn.so.9` / CUDA-version mismatch in the bundled ORT provider) would
+/// leave the input node on CPU and panic at `bind_input` (#251). Failing loudly
+/// surfaces the real cause. The `None` arm keeps ORT's default graceful
+/// multi-EP fallback for the plain CUDA/`TensorRT` path.
+///
+/// SAFETY: `with_compute_stream` requires the `CudaStreamHandle` to outlive
+/// every `Session` bound to it; `load_with_config` guarantees this.
+#[cfg(any(feature = "cuda", feature = "tensorrt"))]
+macro_rules! bind_compute_stream {
+    ($ep:expr, $compute_stream:expr) => {
+        match $compute_stream {
+            Some(s) => unsafe { $ep.with_compute_stream(s).build().error_on_failure() },
+            None => $ep.build(),
+        }
+    };
+}
+
 /// YOLO model for inference.
 ///
 /// This struct wraps an ONNX Runtime session and provides methods for
@@ -520,7 +544,7 @@ impl YOLOModel {
     /// back to standard FP32.
     ///
     /// `compute_stream` (when `Some`) binds the EP to an external cudarc stream
-    /// for the `cuda-preprocess` fast path; this requires an `unsafe` ORT call.
+    /// for the `cuda-preprocess` fast path; see [`bind_compute_stream`].
     #[cfg(feature = "cuda")]
     #[allow(unsafe_code)]
     fn build_cuda_ep(
@@ -530,22 +554,7 @@ impl YOLOModel {
         let ep = ort::execution_providers::CUDAExecutionProvider::default()
             .with_device_id(device_id)
             .with_tf32(true);
-        // Bind to the cuda-preprocess stream when supplied; this keeps the
-        // ORT inference enqueued behind the preprocess kernel without an
-        // explicit synchronize. SAFETY: caller (load_with_config) keeps the
-        // CudaStreamHandle alive for the lifetime of the Session.
-        //
-        // `error_on_failure()` is set ONLY on the cuda-preprocess arm: when the
-        // fast path is active we feed ORT a CUDA *device pointer*, so a silent
-        // CPU fallback (e.g. missing libcudnn.so.9 / CUDA-version mismatch in the
-        // bundled ORT provider) would leave the input node on CPU and panic at
-        // bind_input with "no data transfer registered". Failing loudly here
-        // surfaces the real cause (#251). The `None` arm keeps the default
-        // graceful multi-EP fallback for the plain CUDA path.
-        match compute_stream {
-            Some(s) => unsafe { ep.with_compute_stream(s).build().error_on_failure() },
-            None => ep.build(),
-        }
+        bind_compute_stream!(ep, compute_stream)
     }
 
     /// Build the `TensorRT` execution provider with engine + timing caches enabled.
@@ -557,7 +566,7 @@ impl YOLOModel {
     /// skip the multi-minute TRT engine compile.
     ///
     /// `compute_stream` (when `Some`) binds the EP to an external cudarc stream
-    /// for the `cuda-preprocess` fast path; this requires an `unsafe` ORT call.
+    /// for the `cuda-preprocess` fast path; see [`bind_compute_stream`].
     #[cfg(feature = "tensorrt")]
     #[allow(unsafe_code)]
     fn build_tensorrt_ep(
@@ -584,13 +593,7 @@ impl YOLOModel {
             .with_timing_cache_path(cache_str)
             .with_max_workspace_size(4 * 1024 * 1024 * 1024)
             .with_builder_optimization_level(5);
-        // SAFETY: see build_cuda_ep above. `error_on_failure()` is scoped to the
-        // cuda-preprocess arm for the same reason documented there: a silent CPU
-        // fallback while we hand ORT a device pointer panics at bind_input (#251).
-        match compute_stream {
-            Some(s) => unsafe { ep.with_compute_stream(s).build().error_on_failure() },
-            None => ep.build(),
-        }
+        bind_compute_stream!(ep, compute_stream)
     }
 
     #[cfg(feature = "coreml")]
