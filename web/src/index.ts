@@ -343,7 +343,7 @@ interface LiteRtCompiledModel {
   delete?(): void;
 }
 interface LiteRtModule {
-  loadLiteRt(wasmPath: string): Promise<void>;
+  loadLiteRt(wasmPath: string, opts?: { threads?: boolean }): Promise<void>;
   loadAndCompile(model: Uint8Array | string, opts: { accelerator: string | string[] }): Promise<LiteRtCompiledModel>;
   Tensor: new (data: Float32Array, shape: number[]) => LiteRtTensor;
 }
@@ -385,7 +385,12 @@ function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<voi
     return litertInit;
   }
   litertInitUrl = wasmUrl;
-  litertInit = litert.loadLiteRt(wasmUrl).catch((e) => {
+  // Enable WASM multithreading when the page is cross-origin isolated (COOP/COEP
+  // set, so SharedArrayBuffer is available); otherwise LiteRT.js runs single-
+  // threaded. SIMD is detected by LiteRT itself. Isolation is a page-global
+  // property, so this needs no per-load option.
+  const threads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
+  litertInit = litert.loadLiteRt(wasmUrl, { threads }).catch((e) => {
     litertInit = null; // let a later load retry if the first init failed
     litertInitUrl = null;
     throw e;
