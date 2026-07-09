@@ -106,6 +106,49 @@ impl SemanticMask {
     }
 }
 
+/// Per-pixel depth map (in meters) for monocular depth estimation.
+#[derive(Debug, Clone)]
+pub struct DepthMap {
+    /// Depth value in meters for each pixel, shape [H, W].
+    pub data: Array2<f32>,
+    /// Original image shape (height, width).
+    pub orig_shape: (u32, u32),
+}
+
+impl DepthMap {
+    /// Create a new `DepthMap`.
+    #[must_use]
+    pub const fn new(data: Array2<f32>, orig_shape: (u32, u32)) -> Self {
+        Self { data, orig_shape }
+    }
+
+    /// Get the original image shape (height, width).
+    #[must_use]
+    pub const fn orig_shape(&self) -> (u32, u32) {
+        self.orig_shape
+    }
+
+    /// Minimum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
+    #[must_use]
+    pub fn min_depth(&self) -> Option<f32> {
+        self.data
+            .iter()
+            .copied()
+            .filter(|&v| v > 0.0)
+            .fold(None, |acc, v| Some(acc.map_or(v, |m: f32| m.min(v))))
+    }
+
+    /// Maximum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
+    #[must_use]
+    pub fn max_depth(&self) -> Option<f32> {
+        self.data
+            .iter()
+            .copied()
+            .filter(|&v| v > 0.0)
+            .fold(None, |acc, v| Some(acc.map_or(v, |m: f32| m.max(v))))
+    }
+}
+
 /// Main results container for YOLO inference.
 ///
 /// Contains the original image, detection results (boxes, masks, keypoints, etc.), timing information, and metadata.
@@ -129,6 +172,8 @@ pub struct Results {
     pub obb: Option<Obb>,
     /// Semantic segmentation class map (if applicable).
     pub semantic_mask: Option<SemanticMask>,
+    /// Per-pixel depth map in meters (if applicable).
+    pub depth: Option<DepthMap>,
     /// Inference timing information.
     pub speed: Speed,
     /// Class ID to name mapping.
@@ -204,6 +249,7 @@ impl Results {
             probs: None,
             obb: None,
             semantic_mask: None,
+            depth: None,
             speed,
             names,
             path,
@@ -282,6 +328,13 @@ impl Results {
                 .map(|id| self.names.get(id).map_or("unknown", String::as_str))
                 .collect();
             return shown.join(", ");
+        }
+
+        if let Some(ref depth) = self.depth {
+            return match (depth.min_depth(), depth.max_depth()) {
+                (Some(lo), Some(hi)) => format!("depth {lo:.2}-{hi:.2}m"),
+                _ => "depth (no valid pixels)".to_string(),
+            };
         }
 
         #[allow(clippy::option_if_let_else)]
@@ -1086,6 +1139,30 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.semantic_mask.as_ref().unwrap().classes_present(), 3);
+    }
+
+    #[test]
+    fn test_depth_map_summary_and_len() {
+        let names = Arc::new(HashMap::new());
+        let speed = Speed::default();
+        let orig_img = Array3::zeros((2, 2, 3));
+        let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (2, 2));
+        // Includes an invalid (0.0) pixel that must be excluded from min/max.
+        let depth = DepthMap::new(array![[0.0f32, 1.5], [3.0, 4.0]], (2, 2));
+        assert!((depth.min_depth().unwrap() - 1.5).abs() < 1e-6);
+        assert!((depth.max_depth().unwrap() - 4.0).abs() < 1e-6);
+        results.depth = Some(depth);
+
+        assert_eq!(results.len(), 0);
+        assert!(results.is_empty());
+        assert_eq!(results.detection_summary(), "depth 1.50-4.00m");
+    }
+
+    #[test]
+    fn test_depth_map_no_valid_pixels() {
+        let depth = DepthMap::new(array![[0.0f32, 0.0], [0.0, 0.0]], (2, 2));
+        assert!(depth.min_depth().is_none());
+        assert!(depth.max_depth().is_none());
     }
 
     #[test]

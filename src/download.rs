@@ -19,7 +19,7 @@ const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11", "yolov8"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 /// Variants only available for the yolo26 family.
-const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem"];
+const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth"];
 
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES
@@ -48,6 +48,7 @@ fn supported_models_help() -> String {
         "-obb",
         "-cls",
         "-sem (yolo26 only)",
+        "-depth (yolo26 only)",
     ];
     let sizes_display = MODEL_SIZES.join(", ");
     let variants_joined = variants_display.join(", ");
@@ -489,9 +490,11 @@ mod tests {
         assert!(models.iter().any(|m| m == "yolo26n.onnx"));
         assert!(models.iter().any(|m| m == "yolo11n-seg.onnx"));
         assert!(models.iter().any(|m| m == "yolov8n.onnx"));
-        // `-sem` is a yolo26-only variant.
+        // `-sem` and `-depth` are yolo26-only variants.
         assert!(models.iter().any(|m| m == "yolo26n-sem.onnx"));
         assert!(!models.iter().any(|m| m == "yolo11n-sem.onnx"));
+        assert!(models.iter().any(|m| m == "yolo26n-depth.onnx"));
+        assert!(!models.iter().any(|m| m == "yolo11n-depth.onnx"));
     }
 
     #[test]

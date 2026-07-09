@@ -490,6 +490,7 @@ const fn predict_parent_dir(task: Task) -> &'static str {
         Task::Classify => "runs/classify",
         Task::Obb => "runs/obb",
         Task::Semantic => "runs/semantic",
+        Task::Depth => "runs/depth",
     }
 }
 
@@ -708,6 +709,7 @@ mod tests {
         assert_eq!(predict_parent_dir(Task::Classify), "runs/classify");
         assert_eq!(predict_parent_dir(Task::Obb), "runs/obb");
         assert_eq!(predict_parent_dir(Task::Semantic), "runs/semantic");
+        assert_eq!(predict_parent_dir(Task::Depth), "runs/depth");
     }
 
     #[test]
