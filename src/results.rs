@@ -135,7 +135,7 @@ impl DepthMap {
             .iter()
             .copied()
             .filter(|&v| v > 0.0)
-            .fold(None, |acc, v| Some(acc.map_or(v, |m: f32| m.min(v))))
+            .reduce(f32::min)
     }
 
     /// Maximum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
@@ -145,7 +145,7 @@ impl DepthMap {
             .iter()
             .copied()
             .filter(|&v| v > 0.0)
-            .fold(None, |acc, v| Some(acc.map_or(v, |m: f32| m.max(v))))
+            .reduce(f32::max)
     }
 }
 
