@@ -1733,6 +1733,25 @@ fn bilinear_axis(d: usize, scale: f32, offset: usize, max_idx: usize) -> (usize,
     (i0, i1, s - i0 as f32)
 }
 
+/// Precompute per-output-column bilinear source neighbours and weights `(x0, x1, w0, w1)`
+/// for upsampling a `crop_w`-wide letterbox-cropped region (starting at `left`) to `ow` columns.
+#[allow(clippy::cast_precision_loss)]
+fn bilinear_x_lut(
+    ow: usize,
+    lw: usize,
+    left: usize,
+    crop_w: usize,
+) -> Vec<(usize, usize, f32, f32)> {
+    let scale_x = crop_w as f32 / ow as f32;
+    let lw_minus_1 = lw.saturating_sub(1);
+    (0..ow)
+        .map(|dx| {
+            let (x0, x1, fx) = bilinear_axis(dx, scale_x, left, lw_minus_1);
+            (x0, x1, 1.0 - fx, fx)
+        })
+        .collect()
+}
+
 /// Post-process a Semantic Segmentation ONNX that has ArgMax + Cast(uint8) baked in.
 ///
 /// Output shape is `[1, lh, lw] uint8`. For cityscapes-style inputs where the model's
@@ -1854,32 +1873,16 @@ pub fn postprocess_depth(
         return results;
     }
 
-    // Model output already at original resolution: copy straight through.
-    if lh == oh && lw == ow {
-        let map =
-            Array2::from_shape_vec((oh, ow), output[..oh * ow].to_vec()).expect("shape matches");
-        results.depth = Some(DepthMap::new(map, (oh as u32, ow as u32)));
-        return results;
-    }
-
     // Crop the centered letterbox padding, then bilinear-upsample the crop to (oh, ow).
     // Rows are filled in parallel; the `(d + 0.5) * scale - 0.5` sampling is the
     // `align_corners=False` half-pixel convention of Python's `F.interpolate(mode="bilinear")`.
+    // When the output is already at original resolution this reduces to an exact copy.
     let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
     };
+    let x_lut = bilinear_x_lut(ow, lw, left, crop_w);
     let scale_y = crop_h as f32 / oh as f32;
-    let scale_x = crop_w as f32 / ow as f32;
-    let lw_minus_1 = lw.saturating_sub(1);
     let lh_minus_1 = lh.saturating_sub(1);
-
-    // Precompute source-x neighbors + weights once per output column.
-    let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
-        .map(|dx| {
-            let (x0, x1, fx) = bilinear_axis(dx, scale_x, left, lw_minus_1);
-            (x0, x1, 1.0 - fx, fx)
-        })
-        .collect();
 
     let mut buf = vec![0f32; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
@@ -1984,18 +1987,9 @@ fn postprocess_semantic(
     let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
     };
+    let x_lut = bilinear_x_lut(ow, lw, left, crop_w);
     let scale_y = crop_h as f32 / oh as f32;
-    let scale_x = crop_w as f32 / ow as f32;
-    let lw_minus_1 = lw.saturating_sub(1);
     let lh_minus_1 = lh.saturating_sub(1);
-
-    // Precompute source-x neighbors + weights once per output column.
-    let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
-        .map(|dx| {
-            let (x0, x1, fx) = bilinear_axis(dx, scale_x, left, lw_minus_1);
-            (x0, x1, 1.0 - fx, fx)
-        })
-        .collect();
 
     // Bilinear upsample and argmax directly on CHW data, skipping the transpose.
     // Reads are strided (one plane apart per class) but avoids transposing 39M floats.
