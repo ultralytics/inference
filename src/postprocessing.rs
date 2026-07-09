@@ -1845,27 +1845,44 @@ pub fn postprocess_depth(
         return results;
     }
 
-    // Crop the centered letterbox padding, then bilinear-resize the crop to original size.
+    // Crop the centered letterbox padding, then bilinear-upsample the crop to (oh, ow).
+    // Rows are filled in parallel; the `(d + 0.5) * scale - 0.5` sampling is the
+    // `align_corners=False` half-pixel convention of Python's `F.interpolate(mode="bilinear")`.
     let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
     };
+    let scale_y = crop_h as f32 / oh as f32;
+    let scale_x = crop_w as f32 / ow as f32;
+    let lw_minus_1 = lw.saturating_sub(1);
+    let lh_minus_1 = lh.saturating_sub(1);
 
-    let src_bytes: &[u8] = bytemuck::cast_slice(&output[..lh * lw]);
-    let Ok(src_image) = ImageRef::new(lw as u32, lh as u32, src_bytes, PixelType::F32) else {
-        return results;
-    };
-    let mut dst_image = Image::new(ow as u32, oh as u32, PixelType::F32);
-    let options = ResizeOptions::new()
-        .resize_alg(ResizeAlg::Convolution(FilterType::Bilinear))
-        .crop(left as f64, top as f64, crop_w as f64, crop_h as f64);
-    if Resizer::new()
-        .resize(&src_image, &mut dst_image, &options)
-        .is_err()
-    {
-        return results;
-    }
-    let dst: &[f32] = bytemuck::cast_slice(dst_image.buffer());
-    let map = Array2::from_shape_vec((oh, ow), dst.to_vec()).expect("shape matches");
+    // Precompute source-x neighbors + weights once per output column.
+    let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
+        .map(|dx| {
+            let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
+            let x0 = (sx.floor() as usize).min(lw_minus_1);
+            let x1 = (x0 + 1).min(lw_minus_1);
+            let fx = sx - x0 as f32;
+            (x0, x1, 1.0 - fx, fx)
+        })
+        .collect();
+
+    let mut buf = vec![0f32; oh * ow];
+    buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+        let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
+        let y0 = (sy.floor() as usize).min(lh_minus_1);
+        let y1 = (y0 + 1).min(lh_minus_1);
+        let fy = sy - y0 as f32;
+        let (row0, row1) = (y0 * lw, y1 * lw);
+
+        for (dx, cell) in row.iter_mut().enumerate() {
+            let (x0, x1, fxi, fx) = x_lut[dx];
+            let top_row = output[row0 + x0].mul_add(fxi, output[row0 + x1] * fx);
+            let bot_row = output[row1 + x0].mul_add(fxi, output[row1 + x1] * fx);
+            *cell = top_row.mul_add(1.0 - fy, bot_row * fy);
+        }
+    });
+    let map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
     results.depth = Some(DepthMap::new(map, (oh as u32, ow as u32)));
     results
 }
