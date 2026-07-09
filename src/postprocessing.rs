@@ -1716,6 +1716,23 @@ fn letterbox_crop_bounds(
     }
 }
 
+/// Map an output index `d` to its two source neighbours `(i0, i1)` and fractional weight
+/// `frac` for bilinear upsampling of a letterbox-cropped axis. `offset` is the crop start
+/// and `max_idx` the last valid source index. Uses the `(d + 0.5) * scale - 0.5` half-pixel
+/// convention of Python's `align_corners=False` `F.interpolate`.
+#[inline]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+fn bilinear_axis(d: usize, scale: f32, offset: usize, max_idx: usize) -> (usize, usize, f32) {
+    let s = (d as f32 + 0.5).mul_add(scale, -0.5).max(0.0) + offset as f32;
+    let i0 = (s.floor() as usize).min(max_idx);
+    let i1 = (i0 + 1).min(max_idx);
+    (i0, i1, s - i0 as f32)
+}
+
 /// Post-process a Semantic Segmentation ONNX that has ArgMax + Cast(uint8) baked in.
 ///
 /// Output shape is `[1, lh, lw] uint8`. For cityscapes-style inputs where the model's
@@ -1859,22 +1876,15 @@ pub fn postprocess_depth(
     // Precompute source-x neighbors + weights once per output column.
     let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
         .map(|dx| {
-            let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
-            let x0 = (sx.floor() as usize).min(lw_minus_1);
-            let x1 = (x0 + 1).min(lw_minus_1);
-            let fx = sx - x0 as f32;
+            let (x0, x1, fx) = bilinear_axis(dx, scale_x, left, lw_minus_1);
             (x0, x1, 1.0 - fx, fx)
         })
         .collect();
 
     let mut buf = vec![0f32; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
-        let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
-        let y0 = (sy.floor() as usize).min(lh_minus_1);
-        let y1 = (y0 + 1).min(lh_minus_1);
-        let fy = sy - y0 as f32;
+        let (y0, y1, fy) = bilinear_axis(dy, scale_y, top, lh_minus_1);
         let (row0, row1) = (y0 * lw, y1 * lw);
-
         for (dx, cell) in row.iter_mut().enumerate() {
             let (x0, x1, fxi, fx) = x_lut[dx];
             let top_row = output[row0 + x0].mul_add(fxi, output[row0 + x1] * fx);
@@ -1982,10 +1992,7 @@ fn postprocess_semantic(
     // Precompute source-x neighbors + weights once per output column.
     let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
         .map(|dx| {
-            let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
-            let x0 = (sx.floor() as usize).min(lw_minus_1);
-            let x1 = (x0 + 1).min(lw_minus_1);
-            let fx = sx - x0 as f32;
+            let (x0, x1, fx) = bilinear_axis(dx, scale_x, left, lw_minus_1);
             (x0, x1, 1.0 - fx, fx)
         })
         .collect();
@@ -1994,10 +2001,7 @@ fn postprocess_semantic(
     // Reads are strided (one plane apart per class) but avoids transposing 39M floats.
     let mut buf = vec![0u16; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
-        let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
-        let y0 = (sy.floor() as usize).min(lh_minus_1);
-        let y1 = (y0 + 1).min(lh_minus_1);
-        let fy = sy - y0 as f32;
+        let (y0, y1, fy) = bilinear_axis(dy, scale_y, top, lh_minus_1);
         let fyi = 1.0 - fy;
 
         let row0_base = y0 * lw;
