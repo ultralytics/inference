@@ -166,6 +166,78 @@ fn test_semantic_save_class_map() {
 }
 
 #[test]
+#[ignore = "downloads yolo26n-depth.onnx from GitHub releases; requires network"]
+fn test_auto_download_depth_model() {
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+    let result = ultralytics_inference::download::try_download_model(&model_path);
+    assert!(
+        result.is_ok(),
+        "download should succeed: {:?}",
+        result.err()
+    );
+    assert!(
+        model_path.exists(),
+        "yolo26n-depth.onnx should be present after auto-download"
+    );
+}
+
+#[test]
+#[ignore = "downloads a YOLO depth model and sample image"]
+fn test_run_prediction_e2e_depth() {
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+
+    let args = PredictArgs {
+        model: Some(model_path.to_string_lossy().into_owned()),
+        task: Some(Task::Depth),
+        source: Some("https://ultralytics.com/images/bus.jpg".to_string()),
+        conf: 0.25,
+        iou: 0.45,
+        max_det: 300,
+        imgsz: Some(640),
+        rect: false,
+        batch: 1,
+        half: false,
+        save: false,
+        save_frames: false,
+        save_json: false,
+        show: false,
+        device: None,
+        verbose: false,
+        classes: None,
+    };
+
+    run_prediction(&args);
+}
+
+#[test]
+#[ignore = "downloads a YOLO depth model and sample image; inspects the depth map"]
+fn test_depth_results_has_map() {
+    use ultralytics_inference::YOLOModel;
+
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+
+    let mut model =
+        YOLOModel::load(model_path.to_string_lossy().as_ref()).expect("depth model should load");
+    assert_eq!(model.task(), Task::Depth);
+    let results = model
+        .predict("https://ultralytics.com/images/bus.jpg")
+        .expect("prediction should succeed");
+
+    let depth = results[0]
+        .depth
+        .as_ref()
+        .expect("depth task should populate results.depth");
+    // Depth map is at original image resolution and holds positive metric values.
+    assert_eq!(depth.data.shape().len(), 2);
+    let lo = depth.min_depth().expect("valid pixels expected");
+    let hi = depth.max_depth().expect("valid pixels expected");
+    assert!(lo > 0.0 && hi >= lo, "implausible depth range {lo}-{hi}");
+}
+
+#[test]
 fn test_inference_config_creation() {
     let config = InferenceConfig::default();
     assert_eq!(config.confidence_threshold, 0.25);

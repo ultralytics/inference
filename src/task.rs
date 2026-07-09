@@ -34,6 +34,9 @@ pub enum Task {
     /// Semantic segmentation.
     /// Assigns a class label to every pixel in the image.
     Semantic,
+    /// Monocular depth estimation.
+    /// Predicts a per-pixel depth map (in meters) for the whole image.
+    Depth,
 }
 
 impl Task {
@@ -48,6 +51,7 @@ impl Task {
             Self::Classify => "classify",
             Self::Obb => "obb",
             Self::Semantic => "semantic",
+            Self::Depth => "depth",
         }
     }
 
@@ -68,6 +72,7 @@ impl Task {
             Self::Classify => "-cls",
             Self::Obb => "-obb",
             Self::Semantic => "-sem",
+            Self::Depth => "-depth",
         }
     }
 
@@ -121,6 +126,12 @@ impl Task {
     pub const fn has_semantic_mask(&self) -> bool {
         matches!(self, Self::Semantic)
     }
+
+    /// Returns `true` only for the `Depth` task, which outputs a per-pixel depth map (meters).
+    #[must_use]
+    pub const fn has_depth_map(&self) -> bool {
+        matches!(self, Self::Depth)
+    }
 }
 
 impl fmt::Display for Task {
@@ -140,6 +151,7 @@ impl FromStr for Task {
             "classify" | "classification" | "cls" => Ok(Self::Classify),
             "obb" | "oriented" => Ok(Self::Obb),
             "semantic" | "semantic_segmentation" | "semseg" => Ok(Self::Semantic),
+            "depth" | "depth_estimation" => Ok(Self::Depth),
             _ => Err(TaskParseError(s.to_string())),
         }
     }
@@ -153,7 +165,7 @@ impl fmt::Display for TaskParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid task '{}', expected one of: detect, segment, pose, classify, obb, semantic",
+            "invalid task '{}', expected one of: detect, segment, pose, classify, obb, semantic, depth",
             self.0
         )
     }
@@ -174,6 +186,7 @@ mod tests {
         assert_eq!("obb".parse::<Task>().unwrap(), Task::Obb);
 
         assert_eq!("semantic".parse::<Task>().unwrap(), Task::Semantic);
+        assert_eq!("depth".parse::<Task>().unwrap(), Task::Depth);
 
         // Alternative names
         assert_eq!("detection".parse::<Task>().unwrap(), Task::Detect);
@@ -184,6 +197,7 @@ mod tests {
             "semantic_segmentation".parse::<Task>().unwrap(),
             Task::Semantic
         );
+        assert_eq!("depth_estimation".parse::<Task>().unwrap(), Task::Depth);
     }
 
     #[test]
@@ -203,6 +217,8 @@ mod tests {
         assert!(Task::Obb.has_obb());
         assert!(Task::Semantic.has_semantic_mask());
         assert!(!Task::Detect.has_semantic_mask());
+        assert!(Task::Depth.has_depth_map());
+        assert!(!Task::Semantic.has_depth_map());
     }
 
     #[test]
@@ -214,6 +230,7 @@ mod tests {
             (Task::Classify, "classify", "-cls", "yolo26n-cls.onnx"),
             (Task::Obb, "obb", "-obb", "yolo26n-obb.onnx"),
             (Task::Semantic, "semantic", "-sem", "yolo26n-sem.onnx"),
+            (Task::Depth, "depth", "-depth", "yolo26n-depth.onnx"),
         ];
         for (task, name, suffix, model) in cases {
             assert_eq!(task.as_str(), name);

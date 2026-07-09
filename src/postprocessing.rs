@@ -28,7 +28,7 @@ use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
-use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
+use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
 use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
 
@@ -214,6 +214,10 @@ pub fn postprocess(
                     inference_shape,
                 )
             }
+        }
+        Task::Depth => {
+            let (output, shape) = &outputs[0];
+            postprocess_depth(output, shape, names, orig_img, path, speed, inference_shape)
         }
     }
 }
@@ -1791,6 +1795,81 @@ pub fn postprocess_semantic_mask(
     results
 }
 
+/// Post-process a monocular depth model output into a per-pixel depth map (meters).
+///
+/// The exported ONNX output is `[1, 1, lh, lw]` (or `[1, lh, lw]`) float32 with all
+/// activation and calibration baked into the graph, upsampled to the letterboxed input
+/// resolution. To recover the original image geometry we crop the centered letterbox
+/// padding and bilinear-resize the cropped region back to the original `(H, W)`, mirroring
+/// `ops.scale_masks` in the Python `DepthPredictor`.
+///
+/// # Panics
+///
+/// Panics if the freshly-allocated depth `Array2<f32>` is not contiguous (cannot occur
+/// for a buffer sized exactly `oh * ow`).
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::similar_names,
+    clippy::implicit_hasher
+)]
+#[must_use]
+pub fn postprocess_depth(
+    output: &[f32],
+    shape: &[usize],
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+) -> Results {
+    let oh = orig_img.shape()[0];
+    let ow = orig_img.shape()[1];
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+
+    if shape.len() < 2 || output.is_empty() {
+        return results;
+    }
+    let (lh, lw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
+    if lh == 0 || lw == 0 || oh == 0 || ow == 0 || output.len() < lh * lw {
+        return results;
+    }
+
+    // Model output already at original resolution: copy straight through.
+    if lh == oh && lw == ow {
+        let map =
+            Array2::from_shape_vec((oh, ow), output[..oh * ow].to_vec()).expect("shape matches");
+        results.depth = Some(DepthMap::new(map, (oh as u32, ow as u32)));
+        return results;
+    }
+
+    // Crop the centered letterbox padding, then bilinear-resize the crop to original size.
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
+        return results;
+    };
+
+    let src_bytes: &[u8] = bytemuck::cast_slice(&output[..lh * lw]);
+    let Ok(src_image) = ImageRef::new(lw as u32, lh as u32, src_bytes, PixelType::F32) else {
+        return results;
+    };
+    let mut dst_image = Image::new(ow as u32, oh as u32, PixelType::F32);
+    let options = ResizeOptions::new()
+        .resize_alg(ResizeAlg::Convolution(FilterType::Bilinear))
+        .crop(left as f64, top as f64, crop_w as f64, crop_h as f64);
+    if Resizer::new()
+        .resize(&src_image, &mut dst_image, &options)
+        .is_err()
+    {
+        return results;
+    }
+    let dst: &[f32] = bytemuck::cast_slice(dst_image.buffer());
+    let map = Array2::from_shape_vec((oh, ow), dst.to_vec()).expect("shape matches");
+    results.depth = Some(DepthMap::new(map, (oh as u32, ow as u32)));
+    results
+}
+
 /// Post-process semantic segmentation model output.
 ///
 /// The model outputs raw logits of shape `[1, nc, lh, lw]` at the P3 scale
@@ -2504,6 +2583,65 @@ mod tests {
         // Col 1+ pixels have positive logits → class 1
         assert_eq!(sm.data[[0, 1]], 1);
         assert_eq!(sm.data[[1, 1]], 1);
+    }
+
+    #[test]
+    fn test_postprocess_depth_passthrough() {
+        // Output already at original resolution: values copy straight into the depth map.
+        let (oh, ow) = (2, 3);
+        let output = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let result = postprocess_depth(
+            &output,
+            &[1, 1, oh, ow],
+            make_names(1),
+            ndarray::Array3::zeros((oh, ow, 3)),
+            String::new(),
+            Speed::default(),
+            (oh as u32, ow as u32),
+        );
+        let depth = result.depth.unwrap();
+        assert_eq!(depth.data.shape(), &[oh, ow]);
+        assert!((depth.data[[0, 0]] - 1.0).abs() < 1e-6);
+        assert!((depth.data[[1, 2]] - 6.0).abs() < 1e-6);
+        assert!((depth.min_depth().unwrap() - 1.0).abs() < 1e-6);
+        assert!((depth.max_depth().unwrap() - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_postprocess_depth_letterbox_resize() {
+        // oh=2, ow=4 wide image letterboxed into 8x8: gain=2, 2 rows pad top/bottom,
+        // content rows 2..6, full width. A constant map must survive crop+resize.
+        let (oh, ow, lh, lw) = (2, 4, 8, 8);
+        let output = vec![2.5f32; lh * lw];
+        let result = postprocess_depth(
+            &output,
+            &[1, 1, lh, lw],
+            make_names(1),
+            ndarray::Array3::zeros((oh, ow, 3)),
+            String::new(),
+            Speed::default(),
+            (lh as u32, lw as u32),
+        );
+        let depth = result.depth.unwrap();
+        assert_eq!(depth.data.shape(), &[oh, ow]);
+        for &v in &depth.data {
+            assert!((v - 2.5).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn test_postprocess_depth_malformed_shape_no_panic() {
+        // Too-short shape and empty output must return an empty Results, not panic.
+        let result = postprocess_depth(
+            &[],
+            &[1],
+            make_names(1),
+            ndarray::Array3::zeros((2, 2, 3)),
+            String::new(),
+            Speed::default(),
+            (2, 2),
+        );
+        assert!(result.depth.is_none());
     }
 
     #[test]

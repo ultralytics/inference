@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(propagate_version = true)]
 #[command(after_help = r#"Predict Options:
     --model, -m <MODEL>    Path to ONNX model file [default: yolo26n.onnx]
-    --task <TASK>          Task type: detect, segment, pose, obb, classify, semantic [default: detect]
+    --task <TASK>          Task type: detect, segment, pose, obb, classify, semantic, depth [default: detect]
                            Selects the matching nano model when --model is omitted
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
@@ -35,6 +35,7 @@ Examples:
     ultralytics-inference predict --task obb --source aerial.jpg
     ultralytics-inference predict --task classify --source image.jpg
     ultralytics-inference predict --task semantic --source image.jpg
+    ultralytics-inference predict --task depth --source image.jpg
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
@@ -66,7 +67,7 @@ pub struct PredictArgs {
     pub model: Option<String>,
 
     /// Task type; selects nano model for auto-download when --model is omitted
-    /// (detect, segment, pose, obb, classify, semantic)
+    /// (detect, segment, pose, obb, classify, semantic, depth)
     #[arg(long)]
     pub task: Option<Task>,
 
