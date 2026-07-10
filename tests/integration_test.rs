@@ -11,6 +11,7 @@ use tempfile::tempdir;
 use ultralytics_inference::cli::args::PredictArgs;
 use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::task::Task;
+use ultralytics_inference::visualizer::color::Colormap;
 use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
 #[cfg(any(feature = "coreml", feature = "cuda"))]
 use ultralytics_inference::{Device, YOLOModel};
@@ -63,6 +64,7 @@ fn test_run_prediction_e2e() {
         device: None,
         verbose: false,
         classes: None,
+        colormap: Colormap::default(),
     };
 
     run_prediction(&args);
@@ -114,6 +116,7 @@ fn test_run_prediction_e2e_semantic() {
         device: None,
         verbose: false,
         classes: None,
+        colormap: Colormap::default(),
     };
 
     run_prediction(&args);
@@ -143,6 +146,7 @@ fn test_semantic_save_class_map() {
         device: None,
         verbose: false,
         classes: None,
+        colormap: Colormap::default(),
     };
 
     run_prediction(&args);
@@ -206,6 +210,7 @@ fn test_run_prediction_e2e_depth() {
         device: None,
         verbose: false,
         classes: None,
+        colormap: Colormap::default(),
     };
 
     run_prediction(&args);
