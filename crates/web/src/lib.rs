@@ -301,7 +301,7 @@ impl YoloModel {
     }
 
     /// The model's task (`"detect"`, `"segment"`, `"pose"`, `"classify"`,
-    /// `"obb"`, or `"semantic"`).
+    /// `"obb"`, `"semantic"`, or `"depth"`).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn task(&self) -> String {

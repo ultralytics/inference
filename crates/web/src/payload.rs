@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use ultralytics_inference::Task;
 use ultralytics_inference::results::{Results, SemanticMask};
-use ultralytics_inference::visualizer::color::Color;
+use ultralytics_inference::visualizer::color::{Color, inferno};
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
 /// `color` is the Ultralytics palette color for the class (`#rrggbb`).
@@ -91,6 +91,13 @@ pub(crate) struct JsResults {
     /// class-filtered pixels.
     #[serde(with = "serde_bytes")]
     semantic_mask: Vec<u8>,
+    /// Depth map as an opaque `RGBA` image (`width*height*4`), colorized with the
+    /// INFERNO colormap over valid (`>0`) pixels; empty for other tasks. A
+    /// `Uint8Array`, drawable straight onto a canvas.
+    #[serde(with = "serde_bytes")]
+    depth: Vec<u8>,
+    /// Depth range `[min, max]` in meters over valid pixels; `None` for other tasks.
+    depth_range: Option<[f32; 2]>,
     /// Per-stage timing in ms: `{ preprocess, inference, postprocess }`.
     speed: JsSpeed,
 }
@@ -182,6 +189,11 @@ impl JsResults {
                 }
                 bytes
             }),
+            depth: build_depth_overlay(r),
+            depth_range: r
+                .depth
+                .as_ref()
+                .and_then(|d| Some([d.min_depth()?, d.max_depth()?])),
             speed: JsSpeed {
                 preprocess: r.speed.preprocess.unwrap_or(0.0),
                 inference: r.speed.inference.unwrap_or(0.0),
@@ -242,4 +254,34 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
     }
 
     Vec::new()
+}
+
+/// Colorize the depth map into an opaque RGBA image (`width*height*4`) with the INFERNO
+/// colormap, min/max-normalized over valid (`>0`) pixels; invalid pixels are black. Empty
+/// when the result has no depth map or its resolution does not match the image.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+fn build_depth_overlay(r: &Results) -> Vec<u8> {
+    let Some(depth) = &r.depth else {
+        return Vec::new();
+    };
+    let (h, w) = (r.orig_shape.0 as usize, r.orig_shape.1 as usize);
+    if depth.data.dim() != (h, w) {
+        return Vec::new();
+    }
+    let (vmin, vmax) = match (depth.min_depth(), depth.max_depth()) {
+        (Some(lo), Some(hi)) if hi > lo => (lo, hi),
+        (Some(lo), _) => (lo, lo + 1e-6),
+        _ => (0.0, 1.0),
+    };
+    let inv = 1.0 / (vmax - vmin);
+    let mut buf = vec![0u8; w * h * 4];
+    for (px, &d) in buf.chunks_exact_mut(4).zip(depth.data.iter()) {
+        if d > 0.0 {
+            let c = inferno((d - vmin) * inv);
+            px.copy_from_slice(&[c[0], c[1], c[2], 255]);
+        } else {
+            px[3] = 255; // opaque black for invalid pixels
+        }
+    }
+    buf
 }
