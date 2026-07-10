@@ -251,7 +251,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | 选项            | 简写 | 说明                                                                                                                                       | 默认值                            |
 | --------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
 | `--model`       | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                            | `yolo26n.onnx`                    |
-| `--task`        |      | 任务类型（`detect`、`segment`、`pose`、`obb`、`classify`、`semantic`\*、`depth`\*）；省略 `--model` 时选择 nano 模型                     | `detect`                          |
+| `--task`        |      | 任务类型（`detect`、`segment`、`pose`、`obb`、`classify`、`semantic`\*、`depth`\*）；省略 `--model` 时选择 nano 模型                       | `detect`                          |
 | `--source`      | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                         | 与任务相关的 Ultralytics URL 资源 |
 | `--conf`        |      | 置信度阈值                                                                                                                                 | `0.25`                            |
 | `--iou`         |      | NMS IoU 阈值                                                                                                                               | `0.7`                             |
@@ -270,18 +270,18 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **任务和模型解析：**
 
-| 调用方式                                          | 使用模型             | 说明                                                    |
-| ------------------------------------------------- | -------------------- | ------------------------------------------------------- |
-| `predict`                                         | `yolo26n.onnx`       | 默认检测模型，自动下载                                  |
-| `predict --task segment`                          | `yolo26n-seg.onnx`   | nano 分割模型，自动下载                                 |
-| `predict --task pose`                             | `yolo26n-pose.onnx`  | nano 姿态模型，自动下载                                 |
-| `predict --task obb`                              | `yolo26n-obb.onnx`   | nano OBB 模型，自动下载                                 |
-| `predict --task classify`                         | `yolo26n-cls.onnx`   | nano 分类模型，自动下载                                 |
-| `predict --task semantic`                         | `yolo26n-sem.onnx`\* | nano 语义分割模型，自动下载（仅 YOLO26）                |
-| `predict --task depth`                            | `yolo26n-depth.onnx`\* | nano 深度估计模型，自动下载（仅 YOLO26）              |
-| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`   | 从模型元数据读取任务                                    |
-| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`   | `--task` 与元数据一致，正常执行                         |
-| `predict --task segment --model yolo26n.onnx`     | error                | `--task` 与模型元数据（`detect`）冲突，程序以错误退出。 |
+| 调用方式                                          | 使用模型               | 说明                                                    |
+| ------------------------------------------------- | ---------------------- | ------------------------------------------------------- |
+| `predict`                                         | `yolo26n.onnx`         | 默认检测模型，自动下载                                  |
+| `predict --task segment`                          | `yolo26n-seg.onnx`     | nano 分割模型，自动下载                                 |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                 |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                 |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                 |
+| `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | nano 语义分割模型，自动下载（仅 YOLO26）                |
+| `predict --task depth`                            | `yolo26n-depth.onnx`\* | nano 深度估计模型，自动下载（仅 YOLO26）                |
+| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | 从模型元数据读取任务                                    |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` 与元数据一致，正常执行                         |
+| `predict --task segment --model yolo26n.onnx`     | error                  | `--task` 与模型元数据（`detect`）冲突，程序以错误退出。 |
 
 \* `semantic`（语义分割）和 `depth`（深度估计）仅支持 YOLO26。
 
@@ -289,11 +289,11 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并覆盖标准任务变体。YOLO26 还包含用于语义分割的 `-sem` 和用于深度估计的 `-depth`：
 
-| 系列   | 变体                                                                                              |
-| ------ | ------------------------------------------------------------------------------------------------- |
+| 系列   | 变体                                                                                                  |
+| ------ | ----------------------------------------------------------------------------------------------------- |
 | YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`、`-sem`\*、`-depth`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`           |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`           |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`                       |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`                       |
 
 \* `-sem`（语义分割）和 `-depth`（深度估计）仅支持 YOLO26。
 
