@@ -36,8 +36,7 @@ use ultralytics_inference::preprocessing::{
     PreprocessResult, preprocess_image_center_crop, preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
-use ultralytics_inference::visualizer::color::Color;
-use ultralytics_inference::visualizer::color::Colormap;
+use ultralytics_inference::visualizer::color::{Color, Colormap};
 use ultralytics_inference::visualizer::skeleton::{
     KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
 };
