@@ -263,6 +263,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                     | `true`                            |
 | `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                       | `false`                           |
 | `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                       | `false`                           |
+| `--colormap`    |      | 深度着色方案：`inferno` 或 `jet`（仅深度任务）                                                                                             | `inferno`                         |
 | `--show`        |      | 在窗口中显示结果                                                                                                                           | `false`                           |
 | `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、openvino、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方（见 Features 表） | `cpu`                             |
 | `--verbose`     |      | 显示详细输出                                                                                                                               | `true`                            |

@@ -106,8 +106,9 @@ export interface Results {
    */
   semantic_mask?: Uint16Array;
   /**
-   * Depth map as an opaque INFERNO-colorized RGBA image (`width*height*4`),
-   * empty for other tasks. Drawable straight onto a canvas via `ImageData`.
+   * Depth map as an opaque colorized RGBA image (`width*height*4`), using the
+   * colormap from {@link PredictOptions.colormap}; empty for other tasks.
+   * Drawable straight onto a canvas via `ImageData`.
    */
   depth: Uint8Array;
   /** Depth range `[min, max]` in meters over valid pixels, for depth models. */
@@ -777,8 +778,8 @@ export async function annotate(
     ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
   }
 
-  // Depth: the engine returns an opaque INFERNO-colorized depth image; draw it
-  // over the frame so the canvas shows the depth map.
+  // Depth: the engine returns an opaque colorized depth image; draw it over the
+  // frame so the canvas shows the depth map.
   const depth = results.depth;
   if (depth && depth.length === width * height * 4) {
     const tmp = makeCanvas(width, height);

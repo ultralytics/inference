@@ -92,7 +92,7 @@ pub(crate) struct JsResults {
     #[serde(with = "serde_bytes")]
     semantic_mask: Vec<u8>,
     /// Depth map as an opaque `RGBA` image (`width*height*4`), colorized with the
-    /// INFERNO colormap over valid (`>0`) pixels; empty for other tasks. A
+    /// requested colormap over valid (`>0`) pixels; empty for other tasks. A
     /// `Uint8Array`, drawable straight onto a canvas.
     #[serde(with = "serde_bytes")]
     depth: Vec<u8>,
@@ -256,8 +256,8 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
     Vec::new()
 }
 
-/// Colorize the depth map into an opaque RGBA image (`width*height*4`) with the INFERNO
-/// colormap, min/max-normalized over valid (`>0`) pixels; invalid pixels are black. Empty
+/// Colorize the depth map into an opaque RGBA image (`width*height*4`) with the given
+/// `colormap`, min/max-normalized over valid (`>0`) pixels; invalid pixels are black. Empty
 /// when the result has no depth map or its resolution does not match the image.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 fn build_depth_overlay(r: &Results, colormap: Colormap) -> Vec<u8> {
