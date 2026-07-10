@@ -237,7 +237,7 @@ jobs:
         run: cargo clippy -p ultralytics-inference-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # v2.82.10
+        uses: taiki-e/install-action@5ebac0d9522d786674368e47e92963ba13f2c376 # v2.82.11
         with:
           tool: wasm-pack
 
@@ -279,7 +279,7 @@ jobs:
         run: rustup show
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # v2.82.10
+        uses: taiki-e/install-action@5ebac0d9522d786674368e47e92963ba13f2c376 # v2.82.11
         with:
           tool: cargo-llvm-cov
 
@@ -290,11 +290,12 @@ jobs:
         run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/cuda_inference\.rs|src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
 
       - name: Upload coverage to Codecov
+        continue-on-error: true
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: ./lcov.info
           disable_search: true
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           plugins: noop
           flags: template_coverage
           use_oidc: true
