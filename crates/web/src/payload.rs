@@ -268,11 +268,7 @@ fn build_depth_overlay(r: &Results, colormap: Colormap) -> Vec<u8> {
     if depth.data.dim() != (h, w) {
         return Vec::new();
     }
-    let (vmin, vmax) = match (depth.min_depth(), depth.max_depth()) {
-        (Some(lo), Some(hi)) if hi > lo => (lo, hi),
-        (Some(lo), _) => (lo, lo + 1e-6),
-        _ => (0.0, 1.0),
-    };
+    let (vmin, vmax) = depth.value_range();
     let inv = 1.0 / (vmax - vmin);
     let mut buf = vec![0u8; w * h * 4];
     for (px, &d) in buf.chunks_exact_mut(4).zip(depth.data.iter()) {
