@@ -147,6 +147,17 @@ impl DepthMap {
             .filter(|&v| v > 0.0)
             .reduce(f32::max)
     }
+
+    /// Color-normalization range `(min, max)` for visualization: the valid-pixel span,
+    /// widened so `max > min`, falling back to `(0.0, 1.0)` when no pixels are valid.
+    #[must_use]
+    pub fn value_range(&self) -> (f32, f32) {
+        match (self.min_depth(), self.max_depth()) {
+            (Some(lo), Some(hi)) if hi > lo => (lo, hi),
+            (Some(lo), _) => (lo, lo + 1e-6),
+            _ => (0.0, 1.0),
+        }
+    }
 }
 
 /// Main results container for YOLO inference.
