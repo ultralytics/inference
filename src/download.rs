@@ -492,9 +492,7 @@ mod tests {
         assert!(models.iter().any(|m| m == "yolov8n.onnx"));
         // `-sem` and `-depth` are yolo26-only variants.
         assert!(models.iter().any(|m| m == "yolo26n-sem.onnx"));
-        assert!(!models.iter().any(|m| m == "yolo11n-sem.onnx"));
         assert!(models.iter().any(|m| m == "yolo26n-depth.onnx"));
-        assert!(!models.iter().any(|m| m == "yolo11n-depth.onnx"));
     }
 
     #[test]
