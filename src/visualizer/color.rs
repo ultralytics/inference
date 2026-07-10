@@ -124,9 +124,83 @@ pub fn inferno(t: f32) -> [u8; 3] {
     out
 }
 
+/// Sample the classic JET rainbow colormap at normalized position `t` (clamped to `[0, 1]`).
+///
+/// Returns RGB: dark blue (low) → cyan → green → yellow → dark red (high). The standard
+/// piecewise-linear jet, so it needs no lookup table.
+#[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub fn jet(t: f32) -> [u8; 3] {
+    let t = t.clamp(0.0, 1.0);
+    let ch = |center: f32| (1.5 - t.mul_add(4.0, -center).abs()).clamp(0.0, 1.0);
+    [
+        (ch(3.0) * 255.0).round() as u8,
+        (ch(2.0) * 255.0).round() as u8,
+        (ch(1.0) * 255.0).round() as u8,
+    ]
+}
+
+/// A continuous colormap for depth visualization. `Inferno` (default) matches Ultralytics'
+/// Python `colorize_depth`; `Jet` is the classic rainbow heatmap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Colormap {
+    /// Perceptual black → purple → orange → yellow (matches Python depth plots).
+    #[default]
+    Inferno,
+    /// Classic rainbow: blue → cyan → green → yellow → red.
+    Jet,
+}
+
+impl Colormap {
+    /// Sample this colormap at normalized position `t` (clamped to `[0, 1]`), returning RGB.
+    #[must_use]
+    pub fn sample(self, t: f32) -> [u8; 3] {
+        match self {
+            Self::Inferno => inferno(t),
+            Self::Jet => jet(t),
+        }
+    }
+}
+
+impl std::str::FromStr for Colormap {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "inferno" => Ok(Self::Inferno),
+            "jet" => Ok(Self::Jet),
+            _ => Err(format!(
+                "invalid colormap '{s}', expected one of: inferno, jet"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for Colormap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Inferno => "inferno",
+            Self::Jet => "jet",
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_jet_and_colormap() {
+        // Jet endpoints: dark blue at the low end, dark red at the high end.
+        assert_eq!(jet(0.0), [0, 0, 128]);
+        assert_eq!(jet(1.0), [128, 0, 0]);
+        // Colormap dispatches to the matching function and parses from strings.
+        assert_eq!(Colormap::Inferno.sample(0.5), inferno(0.5));
+        assert_eq!(Colormap::Jet.sample(0.5), jet(0.5));
+        assert_eq!("jet".parse::<Colormap>().unwrap(), Colormap::Jet);
+        assert_eq!("INFERNO".parse::<Colormap>().unwrap(), Colormap::Inferno);
+        assert!("magma".parse::<Colormap>().is_err());
+    }
 
     #[test]
     fn test_inferno_range_and_clamp() {

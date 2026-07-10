@@ -6,7 +6,7 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
-use crate::visualizer::color::{COLORS, POSE_COLORS, inferno};
+use crate::visualizer::color::{COLORS, Colormap, POSE_COLORS};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
@@ -171,6 +171,20 @@ pub fn annotate_image(
     result: &Results,
     top_k: Option<usize>,
 ) -> DynamicImage {
+    annotate_image_with(image, result, top_k, Colormap::default())
+}
+
+/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap`.
+///
+/// Only depth results use `colormap`; every other task ignores it. See
+/// [`annotate_image`] for the general behavior.
+#[must_use]
+pub fn annotate_image_with(
+    image: &DynamicImage,
+    result: &Results,
+    top_k: Option<usize>,
+    colormap: Colormap,
+) -> DynamicImage {
     let mut img = image.to_rgb8();
 
     let font_name = if result.boxes.is_some() && result.names.values().any(|n| !n.is_ascii()) {
@@ -201,7 +215,7 @@ pub fn annotate_image(
 
     // Depth is rendered side-by-side (original | colorized depth), matching the Python
     // `plot(side_by_side=True)`, so it replaces the returned image rather than drawing in place.
-    if let Some(side_by_side) = compose_depth_side_by_side(&img, result) {
+    if let Some(side_by_side) = compose_depth_side_by_side(&img, result, colormap) {
         return DynamicImage::ImageRgb8(side_by_side);
     }
 
@@ -212,8 +226,12 @@ pub fn annotate_image(
 /// has no depth map.
 ///
 /// The depth map is min/max-normalized over valid (`> 0`) pixels and mapped through the
-/// INFERNO colormap; invalid pixels render black, matching Python's `colorize_depth`.
-fn compose_depth_side_by_side(img: &image::RgbImage, result: &Results) -> Option<image::RgbImage> {
+/// given `colormap`; invalid pixels render black, matching Python's `colorize_depth`.
+fn compose_depth_side_by_side(
+    img: &image::RgbImage,
+    result: &Results,
+    colormap: Colormap,
+) -> Option<image::RgbImage> {
     let depth = result.depth.as_ref()?;
     let (width, height) = img.dimensions();
     let (w, h) = (width as usize, height as usize);
@@ -238,7 +256,7 @@ fn compose_depth_side_by_side(img: &image::RgbImage, result: &Results) -> Option
             out.put_pixel(px, py, *img.get_pixel(px, py));
             let d = data[y * w + x];
             let rgb = if d > 0.0 {
-                Rgb(inferno((d - vmin) * inv_range))
+                Rgb(colormap.sample((d - vmin) * inv_range))
             } else {
                 Rgb([0, 0, 0])
             };
