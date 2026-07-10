@@ -1716,7 +1716,7 @@ fn letterbox_crop_bounds(
     }
 }
 
-/// Map an output index `d` to its two source neighbours `(i0, i1)` and fractional weight
+/// Map an output index `d` to its two source neighbors `(i0, i1)` and fractional weight
 /// `frac` for bilinear upsampling of a letterbox-cropped axis. `offset` is the crop start
 /// and `max_idx` the last valid source index. Uses the `(d + 0.5) * scale - 0.5` half-pixel
 /// convention of Python's `align_corners=False` `F.interpolate`.
@@ -1733,7 +1733,7 @@ fn bilinear_axis(d: usize, scale: f32, offset: usize, max_idx: usize) -> (usize,
     (i0, i1, s - i0 as f32)
 }
 
-/// Precompute per-output-column bilinear source neighbours and weights `(x0, x1, w0, w1)`
+/// Precompute per-output-column bilinear source neighbors and weights `(x0, x1, w0, w1)`
 /// for upsampling a `crop_w`-wide letterbox-cropped region (starting at `left`) to `ow` columns.
 #[allow(clippy::cast_precision_loss)]
 fn bilinear_x_lut(

@@ -271,18 +271,18 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **Task and Model Resolution:**
 
-| Invocation                                        | Model used           | Notes                                                               |
-| ------------------------------------------------- | -------------------- | ------------------------------------------------------------------- |
-| `predict`                                         | `yolo26n.onnx`       | Default detect model, auto-downloaded                               |
-| `predict --task segment`                          | `yolo26n-seg.onnx`   | Nano seg model, auto-downloaded                                     |
-| `predict --task pose`                             | `yolo26n-pose.onnx`  | Nano pose model, auto-downloaded                                    |
-| `predict --task obb`                              | `yolo26n-obb.onnx`   | Nano OBB model, auto-downloaded                                     |
-| `predict --task classify`                         | `yolo26n-cls.onnx`   | Nano classify model, auto-downloaded                                |
-| `predict --task semantic`                         | `yolo26n-sem.onnx`\* | Nano semantic segmentation model, auto-downloaded (YOLO26 only)     |
-| `predict --task depth`                            | `yolo26n-depth.onnx`\* | Nano depth estimation model, auto-downloaded (YOLO26 only)        |
-| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`   | Task read from model metadata                                       |
-| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`   | `--task` matches metadata, proceeds normally                        |
-| `predict --task segment --model yolo26n.onnx`     | error                | `--task` conflicts with model metadata (`detect`), exits with error |
+| Invocation                                        | Model used             | Notes                                                               |
+| ------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
+| `predict`                                         | `yolo26n.onnx`         | Default detect model, auto-downloaded                               |
+| `predict --task segment`                          | `yolo26n-seg.onnx`     | Nano seg model, auto-downloaded                                     |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                    |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                     |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                |
+| `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | Nano semantic segmentation model, auto-downloaded (YOLO26 only)     |
+| `predict --task depth`                            | `yolo26n-depth.onnx`\* | Nano depth estimation model, auto-downloaded (YOLO26 only)          |
+| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | Task read from model metadata                                       |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, proceeds normally                        |
+| `predict --task segment --model yolo26n.onnx`     | error                  | `--task` conflicts with model metadata (`detect`), exits with error |
 
 \* `semantic` (semantic segmentation) and `depth` (depth estimation) are YOLO26-only.
 
@@ -290,11 +290,11 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation and `-depth` for depth estimation:
 
-| Family | Variants                                                                                          |
-| ------ | ------------------------------------------------------------------------------------------------- |
+| Family | Variants                                                                                              |
+| ------ | ----------------------------------------------------------------------------------------------------- |
 | YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`, `-sem`\*, `-depth`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`           |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`           |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`                       |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`                       |
 
 \* `-sem` (semantic segmentation) and `-depth` (depth estimation) are YOLO26-only.
 
