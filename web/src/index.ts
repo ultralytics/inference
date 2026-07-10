@@ -223,6 +223,11 @@ export interface PredictOptions {
    * detect/segment/pose/obb, and for semantic marks other pixels as background.
    */
   classes?: number[];
+  /**
+   * Depth colormap for the `depth` overlay: `"inferno"` (default) or `"jet"`.
+   * Ignored by every other task.
+   */
+  colormap?: "inferno" | "jet";
 }
 
 /** Options for {@link annotate}. */
@@ -475,9 +480,16 @@ interface Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
   ): Promise<unknown>;
-  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown>;
+  predictEncoded(
+    bytes: Uint8Array,
+    conf: number,
+    iou: number,
+    classes: Uint32Array | undefined,
+    colormap: string,
+  ): Promise<unknown>;
   free(): void;
 }
 
@@ -499,12 +511,19 @@ class OrtEngine implements Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
   ): Promise<unknown> {
-    return this.model.predict_rgba(data, width, height, conf, iou, classes);
+    return this.model.predict_rgba(data, width, height, conf, iou, classes, colormap);
   }
-  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
-    return this.model.predict(bytes, conf, iou, classes);
+  predictEncoded(
+    bytes: Uint8Array,
+    conf: number,
+    iou: number,
+    classes: Uint32Array | undefined,
+    colormap: string,
+  ): Promise<unknown> {
+    return this.model.predict(bytes, conf, iou, classes, colormap);
   }
   free(): void {
     this.model.free();
@@ -540,18 +559,25 @@ class LiteRtEngine implements Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
   ): Promise<unknown> {
-    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes));
+    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes, colormap));
   }
 
   /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
-  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
+  predictEncoded(
+    bytes: Uint8Array,
+    conf: number,
+    iou: number,
+    classes: Uint32Array | undefined,
+    colormap: string,
+  ): Promise<unknown> {
     return this.serialize(async () => {
       const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
       try {
         const { data, width, height } = toImageData(bitmap);
-        return await this.runDrawable(data, width, height, conf, iou, classes);
+        return await this.runDrawable(data, width, height, conf, iou, classes, colormap);
       } finally {
         bitmap.close();
       }
@@ -564,14 +590,15 @@ class LiteRtEngine implements Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
   ): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
     const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
     // Flatten shapes as [rank, dims..., rank, dims...] for the wasm boundary.
     const flatShapes: number[] = [];
     for (const s of shapes) flatShapes.push(s.length, ...s);
-    return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes);
+    return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes, colormap);
   }
 
   /** Chain `fn` after any in-flight prediction so wasm frame state is never shared. */
@@ -682,12 +709,13 @@ export class YOLO {
     const conf = options?.conf ?? DEFAULT_CONF;
     const iou = options?.iou ?? DEFAULT_IOU;
     const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
+    const colormap = options?.colormap ?? "inferno";
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return decodeResults(await this.engine.predictDrawable(data, width, height, conf, iou, classes));
+      return decodeResults(await this.engine.predictDrawable(data, width, height, conf, iou, classes, colormap));
     }
     const bytes = await toEncodedBytes(image);
-    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes));
+    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes, colormap));
   }
 
   /** Release the underlying wasm model/engine. Call when you are done with it. */
