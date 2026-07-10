@@ -105,6 +105,13 @@ export interface Results {
    * class-filtered pixels. The `masks` overlay is its renderable form.
    */
   semantic_mask?: Uint16Array;
+  /**
+   * Depth map as an opaque INFERNO-colorized RGBA image (`width*height*4`),
+   * empty for other tasks. Drawable straight onto a canvas via `ImageData`.
+   */
+  depth: Uint8Array;
+  /** Depth range `[min, max]` in meters over valid pixels, for depth models. */
+  depth_range?: [number, number];
   speed: Speed;
 }
 
@@ -739,6 +746,15 @@ export async function annotate(
   if (overlay && overlay.length === width * height * 4) {
     const tmp = makeCanvas(width, height);
     get2d(tmp).putImageData(new ImageData(new Uint8ClampedArray(overlay), width, height), 0, 0);
+    ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
+  }
+
+  // Depth: the engine returns an opaque INFERNO-colorized depth image; draw it
+  // over the frame so the canvas shows the depth map.
+  const depth = results.depth;
+  if (depth && depth.length === width * height * 4) {
+    const tmp = makeCanvas(width, height);
+    get2d(tmp).putImageData(new ImageData(new Uint8ClampedArray(depth), width, height), 0, 0);
     ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
   }
 
