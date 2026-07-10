@@ -241,11 +241,7 @@ fn compose_depth_side_by_side(
     }
     let data = depth.data.as_slice().expect("depth map must be contiguous");
 
-    let (vmin, vmax) = match (depth.min_depth(), depth.max_depth()) {
-        (Some(lo), Some(hi)) if hi > lo => (lo, hi),
-        (Some(lo), Some(_)) => (lo, lo + 1e-6),
-        _ => (0.0, 1.0),
-    };
+    let (vmin, vmax) = depth.value_range();
     let inv_range = 1.0 / (vmax - vmin);
 
     let mut out = image::RgbImage::new(width * 2, height);
