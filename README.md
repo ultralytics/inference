@@ -509,7 +509,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 [![npm version](https://img.shields.io/npm/v/@ultralytics/yolo?logo=npm&logoColor=white&label=npm&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 [![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 
-The same engine runs in the browser on **WebGPU**, compiled to WebAssembly. The 
+The same engine runs in the browser on **WebGPU**, compiled to WebAssembly. The
 shared Rust preprocessing and postprocessing run in wasm, so results match the
 native path, while the forward pass runs on a pluggable backend: the official
 ONNX Runtime Web build (bridged through [`ort-web`](https://ort.pyke.io/backends/web))
