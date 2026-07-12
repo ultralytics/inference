@@ -510,9 +510,11 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 [![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 
 The same engine runs in the browser on **WebGPU**, compiled to WebAssembly. The
-forward pass executes on the official ONNX Runtime Web build, bridged through
-[`ort-web`](https://ort.pyke.io/backends/web), while the shared Rust
-preprocessing and postprocessing run in wasm, so results match the native path.
+shared Rust preprocessing and postprocessing run in wasm, so results match the
+native path, while the forward pass runs on a pluggable backend: the official
+ONNX Runtime Web build (bridged through [`ort-web`](https://ort.pyke.io/backends/web))
+for `.onnx` models, or [**LiteRT.js**](https://developers.google.com/edge/litert/web)
+for `.tflite` models.
 
 It ships as the [`@ultralytics/yolo`](web/README.md) npm package:
 
@@ -526,6 +528,13 @@ console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 
 Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the
 default), and read `model.device` to see what actually ran.
+
+The backend is picked automatically from the model format (its extension when
+available, otherwise the model bytes), so switching is just a matter of the model
+you load. LiteRT.js (Google's LiteRT for Web) is optional and
+often **~2× faster than ONNX Runtime Web on WebGPU** — point `YOLO.load` at an
+Ultralytics `.tflite` export and `npm install @litertjs/core` alongside the package.
+See the [LiteRT.js section](web/README.md#-litertjs-backend) for details.
 
 The browser bindings live in [`crates/web`](crates/web) (the
 `ultralytics-inference-web` cdylib); the JS/TS wrapper and build instructions are
