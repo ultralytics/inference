@@ -529,8 +529,9 @@ console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the
 default), and read `model.device` to see what actually ran.
 
-The backend is picked automatically from the file extension, so switching is just
-a matter of the model you load. LiteRT.js (Google's LiteRT for Web) is optional and
+The backend is picked automatically from the model format (its extension when
+available, otherwise the model bytes), so switching is just a matter of the model
+you load. LiteRT.js (Google's LiteRT for Web) is optional and
 often **~2× faster than ONNX Runtime Web on WebGPU** — point `YOLO.load` at an
 Ultralytics `.tflite` export and `npm install @litertjs/core` alongside the package.
 See the [LiteRT.js section](web/README.md#-litertjs-backend) for details.
