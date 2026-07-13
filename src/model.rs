@@ -1575,6 +1575,32 @@ impl YOLOModel {
     ///
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
     #[cfg_attr(coverage_nightly, coverage(off))]
+    /// Feed an FP32 input tensor and run timed inference, returning the ORT outputs.
+    fn run_f32_input<'s>(
+        session: &'s mut Session,
+        input_name: &str,
+        input: &ndarray::Array4<f32>,
+    ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
+        let input_contiguous = input.as_standard_layout();
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+        })?;
+        Self::run_timed(session, ort::inputs![input_name => input_tensor])
+    }
+
+    /// Feed an FP16 input tensor and run timed inference, returning the ORT outputs.
+    fn run_f16_input<'s>(
+        session: &'s mut Session,
+        input_name: &str,
+        input: &ndarray::Array4<f16>,
+    ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
+        let input_contiguous = input.as_standard_layout();
+        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
+        })?;
+        Self::run_timed(session, ort::inputs![input_name => input_tensor])
+    }
+
     fn run_inference_with<R>(
         session: &mut Session,
         input_name: &str,
@@ -1582,11 +1608,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f32>,
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f32_input(session, input_name, input)?;
         Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
@@ -1648,11 +1670,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f32>,
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f32_input(session, input_name, input)?;
         Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
@@ -1692,11 +1710,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f16>,
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f16_input(session, input_name, input)?;
         Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
@@ -1709,11 +1723,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f16>,
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f16_input(session, input_name, input)?;
         Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
