@@ -1283,21 +1283,12 @@ fn postprocess_obb(
         let h = output_2d[[i, 3]];
         let angle = output_2d[[i, 4 + num_classes]]; // Last value is rotation angle (radians)
 
-        // Scale center coordinates to original image space
-        let scaled = scale_coords(&[cx, cy, cx, cy], preprocess.scale, preprocess.padding);
-        let scaled_cx = scaled[0];
-        let scaled_cy = scaled[1];
+        // Scale center to original image space and clip to bounds.
+        let (clipped_cx, clipped_cy) = scale_keypoint(cx, cy, preprocess);
 
         // Scale width and height (note: don't apply padding, just scale)
         let scaled_w = w / preprocess.scale.1;
         let scaled_h = h / preprocess.scale.0;
-
-        // Clip center to image bounds
-        let (oh, ow) = preprocess.orig_shape;
-        #[allow(clippy::cast_precision_loss)]
-        let clipped_cx = scaled_cx.max(0.0).min(ow as f32);
-        #[allow(clippy::cast_precision_loss)]
-        let clipped_cy = scaled_cy.max(0.0).min(oh as f32);
 
         // Filter by class if specified
         if !config.keep_class(best_class) {
