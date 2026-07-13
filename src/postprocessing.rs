@@ -390,16 +390,26 @@ fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
     (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
 }
 
-/// Return the `(index, score)` of the highest class score. NaN scores are normalized to zero
-/// before the reduction, so a NaN can never win selection and then be mapped to zero, which
-/// would suppress a valid detection sharing the same row.
+/// Return the `(index, score)` of the highest class score. NaN scores (and an empty row) map to
+/// negative infinity before the reduction, so a NaN can never win selection over a real score,
+/// and an all-NaN or empty row scores below any confidence threshold (even `0.0`) rather than
+/// masquerading as a genuine zero-confidence detection.
 fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
     scores
         .iter()
         .enumerate()
-        .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
+        .map(|(idx, &score)| {
+            (
+                idx,
+                if score.is_nan() {
+                    f32::NEG_INFINITY
+                } else {
+                    score
+                },
+            )
+        })
         .max_by(|(_, a), (_, b)| a.total_cmp(b))
-        .unwrap_or((0, 0.0))
+        .unwrap_or((0, f32::NEG_INFINITY))
 }
 
 /// Run per-class NMS over `(bbox, score, class, extra)` candidates and return the kept
@@ -2082,18 +2092,17 @@ mod tests {
         let (idx, score) = best_class_score(&ndarray::arr1(&[f32::NAN, 0.8_f32]).view());
         assert_eq!(idx, 1);
         assert!((score - 0.8).abs() < 1e-6);
-        // All-NaN yields a zero score (dropped at the confidence threshold).
+        // All-NaN scores below any threshold (even 0.0), so the row is never emitted.
         assert!(
-            best_class_score(&ndarray::arr1(&[f32::NAN, f32::NAN]).view())
+            !best_class_score(&ndarray::arr1(&[f32::NAN, f32::NAN]).view())
                 .1
-                .abs()
-                < 1e-6
+                .is_finite()
         );
-        // Empty scores fall back to class 0 with a zero score.
+        // Empty scores fall back to class 0 with a rejected (non-finite) score.
         let empty: ndarray::Array1<f32> = ndarray::arr1(&[]);
         let (idx, score) = best_class_score(&empty.view());
         assert_eq!(idx, 0);
-        assert!(score.abs() < 1e-6);
+        assert!(!score.is_finite());
     }
 
     #[test]
