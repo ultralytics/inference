@@ -1078,8 +1078,7 @@ impl YOLOModel {
             let (oshape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
                 InferenceError::InferenceError(format!("extract uint8 semantic output: {e}"))
             })?;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let shape_vec: Vec<usize> = oshape.iter().map(|&d| d as usize).collect();
+            let shape_vec = shape_to_usize(oshape);
             // Drop the leading batch dim (batch == 1 here).
             let img_shape: &[usize] = if shape_vec.len() > 1 {
                 &shape_vec[1..]
@@ -1576,6 +1575,32 @@ impl YOLOModel {
     ///
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
     #[cfg_attr(coverage_nightly, coverage(off))]
+    /// Feed an FP32 input tensor and run timed inference, returning the ORT outputs.
+    fn run_f32_input<'s>(
+        session: &'s mut Session,
+        input_name: &str,
+        input: &ndarray::Array4<f32>,
+    ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
+        let input_contiguous = input.as_standard_layout();
+        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
+        })?;
+        Self::run_timed(session, ort::inputs![input_name => input_tensor])
+    }
+
+    /// Feed an FP16 input tensor and run timed inference, returning the ORT outputs.
+    fn run_f16_input<'s>(
+        session: &'s mut Session,
+        input_name: &str,
+        input: &ndarray::Array4<f16>,
+    ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
+        let input_contiguous = input.as_standard_layout();
+        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
+            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
+        })?;
+        Self::run_timed(session, ort::inputs![input_name => input_tensor])
+    }
+
     fn run_inference_with<R>(
         session: &mut Session,
         input_name: &str,
@@ -1583,11 +1608,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f32>,
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f32_input(session, input_name, input)?;
         Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
@@ -1612,15 +1633,14 @@ impl YOLOModel {
             let output = outputs.get(output_name.as_str()).ok_or_else(|| {
                 InferenceError::InferenceError(format!("Output '{output_name}' not found"))
             })?;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let (buf, shape) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                let shape_vec = shape_to_usize(shape);
                 (OutBuf::Borrow(data), shape_vec)
             } else {
                 let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
                     InferenceError::InferenceError(format!("Failed to extract output: {e}"))
                 })?;
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                let shape_vec = shape_to_usize(shape);
                 let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
                 (OutBuf::Owned(converted), shape_vec)
             };
@@ -1650,11 +1670,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f32>,
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f32_input(session, input_name, input)?;
         Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
@@ -1676,8 +1692,7 @@ impl YOLOModel {
                 let (shape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
                     InferenceError::InferenceError(format!("Failed to extract uint8 output: {e}"))
                 })?;
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                let shape_vec = shape_to_usize(shape);
                 Ok((data, shape_vec))
             })
             .collect::<Result<_>>()?;
@@ -1695,11 +1710,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f16>,
         cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f16_input(session, input_name, input)?;
         Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
     }
 
@@ -1712,11 +1723,7 @@ impl YOLOModel {
         input: &ndarray::Array4<f16>,
         cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
     ) -> Result<R> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
-        })?;
-        let (outputs, ms) = Self::run_timed(session, ort::inputs![input_name => input_tensor])?;
+        let (outputs, ms) = Self::run_f16_input(session, input_name, input)?;
         Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
@@ -1830,6 +1837,12 @@ fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
     provider == "CoreMLExecutionProvider"
         && msg.contains("GatherElements")
         && msg.contains("Out of range")
+}
+
+/// Convert an ONNX Runtime tensor shape (`i64` dims) to `usize` for indexing.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+fn shape_to_usize(shape: &[i64]) -> Vec<usize> {
+    shape.iter().map(|&d| d as usize).collect()
 }
 
 #[cfg(test)]
