@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use ultralytics_inference::Task;
 use ultralytics_inference::results::{Results, SemanticMask};
-use ultralytics_inference::visualizer::color::{Color, Colormap};
+use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
 /// `color` is the Ultralytics palette color for the class (`#rrggbb`).
@@ -106,7 +106,7 @@ impl JsResults {
     /// Convert core [`Results`] into the serializable JS payload, labeling it with
     /// the model's declared `task` (the caller already holds it, so there is no
     /// need to guess it back from which result fields are populated).
-    pub(crate) fn from_results(r: &Results, task: Task, colormap: Colormap) -> Self {
+    pub(crate) fn from_results(r: &Results, task: Task, colormap: Colormap, viz: DepthViz) -> Self {
         // Class id -> display name and palette color, shared by every detection type.
         let name = |c: usize| r.names.get(&c).cloned().unwrap_or_default();
         let hex = |c: usize| Color::from_index(c).to_hex();
@@ -189,7 +189,7 @@ impl JsResults {
                 }
                 bytes
             }),
-            depth: build_depth_overlay(r, colormap),
+            depth: build_depth_overlay(r, colormap, viz),
             depth_range: r
                 .depth
                 .as_ref()
@@ -257,10 +257,10 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
 }
 
 /// Colorize the depth map into an opaque RGBA image (`width*height*4`) with the given
-/// `colormap`, min/max-normalized over valid (`>0`) pixels; invalid pixels are black. Empty
-/// when the result has no depth map or its resolution does not match the image.
+/// `colormap` and normalization `viz`; invalid pixels are black. Empty when the result has
+/// no depth map or its resolution does not match the image.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-fn build_depth_overlay(r: &Results, colormap: Colormap) -> Vec<u8> {
+fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8> {
     let Some(depth) = &r.depth else {
         return Vec::new();
     };
@@ -268,16 +268,9 @@ fn build_depth_overlay(r: &Results, colormap: Colormap) -> Vec<u8> {
     if depth.data.dim() != (h, w) {
         return Vec::new();
     }
-    let (vmin, vmax) = depth.value_range();
-    let inv = 1.0 / (vmax - vmin);
     let mut buf = vec![0u8; w * h * 4];
-    for (px, &d) in buf.chunks_exact_mut(4).zip(depth.data.iter()) {
-        if d > 0.0 {
-            let c = colormap.sample((d - vmin) * inv);
-            px.copy_from_slice(&[c[0], c[1], c[2], 255]);
-        } else {
-            px[3] = 255; // opaque black for invalid pixels
-        }
+    for (px, rgb) in buf.chunks_exact_mut(4).zip(depth.colorize(colormap, viz)) {
+        px.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]); // invalid pixels are [0,0,0] -> opaque black
     }
     buf
 }

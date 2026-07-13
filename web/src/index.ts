@@ -225,10 +225,15 @@ export interface PredictOptions {
    */
   classes?: number[];
   /**
-   * Depth colormap for the `depth` overlay: `"inferno"` (default) or `"jet"`.
-   * Ignored by every other task.
+   * Depth colormap for the `depth` overlay: `"inferno"` (default), `"jet"`, or
+   * `"spectral"` (`Spectral_r`, DepthAnything-style). Ignored by every other task.
    */
-  colormap?: "inferno" | "jet";
+  colormap?: "inferno" | "jet" | "spectral";
+  /**
+   * Depth normalization: `"metric"` (default, min/max) or `"disparity"` (inverse depth +
+   * percentile clip, the DepthAnything look). Ignored by every other task.
+   */
+  depthViz?: "metric" | "disparity";
 }
 
 /** Options for {@link annotate}. */
@@ -483,6 +488,7 @@ interface Engine {
     iou: number,
     classes: Uint32Array | undefined,
     colormap: string,
+    depthViz: string,
   ): Promise<unknown>;
   predictEncoded(
     bytes: Uint8Array,
@@ -490,6 +496,7 @@ interface Engine {
     iou: number,
     classes: Uint32Array | undefined,
     colormap: string,
+    depthViz: string,
   ): Promise<unknown>;
   free(): void;
 }
@@ -514,8 +521,9 @@ class OrtEngine implements Engine {
     iou: number,
     classes: Uint32Array | undefined,
     colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
-    return this.model.predict_rgba(data, width, height, conf, iou, classes, colormap);
+    return this.model.predict_rgba(data, width, height, conf, iou, classes, colormap, depthViz);
   }
   predictEncoded(
     bytes: Uint8Array,
@@ -523,8 +531,9 @@ class OrtEngine implements Engine {
     iou: number,
     classes: Uint32Array | undefined,
     colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
-    return this.model.predict(bytes, conf, iou, classes, colormap);
+    return this.model.predict(bytes, conf, iou, classes, colormap, depthViz);
   }
   free(): void {
     this.model.free();
@@ -562,8 +571,9 @@ class LiteRtEngine implements Engine {
     iou: number,
     classes: Uint32Array | undefined,
     colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
-    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes, colormap));
+    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes, colormap, depthViz));
   }
 
   /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
@@ -573,12 +583,13 @@ class LiteRtEngine implements Engine {
     iou: number,
     classes: Uint32Array | undefined,
     colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
     return this.serialize(async () => {
       const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
       try {
         const { data, width, height } = toImageData(bitmap);
-        return await this.runDrawable(data, width, height, conf, iou, classes, colormap);
+        return await this.runDrawable(data, width, height, conf, iou, classes, colormap, depthViz);
       } finally {
         bitmap.close();
       }
@@ -593,13 +604,14 @@ class LiteRtEngine implements Engine {
     iou: number,
     classes: Uint32Array | undefined,
     colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
     const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
     // Flatten shapes as [rank, dims..., rank, dims...] for the wasm boundary.
     const flatShapes: number[] = [];
     for (const s of shapes) flatShapes.push(s.length, ...s);
-    return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes, colormap);
+    return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes, colormap, depthViz);
   }
 
   /** Chain `fn` after any in-flight prediction so wasm frame state is never shared. */
@@ -711,12 +723,13 @@ export class YOLO {
     const iou = options?.iou ?? DEFAULT_IOU;
     const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
     const colormap = options?.colormap ?? "inferno";
+    const depthViz = options?.depthViz ?? "metric";
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return decodeResults(await this.engine.predictDrawable(data, width, height, conf, iou, classes, colormap));
+      return decodeResults(await this.engine.predictDrawable(data, width, height, conf, iou, classes, colormap, depthViz));
     }
     const bytes = await toEncodedBytes(image);
-    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes, colormap));
+    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes, colormap, depthViz));
   }
 
   /** Release the underlying wasm model/engine. Call when you are done with it. */
