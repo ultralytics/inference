@@ -1351,6 +1351,47 @@ fn postprocess_obb(
 // Coordinates are in the letterboxed model-input space, so we still scale/pad-correct
 // them back to original-image space. No NMS, no class-score matrix.
 
+/// Walk a sorted end-to-end output and, for each row above the confidence threshold that
+/// passes the class filter, scale/clip its box and invoke `on_kept(base, [x1,y1,x2,y2],
+/// conf, cls)`. Rows are confidence-descending, so it stops at the first sub-threshold row
+/// and after `cap` kept detections — the shared box-decode of the detect/segment/pose paths.
+fn decode_end2end(
+    output: &[f32],
+    num_preds: usize,
+    feats: usize,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    cap: usize,
+    mut on_kept: impl FnMut(usize, [f32; 4], f32, usize),
+) {
+    let mut kept = 0;
+    for i in 0..num_preds {
+        let base = i * feats;
+        let conf = output[base + 4];
+        if conf < config.confidence_threshold {
+            break;
+        }
+        let cls = output[base + 5] as usize;
+        if !config.keep_class(cls) {
+            continue;
+        }
+        let bbox = scale_and_clip_box(
+            &[
+                output[base],
+                output[base + 1],
+                output[base + 2],
+                output[base + 3],
+            ],
+            preprocess,
+        );
+        on_kept(base, bbox, conf, cls);
+        kept += 1;
+        if kept >= cap {
+            break;
+        }
+    }
+}
+
 /// Post-process YOLO26 end-to-end detection output `[1, max_det, 6]`.
 #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
 fn postprocess_detect_end2end(
@@ -1378,31 +1419,17 @@ fn postprocess_detect_end2end(
     let user_cap = config.max_det.min(max_det);
 
     let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
-    for i in 0..max_det {
-        let base = i * feats;
-        let conf = output[base + 4];
-        // End2end outputs are sorted by confidence descending; stop on first below threshold.
-        if conf < config.confidence_threshold {
-            break;
-        }
-        let cls = output[base + 5] as usize;
-        if !config.keep_class(cls) {
-            continue;
-        }
-        let [x1, y1, x2, y2] = scale_and_clip_box(
-            &[
-                output[base],
-                output[base + 1],
-                output[base + 2],
-                output[base + 3],
-            ],
-            preprocess,
-        );
-        flat.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
-        if flat.len() >= user_cap * 6 {
-            break;
-        }
-    }
+    decode_end2end(
+        output,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |_base, bbox, conf, cls| {
+            flat.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+        },
+    );
 
     let n = flat.len() / 6;
     if n > 0 {
@@ -1461,32 +1488,19 @@ fn postprocess_segment_end2end(
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_coeffs: Vec<f32> = Vec::with_capacity(user_cap * num_masks);
 
-    for i in 0..max_det {
-        let base = i * feats;
-        let conf = output0[base + 4];
-        if conf < config.confidence_threshold {
-            break;
-        }
-        let cls = output0[base + 5] as usize;
-        if !config.keep_class(cls) {
-            continue;
-        }
-        let [x1, y1, x2, y2] = scale_and_clip_box(
-            &[
-                output0[base],
-                output0[base + 1],
-                output0[base + 2],
-                output0[base + 3],
-            ],
-            preprocess,
-        );
-        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
-        let coeff_start = base + 6;
-        flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
-        if flat_boxes.len() >= user_cap * 6 {
-            break;
-        }
-    }
+    decode_end2end(
+        output0,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |base, bbox, conf, cls| {
+            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+            let coeff_start = base + 6;
+            flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
+        },
+    );
 
     let num_kept = flat_boxes.len() / 6;
     if num_kept == 0 {
@@ -1573,37 +1587,24 @@ fn postprocess_pose_end2end(
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * 3);
 
-    for i in 0..max_det {
-        let base = i * feats;
-        let conf = output[base + 4];
-        if conf < config.confidence_threshold {
-            break;
-        }
-        let cls = output[base + 5] as usize;
-        if !config.keep_class(cls) {
-            continue;
-        }
-        let [x1, y1, x2, y2] = scale_and_clip_box(
-            &[
-                output[base],
-                output[base + 1],
-                output[base + 2],
-                output[base + 3],
-            ],
-            preprocess,
-        );
-        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
-        let kstart = base + 6;
-        for k in 0..nk {
-            let off = kstart + k * kpt_dim;
-            let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
-            let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
-            flat_kpts.extend_from_slice(&[sx, sy, kconf]);
-        }
-        if flat_boxes.len() >= user_cap * 6 {
-            break;
-        }
-    }
+    decode_end2end(
+        output,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |base, bbox, conf, cls| {
+            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+            let kstart = base + 6;
+            for k in 0..nk {
+                let off = kstart + k * kpt_dim;
+                let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
+                let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
+                flat_kpts.extend_from_slice(&[sx, sy, kconf]);
+            }
+        },
+    );
 
     let n = flat_boxes.len() / 6;
     // Always emit a keypoints tensor (even empty) to match the non-end2end pose path.
