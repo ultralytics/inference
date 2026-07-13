@@ -394,6 +394,56 @@ fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
     (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
 }
 
+/// Return the `(index, score)` of the highest class score. NaN scores (and an empty row) map to
+/// negative infinity before the reduction, so a NaN can never win selection over a real score,
+/// and an all-NaN or empty row scores below any confidence threshold (even `0.0`) rather than
+/// masquerading as a genuine zero-confidence detection.
+fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
+    scores
+        .iter()
+        .enumerate()
+        .map(|(idx, &score)| {
+            (
+                idx,
+                if score.is_nan() {
+                    f32::NEG_INFINITY
+                } else {
+                    score
+                },
+            )
+        })
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+        .unwrap_or((0, f32::NEG_INFINITY))
+}
+
+/// Run per-class NMS over `(bbox, score, class, extra)` candidates and return the kept
+/// indices, capped at `max_det`. The `extra` payload (mask index, keypoints, ...) is
+/// ignored here and looked up by the caller via the returned indices.
+fn nms_keep_indices<T>(
+    candidates: &[([f32; 4], f32, usize, T)],
+    iou_threshold: f32,
+    max_det: usize,
+) -> Vec<usize> {
+    let nms_candidates: Vec<_> = candidates
+        .iter()
+        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+        .collect();
+    let mut keep = nms_per_class(&nms_candidates, iou_threshold);
+    keep.truncate(max_det);
+    keep
+}
+
+/// Write one `[x1, y1, x2, y2, score, class]` detection row into a `(_, 6)` boxes array.
+#[allow(clippy::cast_precision_loss)]
+fn write_box_row(boxes: &mut Array2<f32>, row: usize, bbox: &[f32; 4], score: f32, class: usize) {
+    boxes[[row, 0]] = bbox[0];
+    boxes[[row, 1]] = bbox[1];
+    boxes[[row, 2]] = bbox[2];
+    boxes[[row, 3]] = bbox[3];
+    boxes[[row, 4]] = score;
+    boxes[[row, 5]] = class as f32;
+}
+
 /// Reshape a flat model output into a `[preds, features]` 2D array.
 ///
 /// When `is_transposed` the data is already laid out `[preds, features]`;
@@ -809,11 +859,7 @@ fn postprocess_segment(
 
     for i in 0..num_preds {
         let scores = output_2d.slice(s![i, 4..4 + names.len()]);
-        let (best_class, best_score) = scores
-            .iter()
-            .enumerate()
-            .max_by(|&(_, a), &(_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or((0, 0.0), |(idx, &score)| (idx, score));
+        let (best_class, best_score) = best_class_score(&scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -844,25 +890,15 @@ fn postprocess_segment(
     }
 
     // Prepare candidates for NMS (bbox, score, class)
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
-        .collect();
-
-    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_det);
+    let keep_indices = nms_keep_indices(&candidates, config.iou_threshold, config.max_det);
+    let num_kept = keep_indices.len();
 
     let mut boxes_data = Array2::zeros((num_kept, 6));
     let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
 
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+    for (out_idx, &keep_idx) in keep_indices.iter().enumerate() {
         let (bbox, score, class, orig_idx) = &candidates[keep_idx];
-        boxes_data[[out_idx, 0]] = bbox[0];
-        boxes_data[[out_idx, 1]] = bbox[1];
-        boxes_data[[out_idx, 2]] = bbox[2];
-        boxes_data[[out_idx, 3]] = bbox[3];
-        boxes_data[[out_idx, 4]] = *score;
-        boxes_data[[out_idx, 5]] = *class as f32;
+        write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
 
         // Extract coefficients: [orig_idx, 4+nc..]
         let start = 4 + names.len();
@@ -1035,13 +1071,7 @@ fn postprocess_pose(
     for i in 0..num_preds {
         // Get class score(s) - for pose, typically just "person" class
         let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+        let (best_class, best_score) = best_class_score(&class_scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -1092,29 +1122,18 @@ fn postprocess_pose(
     }
 
     // Apply NMS
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
-        .collect();
-    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_det);
+    let keep_indices = nms_keep_indices(&candidates, config.iou_threshold, config.max_det);
+    let num_kept = keep_indices.len();
 
     // Build output arrays
     let mut boxes_data = Array2::zeros((num_kept, 6));
     let mut keypoints_data = Array3::zeros((num_kept, num_keypoints, kpt_dim));
 
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+    for (out_idx, &keep_idx) in keep_indices.iter().enumerate() {
         let (bbox, score, class, kpts) = &candidates[keep_idx];
 
         // Store box data
-        boxes_data[[out_idx, 0]] = bbox[0];
-        boxes_data[[out_idx, 1]] = bbox[1];
-        boxes_data[[out_idx, 2]] = bbox[2];
-        boxes_data[[out_idx, 3]] = bbox[3];
-        boxes_data[[out_idx, 4]] = *score;
-        #[allow(clippy::cast_precision_loss)]
-        let class_f32 = *class as f32;
-        boxes_data[[out_idx, 5]] = class_f32;
+        write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
 
         // Store keypoints
         for (k, kpt) in kpts.iter().enumerate() {
@@ -1268,13 +1287,7 @@ fn postprocess_obb(
     for i in 0..num_preds {
         // Get class scores
         let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+        let (best_class, best_score) = best_class_score(&class_scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -1287,21 +1300,12 @@ fn postprocess_obb(
         let h = output_2d[[i, 3]];
         let angle = output_2d[[i, 4 + num_classes]]; // Last value is rotation angle (radians)
 
-        // Scale center coordinates to original image space
-        let scaled = scale_coords(&[cx, cy, cx, cy], preprocess.scale, preprocess.padding);
-        let scaled_cx = scaled[0];
-        let scaled_cy = scaled[1];
+        // Scale center to original image space and clip to bounds.
+        let (clipped_cx, clipped_cy) = scale_keypoint(cx, cy, preprocess);
 
         // Scale width and height (note: don't apply padding, just scale)
         let scaled_w = w / preprocess.scale.1;
         let scaled_h = h / preprocess.scale.0;
-
-        // Clip center to image bounds
-        let (oh, ow) = preprocess.orig_shape;
-        #[allow(clippy::cast_precision_loss)]
-        let clipped_cx = scaled_cx.max(0.0).min(ow as f32);
-        #[allow(clippy::cast_precision_loss)]
-        let clipped_cy = scaled_cy.max(0.0).min(oh as f32);
 
         // Filter by class if specified
         if !config.keep_class(best_class) {
@@ -1355,6 +1359,47 @@ fn postprocess_obb(
 // Coordinates are in the letterboxed model-input space, so we still scale/pad-correct
 // them back to original-image space. No NMS, no class-score matrix.
 
+/// Walk a sorted end-to-end output and, for each row above the confidence threshold that
+/// passes the class filter, scale/clip its box and invoke `on_kept(base, [x1,y1,x2,y2],
+/// conf, cls)`. Rows are confidence-descending, so it stops at the first sub-threshold row
+/// and after `cap` kept detections — the shared box-decode of the detect/segment/pose paths.
+fn decode_end2end(
+    output: &[f32],
+    num_preds: usize,
+    feats: usize,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    cap: usize,
+    mut on_kept: impl FnMut(usize, [f32; 4], f32, usize),
+) {
+    let mut kept = 0;
+    for i in 0..num_preds {
+        let base = i * feats;
+        let conf = output[base + 4];
+        if conf < config.confidence_threshold {
+            break;
+        }
+        let cls = output[base + 5] as usize;
+        if !config.keep_class(cls) {
+            continue;
+        }
+        let bbox = scale_and_clip_box(
+            &[
+                output[base],
+                output[base + 1],
+                output[base + 2],
+                output[base + 3],
+            ],
+            preprocess,
+        );
+        on_kept(base, bbox, conf, cls);
+        kept += 1;
+        if kept >= cap {
+            break;
+        }
+    }
+}
+
 /// Post-process YOLO26 end-to-end detection output `[1, max_det, 6]`.
 #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
 fn postprocess_detect_end2end(
@@ -1382,31 +1427,17 @@ fn postprocess_detect_end2end(
     let user_cap = config.max_det.min(max_det);
 
     let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
-    for i in 0..max_det {
-        let base = i * feats;
-        let conf = output[base + 4];
-        // End2end outputs are sorted by confidence descending; stop on first below threshold.
-        if conf < config.confidence_threshold {
-            break;
-        }
-        let cls = output[base + 5] as usize;
-        if !config.keep_class(cls) {
-            continue;
-        }
-        let [x1, y1, x2, y2] = scale_and_clip_box(
-            &[
-                output[base],
-                output[base + 1],
-                output[base + 2],
-                output[base + 3],
-            ],
-            preprocess,
-        );
-        flat.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
-        if flat.len() >= user_cap * 6 {
-            break;
-        }
-    }
+    decode_end2end(
+        output,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |_base, bbox, conf, cls| {
+            flat.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+        },
+    );
 
     let n = flat.len() / 6;
     if n > 0 {
@@ -1465,32 +1496,19 @@ fn postprocess_segment_end2end(
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_coeffs: Vec<f32> = Vec::with_capacity(user_cap * num_masks);
 
-    for i in 0..max_det {
-        let base = i * feats;
-        let conf = output0[base + 4];
-        if conf < config.confidence_threshold {
-            break;
-        }
-        let cls = output0[base + 5] as usize;
-        if !config.keep_class(cls) {
-            continue;
-        }
-        let [x1, y1, x2, y2] = scale_and_clip_box(
-            &[
-                output0[base],
-                output0[base + 1],
-                output0[base + 2],
-                output0[base + 3],
-            ],
-            preprocess,
-        );
-        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
-        let coeff_start = base + 6;
-        flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
-        if flat_boxes.len() >= user_cap * 6 {
-            break;
-        }
-    }
+    decode_end2end(
+        output0,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |base, bbox, conf, cls| {
+            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+            let coeff_start = base + 6;
+            flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
+        },
+    );
 
     let num_kept = flat_boxes.len() / 6;
     if num_kept == 0 {
@@ -1577,37 +1595,24 @@ fn postprocess_pose_end2end(
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * 3);
 
-    for i in 0..max_det {
-        let base = i * feats;
-        let conf = output[base + 4];
-        if conf < config.confidence_threshold {
-            break;
-        }
-        let cls = output[base + 5] as usize;
-        if !config.keep_class(cls) {
-            continue;
-        }
-        let [x1, y1, x2, y2] = scale_and_clip_box(
-            &[
-                output[base],
-                output[base + 1],
-                output[base + 2],
-                output[base + 3],
-            ],
-            preprocess,
-        );
-        flat_boxes.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
-        let kstart = base + 6;
-        for k in 0..nk {
-            let off = kstart + k * kpt_dim;
-            let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
-            let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
-            flat_kpts.extend_from_slice(&[sx, sy, kconf]);
-        }
-        if flat_boxes.len() >= user_cap * 6 {
-            break;
-        }
-    }
+    decode_end2end(
+        output,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |base, bbox, conf, cls| {
+            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+            let kstart = base + 6;
+            for k in 0..nk {
+                let off = kstart + k * kpt_dim;
+                let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
+                let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
+                flat_kpts.extend_from_slice(&[sx, sy, kconf]);
+            }
+        },
+    );
 
     let n = flat_boxes.len() / 6;
     // Always emit a keypoints tensor (even empty) to match the non-end2end pose path.
@@ -2170,6 +2175,28 @@ mod tests {
         // Note: The detection may or may not exist depending on how NaN affects max_by
         // The key is that the code didn't crash
         let _ = results;
+    }
+
+    #[test]
+    fn test_best_class_score_ignores_nan() {
+        // A NaN score must never win selection: the valid class in the row is kept.
+        let (idx, score) = best_class_score(&ndarray::arr1(&[0.9_f32, f32::NAN]).view());
+        assert_eq!(idx, 0);
+        assert!((score - 0.9).abs() < 1e-6);
+        let (idx, score) = best_class_score(&ndarray::arr1(&[f32::NAN, 0.8_f32]).view());
+        assert_eq!(idx, 1);
+        assert!((score - 0.8).abs() < 1e-6);
+        // All-NaN scores below any threshold (even 0.0), so the row is never emitted.
+        assert!(
+            !best_class_score(&ndarray::arr1(&[f32::NAN, f32::NAN]).view())
+                .1
+                .is_finite()
+        );
+        // Empty scores fall back to class 0 with a rejected (non-finite) score.
+        let empty: ndarray::Array1<f32> = ndarray::arr1(&[]);
+        let (idx, score) = best_class_score(&empty.view());
+        assert_eq!(idx, 0);
+        assert!(!score.is_finite());
     }
 
     #[test]
