@@ -390,6 +390,34 @@ fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
     (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
 }
 
+/// Run per-class NMS over `(bbox, score, class, extra)` candidates and return the kept
+/// indices, capped at `max_det`. The `extra` payload (mask index, keypoints, ...) is
+/// ignored here and looked up by the caller via the returned indices.
+fn nms_keep_indices<T>(
+    candidates: &[([f32; 4], f32, usize, T)],
+    iou_threshold: f32,
+    max_det: usize,
+) -> Vec<usize> {
+    let nms_candidates: Vec<_> = candidates
+        .iter()
+        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+        .collect();
+    let mut keep = nms_per_class(&nms_candidates, iou_threshold);
+    keep.truncate(max_det);
+    keep
+}
+
+/// Write one `[x1, y1, x2, y2, score, class]` detection row into a `(_, 6)` boxes array.
+#[allow(clippy::cast_precision_loss)]
+fn write_box_row(boxes: &mut Array2<f32>, row: usize, bbox: &[f32; 4], score: f32, class: usize) {
+    boxes[[row, 0]] = bbox[0];
+    boxes[[row, 1]] = bbox[1];
+    boxes[[row, 2]] = bbox[2];
+    boxes[[row, 3]] = bbox[3];
+    boxes[[row, 4]] = score;
+    boxes[[row, 5]] = class as f32;
+}
+
 /// Reshape a flat model output into a `[preds, features]` 2D array.
 ///
 /// When `is_transposed` the data is already laid out `[preds, features]`;
@@ -840,25 +868,15 @@ fn postprocess_segment(
     }
 
     // Prepare candidates for NMS (bbox, score, class)
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
-        .collect();
-
-    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_det);
+    let keep_indices = nms_keep_indices(&candidates, config.iou_threshold, config.max_det);
+    let num_kept = keep_indices.len();
 
     let mut boxes_data = Array2::zeros((num_kept, 6));
     let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
 
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+    for (out_idx, &keep_idx) in keep_indices.iter().enumerate() {
         let (bbox, score, class, orig_idx) = &candidates[keep_idx];
-        boxes_data[[out_idx, 0]] = bbox[0];
-        boxes_data[[out_idx, 1]] = bbox[1];
-        boxes_data[[out_idx, 2]] = bbox[2];
-        boxes_data[[out_idx, 3]] = bbox[3];
-        boxes_data[[out_idx, 4]] = *score;
-        boxes_data[[out_idx, 5]] = *class as f32;
+        write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
 
         // Extract coefficients: [orig_idx, 4+nc..]
         let start = 4 + names.len();
@@ -1088,29 +1106,18 @@ fn postprocess_pose(
     }
 
     // Apply NMS
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
-        .collect();
-    let keep_indices = nms_per_class(&nms_candidates, config.iou_threshold);
-    let num_kept = keep_indices.len().min(config.max_det);
+    let keep_indices = nms_keep_indices(&candidates, config.iou_threshold, config.max_det);
+    let num_kept = keep_indices.len();
 
     // Build output arrays
     let mut boxes_data = Array2::zeros((num_kept, 6));
     let mut keypoints_data = Array3::zeros((num_kept, num_keypoints, kpt_dim));
 
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
+    for (out_idx, &keep_idx) in keep_indices.iter().enumerate() {
         let (bbox, score, class, kpts) = &candidates[keep_idx];
 
         // Store box data
-        boxes_data[[out_idx, 0]] = bbox[0];
-        boxes_data[[out_idx, 1]] = bbox[1];
-        boxes_data[[out_idx, 2]] = bbox[2];
-        boxes_data[[out_idx, 3]] = bbox[3];
-        boxes_data[[out_idx, 4]] = *score;
-        #[allow(clippy::cast_precision_loss)]
-        let class_f32 = *class as f32;
-        boxes_data[[out_idx, 5]] = class_f32;
+        write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
 
         // Store keypoints
         for (k, kpt) in kpts.iter().enumerate() {
