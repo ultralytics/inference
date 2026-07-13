@@ -393,8 +393,15 @@ fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
 /// Run per-class NMS over `(bbox, score, class, extra)` candidates and return the kept
 /// indices, capped at `max_det`. The `extra` payload (mask index, keypoints, ...) is
 /// ignored here and looked up by the caller via the returned indices.
-fn nms_keep_indices<T>(candidates: &[([f32; 4], f32, usize, T)], iou_threshold: f32, max_det: usize) -> Vec<usize> {
-    let nms_candidates: Vec<_> = candidates.iter().map(|(bbox, score, class, _)| (*bbox, *score, *class)).collect();
+fn nms_keep_indices<T>(
+    candidates: &[([f32; 4], f32, usize, T)],
+    iou_threshold: f32,
+    max_det: usize,
+) -> Vec<usize> {
+    let nms_candidates: Vec<_> = candidates
+        .iter()
+        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
+        .collect();
     let mut keep = nms_per_class(&nms_candidates, iou_threshold);
     keep.truncate(max_det);
     keep
