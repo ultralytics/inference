@@ -390,6 +390,18 @@ fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
     (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
 }
 
+/// Return the `(index, score)` of the highest class score. NaN scores are normalized to zero
+/// before the reduction, so a NaN can never win selection and then be mapped to zero, which
+/// would suppress a valid detection sharing the same row.
+fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
+    scores
+        .iter()
+        .enumerate()
+        .map(|(idx, &score)| (idx, if score.is_nan() { 0.0 } else { score }))
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+        .unwrap_or((0, 0.0))
+}
+
 /// Run per-class NMS over `(bbox, score, class, extra)` candidates and return the kept
 /// indices, capped at `max_det`. The `extra` payload (mask index, keypoints, ...) is
 /// ignored here and looked up by the caller via the returned indices.
@@ -833,11 +845,7 @@ fn postprocess_segment(
 
     for i in 0..num_preds {
         let scores = output_2d.slice(s![i, 4..4 + names.len()]);
-        let (best_class, best_score) = scores
-            .iter()
-            .enumerate()
-            .max_by(|&(_, a), &(_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or((0, 0.0), |(idx, &score)| (idx, score));
+        let (best_class, best_score) = best_class_score(&scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -1049,13 +1057,7 @@ fn postprocess_pose(
     for i in 0..num_preds {
         // Get class score(s) - for pose, typically just "person" class
         let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+        let (best_class, best_score) = best_class_score(&class_scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -1271,13 +1273,7 @@ fn postprocess_obb(
     for i in 0..num_preds {
         // Get class scores
         let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+        let (best_class, best_score) = best_class_score(&class_scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -2075,6 +2071,29 @@ mod tests {
         // Note: The detection may or may not exist depending on how NaN affects max_by
         // The key is that the code didn't crash
         let _ = results;
+    }
+
+    #[test]
+    fn test_best_class_score_ignores_nan() {
+        // A NaN score must never win selection: the valid class in the row is kept.
+        let (idx, score) = best_class_score(&ndarray::arr1(&[0.9_f32, f32::NAN]).view());
+        assert_eq!(idx, 0);
+        assert!((score - 0.9).abs() < 1e-6);
+        let (idx, score) = best_class_score(&ndarray::arr1(&[f32::NAN, 0.8_f32]).view());
+        assert_eq!(idx, 1);
+        assert!((score - 0.8).abs() < 1e-6);
+        // All-NaN yields a zero score (dropped at the confidence threshold).
+        assert!(
+            best_class_score(&ndarray::arr1(&[f32::NAN, f32::NAN]).view())
+                .1
+                .abs()
+                < 1e-6
+        );
+        // Empty scores fall back to class 0 with a zero score.
+        let empty: ndarray::Array1<f32> = ndarray::arr1(&[]);
+        let (idx, score) = best_class_score(&empty.view());
+        assert_eq!(idx, 0);
+        assert!(score.abs() < 1e-6);
     }
 
     #[test]
