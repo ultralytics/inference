@@ -7,7 +7,7 @@ The depth head does **not** produce an image. Its raw output is a single-channel
 metric-looking units**. There is no color and no RGB — colorization (grayscale,
 INFERNO, Spectral, ...) only happens at render time. Invalid / background pixels are `0`.
 
-> **Relative vs metric.** The head actually predicts *relative* (affine-invariant)
+> **Relative vs metric.** The head actually predicts _relative_ (affine-invariant)
 > scene structure in log space, like DepthAnything — it has no inherent absolute scale.
 > The "meters" come from a global 2-parameter log-affine calibration
 > `d' = exp(a·log d + b)` baked into the model (`cal_a`/`cal_b`; the default weights
@@ -36,9 +36,9 @@ The library keeps the raw meters; the picture is a downstream view of them.
 
 ```python
 r = model.predict("bus.jpg", imgsz=768)[0]
-depth = r.depth.data                       # torch.Tensor or np.ndarray, (H, W), meters
+depth = r.depth.data  # torch.Tensor or np.ndarray, (H, W), meters
 depth = depth.cpu().numpy() if hasattr(depth, "cpu") else depth
-valid = depth > 0                          # background / invalid pixels are 0
+valid = depth > 0  # background / invalid pixels are 0
 ```
 
 ### Rust

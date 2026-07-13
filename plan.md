@@ -1,11 +1,13 @@
 # TASK: Optimize WebAssembly YOLO Inference for `ultralytics/inference`
 
 ## 🎯 Objective
+
 Refactor the current Rust/WASM implementation in the `ultralytics/inference` repository to maximize YOLO inference speed in the browser using the `ort` crate. The focus is on enabling WebGPU, configuring WASM SIMD/Atomics, and implementing zero-copy memory transfers between JS and Rust.
 
 ---
 
 ## 🛠️ Step 1: Configure Cargo for SIMD and Atomics
+
 **Target File:** `.cargo/config.toml` (Create if it does not exist in the repo root)
 **Action:** Add the following compiler flags. This ensures that if the user's browser lacks WebGPU, the fallback WASM CPU execution uses vector instructions and multithreading.
 
@@ -23,6 +25,7 @@ rustflags = [
 ---
 
 ## 🛠️ Step 2: Enable WebGPU Execution Provider
+
 **Target File:** The Rust source file handling `ort::Session` initialization (likely `src/model.rs`, `src/lib.rs`, or similar).
 **Action:** Modify the `Session::builder()` pipeline to explicitly request the `WebGPUExecutionProvider`.
 
@@ -39,6 +42,7 @@ let session = ort::Session::builder()?
 ---
 
 ## 🛠️ Step 3: Implement Zero-Copy Memory for Image Tensors
+
 **Target File:** The WASM binding file where JavaScript calls Rust (e.g., `src/lib.rs`).
 **Action:** Remove any logic that serializes image data (like JSON or heavy array cloning). Use `js-sys` to access shared linear memory, allowing JS to write directly to Rust's memory space or allowing Rust to read JS arrays without cloning.
 
@@ -57,13 +61,13 @@ impl YoloEngine {
     pub fn run_inference(&self, input_array: &Float32Array) -> Result<JsValue, JsValue> {
         // Extract data with minimal copying
         let mut buffer = vec![0.0; input_array.length() as usize];
-        input_array.copy_to(&mut buffer); 
-        
-        // Advanced: For true zero-copy, allocate a buffer in Rust, 
+        input_array.copy_to(&mut buffer);
+
+        // Advanced: For true zero-copy, allocate a buffer in Rust,
         // return its pointer to JS, let JS write to it, and read it directly here.
 
         // ... Feed buffer to ORT ...
-        
+
         Ok(JsValue::NULL) // Return Bounding Box struct
     }
 }
@@ -72,8 +76,10 @@ impl YoloEngine {
 ---
 
 ## 🛠️ Step 4: Asset Pipeline & Type Constraints
+
 **Target File:** `README.md`, Python export scripts, or deployment docs.
 **Action:** Add documentation stating two strict rules for WASM deployment:
+
 1. **Use `.ort` files:** `.onnx` files are too bloated for web. Provide this command to developers:
    ```bash
    python -m onnxruntime.tools.convert_onnx_models_to_ort model.onnx
@@ -83,12 +89,15 @@ impl YoloEngine {
 ---
 
 ## 🛠️ Step 5: Dev Server & Production Headers
+
 **Target File:** The web framework config (e.g., `vite.config.ts`, `next.config.js`, or `vercel.json`).
 **Action:** Multithreading (Atomics) requires `SharedArrayBuffer` support in the browser. Add these headers to the dev server and production responses:
+
 - `Cross-Origin-Opener-Policy: same-origin`
 - `Cross-Origin-Embedder-Policy: require-corp`
 
 ---
+
 ---
 
 # 📓 OPTIMIZATION LOG (branch `speed-up-web-inference`)
@@ -99,16 +108,17 @@ resolution is explicitly **out of scope** (LiteRT doesn't, so neither do we).
 
 ## Measured per-stage breakdown (yolo11n detect, 640, webcam, WebGPU)
 
-| Stage       | Reading                | Conclusion |
-|-------------|------------------------|------------|
-| `pre`       | **2.5 ms, always**     | Our Rust preprocess (now SIMD) is NOT the bottleneck. Done. |
-| `infer` CPU | ~100 ms, flat          | Pure wasm/asyncify CPU path. |
-| `infer` GPU | **13 ms → 30 ms**      | Starts fast, settles to ~2× after a few seconds, **recovers instantly on page reload**. |
-| `post`      | small, stable          | SIMD NMS fine. |
+| Stage       | Reading            | Conclusion                                                                              |
+| ----------- | ------------------ | --------------------------------------------------------------------------------------- |
+| `pre`       | **2.5 ms, always** | Our Rust preprocess (now SIMD) is NOT the bottleneck. Done.                             |
+| `infer` CPU | ~100 ms, flat      | Pure wasm/asyncify CPU path.                                                            |
+| `infer` GPU | **13 ms → 30 ms**  | Starts fast, settles to ~2× after a few seconds, **recovers instantly on page reload**. |
+| `post`      | small, stable      | SIMD NMS fine.                                                                          |
 
 Key deductions:
+
 - WebGPU is genuinely engaged (100 ms → 30 ms is a real ~3× GPU win; `device:
-  webgpu` confirmed; `chrome://gpu` shows WebGPU hardware-accelerated).
+webgpu` confirmed; `chrome://gpu` shows WebGPU hardware-accelerated).
 - The runtime in use is **`ort-wasm-simd-threaded.asyncify.wasm`** (27 MB), NOT
   the `jsep.wasm` (which is preloaded-but-unused). pyke `ort-web` 0.2.1 bridges
   Rust `run_async` via **Asyncify**, so the asyncify build loads even on WebGPU
@@ -121,15 +131,15 @@ Key deductions:
 
 ## Changes landed so far
 
-| # | Change | File(s) | Status / effect |
-|---|--------|---------|-----------------|
-| 1 | **wasm `+simd128`** via scoped cargo config (un-ignored in `.gitignore`) | `crates/web/.cargo/config.toml`, `.gitignore` | Activates `wide` f32x8 NMS + vectorized preprocess that were silently scalar. `pre`/`post` dropped. ✅ |
-| 2 | **Drop per-frame input clone** (`mem::take` tensor into ORT) | `crates/web/src/lib.rs` | −1 copy (~4.9 MB) per frame. ✅ |
-| 3 | **COOP/COEP serve script** (`npm run serve`) | `web/serve.mjs`, `web/package.json`, `web/README.md` | Enables SharedArrayBuffer so ORT threaded wasm can use workers. ✅ |
-| 4 | **Decouple loop from rAF** (single-slot) | `web/example/index.html` | Removed the rAF/vsync quantization that capped FPS. Faster start (45–50 fps). ✅ |
-| 5 | **Zero-gap scheduler** (MessageChannel, no `setTimeout` ≥4 ms clamp) | `web/example/index.html` | Keeps GPU fed; reclaims ~4 ms/frame. ⚠️ Did **not** stop the 10–15 s degradation → rules out "GPU idle between frames" as the cause. |
-| 6 | **Reuse readback canvas** (was a new `OffscreenCanvas` + ctx every frame) | `web/src/index.ts` | Less GC churn on `pre`. ✅ |
-| 7 | **Reuse `RunOptions`** across frames (struct field) | `crates/web/src/lib.rs` | −1 ORT handle create/drop per frame. ✅ |
+| #   | Change                                                                    | File(s)                                              | Status / effect                                                                                                                      |
+| --- | ------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **wasm `+simd128`** via scoped cargo config (un-ignored in `.gitignore`)  | `crates/web/.cargo/config.toml`, `.gitignore`        | Activates `wide` f32x8 NMS + vectorized preprocess that were silently scalar. `pre`/`post` dropped. ✅                               |
+| 2   | **Drop per-frame input clone** (`mem::take` tensor into ORT)              | `crates/web/src/lib.rs`                              | −1 copy (~4.9 MB) per frame. ✅                                                                                                      |
+| 3   | **COOP/COEP serve script** (`npm run serve`)                              | `web/serve.mjs`, `web/package.json`, `web/README.md` | Enables SharedArrayBuffer so ORT threaded wasm can use workers. ✅                                                                   |
+| 4   | **Decouple loop from rAF** (single-slot)                                  | `web/example/index.html`                             | Removed the rAF/vsync quantization that capped FPS. Faster start (45–50 fps). ✅                                                     |
+| 5   | **Zero-gap scheduler** (MessageChannel, no `setTimeout` ≥4 ms clamp)      | `web/example/index.html`                             | Keeps GPU fed; reclaims ~4 ms/frame. ⚠️ Did **not** stop the 10–15 s degradation → rules out "GPU idle between frames" as the cause. |
+| 6   | **Reuse readback canvas** (was a new `OffscreenCanvas` + ctx every frame) | `web/src/index.ts`                                   | Less GC churn on `pre`. ✅                                                                                                           |
+| 7   | **Reuse `RunOptions`** across frames (struct field)                       | `crates/web/src/lib.rs`                              | −1 ORT handle create/drop per frame. ✅                                                                                              |
 
 ## Tried and rejected
 
@@ -145,6 +155,7 @@ Key deductions:
 ## Open problem: the 10–15 s "drops to half" degradation
 
 Persists even with the GPU continuously fed (change #5). Two remaining causes:
+
 1. **GPU clock settling** (driver drops boost clock under sustained load) — mostly
    outside our control from the web layer.
 2. **ORT-web WebGPU resource accumulation** (per-run GPU buffers/staging not
@@ -153,7 +164,7 @@ Persists even with the GPU continuously fed (change #5). Two remaining causes:
 
 **Distinguishing experiment (next):** cap the loop to ~10 fps. If the slowdown
 still hits at ~10–15 s wall-clock → thermal/clock. If it now takes much longer (it
-tracks *frame count*, not time) → resource accumulation, and we chase the ORT-web
+tracks _frame count_, not time) → resource accumulation, and we chase the ORT-web
 WebGPU buffer cache.
 
 ## Investigated and BLOCKED by the ort-web 0.2.1 stack
