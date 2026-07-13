@@ -390,6 +390,17 @@ fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
     (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
 }
 
+/// Return the `(index, score)` of the highest class score, treating `NaN` scores as 0.
+fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
+    scores
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+        .map_or((0, 0.0), |(idx, &score)| {
+            (idx, if score.is_nan() { 0.0 } else { score })
+        })
+}
+
 /// Reshape a flat model output into a `[preds, features]` 2D array.
 ///
 /// When `is_transposed` the data is already laid out `[preds, features]`;
@@ -805,11 +816,7 @@ fn postprocess_segment(
 
     for i in 0..num_preds {
         let scores = output_2d.slice(s![i, 4..4 + names.len()]);
-        let (best_class, best_score) = scores
-            .iter()
-            .enumerate()
-            .max_by(|&(_, a), &(_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or((0, 0.0), |(idx, &score)| (idx, score));
+        let (best_class, best_score) = best_class_score(&scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -1031,13 +1038,7 @@ fn postprocess_pose(
     for i in 0..num_preds {
         // Get class score(s) - for pose, typically just "person" class
         let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+        let (best_class, best_score) = best_class_score(&class_scores);
 
         if best_score < config.confidence_threshold {
             continue;
@@ -1264,13 +1265,7 @@ fn postprocess_obb(
     for i in 0..num_preds {
         // Get class scores
         let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = class_scores
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-            .map_or((0, 0.0), |(idx, &score)| {
-                (idx, if score.is_nan() { 0.0 } else { score })
-            });
+        let (best_class, best_score) = best_class_score(&class_scores);
 
         if best_score < config.confidence_threshold {
             continue;
