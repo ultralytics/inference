@@ -65,6 +65,7 @@ fn test_run_prediction_e2e() {
         verbose: false,
         classes: None,
         colormap: Colormap::default(),
+        depth_viz: ultralytics_inference::visualizer::color::DepthViz::default(),
     };
 
     run_prediction(&args);
@@ -117,6 +118,7 @@ fn test_run_prediction_e2e_semantic() {
         verbose: false,
         classes: None,
         colormap: Colormap::default(),
+        depth_viz: ultralytics_inference::visualizer::color::DepthViz::default(),
     };
 
     run_prediction(&args);
@@ -147,6 +149,7 @@ fn test_semantic_save_class_map() {
         verbose: false,
         classes: None,
         colormap: Colormap::default(),
+        depth_viz: ultralytics_inference::visualizer::color::DepthViz::default(),
     };
 
     run_prediction(&args);
@@ -211,6 +214,7 @@ fn test_run_prediction_e2e_depth() {
         verbose: false,
         classes: None,
         colormap: Colormap::default(),
+        depth_viz: ultralytics_inference::visualizer::color::DepthViz::default(),
     };
 
     run_prediction(&args);
