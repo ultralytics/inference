@@ -1,0 +1,15 @@
+=== Ultralytics verbose ===
+
+
+=== Prediction output (depth) ===
+model       : yolo26l-depth.pt
+imgsz       : 2048
+orig_shape  : (325, 981)
+depth_shape : (325, 981)
+min_m       : 1.3862031698226929
+max_m       : 4.619532585144043
+mean_m      : 2.3773293495178223
+median_m    : 2.24788761138916
+valid_px    : 318825
+total_px    : 318825
+speed_ms    : {'preprocess': 5.6, 'inference': 36.6, 'postprocess': 0.2}

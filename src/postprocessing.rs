@@ -1376,7 +1376,12 @@ fn decode_end2end(
             continue;
         }
         let bbox = scale_and_clip_box(
-            &[output[base], output[base + 1], output[base + 2], output[base + 3]],
+            &[
+                output[base],
+                output[base + 1],
+                output[base + 2],
+                output[base + 3],
+            ],
             preprocess,
         );
         on_kept(base, bbox, conf, cls);
@@ -1414,9 +1419,17 @@ fn postprocess_detect_end2end(
     let user_cap = config.max_det.min(max_det);
 
     let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
-    decode_end2end(output, max_det, feats, preprocess, config, user_cap, |_base, bbox, conf, cls| {
-        flat.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
-    });
+    decode_end2end(
+        output,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |_base, bbox, conf, cls| {
+            flat.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+        },
+    );
 
     let n = flat.len() / 6;
     if n > 0 {
@@ -1475,11 +1488,19 @@ fn postprocess_segment_end2end(
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_coeffs: Vec<f32> = Vec::with_capacity(user_cap * num_masks);
 
-    decode_end2end(output0, max_det, feats, preprocess, config, user_cap, |base, bbox, conf, cls| {
-        flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
-        let coeff_start = base + 6;
-        flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
-    });
+    decode_end2end(
+        output0,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |base, bbox, conf, cls| {
+            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+            let coeff_start = base + 6;
+            flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
+        },
+    );
 
     let num_kept = flat_boxes.len() / 6;
     if num_kept == 0 {
@@ -1566,16 +1587,24 @@ fn postprocess_pose_end2end(
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * 3);
 
-    decode_end2end(output, max_det, feats, preprocess, config, user_cap, |base, bbox, conf, cls| {
-        flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
-        let kstart = base + 6;
-        for k in 0..nk {
-            let off = kstart + k * kpt_dim;
-            let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
-            let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
-            flat_kpts.extend_from_slice(&[sx, sy, kconf]);
-        }
-    });
+    decode_end2end(
+        output,
+        max_det,
+        feats,
+        preprocess,
+        config,
+        user_cap,
+        |base, bbox, conf, cls| {
+            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+            let kstart = base + 6;
+            for k in 0..nk {
+                let off = kstart + k * kpt_dim;
+                let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
+                let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
+                flat_kpts.extend_from_slice(&[sx, sy, kconf]);
+            }
+        },
+    );
 
     let n = flat_boxes.len() / 6;
     // Always emit a keypoints tensor (even empty) to match the non-end2end pose path.
