@@ -11,6 +11,7 @@ use std::sync::Arc;
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
 use crate::utils::pluralize;
+use crate::visualizer::color::{Colormap, DepthViz};
 
 /// Timing information for inference operations (in milliseconds).
 #[derive(Debug, Clone, Default)]
@@ -158,6 +159,73 @@ impl DepthMap {
             _ => (0.0, 1.0),
         }
     }
+
+    /// Colorize into row-major RGB (`H*W` entries), invalid (`<= 0`) pixels black.
+    ///
+    /// Uses `colormap` and normalization `viz`; shared by the native and web depth renderers.
+    /// `Metric` normalizes the valid-pixel depth min/max (matches Python). `Disparity`
+    /// normalizes inverse depth clipped to the 2–98 percentile — the `DepthAnything` look,
+    /// where near pixels read warm and single-pixel outliers no longer wash out the range.
+    ///
+    /// # Panics
+    /// Panics if the depth map is not contiguous (never happens for `Array2` in standard layout).
+    #[must_use]
+    pub fn colorize(&self, colormap: Colormap, viz: DepthViz) -> Vec<[u8; 3]> {
+        let data = self.data.as_slice().expect("depth map must be contiguous");
+        let black = [0u8; 3];
+        match viz {
+            DepthViz::Metric => {
+                let (vmin, vmax) = self.value_range();
+                let inv = 1.0 / (vmax - vmin);
+                data.iter()
+                    .map(|&d| {
+                        if d > 0.0 {
+                            colormap.sample((d - vmin) * inv)
+                        } else {
+                            black
+                        }
+                    })
+                    .collect()
+            }
+            DepthViz::Disparity => {
+                let mut disp: Vec<f32> = data
+                    .iter()
+                    .filter(|&&d| d > 0.0)
+                    .map(|&d| 1.0 / d)
+                    .collect();
+                if disp.is_empty() {
+                    return vec![black; data.len()];
+                }
+                let (lo, hi) = percentile_2_98(&mut disp);
+                let inv = 1.0 / (hi - lo).max(1e-6);
+                data.iter()
+                    .map(|&d| {
+                        if d > 0.0 {
+                            colormap.sample(((1.0 / d - lo) * inv).clamp(0.0, 1.0))
+                        } else {
+                            black
+                        }
+                    })
+                    .collect()
+            }
+        }
+    }
+}
+
+/// Return the 2nd and 98th percentiles of `vals`, reordering it in place (`O(n)` selection).
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn percentile_2_98(vals: &mut [f32]) -> (f32, f32) {
+    let n = vals.len();
+    let idx = |p: f32| ((p * (n - 1) as f32).round() as usize).min(n - 1);
+    let (lo_i, hi_i) = (idx(0.02), idx(0.98));
+    vals.select_nth_unstable_by(lo_i, f32::total_cmp);
+    let lo = vals[lo_i];
+    vals.select_nth_unstable_by(hi_i, f32::total_cmp);
+    (lo, vals[hi_i])
 }
 
 /// Main results container for YOLO inference.

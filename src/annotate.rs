@@ -6,7 +6,7 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
-use crate::visualizer::color::{COLORS, Colormap, POSE_COLORS};
+use crate::visualizer::color::{COLORS, Colormap, DepthViz, POSE_COLORS};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
@@ -171,12 +171,19 @@ pub fn annotate_image(
     result: &Results,
     top_k: Option<usize>,
 ) -> DynamicImage {
-    annotate_image_with(image, result, top_k, Colormap::default())
+    annotate_image_with(
+        image,
+        result,
+        top_k,
+        Colormap::default(),
+        DepthViz::default(),
+    )
 }
 
-/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap`.
+/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap` and
+/// normalization `viz`.
 ///
-/// Only depth results use `colormap`; every other task ignores it. See
+/// Only depth results use `colormap`/`viz`; every other task ignores them. See
 /// [`annotate_image`] for the general behavior.
 #[must_use]
 pub fn annotate_image_with(
@@ -184,6 +191,7 @@ pub fn annotate_image_with(
     result: &Results,
     top_k: Option<usize>,
     colormap: Colormap,
+    viz: DepthViz,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
 
@@ -215,7 +223,7 @@ pub fn annotate_image_with(
 
     // Depth is rendered side-by-side (original | colorized depth), matching the Python
     // `plot(side_by_side=True)`, so it replaces the returned image rather than drawing in place.
-    if let Some(side_by_side) = compose_depth_side_by_side(&img, result, colormap) {
+    if let Some(side_by_side) = compose_depth_side_by_side(&img, result, colormap, viz) {
         return DynamicImage::ImageRgb8(side_by_side);
     }
 
@@ -223,14 +231,13 @@ pub fn annotate_image_with(
 }
 
 /// Build an `original | colorized-depth` side-by-side image, or `None` when the result
-/// has no depth map.
-///
-/// The depth map is min/max-normalized over valid (`> 0`) pixels and mapped through the
-/// given `colormap`; invalid pixels render black, matching Python's `colorize_depth`.
+/// has no depth map. Colorization (`colormap` + normalization `viz`) is delegated to
+/// [`DepthMap::colorize`](crate::results::DepthMap::colorize).
 fn compose_depth_side_by_side(
     img: &image::RgbImage,
     result: &Results,
     colormap: Colormap,
+    viz: DepthViz,
 ) -> Option<image::RgbImage> {
     let depth = result.depth.as_ref()?;
     let (width, height) = img.dimensions();
@@ -239,10 +246,7 @@ fn compose_depth_side_by_side(
     if depth.data.shape() != [h, w] {
         return None;
     }
-    let data = depth.data.as_slice().expect("depth map must be contiguous");
-
-    let (vmin, vmax) = depth.value_range();
-    let inv_range = 1.0 / (vmax - vmin);
+    let colored = depth.colorize(colormap, viz);
 
     let mut out = image::RgbImage::new(width * 2, height);
     for y in 0..h {
@@ -250,13 +254,7 @@ fn compose_depth_side_by_side(
             #[allow(clippy::cast_possible_truncation)]
             let (px, py) = (x as u32, y as u32);
             out.put_pixel(px, py, *img.get_pixel(px, py));
-            let d = data[y * w + x];
-            let rgb = if d > 0.0 {
-                Rgb(colormap.sample((d - vmin) * inv_range))
-            } else {
-                Rgb([0, 0, 0])
-            };
-            out.put_pixel(px + width, py, rgb);
+            out.put_pixel(px + width, py, Rgb(colored[y * w + x]));
         }
     }
     Some(out)

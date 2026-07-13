@@ -140,8 +140,42 @@ pub fn jet(t: f32) -> [u8; 3] {
     ]
 }
 
-/// A continuous colormap for depth visualization. `Inferno` (default) matches Ultralytics'
-/// Python `colorize_depth`; `Jet` is the classic rainbow heatmap.
+/// Sample the reversed-Spectral colormap at normalized position `t` (clamped to `[0, 1]`).
+///
+/// Diverging blue → cyan → green → yellow → red (matplotlib `Spectral_r`, the colormap
+/// `DepthAnything` uses), linearly interpolated between its 11 anchor colors.
+#[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+pub fn spectral(t: f32) -> [u8; 3] {
+    const A: [[u8; 3]; 11] = [
+        [94, 79, 162],
+        [51, 135, 188],
+        [102, 194, 165],
+        [170, 220, 164],
+        [230, 245, 152],
+        [255, 254, 190],
+        [254, 224, 139],
+        [253, 173, 96],
+        [244, 109, 67],
+        [212, 61, 79],
+        [158, 1, 66],
+    ];
+    let x = t.clamp(0.0, 1.0) * 10.0;
+    let i = (x as usize).min(9);
+    let f = x - i as f32;
+    let (lo, hi) = (A[i], A[i + 1]);
+    let lerp = |a: u8, b: u8| f.mul_add(f32::from(b) - f32::from(a), f32::from(a)).round() as u8;
+    [lerp(lo[0], hi[0]), lerp(lo[1], hi[1]), lerp(lo[2], hi[2])]
+}
+
+/// A continuous colormap for depth visualization.
+///
+/// `Inferno` (default) matches Ultralytics' Python `colorize_depth`; `Jet` is the classic
+/// rainbow; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Colormap {
     /// Perceptual black → purple → orange → yellow (matches Python depth plots).
@@ -149,6 +183,8 @@ pub enum Colormap {
     Inferno,
     /// Classic rainbow: blue → cyan → green → yellow → red.
     Jet,
+    /// Diverging blue → green → yellow → red (matplotlib `Spectral_r`).
+    Spectral,
 }
 
 impl Colormap {
@@ -158,6 +194,7 @@ impl Colormap {
         match self {
             Self::Inferno => inferno(t),
             Self::Jet => jet(t),
+            Self::Spectral => spectral(t),
         }
     }
 }
@@ -169,8 +206,9 @@ impl std::str::FromStr for Colormap {
         match s.to_lowercase().as_str() {
             "inferno" => Ok(Self::Inferno),
             "jet" => Ok(Self::Jet),
+            "spectral" | "spectral_r" => Ok(Self::Spectral),
             _ => Err(format!(
-                "invalid colormap '{s}', expected one of: inferno, jet"
+                "invalid colormap '{s}', expected one of: inferno, jet, spectral"
             )),
         }
     }
@@ -181,6 +219,42 @@ impl std::fmt::Display for Colormap {
         f.write_str(match self {
             Self::Inferno => "inferno",
             Self::Jet => "jet",
+            Self::Spectral => "spectral",
+        })
+    }
+}
+
+/// How depth values are normalized before colormapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DepthViz {
+    /// Metric min/max over valid pixels — near = low color, far = high color. Matches
+    /// Python's `colorize_depth`.
+    #[default]
+    Metric,
+    /// Inverse depth (disparity) with a 2–98 percentile clip — near = high color (warm).
+    /// The `DepthAnything`-style visualization: better contrast, outlier-robust.
+    Disparity,
+}
+
+impl std::str::FromStr for DepthViz {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "metric" => Ok(Self::Metric),
+            "disparity" | "depthanything" => Ok(Self::Disparity),
+            _ => Err(format!(
+                "invalid depth-viz '{s}', expected one of: metric, disparity"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for DepthViz {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Metric => "metric",
+            Self::Disparity => "disparity",
         })
     }
 }
@@ -200,6 +274,28 @@ mod tests {
         assert_eq!("jet".parse::<Colormap>().unwrap(), Colormap::Jet);
         assert_eq!("INFERNO".parse::<Colormap>().unwrap(), Colormap::Inferno);
         assert!("magma".parse::<Colormap>().is_err());
+    }
+
+    #[test]
+    fn test_spectral_and_depth_viz() {
+        // Spectral_r endpoints and midpoint from the matplotlib anchors.
+        assert_eq!(spectral(0.0), [94, 79, 162]);
+        assert_eq!(spectral(1.0), [158, 1, 66]);
+        assert_eq!(spectral(0.5), [255, 254, 190]);
+        assert_eq!(spectral(-1.0), [94, 79, 162]); // clamps
+        assert_eq!(Colormap::Spectral.sample(1.0), [158, 1, 66]);
+        assert_eq!(
+            "spectral_r".parse::<Colormap>().unwrap(),
+            Colormap::Spectral
+        );
+        // DepthViz parsing.
+        assert_eq!("metric".parse::<DepthViz>().unwrap(), DepthViz::Metric);
+        assert_eq!(
+            "disparity".parse::<DepthViz>().unwrap(),
+            DepthViz::Disparity
+        );
+        assert_eq!(DepthViz::default(), DepthViz::Metric);
+        assert!("log".parse::<DepthViz>().is_err());
     }
 
     #[test]
