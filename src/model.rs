@@ -1078,8 +1078,7 @@ impl YOLOModel {
             let (oshape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
                 InferenceError::InferenceError(format!("extract uint8 semantic output: {e}"))
             })?;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let shape_vec: Vec<usize> = oshape.iter().map(|&d| d as usize).collect();
+            let shape_vec = shape_to_usize(oshape);
             // Drop the leading batch dim (batch == 1 here).
             let img_shape: &[usize] = if shape_vec.len() > 1 {
                 &shape_vec[1..]
@@ -1612,15 +1611,14 @@ impl YOLOModel {
             let output = outputs.get(output_name.as_str()).ok_or_else(|| {
                 InferenceError::InferenceError(format!("Output '{output_name}' not found"))
             })?;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let (buf, shape) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                let shape_vec = shape_to_usize(shape);
                 (OutBuf::Borrow(data), shape_vec)
             } else {
                 let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
                     InferenceError::InferenceError(format!("Failed to extract output: {e}"))
                 })?;
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                let shape_vec = shape_to_usize(shape);
                 let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
                 (OutBuf::Owned(converted), shape_vec)
             };
@@ -1676,8 +1674,7 @@ impl YOLOModel {
                 let (shape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
                     InferenceError::InferenceError(format!("Failed to extract uint8 output: {e}"))
                 })?;
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                let shape_vec: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+                let shape_vec = shape_to_usize(shape);
                 Ok((data, shape_vec))
             })
             .collect::<Result<_>>()?;
@@ -1830,6 +1827,12 @@ fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
     provider == "CoreMLExecutionProvider"
         && msg.contains("GatherElements")
         && msg.contains("Out of range")
+}
+
+/// Convert an ONNX Runtime tensor shape (`i64` dims) to `usize` for indexing.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+fn shape_to_usize(shape: &[i64]) -> Vec<usize> {
+    shape.iter().map(|&d| d as usize).collect()
 }
 
 #[cfg(test)]
