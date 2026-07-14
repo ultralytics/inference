@@ -612,7 +612,16 @@ class LiteRtEngine implements Engine {
     // Flatten shapes as [rank, dims..., rank, dims...] for the wasm boundary.
     const flatShapes: number[] = [];
     for (const s of shapes) flatShapes.push(s.length, ...s);
-    return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes, colormap, depthViz);
+    return this.pipeline.postprocess(
+      outputs,
+      new Uint32Array(flatShapes),
+      inferenceMs,
+      conf,
+      iou,
+      classes,
+      colormap,
+      depthViz,
+    );
   }
 
   /** Chain `fn` after any in-flight prediction so wasm frame state is never shared. */
@@ -727,7 +736,9 @@ export class YOLO {
     const depthViz = options?.depthViz ?? "metric";
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return decodeResults(await this.engine.predictDrawable(data, width, height, conf, iou, classes, colormap, depthViz));
+      return decodeResults(
+        await this.engine.predictDrawable(data, width, height, conf, iou, classes, colormap, depthViz),
+      );
     }
     const bytes = await toEncodedBytes(image);
     return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes, colormap, depthViz));
