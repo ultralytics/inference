@@ -931,15 +931,22 @@ impl YOLOModel {
         // Allowlisted to the tasks whose preprocessing is a letterbox (square or
         // non-square) + f32 input. Classify uses center-crop (not letterbox), so
         // it's excluded. Semantic is included: `predict_image_cuda_pre` handles
-        // both its f32-logits and baked-in ArgMax (u8) output forms. The kernel
-        // emits the model's fixed dst_h × dst_w; the only requirement is f32
-        // input (the kernel writes f32, not f16).
+        // both its f32-logits and baked-in ArgMax (u8) output forms. Depth is
+        // included too: it is a plain letterbox + f32 input with a single f32
+        // output, post-processed through the shared pipeline like every other
+        // task. The kernel emits the model's fixed dst_h × dst_w; the only
+        // requirement is f32 input (the kernel writes f32, not f16).
         #[cfg(feature = "cuda-preprocess")]
         if self.cuda_preprocessor.is_some()
             && !self.fp16_input
             && matches!(
                 self.metadata.task,
-                Task::Detect | Task::Segment | Task::Pose | Task::Obb | Task::Semantic
+                Task::Detect
+                    | Task::Segment
+                    | Task::Pose
+                    | Task::Obb
+                    | Task::Semantic
+                    | Task::Depth
             )
         {
             let results = self.predict_image_cuda_pre(image, path)?;
