@@ -173,19 +173,13 @@ impl DepthMap {
     pub fn colorize(&self, colormap: Colormap, viz: DepthViz) -> Vec<[u8; 3]> {
         let data = self.data.as_slice().expect("depth map must be contiguous");
         let black = [0u8; 3];
-        match viz {
+        // Per-viz normalization bounds: `Metric` maps depth directly over its valid min/max;
+        // `Disparity` maps inverse depth over its 2-98 percentile. Both then share the same
+        // per-pixel mapping below (invalid pixels black, everything else clamped to `[0, 1]`).
+        let (lo, inv, disparity) = match viz {
             DepthViz::Metric => {
                 let (vmin, vmax) = self.value_range();
-                let inv = 1.0 / (vmax - vmin);
-                data.iter()
-                    .map(|&d| {
-                        if d > 0.0 {
-                            colormap.sample((d - vmin) * inv)
-                        } else {
-                            black
-                        }
-                    })
-                    .collect()
+                (vmin, 1.0 / (vmax - vmin), false)
             }
             DepthViz::Disparity => {
                 let mut disp: Vec<f32> = data
@@ -197,18 +191,19 @@ impl DepthMap {
                     return vec![black; data.len()];
                 }
                 let (lo, hi) = percentile_2_98(&mut disp);
-                let inv = 1.0 / (hi - lo).max(1e-6);
-                data.iter()
-                    .map(|&d| {
-                        if d > 0.0 {
-                            colormap.sample(((1.0 / d - lo) * inv).clamp(0.0, 1.0))
-                        } else {
-                            black
-                        }
-                    })
-                    .collect()
+                (lo, 1.0 / (hi - lo).max(1e-6), true)
             }
-        }
+        };
+        data.iter()
+            .map(|&d| {
+                if d > 0.0 {
+                    let v = if disparity { 1.0 / d } else { d };
+                    colormap.sample(((v - lo) * inv).clamp(0.0, 1.0))
+                } else {
+                    black
+                }
+            })
+            .collect()
     }
 }
 
