@@ -774,6 +774,63 @@ fn apply_mask_proto(
     }
 }
 
+/// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
+/// to the original image size. Shared by the standard and end2end segment post-processors.
+///
+/// `protos_data` is the flat `[num_masks, mh, mw]` prototype output; `mask_coeffs` is
+/// `[N, num_masks]` and `boxes_data` `[N, ..]` (both indexed by kept detection). Returns
+/// `None` (skip masks) when `protos_data` cannot reshape to `(num_masks, mh*mw)`.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+fn build_instance_masks(
+    mask_coeffs: &Array2<f32>,
+    protos_data: &[f32],
+    num_masks: usize,
+    mh: usize,
+    mw: usize,
+    boxes_data: &Array2<f32>,
+    preprocess: &PreprocessResult,
+    inference_shape: (u32, u32),
+) -> Option<Array3<f32>> {
+    // Protos: [1, num_masks, mh, mw] -> [num_masks, mh*mw]
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), protos_data.to_vec()) {
+        Ok(arr) => arr,
+        Err(e) => {
+            eprintln!("WARNING ⚠️ Failed to build protos array: {e}. Skipping mask generation.");
+            return None;
+        }
+    };
+    // Matrix mul: [N, num_masks] x [num_masks, mh*mw] -> [N, mh*mw]
+    let masks_flat = mask_coeffs.dot(&protos);
+
+    // Crop parameters (same for all masks): strip letterbox padding in proto space.
+    let (oh, ow) = preprocess.orig_shape;
+    let (th, tw) = inference_shape;
+    let (pad_top, pad_left) = preprocess.padding;
+    let scale_w = mw as f32 / tw as f32;
+    let scale_h = mh as f32 / th as f32;
+    let crop_x = pad_left * scale_w;
+    let crop_y = pad_top * scale_h;
+    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
+    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
+
+    let mut masks_data = Array3::zeros((boxes_data.nrows(), oh as usize, ow as usize));
+    let zip = Zip::from(masks_data.outer_iter_mut())
+        .and(masks_flat.outer_iter())
+        .and(boxes_data.outer_iter());
+    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
+        apply_mask_proto(
+            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+        );
+    };
+    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
+    #[cfg(not(target_arch = "wasm32"))]
+    zip.par_for_each(apply);
+    #[cfg(target_arch = "wasm32")]
+    zip.for_each(apply);
+
+    Some(masks_data)
+}
+
 /// Post-process segmentation model output.
 ///
 /// Generates bounding boxes and segmentation masks from the model output.
@@ -930,47 +987,18 @@ fn postprocess_segment(
         );
     }
 
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
-        Ok(arr) => arr,
-        Err(e) => {
-            eprintln!("WARNING ⚠️ Failed to create protos array: {e}. Skipping mask generation.");
-            return results;
-        }
+    let Some(masks_data) = build_instance_masks(
+        &mask_coeffs,
+        output1,
+        num_masks,
+        mh,
+        mw,
+        &boxes_data,
+        preprocess,
+        inference_shape,
+    ) else {
+        return results;
     };
-
-    // Matrix Mul: [N, 32] x [32, 25600] -> [N, 25600]
-    let masks_flat = mask_coeffs.dot(&protos);
-
-    // Resize and crop to original image size
-    let (oh, ow) = preprocess.orig_shape;
-    let (th, tw) = inference_shape;
-    let (pad_top, pad_left) = preprocess.padding;
-
-    // Pre-calculate crop parameters (same for all masks)
-    let scale_w = mw as f32 / tw as f32;
-    let scale_h = mh as f32 / th as f32;
-    let crop_x = pad_left * scale_w;
-    let crop_y = pad_top * scale_h;
-    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
-    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
-
-    // Initialize output array
-    let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
-
-    let zip = Zip::from(masks_data.outer_iter_mut())
-        .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter());
-    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
-        apply_mask_proto(
-            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-        );
-    };
-    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
-    #[cfg(not(target_arch = "wasm32"))]
-    zip.par_for_each(apply);
-    #[cfg(target_arch = "wasm32")]
-    zip.for_each(apply);
-
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
     results
@@ -995,6 +1023,33 @@ fn postprocess_segment(
 /// # Returns
 ///
 /// `Results` struct containing boxes and keypoints.
+/// Derive `(num_preds, is_transposed)` from a pose/OBB output shape.
+///
+/// A `[1, features, preds]` layout is detected when the feature axis equals
+/// `expected_features`, or is the smaller axis while still holding at least
+/// `min_transposed_features` (pose passes `4 + kpt_features`, OBB passes `6`); otherwise
+/// the output is treated as the transposed `[1, preds, features]`. 2D shapes pick the
+/// larger axis as the prediction count; anything else yields `(0, false)`.
+fn parse_transposed_shape(
+    shape: &[usize],
+    expected_features: usize,
+    min_transposed_features: usize,
+) -> (usize, bool) {
+    if shape.len() == 3 {
+        let (a, b) = (shape[1], shape[2]);
+        if a == expected_features || (a < b && a >= min_transposed_features) {
+            (b, false) // [1, features, preds]
+        } else {
+            (a, true) // [1, preds, features]
+        }
+    } else if shape.len() == 2 {
+        let (a, b) = (shape[0], shape[1]);
+        if a < b { (b, false) } else { (a, true) }
+    } else {
+        (0, false)
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
@@ -1025,20 +1080,9 @@ fn postprocess_pose(
     // Pose typically has 1 class (person), so features = 4 + 1 + 51 = 56
     let expected_features = 4 + num_classes + kpt_features;
 
-    // Parse output shape
-    let (num_preds, is_transposed) = if output_shape.len() == 3 {
-        let (a, b) = (output_shape[1], output_shape[2]);
-        if a == expected_features || (a < b && a >= 4 + kpt_features) {
-            (b, false) // [1, features, preds]
-        } else {
-            (a, true) // [1, preds, features]
-        }
-    } else if output_shape.len() == 2 {
-        let (a, b) = (output_shape[0], output_shape[1]);
-        if a < b { (b, false) } else { (a, true) }
-    } else {
-        (0, false)
-    };
+    // Parse output shape ([1, features, preds] vs transposed [1, preds, features]).
+    let (num_preds, is_transposed) =
+        parse_transposed_shape(output_shape, expected_features, 4 + kpt_features);
 
     if output.is_empty() || num_preds == 0 {
         return results;
@@ -1242,20 +1286,8 @@ fn postprocess_obb(
     // features = 4 (bbox) + num_classes + 1 (angle)
     let expected_features = 4 + num_classes + 1;
 
-    // Parse output shape
-    let (num_preds, is_transposed) = if output_shape.len() == 3 {
-        let (a, b) = (output_shape[1], output_shape[2]);
-        if a == expected_features || (a < b && a >= 6) {
-            (b, false) // [1, features, preds]
-        } else {
-            (a, true) // [1, preds, features]
-        }
-    } else if output_shape.len() == 2 {
-        let (a, b) = (output_shape[0], output_shape[1]);
-        if a < b { (b, false) } else { (a, true) }
-    } else {
-        (0, false)
-    };
+    // Parse output shape ([1, features, preds] vs transposed [1, preds, features]).
+    let (num_preds, is_transposed) = parse_transposed_shape(output_shape, expected_features, 6);
 
     if output.is_empty() || num_preds == 0 {
         return results;
@@ -1490,7 +1522,6 @@ fn postprocess_segment_end2end(
         return results;
     }
 
-    let (oh, ow) = preprocess.orig_shape;
     let user_cap = config.max_det.min(max_det);
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1521,40 +1552,19 @@ fn postprocess_segment_end2end(
         .expect("flat length matches (n, num_masks)");
 
     // Protos -> masks (mirrors standard segment path).
-    let mh = shape1[2];
-    let mw = shape1[3];
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("WARNING ⚠️ Failed to build protos array: {e}. Skipping masks.");
-            return results;
-        }
+    let (mh, mw) = (shape1[2], shape1[3]);
+    let Some(masks_data) = build_instance_masks(
+        &mask_coeffs,
+        output1,
+        num_masks,
+        mh,
+        mw,
+        &boxes_data,
+        preprocess,
+        inference_shape,
+    ) else {
+        return results;
     };
-    let masks_flat = mask_coeffs.dot(&protos);
-
-    let (th, tw) = inference_shape;
-    let (pad_top, pad_left) = preprocess.padding;
-    let scale_w = mw as f32 / tw as f32;
-    let scale_h = mh as f32 / th as f32;
-    let crop_x = pad_left * scale_w;
-    let crop_y = pad_top * scale_h;
-    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
-    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
-
-    let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
-    let zip = Zip::from(masks_data.outer_iter_mut())
-        .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter());
-    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
-        apply_mask_proto(
-            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-        );
-    };
-    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
-    #[cfg(not(target_arch = "wasm32"))]
-    zip.par_for_each(apply);
-    #[cfg(target_arch = "wasm32")]
-    zip.for_each(apply);
 
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
