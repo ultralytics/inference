@@ -950,17 +950,7 @@ impl YOLOModel {
             )
         {
             let results = self.predict_image_cuda_pre(image, path)?;
-            if let Some(result) = results.first() {
-                let shape = result.inference_shape();
-                verbose!(
-                    "image 1/1 {}: {}x{} {}, {:.1}ms",
-                    result.path,
-                    shape.0,
-                    shape.1,
-                    result.detection_summary(),
-                    result.speed.inference.unwrap_or(0.0)
-                );
-            }
+            Self::log_first_result(&results);
             return Ok(results);
         }
 
@@ -968,7 +958,13 @@ impl YOLOModel {
         let paths = [path];
         let mut results = self.predict_internal(&images, &paths)?;
         let results = results.pop().unwrap_or_default();
+        Self::log_first_result(&results);
+        Ok(results)
+    }
 
+    /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
+    /// empty), shared by both the CPU and cuda-preprocess arms of [`Self::predict_image`].
+    fn log_first_result(results: &[Results]) {
         if let Some(result) = results.first() {
             let shape = result.inference_shape();
             verbose!(
@@ -980,8 +976,6 @@ impl YOLOModel {
                 result.speed.inference.unwrap_or(0.0)
             );
         }
-
-        Ok(results)
     }
 
     /// CUDA-preprocess fast path used by [`Self::predict_image`] when
