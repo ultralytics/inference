@@ -129,24 +129,21 @@ impl DepthMap {
         self.orig_shape
     }
 
+    /// Reduce the valid (`> 0`) depth pixels with `f`, or `None` if there are none.
+    fn reduce_valid(&self, f: impl Fn(f32, f32) -> f32) -> Option<f32> {
+        self.data.iter().copied().filter(|&v| v > 0.0).reduce(f)
+    }
+
     /// Minimum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
     #[must_use]
     pub fn min_depth(&self) -> Option<f32> {
-        self.data
-            .iter()
-            .copied()
-            .filter(|&v| v > 0.0)
-            .reduce(f32::min)
+        self.reduce_valid(f32::min)
     }
 
     /// Maximum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
     #[must_use]
     pub fn max_depth(&self) -> Option<f32> {
-        self.data
-            .iter()
-            .copied()
-            .filter(|&v| v > 0.0)
-            .reduce(f32::max)
+        self.reduce_valid(f32::max)
     }
 
     /// Color-normalization range `(min, max)` for visualization: the valid-pixel span,
