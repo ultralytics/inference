@@ -101,7 +101,7 @@ pub const POSE_COLORS: [[u8; 3]; 20] = [
 /// `colorize_depth` uses), accurate to within ~9/255 per channel, so it needs no lookup table.
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub fn inferno(t: f32) -> [u8; 3] {
+fn inferno(t: f32) -> [u8; 3] {
     // Per-channel [r, g, b] coefficients, order 0..=6, evaluated with Horner's method.
     const C: [[f32; 3]; 7] = [
         [0.000_218_940_4, 0.001_651_005, -0.019_480_9],
@@ -130,7 +130,7 @@ pub fn inferno(t: f32) -> [u8; 3] {
 /// piecewise-linear jet, so it needs no lookup table.
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub fn jet(t: f32) -> [u8; 3] {
+fn jet(t: f32) -> [u8; 3] {
     let t = t.clamp(0.0, 1.0);
     let ch = |center: f32| (1.5 - t.mul_add(4.0, -center).abs()).clamp(0.0, 1.0);
     [
@@ -150,7 +150,7 @@ pub fn jet(t: f32) -> [u8; 3] {
     clippy::cast_sign_loss,
     clippy::cast_precision_loss
 )]
-pub fn spectral(t: f32) -> [u8; 3] {
+fn spectral(t: f32) -> [u8; 3] {
     const A: [[u8; 3]; 11] = [
         [94, 79, 162],
         [51, 135, 188],
@@ -176,7 +176,7 @@ pub fn spectral(t: f32) -> [u8; 3] {
 /// (high). Raw normalized depth with no color, matching Python's `colorize_depth(cmap="gray")`.
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub fn gray(t: f32) -> [u8; 3] {
+fn gray(t: f32) -> [u8; 3] {
     let g = (t.clamp(0.0, 1.0) * 255.0).round() as u8;
     [g, g, g]
 }

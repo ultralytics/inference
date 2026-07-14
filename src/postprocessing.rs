@@ -1853,11 +1853,6 @@ pub fn postprocess_semantic_mask(
 /// resolution. To recover the original image geometry we crop the centered letterbox
 /// padding and bilinear-resize the cropped region back to the original `(H, W)`, mirroring
 /// `ops.scale_masks` in the Python `DepthPredictor`.
-///
-/// # Panics
-///
-/// Panics if the freshly-allocated depth `Array2<f32>` is not contiguous (cannot occur
-/// for a buffer sized exactly `oh * ow`).
 #[allow(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
@@ -1866,8 +1861,7 @@ pub fn postprocess_semantic_mask(
     clippy::similar_names,
     clippy::implicit_hasher
 )]
-#[must_use]
-pub fn postprocess_depth(
+fn postprocess_depth(
     output: &[f32],
     shape: &[usize],
     names: Arc<HashMap<usize, String>>,

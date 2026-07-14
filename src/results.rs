@@ -123,12 +123,6 @@ impl DepthMap {
         Self { data, orig_shape }
     }
 
-    /// Get the original image shape (height, width).
-    #[must_use]
-    pub const fn orig_shape(&self) -> (u32, u32) {
-        self.orig_shape
-    }
-
     /// Reduce the valid (`> 0`) depth pixels with `f`, or `None` if there are none.
     fn reduce_valid(&self, f: impl Fn(f32, f32) -> f32) -> Option<f32> {
         self.data.iter().copied().filter(|&v| v > 0.0).reduce(f)
@@ -148,11 +142,12 @@ impl DepthMap {
 
     /// Color-normalization range `(min, max)` for visualization: the valid-pixel span,
     /// widened so `max > min`, falling back to `(0.0, 1.0)` when no pixels are valid.
-    #[must_use]
-    pub fn value_range(&self) -> (f32, f32) {
+    /// `min_depth`/`max_depth` reduce the same data, so they are either both `Some` or both
+    /// `None` — never mixed.
+    fn value_range(&self) -> (f32, f32) {
         match (self.min_depth(), self.max_depth()) {
             (Some(lo), Some(hi)) if hi > lo => (lo, hi),
-            (Some(lo), _) => (lo, lo + 1e-6),
+            (Some(lo), Some(_)) => (lo, lo + 1e-6),
             _ => (0.0, 1.0),
         }
     }
@@ -163,12 +158,9 @@ impl DepthMap {
     /// `Metric` normalizes the valid-pixel depth min/max (matches Python). `Disparity`
     /// normalizes inverse depth clipped to the 2–98 percentile — the `DepthAnything` look,
     /// where near pixels read warm and single-pixel outliers no longer wash out the range.
-    ///
-    /// # Panics
-    /// Panics if the depth map is not contiguous (never happens for `Array2` in standard layout).
     #[must_use]
     pub fn colorize(&self, colormap: Colormap, viz: DepthViz) -> Vec<[u8; 3]> {
-        let data = self.data.as_slice().expect("depth map must be contiguous");
+        let data = &self.data;
         let black = [0u8; 3];
         // Per-viz normalization bounds: `Metric` maps depth directly over its valid min/max;
         // `Disparity` maps inverse depth over its 2-98 percentile. Both then share the same
