@@ -172,10 +172,20 @@ pub fn spectral(t: f32) -> [u8; 3] {
     [lerp(lo[0], hi[0]), lerp(lo[1], hi[1]), lerp(lo[2], hi[2])]
 }
 
+/// Sample a grayscale ramp at normalized position `t` (clamped to `[0, 1]`): black (low) → white
+/// (high). Raw normalized depth with no color, matching Python's `colorize_depth(cmap="gray")`.
+#[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub fn gray(t: f32) -> [u8; 3] {
+    let g = (t.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [g, g, g]
+}
+
 /// A continuous colormap for depth visualization.
 ///
 /// `Inferno` (default) matches Ultralytics' Python `colorize_depth`; `Jet` is the classic
-/// rainbow; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`.
+/// rainbow; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`; `Gray` is raw
+/// grayscale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Colormap {
     /// Perceptual black → purple → orange → yellow (matches Python depth plots).
@@ -185,6 +195,8 @@ pub enum Colormap {
     Jet,
     /// Diverging blue → green → yellow → red (matplotlib `Spectral_r`).
     Spectral,
+    /// Raw grayscale black → white, no color.
+    Gray,
 }
 
 impl Colormap {
@@ -195,6 +207,7 @@ impl Colormap {
             Self::Inferno => inferno(t),
             Self::Jet => jet(t),
             Self::Spectral => spectral(t),
+            Self::Gray => gray(t),
         }
     }
 }
@@ -207,8 +220,9 @@ impl std::str::FromStr for Colormap {
             "inferno" => Ok(Self::Inferno),
             "jet" => Ok(Self::Jet),
             "spectral" | "spectral_r" => Ok(Self::Spectral),
+            "gray" | "grey" | "grayscale" => Ok(Self::Gray),
             _ => Err(format!(
-                "invalid colormap '{s}', expected one of: inferno, jet, spectral"
+                "invalid colormap '{s}', expected one of: inferno, jet, spectral, gray"
             )),
         }
     }
@@ -220,6 +234,7 @@ impl std::fmt::Display for Colormap {
             Self::Inferno => "inferno",
             Self::Jet => "jet",
             Self::Spectral => "spectral",
+            Self::Gray => "gray",
         })
     }
 }
@@ -274,6 +289,11 @@ mod tests {
         assert_eq!("jet".parse::<Colormap>().unwrap(), Colormap::Jet);
         assert_eq!("INFERNO".parse::<Colormap>().unwrap(), Colormap::Inferno);
         assert!("magma".parse::<Colormap>().is_err());
+        // Gray is a plain black→white ramp: endpoints and an even midpoint, all channels equal.
+        assert_eq!(gray(0.0), [0, 0, 0]);
+        assert_eq!(gray(1.0), [255, 255, 255]);
+        assert_eq!(Colormap::Gray.sample(0.5), gray(0.5));
+        assert_eq!("gray".parse::<Colormap>().unwrap(), Colormap::Gray);
     }
 
     #[test]

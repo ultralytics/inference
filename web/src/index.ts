@@ -225,10 +225,11 @@ export interface PredictOptions {
    */
   classes?: number[];
   /**
-   * Depth colormap for the `depth` overlay: `"inferno"` (default), `"jet"`, or
-   * `"spectral"` (`Spectral_r`, DepthAnything-style). Ignored by every other task.
+   * Depth colormap for the `depth` overlay: `"inferno"` (default), `"jet"`,
+   * `"spectral"` (`Spectral_r`, DepthAnything-style), or `"gray"` (raw grayscale).
+   * Ignored by every other task.
    */
-  colormap?: "inferno" | "jet" | "spectral";
+  colormap?: "inferno" | "jet" | "spectral" | "gray";
   /**
    * Depth normalization: `"metric"` (default, min/max) or `"disparity"` (inverse depth +
    * percentile clip, the DepthAnything look). Ignored by every other task.
