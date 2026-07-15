@@ -24,8 +24,8 @@ use clap::{Args, Parser, Subcommand};
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
-    --colormap <MAP>       Depth colormap: inferno (default), jet, spectral, or gray; depth task only
-    --depth-viz <MODE>     Depth normalization: metric (default) or disparity (DepthAnything-style); depth only
+    --colormap <MAP>       Depth colormap: jet (default), inferno, spectral, or gray; depth task only
+    --depth-viz <MODE>     Depth normalization: disparity (default, DepthAnything-style) or metric; depth only
     --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)
     --verbose              Show verbose output [default: true]
@@ -144,12 +144,12 @@ pub struct PredictArgs {
     #[arg(long, allow_hyphen_values = true)]
     pub classes: Option<String>,
 
-    /// Depth colormap for visualization (`inferno`, `jet`, `spectral`, or `gray`); depth task only
+    /// Depth colormap for visualization (`jet`, `inferno`, `spectral`, or `gray`); depth task only
     #[arg(long, default_value_t = Colormap::default())]
     pub colormap: Colormap,
 
-    /// Depth normalization: `metric` (min/max, default) or `disparity` (DepthAnything-style,
-    /// inverse depth + percentile clip); depth task only
+    /// Depth normalization: `disparity` (default, DepthAnything-style, inverse depth +
+    /// percentile clip) or `metric` (min/max); depth task only
     #[arg(long, default_value_t = DepthViz::default())]
     pub depth_viz: DepthViz,
 }

@@ -199,7 +199,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.28 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.29 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -219,7 +219,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.28 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.29 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -264,7 +264,8 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                | `true`                                |
 | `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                 | `false`                               |
 | `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                              | `false`                               |
-| `--colormap`    |       | Depth colormap: `inferno`, `jet`, `spectral`, or `gray` (depth task only)                                                                                                      | `inferno`                             |
+| `--colormap`    |       | Depth colormap: `jet`, `inferno`, `spectral`, or `gray` (depth task only)                                                                                                      | `jet`                                 |
+| `--depth-viz`   |       | Depth normalization: `disparity` (inverse depth, near = warm) or `metric` (min/max) (depth task only)                                                                          | `disparity`                           |
 | `--show`        |       | Display results in a window                                                                                                                                                    | `false`                               |
 | `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                 |
 | `--verbose`     |       | Show verbose output                                                                                                                                                            | `true`                                |
@@ -317,7 +318,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.28"
+ultralytics-inference = "0.0.29"
 ```
 
 ```toml

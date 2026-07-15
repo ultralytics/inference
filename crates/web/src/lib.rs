@@ -241,13 +241,13 @@ fn preprocess_image(
     Ok((orig_img, pre))
 }
 
-/// Parse a JS colormap name into a [`Colormap`], falling back to the default (`inferno`)
+/// Parse a JS colormap name into a [`Colormap`], falling back to the default (`jet`)
 /// for an empty or unknown value. Only depth results use it.
 fn parse_colormap(s: &str) -> Colormap {
     s.parse().unwrap_or_default()
 }
 
-/// Parse a JS depth-viz name into a [`DepthViz`], falling back to the default (`metric`)
+/// Parse a JS depth-viz name into a [`DepthViz`], falling back to the default (`disparity`)
 /// for an empty or unknown value. Only depth results use it.
 fn parse_depth_viz(s: &str) -> DepthViz {
     s.parse().unwrap_or_default()

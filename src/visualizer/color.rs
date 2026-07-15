@@ -183,15 +183,16 @@ fn gray(t: f32) -> [u8; 3] {
 
 /// A continuous colormap for depth visualization.
 ///
-/// `Inferno` (default) matches Ultralytics' Python `colorize_depth`; `Jet` is the classic
-/// rainbow; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`; `Gray` is raw
-/// grayscale.
+/// `Jet` (default) is the classic rainbow, the closest match to the rainbow ramp the
+/// Ultralytics iOS app renders depth with; `Inferno` matches Ultralytics' Python
+/// `colorize_depth`; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`;
+/// `Gray` is raw grayscale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Colormap {
     /// Perceptual black → purple → orange → yellow (matches Python depth plots).
-    #[default]
     Inferno,
     /// Classic rainbow: blue → cyan → green → yellow → red.
+    #[default]
     Jet,
     /// Diverging blue → green → yellow → red (matplotlib `Spectral_r`).
     Spectral,
@@ -244,10 +245,11 @@ impl std::fmt::Display for Colormap {
 pub enum DepthViz {
     /// Metric min/max over valid pixels — near = low color, far = high color. Matches
     /// Python's `colorize_depth`.
-    #[default]
     Metric,
     /// Inverse depth (disparity) with a 2–98 percentile clip — near = high color (warm).
-    /// The `DepthAnything`-style visualization: better contrast, outlier-robust.
+    /// The `DepthAnything`-style visualization, and the default: better contrast,
+    /// outlier-robust, and it renders near = warm like the Ultralytics iOS app.
+    #[default]
     Disparity,
 }
 
@@ -314,8 +316,10 @@ mod tests {
             "disparity".parse::<DepthViz>().unwrap(),
             DepthViz::Disparity
         );
-        assert_eq!(DepthViz::default(), DepthViz::Metric);
         assert!("log".parse::<DepthViz>().is_err());
+        // Depth defaults to the rainbow ramp with near = warm, matching the Ultralytics iOS app.
+        assert_eq!(Colormap::default(), Colormap::Jet);
+        assert_eq!(DepthViz::default(), DepthViz::Disparity);
     }
 
     #[test]
