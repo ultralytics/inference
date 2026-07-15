@@ -24,7 +24,7 @@ use clap::{Args, Parser, Subcommand};
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
-    --colormap <MAP>       Depth colormap: inferno (default), jet, spectral, or gray; depth task only
+    --colormap <MAP>       Depth colormap: jet (default), inferno, spectral, or gray; depth task only
     --depth-viz <MODE>     Depth normalization: metric (default) or disparity (DepthAnything-style); depth only
     --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)

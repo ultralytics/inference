@@ -132,7 +132,7 @@
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
-//! | `--colormap` | | Depth colormap: `inferno`, `jet`, `spectral`, or `gray` (depth task only) | `inferno` |
+//! | `--colormap` | | Depth colormap: `jet`, `inferno`, `spectral`, or `gray` (depth task only) | `jet` |
 //! | `--show` | | Display results in a window | `false` |
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |

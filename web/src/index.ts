@@ -225,9 +225,9 @@ export interface PredictOptions {
    */
   classes?: number[];
   /**
-   * Depth colormap for the `depth` overlay: `"inferno"` (default), `"jet"`,
-   * `"spectral"` (`Spectral_r`, DepthAnything-style), or `"gray"` (raw grayscale).
-   * Ignored by every other task.
+   * Depth colormap for the `depth` overlay: `"jet"` (default, classic rainbow),
+   * `"inferno"`, `"spectral"` (`Spectral_r`, DepthAnything-style), or `"gray"` (raw
+   * grayscale). Ignored by every other task.
    */
   colormap?: "inferno" | "jet" | "spectral" | "gray";
   /**

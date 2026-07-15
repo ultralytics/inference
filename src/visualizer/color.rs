@@ -183,15 +183,16 @@ fn gray(t: f32) -> [u8; 3] {
 
 /// A continuous colormap for depth visualization.
 ///
-/// `Inferno` (default) matches Ultralytics' Python `colorize_depth`; `Jet` is the classic
-/// rainbow; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`; `Gray` is raw
-/// grayscale.
+/// `Jet` (default) is the classic rainbow, the closest match to the rainbow ramp the
+/// Ultralytics iOS app renders depth with; `Inferno` matches Ultralytics' Python
+/// `colorize_depth`; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`;
+/// `Gray` is raw grayscale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Colormap {
     /// Perceptual black → purple → orange → yellow (matches Python depth plots).
-    #[default]
     Inferno,
     /// Classic rainbow: blue → cyan → green → yellow → red.
+    #[default]
     Jet,
     /// Diverging blue → green → yellow → red (matplotlib `Spectral_r`).
     Spectral,
@@ -316,6 +317,8 @@ mod tests {
         );
         assert_eq!(DepthViz::default(), DepthViz::Metric);
         assert!("log".parse::<DepthViz>().is_err());
+        // Depth renders as the classic rainbow by default, matching the Ultralytics iOS app.
+        assert_eq!(Colormap::default(), Colormap::Jet);
     }
 
     #[test]
