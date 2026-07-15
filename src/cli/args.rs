@@ -2,6 +2,7 @@
 
 use crate::InferenceConfig;
 use crate::task::Task;
+use crate::visualizer::color::{Colormap, DepthViz};
 use clap::{Args, Parser, Subcommand};
 
 /// CLI arguments parser.
@@ -10,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(propagate_version = true)]
 #[command(after_help = r#"Predict Options:
     --model, -m <MODEL>    Path to ONNX model file [default: yolo26n.onnx]
-    --task <TASK>          Task type: detect, segment, pose, obb, classify, semantic [default: detect]
+    --task <TASK>          Task type: detect, segment, pose, obb, classify, semantic, depth [default: detect]
                            Selects the matching nano model when --model is omitted
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
@@ -23,6 +24,8 @@ use clap::{Args, Parser, Subcommand};
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
+    --colormap <MAP>       Depth colormap: inferno (default), jet, spectral, or gray; depth task only
+    --depth-viz <MODE>     Depth normalization: metric (default) or disparity (DepthAnything-style); depth only
     --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)
     --verbose              Show verbose output [default: true]
@@ -35,6 +38,9 @@ Examples:
     ultralytics-inference predict --task obb --source aerial.jpg
     ultralytics-inference predict --task classify --source image.jpg
     ultralytics-inference predict --task semantic --source image.jpg
+    ultralytics-inference predict --task depth --source image.jpg
+    ultralytics-inference predict --task depth --source image.jpg --colormap jet
+    ultralytics-inference predict --task depth --source image.jpg --colormap spectral --depth-viz disparity
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
@@ -66,7 +72,7 @@ pub struct PredictArgs {
     pub model: Option<String>,
 
     /// Task type; selects nano model for auto-download when --model is omitted
-    /// (detect, segment, pose, obb, classify, semantic)
+    /// (detect, segment, pose, obb, classify, semantic, depth)
     #[arg(long)]
     pub task: Option<Task>,
 
@@ -137,6 +143,15 @@ pub struct PredictArgs {
     /// shell argument parsing issues (e.g. use --classes 0,1 not --classes 0, 1).
     #[arg(long, allow_hyphen_values = true)]
     pub classes: Option<String>,
+
+    /// Depth colormap for visualization (`inferno`, `jet`, `spectral`, or `gray`); depth task only
+    #[arg(long, default_value_t = Colormap::default())]
+    pub colormap: Colormap,
+
+    /// Depth normalization: `metric` (min/max, default) or `disparity` (DepthAnything-style,
+    /// inverse depth + percentile clip); depth task only
+    #[arg(long, default_value_t = DepthViz::default())]
+    pub depth_viz: DepthViz,
 }
 
 /// Parse class IDs from various formats: `"1,2,3"`, `"[1,2,3]"`, `"(1,2,3)"`

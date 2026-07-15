@@ -19,7 +19,7 @@ const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11", "yolov8"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 /// Variants only available for the yolo26 family.
-const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem"];
+const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth"];
 
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES
@@ -48,6 +48,7 @@ fn supported_models_help() -> String {
         "-obb",
         "-cls",
         "-sem (yolo26 only)",
+        "-depth (yolo26 only)",
     ];
     let sizes_display = MODEL_SIZES.join(", ");
     let variants_joined = variants_display.join(", ");
@@ -67,7 +68,7 @@ const DEFAULT_BUS_IMAGE_URL: &str = "https://ultralytics.com/images/bus.jpg";
 const DEFAULT_ZIDANE_IMAGE_URL: &str = "https://ultralytics.com/images/zidane.jpg";
 const DEFAULT_BOATS_IMAGE_URL: &str = "https://ultralytics.com/images/boats.jpg";
 
-/// Default image URLs for detection, segmentation, pose, classification, and semantic tasks.
+/// Default image URLs for detection, segmentation, pose, classification, semantic, and depth tasks.
 pub const DEFAULT_IMAGES: &[&str] = &[DEFAULT_BUS_IMAGE_URL, DEFAULT_ZIDANE_IMAGE_URL];
 
 /// Default image URL for OBB (Oriented Bounding Box) tasks.
@@ -352,7 +353,7 @@ fn normalize_model_path(path: &Path) -> PathBuf {
 /// Attempt to download a model if it matches a known downloadable model.
 ///
 /// Supports all `YOLO26`, `YOLO11`, and `YOLOv8` ONNX models across sizes (n/s/m/l/x) and
-/// task variants (detect, segment, pose, obb, classify, semantic).
+/// task variants (detect, segment, pose, obb, classify, semantic, depth).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
 ///
 /// # Errors
@@ -489,9 +490,9 @@ mod tests {
         assert!(models.iter().any(|m| m == "yolo26n.onnx"));
         assert!(models.iter().any(|m| m == "yolo11n-seg.onnx"));
         assert!(models.iter().any(|m| m == "yolov8n.onnx"));
-        // `-sem` is a yolo26-only variant.
+        // `-sem` and `-depth` are yolo26-only variants.
         assert!(models.iter().any(|m| m == "yolo26n-sem.onnx"));
-        assert!(!models.iter().any(|m| m == "yolo11n-sem.onnx"));
+        assert!(models.iter().any(|m| m == "yolo26n-depth.onnx"));
     }
 
     #[test]

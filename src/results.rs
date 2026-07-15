@@ -11,6 +11,7 @@ use std::sync::Arc;
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
 use crate::utils::pluralize;
+use crate::visualizer::color::{Colormap, DepthViz};
 
 /// Timing information for inference operations (in milliseconds).
 #[derive(Debug, Clone, Default)]
@@ -106,6 +107,111 @@ impl SemanticMask {
     }
 }
 
+/// Per-pixel depth map (in meters) for monocular depth estimation.
+#[derive(Debug, Clone)]
+pub struct DepthMap {
+    /// Depth value in meters for each pixel, shape [H, W].
+    pub data: Array2<f32>,
+    /// Original image shape (height, width).
+    pub orig_shape: (u32, u32),
+}
+
+impl DepthMap {
+    /// Create a new `DepthMap`.
+    #[must_use]
+    pub const fn new(data: Array2<f32>, orig_shape: (u32, u32)) -> Self {
+        Self { data, orig_shape }
+    }
+
+    /// Reduce the valid (`> 0`) depth pixels with `f`, or `None` if there are none.
+    fn reduce_valid(&self, f: impl Fn(f32, f32) -> f32) -> Option<f32> {
+        self.data.iter().copied().filter(|&v| v > 0.0).reduce(f)
+    }
+
+    /// Minimum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
+    #[must_use]
+    pub fn min_depth(&self) -> Option<f32> {
+        self.reduce_valid(f32::min)
+    }
+
+    /// Maximum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
+    #[must_use]
+    pub fn max_depth(&self) -> Option<f32> {
+        self.reduce_valid(f32::max)
+    }
+
+    /// Color-normalization range `(min, max)` for visualization: the valid-pixel span,
+    /// widened so `max > min`, falling back to `(0.0, 1.0)` when no pixels are valid.
+    /// `min_depth`/`max_depth` reduce the same data, so they are either both `Some` or both
+    /// `None` — never mixed.
+    fn value_range(&self) -> (f32, f32) {
+        match (self.min_depth(), self.max_depth()) {
+            (Some(lo), Some(hi)) if hi > lo => (lo, hi),
+            (Some(lo), Some(_)) => (lo, lo + 1e-6),
+            _ => (0.0, 1.0),
+        }
+    }
+
+    /// Colorize into row-major RGB (`H*W` entries), invalid (`<= 0`) pixels black.
+    ///
+    /// Uses `colormap` and normalization `viz`; shared by the native and web depth renderers.
+    /// `Metric` normalizes the valid-pixel depth min/max (matches Python). `Disparity`
+    /// normalizes inverse depth clipped to the 2–98 percentile — the `DepthAnything` look,
+    /// where near pixels read warm and single-pixel outliers no longer wash out the range.
+    #[must_use]
+    pub fn colorize(&self, colormap: Colormap, viz: DepthViz) -> Vec<[u8; 3]> {
+        let data = &self.data;
+        let black = [0u8; 3];
+        // Per-viz normalization bounds: `Metric` maps depth directly over its valid min/max;
+        // `Disparity` maps inverse depth over its 2-98 percentile. Both then share the same
+        // per-pixel mapping below (invalid pixels black, everything else clamped to `[0, 1]`).
+        let (lo, inv, disparity) = match viz {
+            DepthViz::Metric => {
+                let (vmin, vmax) = self.value_range();
+                (vmin, 1.0 / (vmax - vmin), false)
+            }
+            DepthViz::Disparity => {
+                let mut disp: Vec<f32> = data
+                    .iter()
+                    .filter(|&&d| d > 0.0)
+                    .map(|&d| 1.0 / d)
+                    .collect();
+                if disp.is_empty() {
+                    return vec![black; data.len()];
+                }
+                let (lo, hi) = percentile_2_98(&mut disp);
+                (lo, 1.0 / (hi - lo).max(1e-6), true)
+            }
+        };
+        data.iter()
+            .map(|&d| {
+                if d > 0.0 {
+                    let v = if disparity { 1.0 / d } else { d };
+                    colormap.sample(((v - lo) * inv).clamp(0.0, 1.0))
+                } else {
+                    black
+                }
+            })
+            .collect()
+    }
+}
+
+/// Return the 2nd and 98th percentiles of `vals`, reordering it in place (`O(n)` selection).
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn percentile_2_98(vals: &mut [f32]) -> (f32, f32) {
+    let n = vals.len();
+    let idx = |p: f32| ((p * (n - 1) as f32).round() as usize).min(n - 1);
+    let (lo_i, hi_i) = (idx(0.02), idx(0.98));
+    vals.select_nth_unstable_by(lo_i, f32::total_cmp);
+    let lo = vals[lo_i];
+    vals.select_nth_unstable_by(hi_i, f32::total_cmp);
+    (lo, vals[hi_i])
+}
+
 /// Main results container for YOLO inference.
 ///
 /// Contains the original image, detection results (boxes, masks, keypoints, etc.), timing information, and metadata.
@@ -129,6 +235,8 @@ pub struct Results {
     pub obb: Option<Obb>,
     /// Semantic segmentation class map (if applicable).
     pub semantic_mask: Option<SemanticMask>,
+    /// Per-pixel depth map in meters (if applicable).
+    pub depth: Option<DepthMap>,
     /// Inference timing information.
     pub speed: Speed,
     /// Class ID to name mapping.
@@ -204,6 +312,7 @@ impl Results {
             probs: None,
             obb: None,
             semantic_mask: None,
+            depth: None,
             speed,
             names,
             path,
@@ -282,6 +391,13 @@ impl Results {
                 .map(|id| self.names.get(id).map_or("unknown", String::as_str))
                 .collect();
             return shown.join(", ");
+        }
+
+        if let Some(ref depth) = self.depth {
+            return match (depth.min_depth(), depth.max_depth()) {
+                (Some(lo), Some(hi)) => format!("depth {lo:.2}-{hi:.2}m"),
+                _ => "depth (no valid pixels)".to_string(),
+            };
         }
 
         #[allow(clippy::option_if_let_else)]
@@ -1086,6 +1202,30 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.semantic_mask.as_ref().unwrap().classes_present(), 3);
+    }
+
+    #[test]
+    fn test_depth_map_summary_and_len() {
+        let names = Arc::new(HashMap::new());
+        let speed = Speed::default();
+        let orig_img = Array3::zeros((2, 2, 3));
+        let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (2, 2));
+        // Includes an invalid (0.0) pixel that must be excluded from min/max.
+        let depth = DepthMap::new(array![[0.0f32, 1.5], [3.0, 4.0]], (2, 2));
+        assert!((depth.min_depth().unwrap() - 1.5).abs() < 1e-6);
+        assert!((depth.max_depth().unwrap() - 4.0).abs() < 1e-6);
+        results.depth = Some(depth);
+
+        assert_eq!(results.len(), 0);
+        assert!(results.is_empty());
+        assert_eq!(results.detection_summary(), "depth 1.50-4.00m");
+    }
+
+    #[test]
+    fn test_depth_map_no_valid_pixels() {
+        let depth = DepthMap::new(array![[0.0f32, 0.0], [0.0, 0.0]], (2, 2));
+        assert!(depth.min_depth().is_none());
+        assert!(depth.max_depth().is_none());
     }
 
     #[test]

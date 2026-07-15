@@ -36,7 +36,7 @@ use ultralytics_inference::preprocessing::{
     PreprocessResult, preprocess_image_center_crop, preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
-use ultralytics_inference::visualizer::color::Color;
+use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
 use ultralytics_inference::visualizer::skeleton::{
     KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
 };
@@ -241,6 +241,18 @@ fn preprocess_image(
     Ok((orig_img, pre))
 }
 
+/// Parse a JS colormap name into a [`Colormap`], falling back to the default (`inferno`)
+/// for an empty or unknown value. Only depth results use it.
+fn parse_colormap(s: &str) -> Colormap {
+    s.parse().unwrap_or_default()
+}
+
+/// Parse a JS depth-viz name into a [`DepthViz`], falling back to the default (`metric`)
+/// for an empty or unknown value. Only depth results use it.
+fn parse_depth_viz(s: &str) -> DepthViz {
+    s.parse().unwrap_or_default()
+}
+
 /// Build the shared `InferenceConfig` from the JS thresholds and class filter.
 fn make_config(conf: f32, iou: f32, classes: Option<Vec<u32>>) -> InferenceConfig {
     let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
@@ -301,7 +313,7 @@ impl YoloModel {
     }
 
     /// The model's task (`"detect"`, `"segment"`, `"pose"`, `"classify"`,
-    /// `"obb"`, or `"semantic"`).
+    /// `"obb"`, `"semantic"`, or `"depth"`).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn task(&self) -> String {
@@ -340,9 +352,19 @@ impl YoloModel {
         conf: f32,
         iou: f32,
         classes: Option<Vec<u32>>,
+        colormap: String,
+        depth_viz: String,
     ) -> Result<JsValue, JsError> {
         let dynimg = image::load_from_memory(&image).map_err(err_ctx("failed to decode image"))?;
-        self.run(dynimg, conf, iou, classes).await
+        self.run(
+            dynimg,
+            conf,
+            iou,
+            classes,
+            parse_colormap(&colormap),
+            parse_depth_viz(&depth_viz),
+        )
+        .await
     }
 
     /// Run inference on raw `RGBA` pixels (e.g. a canvas/webcam `ImageData`).
@@ -352,6 +374,7 @@ impl YoloModel {
     ///
     /// # Errors
     /// Returns a JS error if the buffer size is wrong or inference fails.
+    #[allow(clippy::too_many_arguments)]
     pub async fn predict_rgba(
         &mut self,
         rgba: Vec<u8>,
@@ -360,6 +383,8 @@ impl YoloModel {
         conf: f32,
         iou: f32,
         classes: Option<Vec<u32>>,
+        colormap: String,
+        depth_viz: String,
     ) -> Result<JsValue, JsError> {
         let expected = (width as usize) * (height as usize) * 4;
         if rgba.len() != expected {
@@ -370,8 +395,15 @@ impl YoloModel {
         }
         let img = image::RgbaImage::from_raw(width, height, rgba)
             .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))?;
-        self.run(image::DynamicImage::ImageRgba8(img), conf, iou, classes)
-            .await
+        self.run(
+            image::DynamicImage::ImageRgba8(img),
+            conf,
+            iou,
+            classes,
+            parse_colormap(&colormap),
+            parse_depth_viz(&depth_viz),
+        )
+        .await
     }
 }
 
@@ -443,6 +475,8 @@ impl YoloModel {
         conf: f32,
         iou: f32,
         classes: Option<Vec<u32>>,
+        colormap: Colormap,
+        viz: DepthViz,
     ) -> Result<JsValue, JsError> {
         let t_pre = now_ms();
 
@@ -527,7 +561,7 @@ impl YoloModel {
                 self.metadata.kpt_shape,
             )
         };
-        let payload = JsResults::from_results(&results, self.metadata.task);
+        let payload = JsResults::from_results(&results, self.metadata.task, colormap, viz);
         to_js(&payload, "results")
     }
 }
@@ -673,6 +707,7 @@ impl YoloPipeline {
     /// # Errors
     /// Returns a JS error if called before `preprocess_rgba`, if `shapes` is
     /// malformed, or on serialization failure.
+    #[allow(clippy::too_many_arguments)]
     pub fn postprocess(
         &mut self,
         outputs: Vec<Float32Array>,
@@ -681,6 +716,8 @@ impl YoloPipeline {
         conf: f32,
         iou: f32,
         classes: Option<Vec<u32>>,
+        colormap: String,
+        depth_viz: String,
     ) -> Result<JsValue, JsError> {
         let t_post = now_ms();
         let pending = self
@@ -742,7 +779,12 @@ impl YoloPipeline {
             self.metadata.kpt_shape,
         );
         results.speed.postprocess = Some(now_ms() - t_post);
-        let payload = JsResults::from_results(&results, self.metadata.task);
+        let payload = JsResults::from_results(
+            &results,
+            self.metadata.task,
+            parse_colormap(&colormap),
+            parse_depth_viz(&depth_viz),
+        );
         to_js(&payload, "results")
     }
 }

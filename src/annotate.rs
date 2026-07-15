@@ -6,7 +6,7 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
-use crate::visualizer::color::{COLORS, POSE_COLORS};
+use crate::visualizer::color::{COLORS, Colormap, DepthViz, POSE_COLORS};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
@@ -171,6 +171,28 @@ pub fn annotate_image(
     result: &Results,
     top_k: Option<usize>,
 ) -> DynamicImage {
+    annotate_image_with(
+        image,
+        result,
+        top_k,
+        Colormap::default(),
+        DepthViz::default(),
+    )
+}
+
+/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap` and
+/// normalization `viz`.
+///
+/// Only depth results use `colormap`/`viz`; every other task ignores them. See
+/// [`annotate_image`] for the general behavior.
+#[must_use]
+pub fn annotate_image_with(
+    image: &DynamicImage,
+    result: &Results,
+    top_k: Option<usize>,
+    colormap: Colormap,
+    viz: DepthViz,
+) -> DynamicImage {
     let mut img = image.to_rgb8();
 
     let font_name = if result.boxes.is_some() && result.names.values().any(|n| !n.is_ascii()) {
@@ -199,7 +221,43 @@ pub fn annotate_image(
     draw_obb(&mut img, result, font.as_ref());
     draw_classification(&mut img, result, font.as_ref(), top_k.unwrap_or(5));
 
+    // Depth is rendered side-by-side (original | colorized depth), matching the Python
+    // `plot(side_by_side=True)`, so it replaces the returned image rather than drawing in place.
+    if let Some(side_by_side) = compose_depth_side_by_side(&img, result, colormap, viz) {
+        return DynamicImage::ImageRgb8(side_by_side);
+    }
+
     DynamicImage::ImageRgb8(img)
+}
+
+/// Build an `original | colorized-depth` side-by-side image, or `None` when the result
+/// has no depth map. Colorization (`colormap` + normalization `viz`) is delegated to
+/// [`DepthMap::colorize`](crate::results::DepthMap::colorize).
+fn compose_depth_side_by_side(
+    img: &image::RgbImage,
+    result: &Results,
+    colormap: Colormap,
+    viz: DepthViz,
+) -> Option<image::RgbImage> {
+    let depth = result.depth.as_ref()?;
+    let (width, height) = img.dimensions();
+    let (w, h) = (width as usize, height as usize);
+    // Depth map is stored at original image resolution; bail if it disagrees with the image.
+    if depth.data.shape() != [h, w] {
+        return None;
+    }
+    let colored = depth.colorize(colormap, viz);
+
+    let mut out = image::RgbImage::new(width * 2, height);
+    for y in 0..h {
+        for x in 0..w {
+            #[allow(clippy::cast_possible_truncation)]
+            let (px, py) = (x as u32, y as u32);
+            out.put_pixel(px, py, *img.get_pixel(px, py));
+            out.put_pixel(px + width, py, Rgb(colored[y * w + x]));
+        }
+    }
+    Some(out)
 }
 
 /// Draw a thick line segment between two points using Bresenham's algorithm.
@@ -986,7 +1044,7 @@ mod tests {
         assert_eq!(annotated.height(), 100);
     }
 
-    use crate::results::{Boxes, Keypoints, Obb, Probs, SemanticMask};
+    use crate::results::{Boxes, DepthMap, Keypoints, Obb, Probs, SemanticMask};
     use ndarray::array;
 
     fn base_results(names: HashMap<usize, String>) -> Results {
@@ -1130,5 +1188,18 @@ mod tests {
         r.semantic_mask = Some(SemanticMask::new(mask_data, (128, 128)));
         let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
         assert_eq!(out.width(), 128);
+    }
+
+    #[test]
+    fn test_annotate_depth_side_by_side() {
+        let mut r = base_results(HashMap::new());
+        let mut depth = ndarray::Array2::<f32>::zeros((128, 128));
+        depth[[10, 10]] = 5.0;
+        depth[[20, 20]] = 2.0;
+        r.depth = Some(DepthMap::new(depth, (128, 128)));
+        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
+        // Depth renders original | colorized-depth, so the output is double width.
+        assert_eq!(out.width(), 256);
+        assert_eq!(out.height(), 128);
     }
 }

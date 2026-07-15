@@ -28,7 +28,7 @@ use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
-use crate::results::{Boxes, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
+use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
 use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
 
@@ -214,6 +214,10 @@ pub fn postprocess(
                     inference_shape,
                 )
             }
+        }
+        Task::Depth => {
+            let (output, shape) = &outputs[0];
+            postprocess_depth(output, shape, names, orig_img, path, speed, inference_shape)
         }
     }
 }
@@ -770,6 +774,63 @@ fn apply_mask_proto(
     }
 }
 
+/// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
+/// to the original image size. Shared by the standard and end2end segment post-processors.
+///
+/// `protos_data` is the flat `[num_masks, mh, mw]` prototype output; `mask_coeffs` is
+/// `[N, num_masks]` and `boxes_data` `[N, ..]` (both indexed by kept detection). Returns
+/// `None` (skip masks) when `protos_data` cannot reshape to `(num_masks, mh*mw)`.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+fn build_instance_masks(
+    mask_coeffs: &Array2<f32>,
+    protos_data: &[f32],
+    num_masks: usize,
+    mh: usize,
+    mw: usize,
+    boxes_data: &Array2<f32>,
+    preprocess: &PreprocessResult,
+    inference_shape: (u32, u32),
+) -> Option<Array3<f32>> {
+    // Protos: [1, num_masks, mh, mw] -> [num_masks, mh*mw]
+    let protos = match Array2::from_shape_vec((num_masks, mh * mw), protos_data.to_vec()) {
+        Ok(arr) => arr,
+        Err(e) => {
+            eprintln!("WARNING ⚠️ Failed to build protos array: {e}. Skipping mask generation.");
+            return None;
+        }
+    };
+    // Matrix mul: [N, num_masks] x [num_masks, mh*mw] -> [N, mh*mw]
+    let masks_flat = mask_coeffs.dot(&protos);
+
+    // Crop parameters (same for all masks): strip letterbox padding in proto space.
+    let (oh, ow) = preprocess.orig_shape;
+    let (th, tw) = inference_shape;
+    let (pad_top, pad_left) = preprocess.padding;
+    let scale_w = mw as f32 / tw as f32;
+    let scale_h = mh as f32 / th as f32;
+    let crop_x = pad_left * scale_w;
+    let crop_y = pad_top * scale_h;
+    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
+    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
+
+    let mut masks_data = Array3::zeros((boxes_data.nrows(), oh as usize, ow as usize));
+    let zip = Zip::from(masks_data.outer_iter_mut())
+        .and(masks_flat.outer_iter())
+        .and(boxes_data.outer_iter());
+    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
+        apply_mask_proto(
+            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+        );
+    };
+    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
+    #[cfg(not(target_arch = "wasm32"))]
+    zip.par_for_each(apply);
+    #[cfg(target_arch = "wasm32")]
+    zip.for_each(apply);
+
+    Some(masks_data)
+}
+
 /// Post-process segmentation model output.
 ///
 /// Generates bounding boxes and segmentation masks from the model output.
@@ -926,47 +987,18 @@ fn postprocess_segment(
         );
     }
 
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
-        Ok(arr) => arr,
-        Err(e) => {
-            eprintln!("WARNING ⚠️ Failed to create protos array: {e}. Skipping mask generation.");
-            return results;
-        }
+    let Some(masks_data) = build_instance_masks(
+        &mask_coeffs,
+        output1,
+        num_masks,
+        mh,
+        mw,
+        &boxes_data,
+        preprocess,
+        inference_shape,
+    ) else {
+        return results;
     };
-
-    // Matrix Mul: [N, 32] x [32, 25600] -> [N, 25600]
-    let masks_flat = mask_coeffs.dot(&protos);
-
-    // Resize and crop to original image size
-    let (oh, ow) = preprocess.orig_shape;
-    let (th, tw) = inference_shape;
-    let (pad_top, pad_left) = preprocess.padding;
-
-    // Pre-calculate crop parameters (same for all masks)
-    let scale_w = mw as f32 / tw as f32;
-    let scale_h = mh as f32 / th as f32;
-    let crop_x = pad_left * scale_w;
-    let crop_y = pad_top * scale_h;
-    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
-    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
-
-    // Initialize output array
-    let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
-
-    let zip = Zip::from(masks_data.outer_iter_mut())
-        .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter());
-    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
-        apply_mask_proto(
-            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-        );
-    };
-    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
-    #[cfg(not(target_arch = "wasm32"))]
-    zip.par_for_each(apply);
-    #[cfg(target_arch = "wasm32")]
-    zip.for_each(apply);
-
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
 
     results
@@ -991,6 +1023,33 @@ fn postprocess_segment(
 /// # Returns
 ///
 /// `Results` struct containing boxes and keypoints.
+/// Derive `(num_preds, is_transposed)` from a pose/OBB output shape.
+///
+/// A `[1, features, preds]` layout is detected when the feature axis equals
+/// `expected_features`, or is the smaller axis while still holding at least
+/// `min_transposed_features` (pose passes `4 + kpt_features`, OBB passes `6`); otherwise
+/// the output is treated as the transposed `[1, preds, features]`. 2D shapes pick the
+/// larger axis as the prediction count; anything else yields `(0, false)`.
+fn parse_transposed_shape(
+    shape: &[usize],
+    expected_features: usize,
+    min_transposed_features: usize,
+) -> (usize, bool) {
+    if shape.len() == 3 {
+        let (a, b) = (shape[1], shape[2]);
+        if a == expected_features || (a < b && a >= min_transposed_features) {
+            (b, false) // [1, features, preds]
+        } else {
+            (a, true) // [1, preds, features]
+        }
+    } else if shape.len() == 2 {
+        let (a, b) = (shape[0], shape[1]);
+        if a < b { (b, false) } else { (a, true) }
+    } else {
+        (0, false)
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
@@ -1021,20 +1080,9 @@ fn postprocess_pose(
     // Pose typically has 1 class (person), so features = 4 + 1 + 51 = 56
     let expected_features = 4 + num_classes + kpt_features;
 
-    // Parse output shape
-    let (num_preds, is_transposed) = if output_shape.len() == 3 {
-        let (a, b) = (output_shape[1], output_shape[2]);
-        if a == expected_features || (a < b && a >= 4 + kpt_features) {
-            (b, false) // [1, features, preds]
-        } else {
-            (a, true) // [1, preds, features]
-        }
-    } else if output_shape.len() == 2 {
-        let (a, b) = (output_shape[0], output_shape[1]);
-        if a < b { (b, false) } else { (a, true) }
-    } else {
-        (0, false)
-    };
+    // Parse output shape ([1, features, preds] vs transposed [1, preds, features]).
+    let (num_preds, is_transposed) =
+        parse_transposed_shape(output_shape, expected_features, 4 + kpt_features);
 
     if output.is_empty() || num_preds == 0 {
         return results;
@@ -1238,20 +1286,8 @@ fn postprocess_obb(
     // features = 4 (bbox) + num_classes + 1 (angle)
     let expected_features = 4 + num_classes + 1;
 
-    // Parse output shape
-    let (num_preds, is_transposed) = if output_shape.len() == 3 {
-        let (a, b) = (output_shape[1], output_shape[2]);
-        if a == expected_features || (a < b && a >= 6) {
-            (b, false) // [1, features, preds]
-        } else {
-            (a, true) // [1, preds, features]
-        }
-    } else if output_shape.len() == 2 {
-        let (a, b) = (output_shape[0], output_shape[1]);
-        if a < b { (b, false) } else { (a, true) }
-    } else {
-        (0, false)
-    };
+    // Parse output shape ([1, features, preds] vs transposed [1, preds, features]).
+    let (num_preds, is_transposed) = parse_transposed_shape(output_shape, expected_features, 6);
 
     if output.is_empty() || num_preds == 0 {
         return results;
@@ -1486,7 +1522,6 @@ fn postprocess_segment_end2end(
         return results;
     }
 
-    let (oh, ow) = preprocess.orig_shape;
     let user_cap = config.max_det.min(max_det);
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
@@ -1517,40 +1552,19 @@ fn postprocess_segment_end2end(
         .expect("flat length matches (n, num_masks)");
 
     // Protos -> masks (mirrors standard segment path).
-    let mh = shape1[2];
-    let mw = shape1[3];
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), output1.to_vec()) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("WARNING ⚠️ Failed to build protos array: {e}. Skipping masks.");
-            return results;
-        }
+    let (mh, mw) = (shape1[2], shape1[3]);
+    let Some(masks_data) = build_instance_masks(
+        &mask_coeffs,
+        output1,
+        num_masks,
+        mh,
+        mw,
+        &boxes_data,
+        preprocess,
+        inference_shape,
+    ) else {
+        return results;
     };
-    let masks_flat = mask_coeffs.dot(&protos);
-
-    let (th, tw) = inference_shape;
-    let (pad_top, pad_left) = preprocess.padding;
-    let scale_w = mw as f32 / tw as f32;
-    let scale_h = mh as f32 / th as f32;
-    let crop_x = pad_left * scale_w;
-    let crop_y = pad_top * scale_h;
-    let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
-    let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
-
-    let mut masks_data = Array3::zeros((num_kept, oh as usize, ow as usize));
-    let zip = Zip::from(masks_data.outer_iter_mut())
-        .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter());
-    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
-        apply_mask_proto(
-            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-        );
-    };
-    // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
-    #[cfg(not(target_arch = "wasm32"))]
-    zip.par_for_each(apply);
-    #[cfg(target_arch = "wasm32")]
-    zip.for_each(apply);
 
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
@@ -1717,6 +1731,42 @@ fn letterbox_crop_bounds(
     }
 }
 
+/// Map an output index `d` to its two source neighbors `(i0, i1)` and fractional weight
+/// `frac` for bilinear upsampling of a letterbox-cropped axis. `offset` is the crop start
+/// and `max_idx` the last valid source index. Uses the `(d + 0.5) * scale - 0.5` half-pixel
+/// convention of Python's `align_corners=False` `F.interpolate`.
+#[inline]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+fn bilinear_axis(d: usize, scale: f32, offset: usize, max_idx: usize) -> (usize, usize, f32) {
+    let s = (d as f32 + 0.5).mul_add(scale, -0.5).max(0.0) + offset as f32;
+    let i0 = (s.floor() as usize).min(max_idx);
+    let i1 = (i0 + 1).min(max_idx);
+    (i0, i1, s - i0 as f32)
+}
+
+/// Precompute per-output-column bilinear source neighbors and weights `(x0, x1, w0, w1)`
+/// for upsampling a `crop_w`-wide letterbox-cropped region (starting at `left`) to `ow` columns.
+#[allow(clippy::cast_precision_loss)]
+fn bilinear_x_lut(
+    ow: usize,
+    lw: usize,
+    left: usize,
+    crop_w: usize,
+) -> Vec<(usize, usize, f32, f32)> {
+    let scale_x = crop_w as f32 / ow as f32;
+    let lw_minus_1 = lw.saturating_sub(1);
+    (0..ow)
+        .map(|dx| {
+            let (x0, x1, fx) = bilinear_axis(dx, scale_x, left, lw_minus_1);
+            (x0, x1, 1.0 - fx, fx)
+        })
+        .collect()
+}
+
 /// Post-process a Semantic Segmentation ONNX that has ArgMax + Cast(uint8) baked in.
 ///
 /// Output shape is `[1, lh, lw] uint8`. For cityscapes-style inputs where the model's
@@ -1793,6 +1843,69 @@ pub fn postprocess_semantic_mask(
     });
     let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
     results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+    results
+}
+
+/// Post-process a monocular depth model output into a per-pixel depth map (meters).
+///
+/// The exported ONNX output is `[1, 1, lh, lw]` (or `[1, lh, lw]`) float32 with all
+/// activation and calibration baked into the graph, upsampled to the letterboxed input
+/// resolution. To recover the original image geometry we crop the centered letterbox
+/// padding and bilinear-resize the cropped region back to the original `(H, W)`, mirroring
+/// `ops.scale_masks` in the Python `DepthPredictor`.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::similar_names,
+    clippy::implicit_hasher
+)]
+fn postprocess_depth(
+    output: &[f32],
+    shape: &[usize],
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+) -> Results {
+    let oh = orig_img.shape()[0];
+    let ow = orig_img.shape()[1];
+    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+
+    if shape.len() < 2 || output.is_empty() {
+        return results;
+    }
+    let (lh, lw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
+    if lh == 0 || lw == 0 || oh == 0 || ow == 0 || output.len() < lh * lw {
+        return results;
+    }
+
+    // Crop the centered letterbox padding, then bilinear-upsample the crop to (oh, ow).
+    // Rows are filled in parallel; the `(d + 0.5) * scale - 0.5` sampling is the
+    // `align_corners=False` half-pixel convention of Python's `F.interpolate(mode="bilinear")`.
+    // When the output is already at original resolution this reduces to an exact copy.
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
+        return results;
+    };
+    let x_lut = bilinear_x_lut(ow, lw, left, crop_w);
+    let scale_y = crop_h as f32 / oh as f32;
+    let lh_minus_1 = lh.saturating_sub(1);
+
+    let mut buf = vec![0f32; oh * ow];
+    buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
+        let (y0, y1, fy) = bilinear_axis(dy, scale_y, top, lh_minus_1);
+        let (row0, row1) = (y0 * lw, y1 * lw);
+        for (dx, cell) in row.iter_mut().enumerate() {
+            let (x0, x1, fxi, fx) = x_lut[dx];
+            let top_row = output[row0 + x0].mul_add(fxi, output[row0 + x1] * fx);
+            let bot_row = output[row1 + x0].mul_add(fxi, output[row1 + x1] * fx);
+            *cell = top_row.mul_add(1.0 - fy, bot_row * fy);
+        }
+    });
+    let map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
+    results.depth = Some(DepthMap::new(map, (oh as u32, ow as u32)));
     results
 }
 
@@ -1883,30 +1996,15 @@ fn postprocess_semantic(
     let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
     };
+    let x_lut = bilinear_x_lut(ow, lw, left, crop_w);
     let scale_y = crop_h as f32 / oh as f32;
-    let scale_x = crop_w as f32 / ow as f32;
-    let lw_minus_1 = lw.saturating_sub(1);
     let lh_minus_1 = lh.saturating_sub(1);
-
-    // Precompute source-x neighbors + weights once per output column.
-    let x_lut: Vec<(usize, usize, f32, f32)> = (0..ow)
-        .map(|dx| {
-            let sx = (dx as f32 + 0.5).mul_add(scale_x, -0.5).max(0.0) + left as f32;
-            let x0 = (sx.floor() as usize).min(lw_minus_1);
-            let x1 = (x0 + 1).min(lw_minus_1);
-            let fx = sx - x0 as f32;
-            (x0, x1, 1.0 - fx, fx)
-        })
-        .collect();
 
     // Bilinear upsample and argmax directly on CHW data, skipping the transpose.
     // Reads are strided (one plane apart per class) but avoids transposing 39M floats.
     let mut buf = vec![0u16; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
-        let sy = (dy as f32 + 0.5).mul_add(scale_y, -0.5).max(0.0) + top as f32;
-        let y0 = (sy.floor() as usize).min(lh_minus_1);
-        let y1 = (y0 + 1).min(lh_minus_1);
-        let fy = sy - y0 as f32;
+        let (y0, y1, fy) = bilinear_axis(dy, scale_y, top, lh_minus_1);
         let fyi = 1.0 - fy;
 
         let row0_base = y0 * lw;
@@ -2531,6 +2629,65 @@ mod tests {
         // Col 1+ pixels have positive logits → class 1
         assert_eq!(sm.data[[0, 1]], 1);
         assert_eq!(sm.data[[1, 1]], 1);
+    }
+
+    #[test]
+    fn test_postprocess_depth_passthrough() {
+        // Output already at original resolution: values copy straight into the depth map.
+        let (oh, ow) = (2, 3);
+        let output = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let result = postprocess_depth(
+            &output,
+            &[1, 1, oh, ow],
+            make_names(1),
+            ndarray::Array3::zeros((oh, ow, 3)),
+            String::new(),
+            Speed::default(),
+            (oh as u32, ow as u32),
+        );
+        let depth = result.depth.unwrap();
+        assert_eq!(depth.data.shape(), &[oh, ow]);
+        assert!((depth.data[[0, 0]] - 1.0).abs() < 1e-6);
+        assert!((depth.data[[1, 2]] - 6.0).abs() < 1e-6);
+        assert!((depth.min_depth().unwrap() - 1.0).abs() < 1e-6);
+        assert!((depth.max_depth().unwrap() - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_postprocess_depth_letterbox_resize() {
+        // oh=2, ow=4 wide image letterboxed into 8x8: gain=2, 2 rows pad top/bottom,
+        // content rows 2..6, full width. A constant map must survive crop+resize.
+        let (oh, ow, lh, lw) = (2, 4, 8, 8);
+        let output = vec![2.5f32; lh * lw];
+        let result = postprocess_depth(
+            &output,
+            &[1, 1, lh, lw],
+            make_names(1),
+            ndarray::Array3::zeros((oh, ow, 3)),
+            String::new(),
+            Speed::default(),
+            (lh as u32, lw as u32),
+        );
+        let depth = result.depth.unwrap();
+        assert_eq!(depth.data.shape(), &[oh, ow]);
+        for &v in &depth.data {
+            assert!((v - 2.5).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn test_postprocess_depth_malformed_shape_no_panic() {
+        // Too-short shape and empty output must return an empty Results, not panic.
+        let result = postprocess_depth(
+            &[],
+            &[1],
+            make_names(1),
+            ndarray::Array3::zeros((2, 2, 3)),
+            String::new(),
+            Speed::default(),
+            (2, 2),
+        );
+        assert!(result.depth.is_none());
     }
 
     #[test]

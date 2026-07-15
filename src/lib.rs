@@ -24,7 +24,7 @@
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
 //! - **Supported YOLO Versions** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports)
-//! - **All Tasks** - Detection, segmentation, pose estimation, classification, OBB, and semantic segmentation (YOLO26 only)
+//! - **All Tasks** - Detection, segmentation, pose estimation, classification, OBB, semantic segmentation, and depth estimation (last two YOLO26 only)
 //! - **Ultralytics API** - Results API for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
 //! - **Multiple Sources** - Images, directories, glob patterns, video, webcam, streams
@@ -120,7 +120,7 @@
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
 //! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO26/YOLO11/YOLOv8 name | `yolo26n.onnx` |
-//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*); selects nano model when `--model` is omitted | `detect` |
+//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*, `depth`\*); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
 //! | `--iou` | | `IoU` threshold for NMS | `0.7` |
@@ -132,12 +132,13 @@
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
+//! | `--colormap` | | Depth colormap: `inferno`, `jet`, `spectral`, or `gray` (depth task only) | `inferno` |
 //! | `--show` | | Display results in a window | `false` |
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!
-//! \* `semantic` (semantic segmentation) is YOLO26-only.
+//! \* `semantic` (semantic segmentation) and `depth` (depth estimation) are YOLO26-only.
 //!
 //! ## Task-Specific Examples
 //!
@@ -161,6 +162,9 @@
 //!
 //! # Semantic Segmentation (YOLO26 only)
 //! yolo export model=yolo26n-sem.pt format=onnx
+//!
+//! # Depth Estimation (YOLO26 only)
+//! yolo export model=yolo26n-depth.pt format=onnx
 //! ```
 //!
 //! Add `quantize=16` for an FP16 (half-precision) ONNX, or `quantize=8` for INT8
@@ -226,6 +230,16 @@
 //! if let Some(ref sem) = results[0].semantic_mask {
 //!     println!("Semantic mask shape: {:?}", sem.data.shape());
 //! }
+//!
+//! // Depth model (YOLO26 only) - returns a per-pixel depth map in meters
+//! let mut model = YOLOModel::load("yolo26n-depth.onnx")?;
+//! let results = model.predict("image.jpg")?;
+//! if let Some(ref depth) = results[0].depth {
+//!     println!("Depth map shape: {:?}", depth.data.shape());
+//!     if let (Some(lo), Some(hi)) = (depth.min_depth(), depth.max_depth()) {
+//!         println!("Depth range: {:.2}-{:.2} m", lo, hi);
+//!     }
+//! }
 //! # Ok(())
 //! # }
 //! ```
@@ -287,10 +301,10 @@
 //! | [`results`] | Output types ([`Results`], [`Boxes`], [`Masks`], etc.) |
 //! | [`inference`] | [`InferenceConfig`] for customizing inference settings |
 //! | [`source`] | Input source handling ([`Source`], [`SourceIterator`]) |
-//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Pose, Classify, Obb, Semantic) |
+//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Pose, Classify, Obb, Semantic, Depth) |
 //! | [`mod@error`] | Error types ([`InferenceError`], [`Result`]) |
 //! | [`preprocessing`] | Image preprocessing utilities |
-//! | [`postprocessing`] | Post-processing for all tasks (NMS/decode for detection; argmax for semantic segmentation) |
+//! | [`postprocessing`] | Post-processing for all tasks (NMS/decode for detection; argmax for semantic segmentation; letterbox-crop resize for depth) |
 //! | [`metadata`] | ONNX model metadata parsing |
 //!
 //! ## Feature Flags
@@ -392,7 +406,7 @@ pub use error::{InferenceError, Result};
 pub use inference::InferenceConfig;
 #[cfg(not(target_arch = "wasm32"))]
 pub use model::YOLOModel;
-pub use results::{Boxes, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
+pub use results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::{Source, SourceIterator, SourceMeta};
 pub use task::Task;

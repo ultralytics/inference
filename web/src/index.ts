@@ -105,6 +105,14 @@ export interface Results {
    * class-filtered pixels. The `masks` overlay is its renderable form.
    */
   semantic_mask?: Uint16Array;
+  /**
+   * Depth map as an opaque colorized RGBA image (`width*height*4`), using the
+   * colormap from {@link PredictOptions.colormap}; empty for other tasks.
+   * Drawable straight onto a canvas via `ImageData`.
+   */
+  depth: Uint8Array;
+  /** Depth range `[min, max]` in meters over valid pixels, for depth models. */
+  depth_range?: [number, number];
   speed: Speed;
 }
 
@@ -216,6 +224,17 @@ export interface PredictOptions {
    * detect/segment/pose/obb, and for semantic marks other pixels as background.
    */
   classes?: number[];
+  /**
+   * Depth colormap for the `depth` overlay: `"inferno"` (default), `"jet"`,
+   * `"spectral"` (`Spectral_r`, DepthAnything-style), or `"gray"` (raw grayscale).
+   * Ignored by every other task.
+   */
+  colormap?: "inferno" | "jet" | "spectral" | "gray";
+  /**
+   * Depth normalization: `"metric"` (default, min/max) or `"disparity"` (inverse depth +
+   * percentile clip, the DepthAnything look). Ignored by every other task.
+   */
+  depthViz?: "metric" | "disparity";
 }
 
 /** Options for {@link annotate}. */
@@ -468,9 +487,18 @@ interface Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
+    depthViz: string,
   ): Promise<unknown>;
-  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown>;
+  predictEncoded(
+    bytes: Uint8Array,
+    conf: number,
+    iou: number,
+    classes: Uint32Array | undefined,
+    colormap: string,
+    depthViz: string,
+  ): Promise<unknown>;
   free(): void;
 }
 
@@ -492,12 +520,21 @@ class OrtEngine implements Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
-    return this.model.predict_rgba(data, width, height, conf, iou, classes);
+    return this.model.predict_rgba(data, width, height, conf, iou, classes, colormap, depthViz);
   }
-  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
-    return this.model.predict(bytes, conf, iou, classes);
+  predictEncoded(
+    bytes: Uint8Array,
+    conf: number,
+    iou: number,
+    classes: Uint32Array | undefined,
+    colormap: string,
+    depthViz: string,
+  ): Promise<unknown> {
+    return this.model.predict(bytes, conf, iou, classes, colormap, depthViz);
   }
   free(): void {
     this.model.free();
@@ -533,18 +570,27 @@ class LiteRtEngine implements Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
-    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes));
+    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes, colormap, depthViz));
   }
 
   /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
-  predictEncoded(bytes: Uint8Array, conf: number, iou: number, classes?: Uint32Array): Promise<unknown> {
+  predictEncoded(
+    bytes: Uint8Array,
+    conf: number,
+    iou: number,
+    classes: Uint32Array | undefined,
+    colormap: string,
+    depthViz: string,
+  ): Promise<unknown> {
     return this.serialize(async () => {
       const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
       try {
         const { data, width, height } = toImageData(bitmap);
-        return await this.runDrawable(data, width, height, conf, iou, classes);
+        return await this.runDrawable(data, width, height, conf, iou, classes, colormap, depthViz);
       } finally {
         bitmap.close();
       }
@@ -557,14 +603,25 @@ class LiteRtEngine implements Engine {
     height: number,
     conf: number,
     iou: number,
-    classes?: Uint32Array,
+    classes: Uint32Array | undefined,
+    colormap: string,
+    depthViz: string,
   ): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
     const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
     // Flatten shapes as [rank, dims..., rank, dims...] for the wasm boundary.
     const flatShapes: number[] = [];
     for (const s of shapes) flatShapes.push(s.length, ...s);
-    return this.pipeline.postprocess(outputs, new Uint32Array(flatShapes), inferenceMs, conf, iou, classes);
+    return this.pipeline.postprocess(
+      outputs,
+      new Uint32Array(flatShapes),
+      inferenceMs,
+      conf,
+      iou,
+      classes,
+      colormap,
+      depthViz,
+    );
   }
 
   /** Chain `fn` after any in-flight prediction so wasm frame state is never shared. */
@@ -675,12 +732,16 @@ export class YOLO {
     const conf = options?.conf ?? DEFAULT_CONF;
     const iou = options?.iou ?? DEFAULT_IOU;
     const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
+    const colormap = options?.colormap ?? "inferno";
+    const depthViz = options?.depthViz ?? "metric";
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return decodeResults(await this.engine.predictDrawable(data, width, height, conf, iou, classes));
+      return decodeResults(
+        await this.engine.predictDrawable(data, width, height, conf, iou, classes, colormap, depthViz),
+      );
     }
     const bytes = await toEncodedBytes(image);
-    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes));
+    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes, colormap, depthViz));
   }
 
   /** Release the underlying wasm model/engine. Call when you are done with it. */
@@ -739,6 +800,15 @@ export async function annotate(
   if (overlay && overlay.length === width * height * 4) {
     const tmp = makeCanvas(width, height);
     get2d(tmp).putImageData(new ImageData(new Uint8ClampedArray(overlay), width, height), 0, 0);
+    ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
+  }
+
+  // Depth: the engine returns an opaque colorized depth image; draw it over the
+  // frame so the canvas shows the depth map.
+  const depth = results.depth;
+  if (depth && depth.length === width * height * 4) {
+    const tmp = makeCanvas(width, height);
+    get2d(tmp).putImageData(new ImageData(new Uint8ClampedArray(depth), width, height), 0, 0);
     ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
   }
 
