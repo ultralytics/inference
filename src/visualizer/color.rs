@@ -245,10 +245,11 @@ impl std::fmt::Display for Colormap {
 pub enum DepthViz {
     /// Metric min/max over valid pixels — near = low color, far = high color. Matches
     /// Python's `colorize_depth`.
-    #[default]
     Metric,
     /// Inverse depth (disparity) with a 2–98 percentile clip — near = high color (warm).
-    /// The `DepthAnything`-style visualization: better contrast, outlier-robust.
+    /// The `DepthAnything`-style visualization, and the default: better contrast,
+    /// outlier-robust, and it renders near = warm like the Ultralytics iOS app.
+    #[default]
     Disparity,
 }
 
@@ -315,10 +316,10 @@ mod tests {
             "disparity".parse::<DepthViz>().unwrap(),
             DepthViz::Disparity
         );
-        assert_eq!(DepthViz::default(), DepthViz::Metric);
         assert!("log".parse::<DepthViz>().is_err());
-        // Depth renders as the classic rainbow by default, matching the Ultralytics iOS app.
+        // Depth defaults to the rainbow ramp with near = warm, matching the Ultralytics iOS app.
         assert_eq!(Colormap::default(), Colormap::Jet);
+        assert_eq!(DepthViz::default(), DepthViz::Disparity);
     }
 
     #[test]

@@ -231,8 +231,8 @@ export interface PredictOptions {
    */
   colormap?: "inferno" | "jet" | "spectral" | "gray";
   /**
-   * Depth normalization: `"metric"` (default, min/max) or `"disparity"` (inverse depth +
-   * percentile clip, the DepthAnything look). Ignored by every other task.
+   * Depth normalization: `"disparity"` (default, inverse depth + percentile clip, the
+   * DepthAnything look) or `"metric"` (min/max). Ignored by every other task.
    */
   depthViz?: "metric" | "disparity";
 }
@@ -732,8 +732,10 @@ export class YOLO {
     const conf = options?.conf ?? DEFAULT_CONF;
     const iou = options?.iou ?? DEFAULT_IOU;
     const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
-    const colormap = options?.colormap ?? "inferno";
-    const depthViz = options?.depthViz ?? "metric";
+    // Empty means "unset": the wasm side falls back to the Rust `Colormap`/`DepthViz`
+    // defaults, so the default lives in exactly one place.
+    const colormap = options?.colormap ?? "";
+    const depthViz = options?.depthViz ?? "";
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
       return decodeResults(

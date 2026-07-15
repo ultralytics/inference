@@ -133,6 +133,7 @@
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
 //! | `--colormap` | | Depth colormap: `jet`, `inferno`, `spectral`, or `gray` (depth task only) | `jet` |
+//! | `--depth-viz` | | Depth normalization: `disparity` or `metric` (depth task only) | `disparity` |
 //! | `--show` | | Display results in a window | `false` |
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
