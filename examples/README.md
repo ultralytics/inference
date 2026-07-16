@@ -31,7 +31,7 @@ cargo run --example basic -- path/to/image.jpg
 cargo run --example annotate --features annotate
 ```
 
-To run your own model, export one with the Ultralytics Python package and pass its path:
+The examples load `yolo26n.onnx`, downloading it on first use. To provide the model yourself, export it with the Ultralytics Python package. The command below writes `yolo26n.onnx` into the current directory, which the example then loads instead of downloading. The positional argument is still the input image:
 
 ```bash
 pip install ultralytics
@@ -39,6 +39,8 @@ yolo export model=yolo26n.pt format=onnx
 
 cargo run --example basic -- image.jpg
 ```
+
+To run a different model, change the model path in the example.
 
 ## 🤝 Contributing
 
