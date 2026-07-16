@@ -59,4 +59,4 @@ To run a different model, change the model path in the example.
 
 ## 🤝 Contributing
 
-Contributions are welcome. If you find an issue with an example or want to add one, open an issue or pull request on the [Ultralytics inference repository](https://github.com/ultralytics/inference).
+Contributions are welcome. See the [Ultralytics Contributing Guide](https://docs.ultralytics.com/help/contributing/) for details. If you find an issue with an example or want to add one, open an issue or pull request on the [Ultralytics inference repository](https://github.com/ultralytics/inference).
