@@ -28,11 +28,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for result in &results {
         let Some(boxes) = &result.boxes else { continue };
         println!("Found {} detections", boxes.len());
+        let xyxy = boxes.xyxy();
         for i in 0..boxes.len() {
             let cls = boxes.cls()[i] as usize;
             let conf = boxes.conf()[i];
             let name = result.names.get(&cls).map_or("unknown", String::as_str);
-            println!("  {name} {conf:.2}");
+            let b = xyxy.row(i);
+            println!(
+                "  {name} {conf:.2} [{:.1} {:.1} {:.1} {:.1}]",
+                b[0], b[1], b[2], b[3]
+            );
         }
     }
 
