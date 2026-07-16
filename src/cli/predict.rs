@@ -652,7 +652,7 @@ mod tests {
             ..predict_args()
         };
 
-        let config = build_inference_config(&args, Some(crate::Device::OpenVino)).unwrap();
+        let config = build_inference_config(&args, Some(crate::Device::IntelCpu)).unwrap();
 
         assert!((config.confidence_threshold - 0.42).abs() < f32::EPSILON);
         assert!((config.iou_threshold - 0.55).abs() < f32::EPSILON);
@@ -660,7 +660,7 @@ mod tests {
         assert_eq!(config.imgsz, Some((512, 512)));
         assert_eq!(config.batch, Some(4));
         assert!(config.half);
-        assert_eq!(config.device, Some(crate::Device::OpenVino));
+        assert_eq!(config.device, Some(crate::Device::IntelCpu));
         assert!(config.save_frames);
         assert!(!config.rect);
         assert_eq!(config.classes, Some(vec![0, 2, 5]));

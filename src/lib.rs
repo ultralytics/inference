@@ -138,7 +138,7 @@
 //! | `--colormap` | | Depth colormap: `jet`, `inferno`, `spectral`, or `gray` (depth task only) | `jet` |
 //! | `--depth-viz` | | Depth normalization: `disparity` or `metric` (depth task only) | `disparity` |
 //! | `--show` | | Display results in a window | `false` |
-//! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, xnnpack) | `cpu` |
+//! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!

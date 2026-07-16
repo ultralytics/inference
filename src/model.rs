@@ -260,10 +260,13 @@ impl YOLOModel {
                     provider_name = "DirectMLExecutionProvider";
                 }
                 #[cfg(feature = "openvino")]
-                crate::Device::OpenVino => {
-                    eps.push(
-                        ort::execution_providers::OpenVINOExecutionProvider::default().build(),
-                    );
+                crate::Device::IntelCpu | crate::Device::IntelGpu | crate::Device::IntelNpu => {
+                    let dt = match device {
+                        crate::Device::IntelGpu => "GPU",
+                        crate::Device::IntelNpu => "NPU",
+                        _ => "CPU",
+                    };
+                    eps.push(Self::build_openvino_ep(path, dt));
                     provider_name = "OpenVINOExecutionProvider";
                 }
                 #[cfg(feature = "xnnpack")]
@@ -640,6 +643,33 @@ impl YOLOModel {
             }
         }
         ep.build()
+    }
+
+    /// Build the `OpenVINO` EP with a compiled-model cache, mirroring the `TensorRT` engine cache.
+    ///
+    /// The cache (`.ov_cache/`) lets repeat loads skip kernel recompilation, which is the dominant
+    /// GPU model-load cost. Precision, streams, and thread count are intentionally left to
+    /// `OpenVINO`'s defaults, which already pick the optimal low-latency configuration for a
+    /// single-stream batch-1 workload (GPU runs FP16, one stream, auto thread scheduling). Forcing
+    /// those knobs was measured to be a no-op at best and a regression on hybrid CPUs at worst.
+    #[cfg(feature = "openvino")]
+    fn build_openvino_ep(
+        model_path: &Path,
+        device_type: &str,
+    ) -> ort::execution_providers::ExecutionProviderDispatch {
+        let stem = model_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("model");
+        let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
+        let cache_dir = parent
+            .join(".ov_cache")
+            .join(format!("{stem}_{}", device_type.to_ascii_lowercase()));
+        let _ = std::fs::create_dir_all(&cache_dir);
+        ort::execution_providers::OpenVINOExecutionProvider::default()
+            .with_device_type(device_type)
+            .with_cache_dir(cache_dir.to_string_lossy())
+            .build()
     }
 
     /// Distribute the elapsed wall time since `start` evenly across every result in the
