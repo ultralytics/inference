@@ -267,7 +267,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--colormap`    |       | Depth colormap: `jet`, `inferno`, `spectral`, or `gray` (depth task only)                                                                                                      | `jet`                                 |
 | `--depth-viz`   |       | Depth normalization: `disparity` (inverse depth, near = high color) or `metric` (min/max, near = low color) (depth task only)                                                  | `disparity`                           |
 | `--show`        |       | Display results in a window                                                                                                                                                    | `false`                               |
-| `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                 |
+| `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                 |
 | `--verbose`     |       | Show verbose output                                                                                                                                                            | `true`                                |
 | `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                    | all classes                           |
 
@@ -476,8 +476,9 @@ cargo build --release --features cuda-preprocess
 # Apple CoreML (macOS/iOS)
 cargo build --release --features coreml
 
-# Intel OpenVINO
+# Intel OpenVINO (select the target hardware with intel:cpu, intel:gpu, or intel:npu)
 cargo build --release --features openvino
+ultralytics-inference predict --source bus.jpg --device intel:gpu
 
 # Multiple features
 cargo build --release --features "cuda,tensorrt"

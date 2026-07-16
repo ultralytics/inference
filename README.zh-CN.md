@@ -266,7 +266,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--colormap`    |      | 深度着色方案：`jet`、`inferno`、`spectral` 或 `gray`（仅深度任务）                                                                         | `jet`                             |
 | `--depth-viz`   |      | 深度归一化方式：`disparity`（逆深度，近处为高值色）或 `metric`（最小/最大值，近处为低值色）（仅深度任务）                                  | `disparity`                       |
 | `--show`        |      | 在窗口中显示结果                                                                                                                           | `false`                           |
-| `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、openvino、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方（见 Features 表） | `cpu`                             |
+| `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、intel:cpu、intel:gpu、intel:npu、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方（见 Features 表） | `cpu`                             |
 | `--verbose`     |      | 显示详细输出                                                                                                                               | `true`                            |
 | `--classes`     |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                       | 所有类别                          |
 
@@ -475,8 +475,9 @@ cargo build --release --features cuda-preprocess
 # Apple CoreML（macOS/iOS）
 cargo build --release --features coreml
 
-# Intel OpenVINO
+# Intel OpenVINO（使用 intel:cpu、intel:gpu 或 intel:npu 选择目标硬件）
 cargo build --release --features openvino
+ultralytics-inference predict --source bus.jpg --device intel:gpu
 
 # 多个 features
 cargo build --release --features "cuda,tensorrt"
