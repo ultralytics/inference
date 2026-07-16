@@ -408,6 +408,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+可复制并修改的可运行程序，请参见 [examples](examples/README.md) 目录。
+
 ## 🗂️ 项目结构
 
 ```text
@@ -440,6 +442,10 @@ inference/
 │   └── visualizer/         # 实时可视化（minifb）
 ├── tests/
 │   └── integration_test.rs # 集成测试
+├── examples/               # 可运行的库示例
+│   ├── basic.rs            # 加载模型、运行推理、打印检测结果
+│   ├── annotate.rs         # 绘制边界框和标签，保存标注后的图片
+│   └── README.md           # 示例说明
 ├── assets/                 # 测试图片
 │   ├── boats.jpg
 │   ├── bus.jpg

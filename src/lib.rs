@@ -70,6 +70,9 @@
 //! }
 //! ```
 //!
+//! For runnable programs you can copy and adapt, see the
+//! [examples](https://github.com/ultralytics/inference/tree/main/examples) directory.
+//!
 //! ## CLI Usage
 //!
 //! The `ultralytics-inference` CLI provides a command-line interface for running YOLO inference:

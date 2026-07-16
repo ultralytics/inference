@@ -409,6 +409,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+For runnable programs you can copy and adapt, see the [examples](examples/README.md) directory.
+
 ## 🗂️ Project Structure
 
 ```text
@@ -441,6 +443,10 @@ inference/
 │   └── visualizer/         # Real-time visualization (minifb)
 ├── tests/
 │   └── integration_test.rs # Integration tests
+├── examples/               # Runnable library examples
+│   ├── basic.rs            # Load a model, run inference, print detections
+│   ├── annotate.rs         # Draw boxes and labels, save the annotated image
+│   └── README.md           # Examples guide
 ├── assets/                 # Test images
 │   ├── boats.jpg
 │   ├── bus.jpg

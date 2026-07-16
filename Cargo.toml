@@ -31,6 +31,8 @@ include = [
     "/README.md",
     "/src/**/*.rs",
     "/tests/**/*.rs",
+    "/examples/**/*.rs",
+    "/examples/README.md",
     "/docs/**/*.md",
 ]
 
@@ -63,6 +65,13 @@ path = "src/lib.rs"
 [[bin]]
 name = "ultralytics-inference"
 path = "src/main.rs"
+
+[[example]]
+name = "basic"
+
+[[example]]
+name = "annotate"
+required-features = ["annotate"]
 
 [dependencies]
 # Core - Image loading and processing
