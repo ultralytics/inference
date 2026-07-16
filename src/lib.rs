@@ -405,7 +405,7 @@ pub mod task;
 pub mod utils;
 
 // Re-export main types for convenience
-pub use device::{Device, Intel};
+pub use device::Device;
 pub use error::{InferenceError, Result};
 pub use inference::InferenceConfig;
 #[cfg(not(target_arch = "wasm32"))]

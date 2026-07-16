@@ -276,19 +276,19 @@ impl InferenceConfig {
     /// # Arguments
     ///
     /// * `device` - The device to use (e.g. `Device::Cpu`, `Device::Cuda(0)`,
-    ///   `Device::CoreMl`, `Device::OpenVino(Intel::Gpu)`).
+    ///   `Device::CoreMl`, `Device::IntelGpu`).
     ///
     /// # Example
     ///
     /// ```rust
-    /// use ultralytics_inference::{Device, Intel, InferenceConfig};
+    /// use ultralytics_inference::{Device, InferenceConfig};
     ///
     /// let config = InferenceConfig::new()
     ///     .with_device(Device::CoreMl); // CoreML on Apple Silicon
     ///
     /// // OpenVINO on Intel hardware (intel:cpu, intel:gpu, intel:npu)
     /// let intel = InferenceConfig::new()
-    ///     .with_device(Device::OpenVino(Intel::Gpu));
+    ///     .with_device(Device::IntelGpu);
     /// ```
     ///
     /// # Returns

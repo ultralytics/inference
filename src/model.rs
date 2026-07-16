@@ -260,11 +260,11 @@ impl YOLOModel {
                     provider_name = "DirectMLExecutionProvider";
                 }
                 #[cfg(feature = "openvino")]
-                crate::Device::OpenVino(target) => {
-                    let dt = match target {
-                        crate::Intel::Cpu => "CPU",
-                        crate::Intel::Gpu => "GPU",
-                        crate::Intel::Npu => "NPU",
+                crate::Device::IntelCpu | crate::Device::IntelGpu | crate::Device::IntelNpu => {
+                    let dt = match device {
+                        crate::Device::IntelGpu => "GPU",
+                        crate::Device::IntelNpu => "NPU",
+                        _ => "CPU",
                     };
                     eps.push(
                         ort::execution_providers::OpenVINOExecutionProvider::default()
