@@ -70,6 +70,9 @@ path = "src/main.rs"
 name = "basic"
 
 [[example]]
+name = "config"
+
+[[example]]
 name = "annotate"
 required-features = ["annotate"]
 

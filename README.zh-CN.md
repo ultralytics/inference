@@ -444,6 +444,7 @@ inference/
 │   └── integration_test.rs # 集成测试
 ├── examples/               # 可运行的库示例
 │   ├── basic.rs            # 加载模型、运行推理、打印检测结果
+│   ├── config.rs           # 设置置信度、IoU、图片尺寸和设备
 │   ├── annotate.rs         # 绘制边界框和标签，保存标注后的图片
 │   └── README.md           # 示例说明
 ├── assets/                 # 测试图片

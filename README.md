@@ -445,6 +445,7 @@ inference/
 │   └── integration_test.rs # Integration tests
 ├── examples/               # Runnable library examples
 │   ├── basic.rs            # Load a model, run inference, print detections
+│   ├── config.rs           # Set confidence, IoU, image size, and device
 │   ├── annotate.rs         # Draw boxes and labels, save the annotated image
 │   └── README.md           # Examples guide
 ├── assets/                 # Test images

@@ -2,7 +2,7 @@
 
 # Ultralytics YOLO Rust Examples
 
-<img alt="Rust" src="https://img.shields.io/badge/Rust-1.89%2B-CE422B.svg?logo=rust&logoColor=white"> <a href="https://docs.rs/ultralytics-inference" target="_blank"><img alt="docs.rs" src="https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs&color=CE422B"></a> <a href="https://docs.ultralytics.com/" target="_blank"><img alt="Ultralytics Docs" src="https://img.shields.io/badge/Ultralytics-Docs-042AFF.svg?logo=ultralytics&logoColor=white"></a>
+<img alt="Rust" src="https://img.shields.io/badge/Rust-1.89%2B-CE422B.svg?logo=rust&logoColor=white"> <a href="https://crates.io/crates/ultralytics-inference" target="_blank"><img alt="crates.io" src="https://img.shields.io/crates/v/ultralytics-inference?logo=rust&logoColor=white&label=crates.io&color=CE422B"></a> <a href="https://docs.rs/ultralytics-inference" target="_blank"><img alt="docs.rs" src="https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs&color=CE422B"></a> <a href="https://docs.ultralytics.com/" target="_blank"><img alt="Ultralytics Docs" src="https://img.shields.io/badge/Ultralytics-Docs-042AFF.svg?logo=ultralytics&logoColor=white"></a>
 
 Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ultralytics-inference) library. Each example is a single file you run with `cargo run --example`. They show how to load and run [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26/), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11/), and [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8/) models from Rust.
 
@@ -14,6 +14,7 @@ Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ult
 | Example                 | Feature    | Description                                     | Run                                                |
 | ----------------------- | ---------- | ----------------------------------------------- | -------------------------------------------------- |
 | [basic](basic.rs)       | none       | Load a model, run inference, print detections   | `cargo run --example basic`                        |
+| [config](config.rs)     | none       | Set confidence, IoU, image size, and device     | `cargo run --example config`                       |
 | [annotate](annotate.rs) | `annotate` | Draw boxes and labels, save the annotated image | `cargo run --example annotate --features annotate` |
 
 ## ✅ How to Run
@@ -27,8 +28,22 @@ cargo run --example basic
 # Use your own image
 cargo run --example basic -- path/to/image.jpg
 
+# Set thresholds, image size, and device
+cargo run --example config
+
 # Annotate and save to runs/predict/annotated_*.jpg
 cargo run --example annotate --features annotate
+```
+
+The `basic` example prints one block per image:
+
+```text
+Found 5 detections
+  bus 0.93 [5.9 228.8 807.3 748.9]
+  person 0.92 [46.7 398.6 237.0 901.8]
+  person 0.90 [223.0 405.3 345.2 863.1]
+  person 0.86 [668.6 391.2 810.0 879.7]
+  person 0.51 [0.0 553.4 65.4 874.1]
 ```
 
 The examples load `yolo26n.onnx`, downloading it on first use. To provide the model yourself, export it with the Ultralytics Python package. The command below writes `yolo26n.onnx` into the current directory, which the example then loads instead of downloading. The positional argument is still the input image:
