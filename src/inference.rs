@@ -276,7 +276,7 @@ impl InferenceConfig {
     /// # Arguments
     ///
     /// * `device` - The device to use (e.g. `Device::Cpu`, `Device::Cuda(0)`,
-    ///   `Device::OpenVino(Intel::Gpu)`).
+    ///   `Device::CoreMl`, `Device::OpenVino(Intel::Gpu)`).
     ///
     /// # Example
     ///
