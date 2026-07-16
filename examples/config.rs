@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 //! Configure inference with `InferenceConfig` before loading the model.
 //!
 //! ```bash
