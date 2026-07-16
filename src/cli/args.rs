@@ -27,7 +27,7 @@ use clap::{Args, Parser, Subcommand};
     --colormap <MAP>       Depth colormap: jet (default), inferno, spectral, or gray; depth task only
     --depth-viz <MODE>     Depth normalization: disparity (default, DepthAnything-style) or metric; depth only
     --show                 Display results in a window [default: false]
-    --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)
+    --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack)
     --verbose              Show verbose output [default: true]
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
@@ -124,7 +124,7 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = false)]
     pub show: bool,
 
-    /// Device to use (cpu, cuda:0, coreml, directml:0, openvino, tensorrt:0, rocm:0, xnnpack)
+    /// Device to use (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack)
     #[arg(long)]
     pub device: Option<String>,
 

@@ -4,6 +4,18 @@
 use std::fmt;
 use std::str::FromStr;
 
+/// Intel target hardware for the `OpenVINO` execution provider, selected with the
+/// Ultralytics `intel:<type>` device name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Intel {
+    /// Intel CPU.
+    Cpu,
+    /// Intel GPU (integrated or discrete).
+    Gpu,
+    /// Intel NPU (Neural Processing Unit).
+    Npu,
+}
+
 /// Hardware device for inference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Device {
@@ -17,8 +29,9 @@ pub enum Device {
     /// `DirectML` (Direct Machine Learning) for Windows.
     /// The argument specifies the device index.
     DirectMl(usize),
-    /// `OpenVINO` (Open Visual Inference and Neural Network Optimization) for Intel hardware.
-    OpenVino,
+    /// `OpenVINO` (Open Visual Inference and Neural Network Optimization) for Intel hardware,
+    /// selected with `intel:cpu`, `intel:gpu`, or `intel:npu`.
+    OpenVino(Intel),
     /// XNNPACK (optimized floating-point neural network inference operators) for CPU.
     Xnnpack,
     /// `TensorRT` (NVIDIA `TensorRT`) for high-performance deep learning inference.
@@ -36,7 +49,9 @@ impl fmt::Display for Device {
             Self::Cuda(i) => write!(f, "cuda:{i}"),
             Self::CoreMl => write!(f, "coreml"),
             Self::DirectMl(i) => write!(f, "directml:{i}"),
-            Self::OpenVino => write!(f, "openvino"),
+            Self::OpenVino(Intel::Cpu) => write!(f, "intel:cpu"),
+            Self::OpenVino(Intel::Gpu) => write!(f, "intel:gpu"),
+            Self::OpenVino(Intel::Npu) => write!(f, "intel:npu"),
             Self::Xnnpack => write!(f, "xnnpack"),
             Self::TensorRt(i) => write!(f, "tensorrt:{i}"),
             Self::Rocm(i) => write!(f, "rocm:{i}"),
@@ -61,10 +76,13 @@ impl FromStr for Device {
         if let Some(rest) = s.strip_prefix("rocm") {
             return Ok(Self::Rocm(parse_device_index(rest)));
         }
+        // Ultralytics OpenVINO naming: `intel:cpu`, `intel:gpu`, `intel:npu`.
+        if let Some(rest) = s.strip_prefix("intel") {
+            return parse_intel(rest).map(Self::OpenVino);
+        }
         match s.as_str() {
             "cpu" => Ok(Self::Cpu),
             "coreml" => Ok(Self::CoreMl),
-            "openvino" => Ok(Self::OpenVino),
             "xnnpack" => Ok(Self::Xnnpack),
             _ => Err(format!("Unknown device: {s}")),
         }
@@ -76,6 +94,16 @@ fn parse_device_index(s: &str) -> usize {
     s.strip_prefix(':')
         .and_then(|i| i.parse().ok())
         .unwrap_or(0)
+}
+
+/// Parse the Intel device from the suffix after `intel` (`":cpu"`, `":gpu"`, `":npu"`).
+fn parse_intel(s: &str) -> Result<Intel, String> {
+    match s {
+        ":cpu" => Ok(Intel::Cpu),
+        ":gpu" => Ok(Intel::Gpu),
+        ":npu" => Ok(Intel::Npu),
+        _ => Err(format!("Unknown OpenVINO device: intel{s}")),
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +119,22 @@ mod tests {
         assert_eq!(Device::from_str("coreml").unwrap(), Device::CoreMl);
         assert_eq!(Device::from_str("directml").unwrap(), Device::DirectMl(0));
         assert_eq!(Device::from_str("directml:1").unwrap(), Device::DirectMl(1));
+        // OpenVINO uses the Ultralytics `intel:<type>` naming.
+        assert_eq!(
+            Device::from_str("intel:cpu").unwrap(),
+            Device::OpenVino(Intel::Cpu)
+        );
+        assert_eq!(
+            Device::from_str("intel:gpu").unwrap(),
+            Device::OpenVino(Intel::Gpu)
+        );
+        assert_eq!(
+            Device::from_str("intel:npu").unwrap(),
+            Device::OpenVino(Intel::Npu)
+        );
+        assert!(Device::from_str("intel").is_err());
+        assert!(Device::from_str("intel:tpu").is_err());
+        assert!(Device::from_str("openvino").is_err());
     }
 
     #[test]
@@ -100,7 +144,9 @@ mod tests {
         assert_eq!(Device::Cuda(1).to_string(), "cuda:1");
         assert_eq!(Device::CoreMl.to_string(), "coreml");
         assert_eq!(Device::DirectMl(0).to_string(), "directml:0");
-        assert_eq!(Device::OpenVino.to_string(), "openvino");
+        assert_eq!(Device::OpenVino(Intel::Cpu).to_string(), "intel:cpu");
+        assert_eq!(Device::OpenVino(Intel::Gpu).to_string(), "intel:gpu");
+        assert_eq!(Device::OpenVino(Intel::Npu).to_string(), "intel:npu");
         assert_eq!(Device::Xnnpack.to_string(), "xnnpack");
         assert_eq!(Device::TensorRt(2).to_string(), "tensorrt:2");
         assert_eq!(Device::Rocm(3).to_string(), "rocm:3");
@@ -113,7 +159,9 @@ mod tests {
             "cuda:0",
             "coreml",
             "directml:0",
-            "openvino",
+            "intel:cpu",
+            "intel:gpu",
+            "intel:npu",
             "xnnpack",
         ] {
             assert_eq!(Device::from_str(s).unwrap().to_string(), s);
