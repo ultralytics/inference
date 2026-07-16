@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 //! Basic quickstart: load a model, run inference, print detections.
 //!
 //! Run it (auto-downloads `yolo26n.onnx` and a sample image on first use):

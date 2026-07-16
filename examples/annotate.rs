@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 //! Annotate detections onto the image and save the result to disk.
 //!
 //! Requires the `annotate` feature (enabled by default):
