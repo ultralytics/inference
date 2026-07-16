@@ -11,12 +11,12 @@ Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ult
 
 ## 📂 Examples
 
-| Example                 | Feature    | Description                                      | Run                                                |
-| ----------------------- | ---------- | ------------------------------------------------ | -------------------------------------------------- |
-| [basic](basic.rs)       | none       | Load a model, run inference, print detections    | `cargo run --example basic`                        |
-| [config](config.rs)     | none       | Set confidence, IoU, image size, and device      | `cargo run --example config`                       |
-| [tasks](tasks.rs)       | none       | Summary for detect, segment, pose, obb, classify | `cargo run --example tasks`                        |
-| [annotate](annotate.rs) | `annotate` | Draw boxes and labels, save the annotated image  | `cargo run --example annotate --features annotate` |
+| Example                 | Feature    | Description                                                          | Run                                                |
+| ----------------------- | ---------- | -------------------------------------------------------------------- | -------------------------------------------------- |
+| [basic](basic.rs)       | none       | Load a model, run inference, print detections                        | `cargo run --example basic`                        |
+| [config](config.rs)     | none       | Set confidence, IoU, image size, and device                          | `cargo run --example config`                       |
+| [tasks](tasks.rs)       | none       | Summary for every task, plus raw arrays for segment, semantic, depth | `cargo run --example tasks`                        |
+| [annotate](annotate.rs) | `annotate` | Draw boxes and labels, save the annotated image                      | `cargo run --example annotate --features annotate` |
 
 ## ✅ How to Run
 
@@ -36,14 +36,16 @@ cargo run --example config
 cargo run --example annotate --features annotate
 ```
 
-The `tasks` example defaults to detection and works with the other tasks when you pass their model. The matching sample image is downloaded automatically:
+The `tasks` example defaults to detection and works with the other tasks when you pass their model. The matching sample image is downloaded automatically. The segment, semantic, and depth branches also print the raw output array, which `ndarray` truncates with `...`:
 
 ```bash
-cargo run --example tasks                      # detect (default)
-cargo run --example tasks -- yolo26n-seg.onnx  # segment
-cargo run --example tasks -- yolo26n-pose.onnx # pose
-cargo run --example tasks -- yolo26n-obb.onnx  # obb
-cargo run --example tasks -- yolo26n-cls.onnx  # classify
+cargo run --example tasks                       # detect (default)
+cargo run --example tasks -- yolo26n-seg.onnx   # segment
+cargo run --example tasks -- yolo26n-pose.onnx  # pose
+cargo run --example tasks -- yolo26n-obb.onnx   # obb
+cargo run --example tasks -- yolo26n-cls.onnx   # classify
+cargo run --example tasks -- yolo26n-sem.onnx   # semantic (YOLO26)
+cargo run --example tasks -- yolo26n-depth.onnx # depth (YOLO26)
 ```
 
 The `basic` example prints one block per image:
