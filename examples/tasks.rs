@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 //! Print a short, task-appropriate summary for any YOLO model.
 //!
 //! The default model is detection. Pass another task's ONNX to try it:
