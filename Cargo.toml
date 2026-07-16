@@ -73,6 +73,9 @@ name = "basic"
 name = "config"
 
 [[example]]
+name = "tasks"
+
+[[example]]
 name = "annotate"
 required-features = ["annotate"]
 

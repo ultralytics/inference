@@ -445,6 +445,7 @@ inference/
 ├── examples/               # 可运行的库示例
 │   ├── basic.rs            # 加载模型、运行推理、打印检测结果
 │   ├── config.rs           # 设置置信度、IoU、图片尺寸和设备
+│   ├── tasks.rs            # 检测、分割、姿态、旋转框、分类的结果概览
 │   ├── annotate.rs         # 绘制边界框和标签，保存标注后的图片
 │   └── README.md           # 示例说明
 ├── assets/                 # 测试图片

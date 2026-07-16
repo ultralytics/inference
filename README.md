@@ -446,6 +446,7 @@ inference/
 ├── examples/               # Runnable library examples
 │   ├── basic.rs            # Load a model, run inference, print detections
 │   ├── config.rs           # Set confidence, IoU, image size, and device
+│   ├── tasks.rs            # Summary for detect, segment, pose, obb, classify
 │   ├── annotate.rs         # Draw boxes and labels, save the annotated image
 │   └── README.md           # Examples guide
 ├── assets/                 # Test images
