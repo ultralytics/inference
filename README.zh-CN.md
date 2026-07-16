@@ -248,27 +248,27 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **CLI 选项：**
 
-| 选项            | 简写 | 说明                                                                                                                                       | 默认值                            |
-| --------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
-| `--model`       | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                            | `yolo26n.onnx`                    |
-| `--task`        |      | 任务类型（`detect`、`segment`、`pose`、`obb`、`classify`、`semantic`\*、`depth`\*）；省略 `--model` 时选择 nano 模型                       | `detect`                          |
-| `--source`      | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                         | 与任务相关的 Ultralytics URL 资源 |
-| `--conf`        |      | 置信度阈值                                                                                                                                 | `0.25`                            |
-| `--iou`         |      | NMS IoU 阈值                                                                                                                               | `0.7`                             |
-| `--max-det`     |      | 最大检测数量                                                                                                                               | `300`                             |
-| `--imgsz`       |      | 推理图片尺寸                                                                                                                               | 模型元数据                        |
-| `--rect`        |      | 启用矩形推理（最小填充）                                                                                                                   | `true`                            |
-| `--batch`       |      | 推理 batch size                                                                                                                            | `1`                               |
-| `--half`        |      | 使用 FP16 半精度推理                                                                                                                       | `false`                           |
-| `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                     | `true`                            |
-| `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                       | `false`                           |
-| `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                       | `false`                           |
-| `--colormap`    |      | 深度着色方案：`jet`、`inferno`、`spectral` 或 `gray`（仅深度任务）                                                                         | `jet`                             |
-| `--depth-viz`   |      | 深度归一化方式：`disparity`（逆深度，近处为高值色）或 `metric`（最小/最大值，近处为低值色）（仅深度任务）                                  | `disparity`                       |
-| `--show`        |      | 在窗口中显示结果                                                                                                                           | `false`                           |
+| 选项            | 简写 | 说明                                                                                                                                                              | 默认值                            |
+| --------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `--model`       | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                                                   | `yolo26n.onnx`                    |
+| `--task`        |      | 任务类型（`detect`、`segment`、`pose`、`obb`、`classify`、`semantic`\*、`depth`\*）；省略 `--model` 时选择 nano 模型                                              | `detect`                          |
+| `--source`      | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                                                | 与任务相关的 Ultralytics URL 资源 |
+| `--conf`        |      | 置信度阈值                                                                                                                                                        | `0.25`                            |
+| `--iou`         |      | NMS IoU 阈值                                                                                                                                                      | `0.7`                             |
+| `--max-det`     |      | 最大检测数量                                                                                                                                                      | `300`                             |
+| `--imgsz`       |      | 推理图片尺寸                                                                                                                                                      | 模型元数据                        |
+| `--rect`        |      | 启用矩形推理（最小填充）                                                                                                                                          | `true`                            |
+| `--batch`       |      | 推理 batch size                                                                                                                                                   | `1`                               |
+| `--half`        |      | 使用 FP16 半精度推理                                                                                                                                              | `false`                           |
+| `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                            | `true`                            |
+| `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                                              | `false`                           |
+| `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                                              | `false`                           |
+| `--colormap`    |      | 深度着色方案：`jet`、`inferno`、`spectral` 或 `gray`（仅深度任务）                                                                                                | `jet`                             |
+| `--depth-viz`   |      | 深度归一化方式：`disparity`（逆深度，近处为高值色）或 `metric`（最小/最大值，近处为低值色）（仅深度任务）                                                         | `disparity`                       |
+| `--show`        |      | 在窗口中显示结果                                                                                                                                                  | `false`                           |
 | `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、intel:cpu、intel:gpu、intel:npu、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方（见 Features 表） | `cpu`                             |
-| `--verbose`     |      | 显示详细输出                                                                                                                               | `true`                            |
-| `--classes`     |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                       | 所有类别                          |
+| `--verbose`     |      | 显示详细输出                                                                                                                                                      | `true`                            |
+| `--classes`     |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                                              | 所有类别                          |
 
 **任务和模型解析：**
 
