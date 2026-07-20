@@ -2633,7 +2633,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ultralytics-inference"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -2660,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "ultralytics-inference-web"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "console_error_panic_hook",
  "half",
