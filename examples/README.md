@@ -4,7 +4,7 @@
 
 <img alt="Rust" src="https://img.shields.io/badge/Rust-1.89%2B-CE422B.svg?logo=rust&logoColor=white"> <a href="https://crates.io/crates/ultralytics-inference" target="_blank"><img alt="crates.io" src="https://img.shields.io/crates/v/ultralytics-inference?logo=rust&logoColor=white&label=crates.io&color=CE422B"></a> <a href="https://docs.rs/ultralytics-inference" target="_blank"><img alt="docs.rs" src="https://img.shields.io/docsrs/ultralytics-inference?logo=docs.rs&logoColor=white&label=docs.rs&color=CE422B"></a> <a href="https://docs.ultralytics.com/" target="_blank"><img alt="Ultralytics Docs" src="https://img.shields.io/badge/Ultralytics-Docs-042AFF.svg?logo=ultralytics&logoColor=white"></a>
 
-Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ultralytics-inference) library. Each example is a single file you run with `cargo run --example`. They show how to load and run [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26/), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11/), and [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8/) models from Rust.
+Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ultralytics-inference) library. Each example is a single file you run with `cargo run --example`. They show how to load and run [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8) models from Rust.
 
 > [!NOTE]
 > Model metadata (classes, task, image size) is read from the ONNX file, so Ultralytics YOLOv8, Ultralytics YOLO11, and Ultralytics YOLO26 models all work without extra configuration. Each example takes an optional image path and downloads a sample image when none is given.
@@ -72,4 +72,4 @@ To run a different model, change the model path in the example.
 
 ## 🤝 Contributing
 
-Contributions are welcome. See the [Ultralytics Contributing Guide](https://docs.ultralytics.com/help/contributing/) for details. If you find an issue with an example or want to add one, open an issue or pull request on the [Ultralytics inference repository](https://github.com/ultralytics/inference).
+Contributions are welcome. See the [Ultralytics Contributing Guide](https://docs.ultralytics.com/help/contributing) for details. If you find an issue with an example or want to add one, open an issue or pull request on the [Ultralytics inference repository](https://github.com/ultralytics/inference).
