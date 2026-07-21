@@ -6,7 +6,7 @@ use std::process;
 use std::time::Duration;
 
 #[cfg(feature = "annotate")]
-use crate::annotate::annotate_image_with;
+use crate::annotate::annotate_image;
 use crate::io::find_next_run_dir;
 
 #[cfg(feature = "visualize")]
@@ -41,8 +41,6 @@ pub fn run_prediction(args: &PredictArgs) {
     let save = args.save;
     let save_frames = args.save_frames;
     let save_json = args.save_json;
-    let colormap = args.colormap;
-    let depth_viz = args.depth_viz;
     let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
@@ -327,8 +325,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
                         #[cfg(feature = "annotate")]
                         if save {
-                            let annotated =
-                                annotate_image_with(img, &result, None, colormap, depth_viz);
+                            let annotated = annotate_image(img, &result, None);
 
                             if let Some(saver) = &mut result_saver
                                 && let Err(e) = saver.save(is_video, meta, &annotated)
@@ -356,8 +353,7 @@ pub fn run_prediction(args: &PredictArgs) {
                             }
 
                             if let Some(ref mut v) = viewer {
-                                let annotated =
-                                    annotate_image_with(img, &result, None, colormap, depth_viz);
+                                let annotated = annotate_image(img, &result, None);
 
                                 if v.update(&annotated).is_ok() {
                                     // Main thread is blocking on channel, so visualizer wait is less critical
@@ -582,8 +578,6 @@ mod tests {
             device: None,
             verbose: true,
             classes: None,
-            colormap: crate::visualizer::color::Colormap::default(),
-            depth_viz: crate::visualizer::color::DepthViz::default(),
         }
     }
 

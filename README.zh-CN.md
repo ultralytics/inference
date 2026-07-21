@@ -263,8 +263,6 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                            | `true`                            |
 | `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                                              | `false`                           |
 | `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                                              | `false`                           |
-| `--colormap`    |      | 深度着色方案：`jet`、`inferno`、`spectral` 或 `gray`（仅深度任务）                                                                                                | `jet`                             |
-| `--depth-viz`   |      | 深度归一化方式：`disparity`（逆深度，近处为高值色）或 `metric`（最小/最大值，近处为低值色）（仅深度任务）                                                         | `disparity`                       |
 | `--show`        |      | 在窗口中显示结果                                                                                                                                                  | `false`                           |
 | `--device`      |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、intel:cpu、intel:gpu、intel:npu、tensorrt:0、rocm:0、xnnpack；启用 feature 后可选择更多提供方（见 Features 表） | `cpu`                             |
 | `--verbose`     |      | 显示详细输出                                                                                                                                                      | `true`                            |
@@ -407,6 +405,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+**深度可视化：**
+
+深度结果的渲染方式是将彩色化的深度图以 `alpha = 0.6` 叠加到原图上，使用 `jet` 配色和
+`disparity` 归一化。这与 Ultralytics Python 的 `Annotator.depth_map` 默认行为完全一致，
+因此 CLI 无需任何深度相关参数，`--save` 始终产出与 Python `plot()` 相同的图像。
+
+可通过库接口显式指定配色与归一化方式（下面的 `Jet` + `Disparity` 即默认值，可替换为其他变体）：
+
+```rust
+use ultralytics_inference::YOLOModel;
+use ultralytics_inference::annotate::{annotate_image_with, load_image};
+use ultralytics_inference::visualizer::color::{Colormap, DepthViz};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut model = YOLOModel::load("yolo26n-depth.onnx")?;
+    let results = model.predict("image.jpg")?;
+
+    // 原图分辨率下的逐像素深度（米）
+    if let Some(depth) = &results[0].depth {
+        println!("{:?} {:?}m", depth.data.shape(), depth.min_depth());
+    }
+
+    // inferno / jet / spectral / gray，以及 disparity（逆深度）或 metric（线性）
+    let image = load_image("image.jpg")?;
+    let annotated = annotate_image_with(&image, &results[0], None, Colormap::Jet, DepthViz::Disparity);
+    annotated.save("depth.jpg")?;
+
+    Ok(())
+}
+```
+
+`disparity` 着色的是 `1/d` 而非 `d`，并裁剪到第 2 至第 98 百分位。取倒数后色彩范围会集中在近处
+细节而非远处背景，因此近处呈暖色，且少量离群像素不会冲淡其余部分；`metric` 则直接对深度在其
+最小值与最大值之间做线性着色。
 
 可复制并修改的可运行程序，请参见 [examples](examples/README.md) 目录。
 

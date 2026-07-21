@@ -142,8 +142,8 @@ fn jet(t: f32) -> [u8; 3] {
 
 /// Sample the reversed-Spectral colormap at normalized position `t` (clamped to `[0, 1]`).
 ///
-/// Diverging blue → cyan → green → yellow → red (matplotlib `Spectral_r`, the colormap
-/// `DepthAnything` uses), linearly interpolated between its 11 anchor colors.
+/// Diverging blue → cyan → green → yellow → red (matplotlib `Spectral_r`), linearly
+/// interpolated between its 11 anchor colors.
 #[must_use]
 #[allow(
     clippy::cast_possible_truncation,
@@ -173,7 +173,7 @@ fn spectral(t: f32) -> [u8; 3] {
 }
 
 /// Sample a grayscale ramp at normalized position `t` (clamped to `[0, 1]`): black (low) → white
-/// (high). Raw normalized depth with no color, matching Python's `colorize_depth(cmap="gray")`.
+/// (high). Raw normalized depth with no color.
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn gray(t: f32) -> [u8; 3] {
@@ -183,10 +183,13 @@ fn gray(t: f32) -> [u8; 3] {
 
 /// A continuous colormap for depth visualization.
 ///
-/// `Jet` (default) is the classic rainbow, the closest match to the rainbow ramp the
-/// Ultralytics iOS app renders depth with; `Inferno` matches Ultralytics' Python
-/// `colorize_depth`; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`;
-/// `Gray` is raw grayscale.
+/// `Jet` (default) is the classic rainbow, matching Python's `colorize_depth` default and
+/// the ramp the Ultralytics iOS app renders depth with; `Inferno` and the diverging
+/// `Spectral` (`Spectral_r`) are Python's other two options; `Gray` is raw grayscale,
+/// available here and in the wasm API only.
+///
+/// The CLI always renders the default (`Jet`), like Python's `yolo predict`. Pick another
+/// through [`annotate_image_with`](crate::annotate::annotate_image_with).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Colormap {
     /// Perceptual black → purple → orange → yellow (matches Python depth plots).
@@ -246,9 +249,10 @@ pub enum DepthViz {
     /// Metric min/max over valid pixels — near = low color, far = high color. Matches
     /// Python's `colorize_depth`.
     Metric,
-    /// Inverse depth (disparity) with a 2–98 percentile clip — near = high color (warm).
-    /// The `DepthAnything`-style visualization, and the default: better contrast,
-    /// outlier-robust, and it renders near = warm like the Ultralytics iOS app.
+    /// Inverse depth (`1/d`, disparity) with a 2–98 percentile clip — near = high color
+    /// (warm). The default: inverting depth spreads the color range over nearby detail
+    /// instead of the distant background, and the percentile clip keeps a few stray
+    /// pixels from washing it out.
     #[default]
     Disparity,
 }
