@@ -6,7 +6,7 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
-use crate::visualizer::color::{COLORS, Colormap, DepthViz, POSE_COLORS};
+use crate::visualizer::color::{COLORS, Colormap, DEPTH_ALPHA, DepthViz, POSE_COLORS};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
@@ -225,9 +225,6 @@ pub fn annotate_image_with(
 
     DynamicImage::ImageRgb8(img)
 }
-
-/// Blend factor for the depth overlay, matching Python's `Annotator.depth_map` default.
-const DEPTH_ALPHA: f32 = 0.6;
 
 /// Blend the colorized depth map over `img` in place, mirroring Python's
 /// `Annotator.depth_map`: `(1 - alpha) * image + alpha * depth` at [`DEPTH_ALPHA`].

@@ -243,6 +243,13 @@ impl std::fmt::Display for Colormap {
     }
 }
 
+/// Blend factor for the colorized depth overlay: `(1 - alpha) * image + alpha * depth`,
+/// matching Python's `Annotator.depth_map` default.
+///
+/// Shared by the native annotator and the browser crate, which bakes it into the overlay's
+/// alpha channel so the canvas composites to the same result.
+pub const DEPTH_ALPHA: f32 = 0.6;
+
 /// How depth values are normalized before colormapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DepthViz {
