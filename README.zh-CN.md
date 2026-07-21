@@ -409,8 +409,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 **深度可视化：**
 
 深度结果的渲染方式是将彩色化的深度图以 `alpha = 0.6` 叠加到原图上，使用 `jet` 配色和
-`disparity` 归一化。这与 Ultralytics Python 的 `Annotator.depth_map` 默认行为完全一致，
-因此 CLI 无需任何深度相关参数，`--save` 始终产出与 Python `plot()` 相同的图像。
+`disparity` 归一化。这与 Ultralytics Python 的 `Annotator.depth_map` 默认行为一致，
+因此 CLI 无需任何深度相关参数，`--save` 产出与 Python `plot()` 相同的图像。
 
 可通过库接口显式指定配色与归一化方式（下面的 `Jet` + `Disparity` 即默认值，可替换为其他变体）：
 

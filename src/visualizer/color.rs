@@ -232,17 +232,6 @@ impl std::str::FromStr for Colormap {
     }
 }
 
-impl std::fmt::Display for Colormap {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Inferno => "inferno",
-            Self::Jet => "jet",
-            Self::Spectral => "spectral",
-            Self::Gray => "gray",
-        })
-    }
-}
-
 /// Blend factor for the colorized depth overlay: `(1 - alpha) * image + alpha * depth`,
 /// matching Python's `Annotator.depth_map` default.
 ///
@@ -275,15 +264,6 @@ impl std::str::FromStr for DepthViz {
                 "invalid depth-viz '{s}', expected one of: metric, disparity"
             )),
         }
-    }
-}
-
-impl std::fmt::Display for DepthViz {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Metric => "metric",
-            Self::Disparity => "disparity",
-        })
     }
 }
 

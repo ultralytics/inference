@@ -411,8 +411,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Depth results are rendered by blending the colorized depth map over the source image at
 `alpha = 0.6`, using the `jet` colormap and `disparity` normalization. This matches the
-Ultralytics Python `Annotator.depth_map` default exactly, so the CLI needs no depth flags
-and `--save` always produces the same image Python's `plot()` does.
+Ultralytics Python `Annotator.depth_map` default, so the CLI needs no depth flags and
+`--save` produces the same image Python's `plot()` does.
 
 Set the colormap and normalization explicitly through the library (`Jet` + `Disparity`
 below are the defaults; swap in any other variant):

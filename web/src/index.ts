@@ -109,7 +109,7 @@ export interface Results {
    * Depth map as a translucent colorized RGBA overlay (`width*height*4`), using the
    * colormap from {@link PredictOptions.colormap}; empty for other tasks. Drawable
    * straight onto a canvas via `ImageData`, where its alpha blends it over the frame
-   * exactly as the native annotator and Python do.
+   * as the native annotator and Python do.
    */
   depth: Uint8Array;
   /** Depth range `[min, max]` in meters over valid pixels, for depth models. */
@@ -807,7 +807,7 @@ export async function annotate(
   }
 
   // Depth: the engine returns a translucent colorized depth overlay; drawing it over
-  // the frame blends it in, matching the native annotator and Python.
+  // the frame blends it in, like the native annotator and Python.
   const depth = results.depth;
   if (depth && depth.length === width * height * 4) {
     const tmp = makeCanvas(width, height);
