@@ -124,7 +124,10 @@ What to expect and how to avoid surprises:
 No separate type or API. With the feature compiled in and a CUDA/TensorRT
 device, [`YOLOModel::predict_image`] automatically runs the fused GPU
 preprocess kernel (bilinear letterbox + `/255` normalize + HWC→CHW) and hands
-the result to ORT as a zero-copy device tensor:
+the result to ORT as a zero-copy device tensor. The kernel reproduces the CPU
+letterbox exactly - same half-pixel bilinear sampling, and the same
+stride-aligned rectangular target under `rect` - so `--device cuda` and
+`--device cpu` infer on identical pixels:
 
 ```rust,no_run
 use ultralytics_inference::{Device, InferenceConfig, YOLOModel};

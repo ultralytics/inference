@@ -992,6 +992,29 @@ impl YOLOModel {
         Ok(results)
     }
 
+    /// Whether rectangular inference applies: requested in the config and supported by
+    /// the model. Fixed-shape models must letterbox to their own input size.
+    const fn rect_enabled(&self) -> bool {
+        self.config.rect && self.is_dynamic
+    }
+
+    /// Letterbox target for one image: the stride-aligned rectangle when `rect` is in
+    /// effect, else `target` unchanged. Shared by the CPU and cuda-preprocess paths so
+    /// both feed the model the same pixels.
+    fn letterbox_target(
+        rect: bool,
+        width: u32,
+        height: u32,
+        target: (usize, usize),
+        stride: u32,
+    ) -> (usize, usize) {
+        if rect {
+            calculate_rect_size(width, height, target, stride)
+        } else {
+            target
+        }
+    }
+
     /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
     /// empty), shared by both the CPU and cuda-preprocess arms of [`Self::predict_image`].
     fn log_first_result(results: &[Results]) {
@@ -1032,12 +1055,16 @@ impl YOLOModel {
         let (w, h) = (rgb_img.width(), rgb_img.height());
         let rgb_bytes = rgb_img.into_raw();
 
+        // Same letterbox target the CPU path would pick, so both paths feed the model
+        // identical pixels.
+        let (rect, stride) = (self.rect_enabled(), self.metadata.stride);
         let pre = self
             .cuda_preprocessor
             .as_mut()
             .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
-        let geom = pre.preprocess(&rgb_bytes, h, w, false)?;
-        let (dst_h, dst_w) = pre.dst_hw();
+        let target = Self::letterbox_target(rect, w, h, pre.dst_hw(), stride);
+        let geom = pre.preprocess(&rgb_bytes, h, w, false, target)?;
+        let (dst_h, dst_w) = geom.dst_hw;
         let dev_ptr = pre.input_dev_ptr();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
@@ -1257,7 +1284,7 @@ impl YOLOModel {
         // 1. Enabled in config
         // 2. Model supports dynamic shapes
         // 3. Batch is homogeneous (all images have same dimensions) or batch size is 1
-        let use_rect = self.config.rect && self.is_dynamic;
+        let use_rect = self.rect_enabled();
         let uniform_shape = if images.len() > 1 {
             let first_dims = images[0].dimensions();
             images.iter().all(|img| img.dimensions() == first_dims)
@@ -1276,12 +1303,9 @@ impl YOLOModel {
         // We will stack tensors later
         for image in images {
             // Determine target size for this image
-            let current_target_size = if actual_rect {
-                let (w, h) = image.dimensions();
-                calculate_rect_size(w, h, target_size, self.metadata.stride)
-            } else {
-                target_size
-            };
+            let (w, h) = image.dimensions();
+            let current_target_size =
+                Self::letterbox_target(actual_rect, w, h, target_size, self.metadata.stride);
 
             let res = if self.metadata.task == Task::Classify {
                 preprocess_image_center_crop(image, current_target_size, self.fp16_input)
