@@ -490,12 +490,19 @@ impl YOLOModel {
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
         // has been wired into the EPs above - dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
-        // opened we always finalize the preprocessor, sizing the input buffer to
-        // the resolved (possibly non-square) model input; `predict_image`'s
-        // runtime gate keeps it unused for Classify / fp16-input models.
+        // opened we always finalize the preprocessor; `predict_image`'s runtime gate
+        // keeps it unused for Classify / fp16-input models.
+        //
+        // The buffer is sized to the resolved (possibly non-square) model input rounded
+        // up to the stride, which is the largest target `rect` can ask for:
+        // `calculate_rect_size` shrinks the short axis but rounds each axis *up* to the
+        // stride, so a non-stride-aligned `imgsz` (e.g. 1000 -> 1024) exceeds the model
+        // input itself.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
-            let (dst_h, dst_w) = resolved_imgsz;
+            let stride = metadata.stride as usize;
+            let round_up = |v: usize| v.div_ceil(stride) * stride;
+            let (dst_h, dst_w) = (round_up(resolved_imgsz.0), round_up(resolved_imgsz.1));
             match crate::cuda_inference::CudaPreprocessor::finalize(handle, dst_h, dst_w) {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -964,8 +971,7 @@ impl YOLOModel {
         // both its f32-logits and baked-in ArgMax (u8) output forms. Depth is
         // included too: it is a plain letterbox + f32 input with a single f32
         // output, post-processed through the shared pipeline like every other
-        // task. The kernel emits the model's fixed dst_h × dst_w; the only
-        // requirement is f32 input (the kernel writes f32, not f16).
+        // task. The only requirement is f32 input (the kernel writes f32, not f16).
         #[cfg(feature = "cuda-preprocess")]
         if self.cuda_preprocessor.is_some()
             && !self.fp16_input
@@ -996,23 +1002,6 @@ impl YOLOModel {
     /// the model. Fixed-shape models must letterbox to their own input size.
     const fn rect_enabled(&self) -> bool {
         self.config.rect && self.is_dynamic
-    }
-
-    /// Letterbox target for one image: the stride-aligned rectangle when `rect` is in
-    /// effect, else `target` unchanged. Shared by the CPU and cuda-preprocess paths so
-    /// both feed the model the same pixels.
-    fn letterbox_target(
-        rect: bool,
-        width: u32,
-        height: u32,
-        target: (usize, usize),
-        stride: u32,
-    ) -> (usize, usize) {
-        if rect {
-            calculate_rect_size(width, height, target, stride)
-        } else {
-            target
-        }
     }
 
     /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
@@ -1056,13 +1045,21 @@ impl YOLOModel {
         let rgb_bytes = rgb_img.into_raw();
 
         // Same letterbox target the CPU path would pick, so both paths feed the model
-        // identical pixels.
-        let (rect, stride) = (self.rect_enabled(), self.metadata.stride);
+        // identical pixels. Computed from the model input, not the (stride-rounded)
+        // device buffer, and read before `cuda_preprocessor` borrows `self`.
+        let imgsz = self
+            .metadata
+            .imgsz
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+        let target = if self.rect_enabled() {
+            calculate_rect_size(w, h, imgsz, self.metadata.stride)
+        } else {
+            imgsz
+        };
         let pre = self
             .cuda_preprocessor
             .as_mut()
             .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
-        let target = Self::letterbox_target(rect, w, h, pre.dst_hw(), stride);
         let geom = pre.preprocess(&rgb_bytes, h, w, false, target)?;
         let (dst_h, dst_w) = geom.dst_hw;
         let dev_ptr = pre.input_dev_ptr();
@@ -1303,9 +1300,12 @@ impl YOLOModel {
         // We will stack tensors later
         for image in images {
             // Determine target size for this image
-            let (w, h) = image.dimensions();
-            let current_target_size =
-                Self::letterbox_target(actual_rect, w, h, target_size, self.metadata.stride);
+            let current_target_size = if actual_rect {
+                let (w, h) = image.dimensions();
+                calculate_rect_size(w, h, target_size, self.metadata.stride)
+            } else {
+                target_size
+            };
 
             let res = if self.metadata.task == Task::Classify {
                 preprocess_image_center_crop(image, current_target_size, self.fp16_input)

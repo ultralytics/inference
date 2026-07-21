@@ -43,7 +43,8 @@ extern "C" __global__ void preprocess(
     int src_h, int src_w,
     float* __restrict__ dst,
     int dst_h, int dst_w,
-    float scale,
+    float scale_x, float scale_y,
+    int valid_w, int valid_h,
     int pad_x, int pad_y,
     int bgr_in)
 {
@@ -53,17 +54,17 @@ extern "C" __global__ void preprocess(
 
     int rx = x - pad_x;
     int ry = y - pad_y;
-    int valid_w = (int)(src_w * scale + 0.5f);
-    int valid_h = (int)(src_h * scale + 0.5f);
 
     float r, g, b;
     if (rx < 0 || ry < 0 || rx >= valid_w || ry >= valid_h) {
         r = g = b = 114.0f / 255.0f;
     } else {
-        // Half-pixel convention: src = (dst + 0.5) / scale - 0.5, matching the CPU
-        // letterbox in preprocessing.rs and cv2/torch `align_corners=False`.
-        float fx = ((float)rx + 0.5f) / scale - 0.5f;
-        float fy = ((float)ry + 0.5f) / scale - 0.5f;
+        // Half-pixel convention: src = (dst + 0.5) * (src / resized) - 0.5, matching the
+        // CPU letterbox in preprocessing.rs and cv2's `INTER_LINEAR`. The ratios are
+        // per-axis and derived from the *rounded* resized extents, so a uniform
+        // 1 / letterbox-scale is not equivalent on the padded axis.
+        float fx = ((float)rx + 0.5f) * scale_x - 0.5f;
+        float fy = ((float)ry + 0.5f) * scale_y - 0.5f;
         if (fx < 0.f) fx = 0.f;
         if (fy < 0.f) fy = 0.f;
         if (fx > (float)(src_w - 1)) fx = (float)(src_w - 1);
@@ -224,19 +225,13 @@ impl CudaPreprocessor {
         self.input_dev_ptr
     }
 
-    /// Model input dimensions `(height, width)` - may be non-square.
-    pub(crate) const fn dst_hw(&self) -> (usize, usize) {
-        (self.dst_h, self.dst_w)
-    }
-
     /// H2D-copy the source frame, launch the fused preprocess kernel writing
     /// into the input buffer, and return the letterbox geometry needed by
     /// post-processing.
     ///
     /// `dst` is the letterbox target `(height, width)`: the model input for square
-    /// inference, or the smaller stride-aligned rectangle for `rect`. It must fit the
-    /// buffer sized at [`Self::finalize`], which every rect target does since
-    /// `calculate_rect_size` only shrinks axes.
+    /// inference, or the stride-aligned rectangle for `rect`. The caller sizes the buffer
+    /// at [`Self::finalize`] to the largest target `rect` can produce.
     ///
     /// The output of this call is enqueued on the same stream that the ORT
     /// session was bound to via [`CudaStreamHandle::raw_stream_ptr`], so the
@@ -251,12 +246,14 @@ impl CudaPreprocessor {
         dst: (usize, usize),
     ) -> Result<PreGeom> {
         let (dst_h, dst_w) = dst;
-        if dst_h * dst_w > self.dst_h * self.dst_w {
-            return Err(InferenceError::InferenceError(format!(
-                "letterbox target {dst_h}x{dst_w} exceeds the input buffer sized for {}x{}",
-                self.dst_h, self.dst_w
-            )));
-        }
+        // Writes are linear (`idx = y * dst_w + x`, plane stride `dst_h * dst_w`), so the
+        // product is what has to fit; the caller sizes the buffer to the largest target.
+        debug_assert!(
+            dst_h * dst_w <= self.dst_h * self.dst_w,
+            "letterbox target {dst_h}x{dst_w} exceeds the input buffer sized for {}x{}",
+            self.dst_h,
+            self.dst_w
+        );
         let needed = (src_h as usize) * (src_w as usize) * 3;
         if frame_hwc.len() != needed {
             return Err(InferenceError::InferenceError(format!(
@@ -284,6 +281,11 @@ impl CudaPreprocessor {
         let resized_h = (src_h as f32 * scale).round() as i32;
         let pad_x = (dst_w as i32 - resized_w) / 2;
         let pad_y = (dst_h as i32 - resized_h) / 2;
+        // Resampling ratios are src-per-dst on each axis, matching the CPU letterbox
+        // (`get_or_compute_x_lut(src_w, new_w)` / `scale_y = src_h / new_h`). `scale`
+        // itself stays the uniform gain, which is what post-processing back-projects with.
+        let scale_x = src_w as f32 / resized_w as f32;
+        let scale_y = src_h as f32 / resized_h as f32;
         let bgr_in_i = i32::from(bgr_in);
 
         let block_dim = (16u32, 16u32, 1u32);
@@ -307,7 +309,10 @@ impl CudaPreprocessor {
                 .arg(&mut self.input_dev)
                 .arg(&(dst_h as i32))
                 .arg(&(dst_w as i32))
-                .arg(&scale)
+                .arg(&scale_x)
+                .arg(&scale_y)
+                .arg(&resized_w)
+                .arg(&resized_h)
                 .arg(&pad_x)
                 .arg(&pad_y)
                 .arg(&bgr_in_i)
@@ -371,7 +376,7 @@ mod tests {
     #[test]
     fn preprocessor_finalize_allocates() {
         let pre = preprocessor(640, 640);
-        assert_eq!(pre.dst_hw(), (640, 640));
+        assert_eq!((pre.dst_h, pre.dst_w), (640, 640));
         assert_ne!(
             pre.input_dev_ptr(),
             0,
@@ -386,7 +391,7 @@ mod tests {
         let frame = solid(src_h as usize, src_w as usize, 200, 100, 50);
 
         let geom = pre
-            .preprocess(&frame, src_h, src_w, false, pre.dst_hw())
+            .preprocess(&frame, src_h, src_w, false, (pre.dst_h, pre.dst_w))
             .expect("preprocess");
 
         // 640/640 = 1.0 is the binding axis; the 480-tall image is centered.
@@ -404,12 +409,12 @@ mod tests {
     #[test]
     fn preprocess_non_square_target() {
         let mut pre = preprocessor(384, 640);
-        assert_eq!(pre.dst_hw(), (384, 640));
+        assert_eq!((pre.dst_h, pre.dst_w), (384, 640));
 
         // 640x640 into 384x640: scale 0.6 fills the width, pads the height to 0.
         let frame = solid(640, 640, 10, 20, 30);
         let geom = pre
-            .preprocess(&frame, 640, 640, false, pre.dst_hw())
+            .preprocess(&frame, 640, 640, false, (pre.dst_h, pre.dst_w))
             .expect("preprocess");
 
         assert_eq!(geom.pad_y, 0);
@@ -427,7 +432,7 @@ mod tests {
         let frame = solid(src_h as usize, src_w as usize, 255, 255, 255);
 
         let geom = pre
-            .preprocess(&frame, src_h, src_w, false, pre.dst_hw())
+            .preprocess(&frame, src_h, src_w, false, (pre.dst_h, pre.dst_w))
             .expect("preprocess");
         assert!(
             geom.pad_x > 0,
@@ -453,8 +458,14 @@ mod tests {
         let mut pre = preprocessor(dst, dst);
         // Square input, no letterbox: every pixel is R=255, G=0, B=0.
         let frame = solid(dst, dst, 255, 0, 0);
-        pre.preprocess(&frame, dst as u32, dst as u32, false, pre.dst_hw())
-            .expect("preprocess");
+        pre.preprocess(
+            &frame,
+            dst as u32,
+            dst as u32,
+            false,
+            (pre.dst_h, pre.dst_w),
+        )
+        .expect("preprocess");
 
         let host = readback(&pre);
         let hw = dst * dst;
@@ -476,12 +487,18 @@ mod tests {
         let idx = (dst / 2) * dst + dst / 2;
 
         let mut rgb = preprocessor(dst, dst);
-        rgb.preprocess(&frame, dst as u32, dst as u32, false, rgb.dst_hw())
-            .expect("rgb preprocess");
+        rgb.preprocess(
+            &frame,
+            dst as u32,
+            dst as u32,
+            false,
+            (rgb.dst_h, rgb.dst_w),
+        )
+        .expect("rgb preprocess");
         let rgb_host = readback(&rgb);
 
         let mut bgr = preprocessor(dst, dst);
-        bgr.preprocess(&frame, dst as u32, dst as u32, true, bgr.dst_hw())
+        bgr.preprocess(&frame, dst as u32, dst as u32, true, (bgr.dst_h, bgr.dst_w))
             .expect("bgr preprocess");
         let bgr_host = readback(&bgr);
 
@@ -503,7 +520,7 @@ mod tests {
     fn preprocess_rejects_wrong_len() {
         let mut pre = preprocessor(64, 64);
         let bad = vec![0u8; 10]; // != 64 * 64 * 3
-        let result = pre.preprocess(&bad, 64, 64, false, pre.dst_hw());
+        let result = pre.preprocess(&bad, 64, 64, false, (pre.dst_h, pre.dst_w));
         assert!(
             matches!(result, Err(InferenceError::InferenceError(_))),
             "wrong-length frame must be rejected"
@@ -515,10 +532,10 @@ mod tests {
         let mut pre = preprocessor(128, 128);
         // First a small frame, then a larger one to force `frame_dev` to grow.
         let small = solid(32, 32, 1, 2, 3);
-        pre.preprocess(&small, 32, 32, false, pre.dst_hw())
+        pre.preprocess(&small, 32, 32, false, (pre.dst_h, pre.dst_w))
             .expect("small frame");
         let large = solid(256, 256, 4, 5, 6);
-        pre.preprocess(&large, 256, 256, false, pre.dst_hw())
+        pre.preprocess(&large, 256, 256, false, (pre.dst_h, pre.dst_w))
             .expect("large frame after buffer growth");
     }
 
@@ -526,36 +543,47 @@ mod tests {
     fn preprocess_matches_cpu_letterbox() {
         // The GPU kernel and the CPU letterbox must produce the same tensor, otherwise
         // `--device cuda` silently infers on different pixels than `--device cpu`. A
-        // gradient (not a solid color) is required: it is the only input that exposes a
-        // half-pixel offset in the bilinear sampling.
-        let (src_h, src_w) = (270usize, 480usize);
-        let mut frame = Vec::with_capacity(src_h * src_w * 3);
-        for y in 0..src_h {
-            for x in 0..src_w {
-                frame.extend_from_slice(&[(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8]);
+        // gradient (not a solid color) is required: a flat image hides both the
+        // half-pixel offset and the per-axis resampling ratio.
+        //
+        // Both source shapes letterbox into the same rect target, but 271x481 rounds the
+        // padded axis (`round(271 * scale) != 271 * scale`) while 270x480 divides exactly.
+        // Only the rounding case distinguishes the CPU's `src / resized` ratio from a
+        // uniform `1 / letterbox-scale`, so it must stay in the list.
+        for (src_h, src_w) in [(271usize, 481usize), (270, 480), (481, 271)] {
+            let mut frame = Vec::with_capacity(src_h * src_w * 3);
+            for y in 0..src_h {
+                for x in 0..src_w {
+                    frame.extend_from_slice(&[
+                        (x % 256) as u8,
+                        (y % 256) as u8,
+                        ((x + y) % 256) as u8,
+                    ]);
+                }
             }
+
+            // A rect target, so this also covers the non-square letterbox `rect` produces.
+            let dst = (192usize, 320usize);
+            let mut pre = preprocessor(dst.0, dst.1);
+            pre.preprocess(&frame, src_h as u32, src_w as u32, false, dst)
+                .expect("gpu preprocess");
+            let gpu = readback(&pre);
+
+            let img = image::DynamicImage::ImageRgb8(
+                image::RgbImage::from_raw(src_w as u32, src_h as u32, frame).expect("rgb image"),
+            );
+            let cpu = crate::preprocessing::preprocess_image_with_precision(&img, dst, 32, false);
+            let cpu = cpu.tensor.as_slice().expect("contiguous cpu tensor");
+
+            let n = 3 * dst.0 * dst.1;
+            let max_diff = (0..n).fold(0.0f32, |m, i| m.max((gpu[i] - cpu[i]).abs()));
+            // 1/255 == 0.0039: anything above one input quantization step is a real
+            // resampling mismatch, not float noise (the CPU uses OpenCV's 11-bit
+            // fixed-point weights, the kernel f32).
+            assert!(
+                max_diff < 1.0 / 255.0,
+                "gpu letterbox deviates from cpu by {max_diff} at {src_h}x{src_w}"
+            );
         }
-
-        // A rect target, so this also covers the non-square letterbox the `rect` path uses.
-        let dst = (192usize, 320usize);
-        let mut pre = preprocessor(dst.0, dst.1);
-        pre.preprocess(&frame, src_h as u32, src_w as u32, false, dst)
-            .expect("gpu preprocess");
-        let gpu = readback(&pre);
-
-        let img = image::DynamicImage::ImageRgb8(
-            image::RgbImage::from_raw(src_w as u32, src_h as u32, frame).expect("rgb image"),
-        );
-        let cpu = crate::preprocessing::preprocess_image_with_precision(&img, dst, 32, false);
-        let cpu = cpu.tensor.as_slice().expect("contiguous cpu tensor");
-
-        let n = 3 * dst.0 * dst.1;
-        let max_diff = (0..n).fold(0.0f32, |m, i| m.max((gpu[i] - cpu[i]).abs()));
-        // 1/255 == 0.0039: anything above one input quantization step is a real
-        // resampling mismatch, not float noise.
-        assert!(
-            max_diff < 1.0 / 255.0,
-            "gpu letterbox deviates from cpu by {max_diff}"
-        );
     }
 }
