@@ -14,6 +14,10 @@ on:
         description: Publish to crates.io
         default: false
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   check:
     if: github.repository == 'ultralytics/inference' && github.ref == 'refs/heads/main'
