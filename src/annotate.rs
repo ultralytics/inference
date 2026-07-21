@@ -221,43 +221,38 @@ pub fn annotate_image_with(
     draw_obb(&mut img, result, font.as_ref());
     draw_classification(&mut img, result, font.as_ref(), top_k.unwrap_or(5));
 
-    // Depth is rendered side-by-side (original | colorized depth), matching the Python
-    // `plot(side_by_side=True)`, so it replaces the returned image rather than drawing in place.
-    if let Some(side_by_side) = compose_depth_side_by_side(&img, result, colormap, viz) {
-        return DynamicImage::ImageRgb8(side_by_side);
-    }
+    draw_depth_map(&mut img, result, colormap, viz);
 
     DynamicImage::ImageRgb8(img)
 }
 
-/// Build an `original | colorized-depth` side-by-side image, or `None` when the result
-/// has no depth map. Colorization (`colormap` + normalization `viz`) is delegated to
-/// [`DepthMap::colorize`](crate::results::DepthMap::colorize).
-fn compose_depth_side_by_side(
-    img: &image::RgbImage,
-    result: &Results,
-    colormap: Colormap,
-    viz: DepthViz,
-) -> Option<image::RgbImage> {
-    let depth = result.depth.as_ref()?;
-    let (width, height) = img.dimensions();
-    let (w, h) = (width as usize, height as usize);
-    // Depth map is stored at original image resolution; bail if it disagrees with the image.
-    if depth.data.shape() != [h, w] {
-        return None;
-    }
-    let colored = depth.colorize(colormap, viz);
+/// Blend factor for the depth overlay, matching Python's `Annotator.depth_map` default.
+const DEPTH_ALPHA: f32 = 0.6;
 
-    let mut out = image::RgbImage::new(width * 2, height);
-    for y in 0..h {
-        for x in 0..w {
-            #[allow(clippy::cast_possible_truncation)]
-            let (px, py) = (x as u32, y as u32);
-            out.put_pixel(px, py, *img.get_pixel(px, py));
-            out.put_pixel(px + width, py, Rgb(colored[y * w + x]));
+/// Blend the colorized depth map over `img` in place, mirroring Python's
+/// `Annotator.depth_map`: `(1 - alpha) * image + alpha * depth` at [`DEPTH_ALPHA`].
+///
+/// No-op when the result carries no depth map or the map's resolution disagrees with the
+/// image. Colorization (`colormap` + normalization `viz`) is delegated to
+/// [`DepthMap::colorize`](crate::results::DepthMap::colorize).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn draw_depth_map(img: &mut image::RgbImage, result: &Results, colormap: Colormap, viz: DepthViz) {
+    let Some(depth) = result.depth.as_ref() else {
+        return;
+    };
+    let (width, height) = img.dimensions();
+    // Depth map is stored at original image resolution; bail if it disagrees with the image.
+    if depth.data.shape() != [height as usize, width as usize] {
+        return;
+    }
+    // `colorize` returns row-major RGB, the same order `pixels_mut` walks.
+    for (px, heat) in img.pixels_mut().zip(depth.colorize(colormap, viz)) {
+        for (channel, &h) in px.0.iter_mut().zip(heat.iter()) {
+            *channel = f32::from(*channel)
+                .mul_add(1.0 - DEPTH_ALPHA, f32::from(h) * DEPTH_ALPHA)
+                .round() as u8;
         }
     }
-    Some(out)
 }
 
 /// Draw a thick line segment between two points using Bresenham's algorithm.
@@ -1191,15 +1186,17 @@ mod tests {
     }
 
     #[test]
-    fn test_annotate_depth_side_by_side() {
+    fn test_annotate_depth_blends_in_place() {
         let mut r = base_results(HashMap::new());
         let mut depth = ndarray::Array2::<f32>::zeros((128, 128));
         depth[[10, 10]] = 5.0;
         depth[[20, 20]] = 2.0;
         r.depth = Some(DepthMap::new(depth, (128, 128)));
         let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
-        // Depth renders original | colorized-depth, so the output is double width.
-        assert_eq!(out.width(), 256);
+        // Depth blends over the image, so the output keeps the input size.
+        assert_eq!(out.width(), 128);
         assert_eq!(out.height(), 128);
+        // A valid pixel picks up the colormap, so it no longer matches the black input.
+        assert_ne!(out.to_rgb8().get_pixel(10, 10).0, [0, 0, 0]);
     }
 }

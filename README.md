@@ -186,7 +186,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 # Semantic segmentation: write per-image PNG class maps to runs/semantic/predictN/results/
 ultralytics-inference predict --task semantic --source cityscapes/ --save-json
 
-# Depth estimation: save a colorized side-by-side (image | depth) to runs/depth/predictN/
+# Depth estimation: blend the colorized depth over the image into runs/depth/predictN/
 ultralytics-inference predict --task depth --source image.jpg
 ```
 

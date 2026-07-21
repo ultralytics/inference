@@ -185,7 +185,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 # 语义分割：将每张图片的 PNG 类别图写入 runs/semantic/predictN/results/
 ultralytics-inference predict --task semantic --source cityscapes/ --save-json
 
-# 深度估计：将彩色化的并排图（原图 | 深度）保存到 runs/depth/predictN/
+# 深度估计：将彩色化的深度图叠加到原图并保存到 runs/depth/predictN/
 ultralytics-inference predict --task depth --source image.jpg
 ```
 
