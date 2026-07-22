@@ -80,11 +80,44 @@ pub struct PreprocessResult {
 
 /// Geometry parameters resolved by letterbox layout.
 #[derive(Clone, Copy)]
-struct LetterboxGeometry {
-    new_w: u32,
-    new_h: u32,
-    pad_left: u32,
-    pad_top: u32,
+pub(crate) struct LetterboxGeometry {
+    pub(crate) new_w: u32,
+    pub(crate) new_h: u32,
+    pub(crate) pad_left: u32,
+    pub(crate) pad_top: u32,
+}
+
+impl LetterboxGeometry {
+    /// Letterbox geometry for fitting `(orig_w, orig_h)` into `target` = `(height, width)`:
+    /// a uniform scale (`min` over both axes), rounded resized extents, and centered
+    /// padding. The returned `scale` is that uniform gain, used for coordinate
+    /// back-projection.
+    ///
+    /// The single source of this math for both the CPU letterbox and the `cuda-preprocess`
+    /// kernel, so the two can never disagree on where a pixel lands.
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    pub(crate) fn compute(orig_w: u32, orig_h: u32, target: (usize, usize)) -> (Self, f32) {
+        let (target_h, target_w) = (target.0 as f32, target.1 as f32);
+        let (orig_hf, orig_wf) = (orig_h as f32, orig_w as f32);
+        let scale = (target_h / orig_hf).min(target_w / orig_wf);
+        let new_w = (orig_wf * scale).round() as u32;
+        let new_h = (orig_hf * scale).round() as u32;
+        let pad_left = (target.1 as u32).saturating_sub(new_w) / 2;
+        let pad_top = (target.0 as u32).saturating_sub(new_h) / 2;
+        (
+            Self {
+                new_w,
+                new_h,
+                pad_left,
+                pad_top,
+            },
+            scale,
+        )
+    }
 }
 
 /// Build a `PreprocessResult` from a resolved letterbox geometry.
@@ -451,40 +484,10 @@ fn calculate_letterbox_params(
     target_size: (usize, usize),
     _stride: u32,
 ) -> (LetterboxGeometry, (f32, f32)) {
-    #[allow(clippy::cast_precision_loss)]
-    let (target_h, target_w) = (target_size.0 as f32, target_size.1 as f32);
-    #[allow(clippy::cast_precision_loss)]
-    let (orig_h, orig_w) = (orig_height as f32, orig_width as f32);
-
-    // Calculate scale to fit within target while maintaining aspect ratio
-    let scale = (target_h / orig_h).min(target_w / orig_w);
-
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let new_w = (orig_w * scale).round() as u32;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let new_h = (orig_h * scale).round() as u32;
-
-    #[allow(clippy::cast_possible_truncation)]
-    let pad_w = (target_size.1 as u32).saturating_sub(new_w);
-    #[allow(clippy::cast_possible_truncation)]
-    let pad_h = (target_size.0 as u32).saturating_sub(new_h);
-
-    // Center alignment: divide padding equally on both sides
-    let pad_left = pad_w / 2;
-    let pad_top = pad_h / 2;
-
-    // Use a single `gain = min(target_h / orig_h, target_w / orig_w)` on both axes for
-    // coordinate back-projection. Per-axis gains computed from rounded `new_w`/`new_h`
-    // can diverge slightly, shifting boxes and changing NMS results.
-    (
-        LetterboxGeometry {
-            new_w,
-            new_h,
-            pad_left,
-            pad_top,
-        },
-        (scale, scale),
-    )
+    // A single uniform `gain` on both axes for coordinate back-projection; per-axis gains
+    // from the rounded extents can diverge slightly, shifting boxes and changing NMS.
+    let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size);
+    (geom, (scale, scale))
 }
 
 /// Convert an RGB image to a normalized NCHW tensor (FP32).
