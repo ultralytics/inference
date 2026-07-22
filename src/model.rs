@@ -490,12 +490,19 @@ impl YOLOModel {
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
         // has been wired into the EPs above - dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
-        // opened we always finalize the preprocessor, sizing the input buffer to
-        // the resolved (possibly non-square) model input; `predict_image`'s
-        // runtime gate keeps it unused for Classify / fp16-input models.
+        // opened we always finalize the preprocessor; `predict_image`'s runtime gate
+        // keeps it unused for Classify / fp16-input models.
+        //
+        // The buffer is sized to the resolved (possibly non-square) model input rounded
+        // up to the stride, which is the largest target `rect` can ask for:
+        // `calculate_rect_size` shrinks the short axis but rounds each axis *up* to the
+        // stride, so a non-stride-aligned `imgsz` (e.g. 1000 -> 1024) exceeds the model
+        // input itself.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
-            let (dst_h, dst_w) = resolved_imgsz;
+            let stride = metadata.stride as usize;
+            let round_up = |v: usize| v.div_ceil(stride) * stride;
+            let (dst_h, dst_w) = (round_up(resolved_imgsz.0), round_up(resolved_imgsz.1));
             match crate::cuda_inference::CudaPreprocessor::finalize(handle, dst_h, dst_w) {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -964,8 +971,7 @@ impl YOLOModel {
         // both its f32-logits and baked-in ArgMax (u8) output forms. Depth is
         // included too: it is a plain letterbox + f32 input with a single f32
         // output, post-processed through the shared pipeline like every other
-        // task. The kernel emits the model's fixed dst_h × dst_w; the only
-        // requirement is f32 input (the kernel writes f32, not f16).
+        // task. The only requirement is f32 input (the kernel writes f32, not f16).
         #[cfg(feature = "cuda-preprocess")]
         if self.cuda_preprocessor.is_some()
             && !self.fp16_input
@@ -990,6 +996,12 @@ impl YOLOModel {
         let results = results.pop().unwrap_or_default();
         Self::log_first_result(&results);
         Ok(results)
+    }
+
+    /// Whether rectangular inference applies: requested in the config and supported by
+    /// the model. Fixed-shape models must letterbox to their own input size.
+    const fn rect_enabled(&self) -> bool {
+        self.config.rect && self.is_dynamic
     }
 
     /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
@@ -1032,12 +1044,24 @@ impl YOLOModel {
         let (w, h) = (rgb_img.width(), rgb_img.height());
         let rgb_bytes = rgb_img.into_raw();
 
+        // Same letterbox target the CPU path would pick, so both paths feed the model
+        // identical pixels. Computed from the model input, not the (stride-rounded)
+        // device buffer, and read before `cuda_preprocessor` borrows `self`.
+        let imgsz = self
+            .metadata
+            .imgsz
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+        let target = if self.rect_enabled() {
+            calculate_rect_size(w, h, imgsz, self.metadata.stride)
+        } else {
+            imgsz
+        };
         let pre = self
             .cuda_preprocessor
             .as_mut()
             .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
-        let geom = pre.preprocess(&rgb_bytes, h, w, false)?;
-        let (dst_h, dst_w) = pre.dst_hw();
+        let geom = pre.preprocess(&rgb_bytes, h, w, false, target)?;
+        let (dst_h, dst_w) = target;
         let dev_ptr = pre.input_dev_ptr();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
@@ -1253,11 +1277,9 @@ impl YOLOModel {
         let start_preprocess = Instant::now();
         let mut preprocessed_results = Vec::with_capacity(images.len());
 
-        // Check if we can use rect inference
-        // 1. Enabled in config
-        // 2. Model supports dynamic shapes
-        // 3. Batch is homogeneous (all images have same dimensions) or batch size is 1
-        let use_rect = self.config.rect && self.is_dynamic;
+        // Rect inference additionally needs a homogeneous batch: mixed sizes can't share
+        // one padded shape, so they fall back to square below.
+        let use_rect = self.rect_enabled();
         let uniform_shape = if images.len() > 1 {
             let first_dims = images[0].dimensions();
             images.iter().all(|img| img.dimensions() == first_dims)

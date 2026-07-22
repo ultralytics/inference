@@ -104,9 +104,11 @@ What to expect and how to avoid surprises:
   to `.gitignore`, not to clean builds) to avoid paying the cost again.
 - **Cache is keyed to the build context.** A new engine is built whenever the
   model file, GPU/driver/TensorRT version, precision (`--half`), or **input
-  shape** changes. **Dynamic-shape models rebuild per new input size** - feed a
-  consistent size (the fast path uses the model's resolved `imgsz`) to keep it
-  to a single cached engine.
+  shape** changes. **Dynamic-shape models rebuild per new input size** - feed
+  consistently-sized inputs to keep it to a single cached engine. Note that rectangular
+  inference (`rect`, on by default) letterboxes each image to its own aspect ratio, so a
+  source with mixed aspect ratios produces one engine build per distinct shape; pass
+  `--rect false` to pin every input to the square model size.
 - **Warm up before timing.** The first `predict*` call also triggers an
   inference-time warm-up. Always discard the first few iterations when
   benchmarking (the examples do this).
@@ -124,7 +126,11 @@ What to expect and how to avoid surprises:
 No separate type or API. With the feature compiled in and a CUDA/TensorRT
 device, [`YOLOModel::predict_image`] automatically runs the fused GPU
 preprocess kernel (bilinear letterbox + `/255` normalize + HWC→CHW) and hands
-the result to ORT as a zero-copy device tensor:
+the result to ORT as a zero-copy device tensor. The kernel mirrors the CPU letterbox -
+same half-pixel bilinear sampling, same per-axis resampling ratios, and the same
+stride-aligned rectangular target under `rect` - so `--device cuda` and `--device cpu`
+agree to within one 8-bit quantization step (the CPU uses OpenCV's fixed-point weights,
+the kernel f32):
 
 ```rust,no_run
 use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
