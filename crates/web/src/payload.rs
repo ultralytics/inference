@@ -261,8 +261,8 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
 /// no depth map or its resolution does not match the image.
 ///
 /// Alpha is [`DEPTH_ALPHA`], so drawing this over the frame composites to the
-/// `(1 - alpha) * image + alpha * depth` blend the native annotator and Python produce
-/// (within the canvas backing store's 8-bit premultiplied rounding).
+/// `(1 - alpha) * image + alpha * depth` blend (within the canvas backing store's
+/// 8-bit premultiplied rounding).
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8> {
     let Some(depth) = &r.depth else {
