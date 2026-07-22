@@ -1061,7 +1061,7 @@ impl YOLOModel {
             .as_mut()
             .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
         let geom = pre.preprocess(&rgb_bytes, h, w, false, target)?;
-        let (dst_h, dst_w) = geom.dst_hw;
+        let (dst_h, dst_w) = target;
         let dev_ptr = pre.input_dev_ptr();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;

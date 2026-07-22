@@ -114,10 +114,6 @@ pub(crate) struct PreGeom {
     pub scale: f32,
     pub pad_x: i32,
     pub pad_y: i32,
-    /// Target the frame was letterboxed into, `(height, width)`. Equals the caller's
-    /// requested size, which is the model input for square inference and the
-    /// stride-aligned rectangle for `rect`.
-    pub dst_hw: (usize, usize),
 }
 
 /// Phase-1 of the fast-path init: a cudarc context + stream created before
@@ -324,7 +320,6 @@ impl CudaPreprocessor {
             scale,
             pad_x,
             pad_y,
-            dst_hw: (dst_h, dst_w),
         })
     }
 }
