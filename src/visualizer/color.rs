@@ -228,10 +228,12 @@ impl std::str::FromStr for Colormap {
     }
 }
 
-/// Blend factor for the colorized depth overlay: `(1 - alpha) * image + alpha * depth`.
+/// Default depth-overlay opacity: `(1 - alpha) * image + alpha * depth`.
 ///
-/// Shared by the native annotator and the browser crate, which bakes it into the overlay's
-/// alpha channel so the canvas composites to the same result.
+/// The default [`annotate_image`](crate::annotate::annotate_image) (and the CLI's `--save`)
+/// blend at this; callers of
+/// [`annotate_image_with`](crate::annotate::annotate_image_with) or the wasm `annotate`'s
+/// `depthAlpha` can pass any opacity (`1.0` for the full colorized map).
 pub const DEPTH_ALPHA: f32 = 0.6;
 
 /// How depth values are normalized before colormapping.

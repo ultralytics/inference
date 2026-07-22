@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use ultralytics_inference::Task;
 use ultralytics_inference::results::{Results, SemanticMask};
-use ultralytics_inference::visualizer::color::{Color, Colormap, DEPTH_ALPHA, DepthViz};
+use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
 /// `color` is the Ultralytics palette color for the class (`#rrggbb`).
@@ -260,10 +260,9 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
 /// `colormap` and normalization `viz`; invalid pixels are black. Empty when the result has
 /// no depth map or its resolution does not match the image.
 ///
-/// Alpha is [`DEPTH_ALPHA`], so drawing this over the frame composites to the
-/// `(1 - alpha) * image + alpha * depth` blend (within the canvas backing store's
-/// 8-bit premultiplied rounding).
-#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+/// Fully opaque (`alpha = 255`): the blend opacity is applied by the consumer at draw
+/// time (`annotate` composites at `0.6` to match native, the demo exposes a slider), so
+/// this stays the raw colorized map and can be shown at full opacity.
 fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8> {
     let Some(depth) = &r.depth else {
         return Vec::new();
@@ -272,10 +271,9 @@ fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8
     if depth.data.dim() != (h, w) {
         return Vec::new();
     }
-    let alpha = (DEPTH_ALPHA * 255.0).round() as u8;
     let mut buf = vec![0u8; w * h * 4];
     for (px, rgb) in buf.chunks_exact_mut(4).zip(depth.colorize(colormap, viz)) {
-        px.copy_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
+        px.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
     }
     buf
 }

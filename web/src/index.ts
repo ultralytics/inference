@@ -106,9 +106,10 @@ export interface Results {
    */
   semantic_mask?: Uint16Array;
   /**
-   * Depth map as a translucent colorized RGBA overlay (`width*height*4`), using the
-   * colormap from {@link PredictOptions.colormap}; empty for other tasks. Drawable
-   * straight onto a canvas via `ImageData`, where its alpha blends it over the frame.
+   * Depth map as an opaque colorized RGBA image (`width*height*4`), using the colormap
+   * from {@link PredictOptions.colormap}; empty for other tasks. {@link annotate} blends
+   * it over the frame at {@link AnnotateOptions.depthAlpha} (default 0.6); draw it directly
+   * for the raw map.
    */
   depth: Uint8Array;
   /** Depth range `[min, max]` in meters over valid pixels, for depth models. */
@@ -249,6 +250,11 @@ export interface AnnotateOptions {
   keypoints?: boolean;
   /** Keypoint confidence threshold for drawing. Default `0.25` (matches Ultralytics). */
   keypointThreshold?: number;
+  /**
+   * Blend opacity for the depth overlay, `0`..`1`. Default `0.6` (matches the native
+   * annotator); `1` shows the raw colorized depth map, `0` shows only the source.
+   */
+  depthAlpha?: number;
 }
 
 /** Image-like inputs accepted by {@link YOLO.predict}. */
@@ -805,15 +811,17 @@ export async function annotate(
     ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
   }
 
-  // Depth: the engine returns a translucent colorized depth overlay; drawing it over
-  // the frame blends it in. Like the segment overlay above, this assumes an opaque
-  // source (photo/camera/video frame): a source with transparent pixels keeps that
-  // transparency through the blend, so feed opaque frames for a fully opaque result.
+  // Depth: the engine returns the opaque colorized depth map, blended over the frame here
+  // at `depthAlpha` (default 0.6; pass 1 for the raw map, 0 for none). Like the segment
+  // overlay above, this assumes an opaque source (photo/camera/video frame): a source with
+  // transparent pixels keeps that transparency through the blend.
   const depth = results.depth;
   if (depth && depth.length === width * height * 4) {
     const tmp = makeCanvas(width, height);
     get2d(tmp).putImageData(new ImageData(new Uint8ClampedArray(depth), width, height), 0, 0);
+    ctx.globalAlpha = options?.depthAlpha ?? 0.6;
     ctx.drawImage(tmp as CanvasImageSource, 0, 0, width, height);
+    ctx.globalAlpha = 1;
   }
 
   const lineWidth = options?.lineWidth ?? Math.max(2, Math.round(width / 320));

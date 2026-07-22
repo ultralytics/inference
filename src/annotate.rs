@@ -177,14 +177,18 @@ pub fn annotate_image(
         top_k,
         Colormap::default(),
         DepthViz::default(),
+        DEPTH_ALPHA,
     )
 }
 
-/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap` and
-/// normalization `viz`.
+/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap`,
+/// normalization `viz`, and overlay opacity `depth_alpha`.
 ///
-/// Only depth results use `colormap`/`viz`; every other task ignores them. See
-/// [`annotate_image`] for the general behavior.
+/// Only depth results use `colormap`/`viz`/`depth_alpha`; every other task ignores them.
+/// `depth_alpha` is the depth-overlay opacity in `0.0..=1.0`:
+/// [`DEPTH_ALPHA`](crate::visualizer::color::DEPTH_ALPHA) (`0.6`, the [`annotate_image`]
+/// default) blends it over the image; `1.0` renders the full colorized map, `0.0` shows only
+/// the source. See [`annotate_image`] for the general behavior.
 #[must_use]
 pub fn annotate_image_with(
     image: &DynamicImage,
@@ -192,6 +196,7 @@ pub fn annotate_image_with(
     top_k: Option<usize>,
     colormap: Colormap,
     viz: DepthViz,
+    depth_alpha: f32,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
 
@@ -221,19 +226,25 @@ pub fn annotate_image_with(
     draw_obb(&mut img, result, font.as_ref());
     draw_classification(&mut img, result, font.as_ref(), top_k.unwrap_or(5));
 
-    draw_depth_map(&mut img, result, colormap, viz);
+    draw_depth_map(&mut img, result, colormap, viz, depth_alpha);
 
     DynamicImage::ImageRgb8(img)
 }
 
-/// Blend the colorized depth map over `img` in place, mirroring Python's
-/// `Annotator.depth_map`: `(1 - alpha) * image + alpha * depth` at [`DEPTH_ALPHA`].
+/// Draw the colorized depth map over `img` in place at opacity `alpha`
+/// (`(1 - alpha) * image + alpha * depth`): `1.0` is the full colorized map, lower blends.
 ///
 /// No-op when the result carries no depth map or the map's resolution disagrees with the
 /// image. Colorization (`colormap` + normalization `viz`) is delegated to
 /// [`DepthMap::colorize`](crate::results::DepthMap::colorize).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn draw_depth_map(img: &mut image::RgbImage, result: &Results, colormap: Colormap, viz: DepthViz) {
+fn draw_depth_map(
+    img: &mut image::RgbImage,
+    result: &Results,
+    colormap: Colormap,
+    viz: DepthViz,
+    alpha: f32,
+) {
     let Some(depth) = result.depth.as_ref() else {
         return;
     };
@@ -242,11 +253,12 @@ fn draw_depth_map(img: &mut image::RgbImage, result: &Results, colormap: Colorma
     if depth.data.shape() != [height as usize, width as usize] {
         return;
     }
+    let alpha = alpha.clamp(0.0, 1.0);
     // `colorize` returns row-major RGB, the same order `pixels_mut` walks.
     for (px, heat) in img.pixels_mut().zip(depth.colorize(colormap, viz)) {
         for (channel, &h) in px.0.iter_mut().zip(heat.iter()) {
             *channel = f32::from(*channel)
-                .mul_add(1.0 - DEPTH_ALPHA, f32::from(h) * DEPTH_ALPHA)
+                .mul_add(1.0 - alpha, f32::from(h) * alpha)
                 .round() as u8;
         }
     }
