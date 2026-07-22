@@ -270,18 +270,17 @@ impl CudaPreprocessor {
             .memcpy_htod(frame_hwc, &mut self.frame_dev)
             .map_err(|e| InferenceError::InferenceError(format!("htod: {e:?}")))?;
 
-        // Letterbox into the (possibly non-square) dst_h × dst_w target:
-        // single uniform scale = min over both axes, centered padding.
-        let scale = (dst_h as f32 / src_h as f32).min(dst_w as f32 / src_w as f32);
-        let resized_w = (src_w as f32 * scale).round() as i32;
-        let resized_h = (src_h as f32 * scale).round() as i32;
-        let pad_x = (dst_w as i32 - resized_w) / 2;
-        let pad_y = (dst_h as i32 - resized_h) / 2;
+        // Letterbox geometry from the shared CPU helper, so the kernel and the CPU path
+        // can never disagree on scale/rounding/padding. `scale` is the uniform gain
+        // post-processing back-projects with.
+        let (geom, scale) =
+            crate::preprocessing::LetterboxGeometry::compute(src_w, src_h, (dst_h, dst_w));
+        let (resized_w, resized_h) = (geom.new_w as i32, geom.new_h as i32);
+        let (pad_x, pad_y) = (geom.pad_left as i32, geom.pad_top as i32);
         // Resampling ratios are src-per-dst on each axis, matching the CPU letterbox
-        // (`get_or_compute_x_lut(src_w, new_w)` / `scale_y = src_h / new_h`). `scale`
-        // itself stays the uniform gain, which is what post-processing back-projects with.
-        let scale_x = src_w as f32 / resized_w as f32;
-        let scale_y = src_h as f32 / resized_h as f32;
+        // (`get_or_compute_x_lut(src_w, new_w)` / `scale_y = src_h / new_h`).
+        let scale_x = src_w as f32 / geom.new_w as f32;
+        let scale_y = src_h as f32 / geom.new_h as f32;
         let bgr_in_i = i32::from(bgr_in);
 
         let block_dim = (16u32, 16u32, 1u32);
