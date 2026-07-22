@@ -181,18 +181,14 @@ fn gray(t: f32) -> [u8; 3] {
     [g, g, g]
 }
 
-/// A continuous colormap for depth visualization.
+/// A continuous colormap for depth visualization; see each variant for its ramp.
 ///
-/// `Jet` (default) is the classic rainbow, matching Python's `colorize_depth` default and
-/// the ramp the Ultralytics iOS app renders depth with; `Inferno` and the diverging
-/// `Spectral` (`Spectral_r`) are Python's other two options; `Gray` is raw grayscale,
-/// available here and in the wasm API only.
-///
-/// The CLI always renders the default (`Jet`), like Python's `yolo predict`. Pick another
-/// through [`annotate_image_with`](crate::annotate::annotate_image_with).
+/// The CLI always renders the default (`Jet`). Pick another through
+/// [`annotate_image_with`](crate::annotate::annotate_image_with) in Rust, or the
+/// `colormap` option of `predict` in the wasm/npm API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Colormap {
-    /// Perceptual black → purple → orange → yellow (matches Python depth plots).
+    /// Perceptual black → purple → orange → yellow.
     Inferno,
     /// Classic rainbow: blue → cyan → green → yellow → red.
     #[default]
@@ -308,7 +304,7 @@ mod tests {
             DepthViz::Disparity
         );
         assert!("log".parse::<DepthViz>().is_err());
-        // Depth defaults to the rainbow ramp with near = warm, matching the Ultralytics iOS app.
+        // Depth defaults to the rainbow ramp (jet) with near = warm (disparity).
         assert_eq!(Colormap::default(), Colormap::Jet);
         assert_eq!(DepthViz::default(), DepthViz::Disparity);
     }
