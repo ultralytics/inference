@@ -145,12 +145,24 @@ Field names match the Rust/Ultralytics `Results` API 1-1:
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, top5names, color } \| null` | classify              |
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)                        | segment, semantic     |
 | `semantic_mask`    | `Uint16Array` (class id per pixel, `width*height`)                   | semantic              |
+| `depth`            | `Uint8Array` (opaque colorized depth map, `width*height*4`)          | depth                 |
+| `depth_range`      | `[min, max]` in meters                                               | depth                 |
 | `speed`            | `{ preprocess, inference, postprocess }` ms                          | all                   |
 
 `model.names` is the class id to name map (like `model.names` in Python). Every
 detection carries its Ultralytics palette `color`, and `annotate()` draws the
 `masks` overlay and the pose skeleton with the same per-limb/keypoint colors as
 the native renderer. None of this is duplicated in JS.
+
+For the `depth` task, `predict(img, { colormap, depthViz })` picks the colormap
+(`"jet"` default, `"inferno"`, `"spectral"`, `"gray"`) and normalization
+(`"disparity"` default, `"metric"`); `annotate()` blends the returned map over the
+frame at `depthAlpha` (default `0.6`, `1` shows the raw map):
+
+```ts
+const results = await model.predict(img, { colormap: "spectral", depthViz: "metric" });
+await annotate(canvas, img, results, { depthAlpha: 0.6 });
+```
 
 ## ⚙️ Requirements & Notes
 
