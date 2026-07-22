@@ -238,6 +238,74 @@ fn test_depth_results_has_map() {
 }
 
 #[test]
+#[ignore = "downloads a YOLO depth model and sample image; annotates the depth map"]
+fn test_depth_annotation_blends_over_image() {
+    use ultralytics_inference::YOLOModel;
+    use ultralytics_inference::annotate::{annotate_image, load_image};
+
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+
+    // Pinned to CPU so the assertion is about the annotator, not the build's EPs.
+    let cfg = InferenceConfig::new().with_device(ultralytics_inference::Device::Cpu);
+    let mut model = YOLOModel::load_with_config(model_path.to_string_lossy().as_ref(), cfg)
+        .expect("depth model should load");
+    let source =
+        ultralytics_inference::download::download_image("https://ultralytics.com/images/bus.jpg")
+            .expect("sample image should download");
+    let results = model.predict(&source).expect("prediction should succeed");
+
+    let image = load_image(&source).expect("sample image should decode");
+    let annotated = annotate_image(&image, &results[0], None);
+    // The depth overlay is blended in place, so the annotation keeps the source size
+    // (a side-by-side composition would double the width).
+    assert_eq!(annotated.width(), image.width());
+    assert_eq!(annotated.height(), image.height());
+    // Blending at alpha 0.6 must actually change pixels.
+    assert_ne!(annotated.to_rgb8().into_raw(), image.to_rgb8().into_raw());
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+#[allow(clippy::cast_precision_loss)]
+#[ignore = "requires an NVIDIA GPU; downloads a YOLO depth model and sample image"]
+fn test_depth_cpu_matches_cuda() {
+    use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+
+    let temp_dir = tempdir().expect("temp dir should be created");
+    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+    let model_path = model_path.to_string_lossy().into_owned();
+    let source =
+        ultralytics_inference::download::download_image("https://ultralytics.com/images/bus.jpg")
+            .expect("sample image should download");
+
+    let depth_map = |device: Device| {
+        let cfg = InferenceConfig::new().with_device(device);
+        let mut model = YOLOModel::load_with_config(&model_path, cfg).expect("model should load");
+        let results = model.predict(&source).expect("prediction should succeed");
+        results[0]
+            .depth
+            .as_ref()
+            .expect("depth task should populate results.depth")
+            .data
+            .clone()
+    };
+
+    let cpu = depth_map(Device::Cpu);
+    let cuda = depth_map(Device::Cuda(0));
+    assert_eq!(cpu.shape(), cuda.shape());
+    // Both devices must letterbox identically, so only float/kernel noise remains. A
+    // geometry mismatch (padding or resampling) lands orders of magnitude above this.
+    let mean_abs = cpu
+        .iter()
+        .zip(cuda.iter())
+        .map(|(a, b)| (a - b).abs())
+        .sum::<f32>()
+        / cpu.len() as f32;
+    assert!(mean_abs < 0.05, "cpu vs cuda depth differs by {mean_abs} m");
+}
+
+#[test]
 fn test_inference_config_creation() {
     let config = InferenceConfig::default();
     assert_eq!(config.confidence_threshold, 0.25);
