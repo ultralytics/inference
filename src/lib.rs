@@ -247,7 +247,7 @@
 //! ```
 //!
 //! Annotated depth is the colorized map blended over the image at `alpha = 0.6` with the
-//! `jet` colormap and `disparity` normalization, matching Python's `Annotator.depth_map`.
+//! `jet` colormap and `disparity` normalization.
 //! [`annotate_image_with`](annotate::annotate_image_with) selects a different
 //! [`Colormap`](visualizer::color::Colormap) or [`DepthViz`](visualizer::color::DepthViz);
 //! the CLI always renders the default.
