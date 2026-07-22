@@ -186,9 +186,9 @@ pub fn annotate_image(
 ///
 /// Only depth results use `colormap`/`viz`/`depth_alpha`; every other task ignores them.
 /// `depth_alpha` is the depth-overlay opacity in `0.0..=1.0`:
-/// [`DEPTH_ALPHA`](crate::visualizer::color::DEPTH_ALPHA) (`0.6`, the [`annotate_image`]
-/// default) blends it over the image; `1.0` renders the full colorized map, `0.0` shows only
-/// the source. See [`annotate_image`] for the general behavior.
+/// [`DEPTH_ALPHA`] (`0.6`) is the [`annotate_image`] default and blends it over the image;
+/// `1.0` renders the full colorized map, `0.0` shows only the source. See [`annotate_image`]
+/// for the general behavior.
 #[must_use]
 pub fn annotate_image_with(
     image: &DynamicImage,
