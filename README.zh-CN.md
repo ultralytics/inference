@@ -412,7 +412,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `disparity` 归一化。这与 Ultralytics Python 的 `Annotator.depth_map` 默认行为一致，
 因此 CLI 无需任何深度相关参数，`--save` 产出与 Python `plot()` 相同的图像。
 
-可通过库接口显式指定配色与归一化方式（下面的 `Jet` + `Disparity` 即默认值，可替换为其他变体）：
+可通过库接口显式指定配色、归一化方式与叠加不透明度（下面的 `Jet` + `Disparity` + `0.6` 即 CLI 默认值，可替换为其他变体）：
 
 ```rust
 use ultralytics_inference::YOLOModel;
@@ -428,9 +428,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{:?} {:?}m", depth.data.shape(), depth.min_depth());
     }
 
-    // inferno / jet / spectral / gray，以及 disparity（逆深度）或 metric（线性）
+    // 配色：inferno / jet / spectral / gray；归一化：disparity / metric。
+    // 不透明度：0.6 叠加在原图上（CLI 默认），1.0 为完整彩色深度图。
     let image = load_image("image.jpg")?;
-    let annotated = annotate_image_with(&image, &results[0], None, Colormap::Jet, DepthViz::Disparity);
+    let annotated = annotate_image_with(&image, &results[0], None, Colormap::Jet, DepthViz::Disparity, 0.6);
     annotated.save("depth.jpg")?;
 
     Ok(())

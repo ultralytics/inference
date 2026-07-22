@@ -414,8 +414,8 @@ Depth results are rendered by blending the colorized depth map over the source i
 Ultralytics Python `Annotator.depth_map` default, so the CLI needs no depth flags and
 `--save` produces the same image Python's `plot()` does.
 
-Set the colormap and normalization explicitly through the library (`Jet` + `Disparity`
-below are the defaults; swap in any other variant):
+Set the colormap, normalization, and overlay opacity explicitly through the library
+(`Jet` + `Disparity` + `0.6` below match the CLI default; swap in any other variant):
 
 ```rust
 use ultralytics_inference::YOLOModel;
@@ -431,9 +431,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{:?} {:?}m", depth.data.shape(), depth.min_depth());
     }
 
-    // inferno / jet / spectral / gray, and disparity (inverse depth) or metric (linear)
+    // Colormap: inferno / jet / spectral / gray. Normalization: disparity / metric.
+    // Opacity: 0.6 blends over the image (CLI default), 1.0 is the full colorized map.
     let image = load_image("image.jpg")?;
-    let annotated = annotate_image_with(&image, &results[0], None, Colormap::Jet, DepthViz::Disparity);
+    let annotated = annotate_image_with(&image, &results[0], None, Colormap::Jet, DepthViz::Disparity, 0.6);
     annotated.save("depth.jpg")?;
 
     Ok(())
