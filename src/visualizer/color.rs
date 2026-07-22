@@ -142,8 +142,8 @@ fn jet(t: f32) -> [u8; 3] {
 
 /// Sample the reversed-Spectral colormap at normalized position `t` (clamped to `[0, 1]`).
 ///
-/// Diverging blue → cyan → green → yellow → red (matplotlib `Spectral_r`, the colormap
-/// `DepthAnything` uses), linearly interpolated between its 11 anchor colors.
+/// Diverging blue → cyan → green → yellow → red (matplotlib `Spectral_r`), linearly
+/// interpolated between its 11 anchor colors.
 #[must_use]
 #[allow(
     clippy::cast_possible_truncation,
@@ -173,7 +173,7 @@ fn spectral(t: f32) -> [u8; 3] {
 }
 
 /// Sample a grayscale ramp at normalized position `t` (clamped to `[0, 1]`): black (low) → white
-/// (high). Raw normalized depth with no color, matching Python's `colorize_depth(cmap="gray")`.
+/// (high). Raw normalized depth with no color.
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn gray(t: f32) -> [u8; 3] {
@@ -181,15 +181,14 @@ fn gray(t: f32) -> [u8; 3] {
     [g, g, g]
 }
 
-/// A continuous colormap for depth visualization.
+/// A continuous colormap for depth visualization; see each variant for its ramp.
 ///
-/// `Jet` (default) is the classic rainbow, the closest match to the rainbow ramp the
-/// Ultralytics iOS app renders depth with; `Inferno` matches Ultralytics' Python
-/// `colorize_depth`; `Spectral` is the diverging `Spectral_r` used by `DepthAnything`;
-/// `Gray` is raw grayscale.
+/// The CLI always renders the default (`Jet`). Pick another through
+/// [`annotate_image_with`](crate::annotate::annotate_image_with) in Rust, or the
+/// `colormap` option of `predict` in the wasm/npm API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Colormap {
-    /// Perceptual black → purple → orange → yellow (matches Python depth plots).
+    /// Perceptual black → purple → orange → yellow.
     Inferno,
     /// Classic rainbow: blue → cyan → green → yellow → red.
     #[default]
@@ -229,16 +228,13 @@ impl std::str::FromStr for Colormap {
     }
 }
 
-impl std::fmt::Display for Colormap {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Inferno => "inferno",
-            Self::Jet => "jet",
-            Self::Spectral => "spectral",
-            Self::Gray => "gray",
-        })
-    }
-}
+/// Default depth-overlay opacity: `(1 - alpha) * image + alpha * depth`.
+///
+/// The default [`annotate_image`](crate::annotate::annotate_image) (and the CLI's `--save`)
+/// blend at this; callers of
+/// [`annotate_image_with`](crate::annotate::annotate_image_with) or the wasm `annotate`'s
+/// `depthAlpha` can pass any opacity (`1.0` for the full colorized map).
+pub const DEPTH_ALPHA: f32 = 0.6;
 
 /// How depth values are normalized before colormapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -246,9 +242,10 @@ pub enum DepthViz {
     /// Metric min/max over valid pixels — near = low color, far = high color. Matches
     /// Python's `colorize_depth`.
     Metric,
-    /// Inverse depth (disparity) with a 2–98 percentile clip — near = high color (warm).
-    /// The `DepthAnything`-style visualization, and the default: better contrast,
-    /// outlier-robust, and it renders near = warm like the Ultralytics iOS app.
+    /// Inverse depth (`1/d`, disparity) with a 2–98 percentile clip — near = high color
+    /// (warm). The default: inverting depth spreads the color range over nearby detail
+    /// instead of the distant background, and the percentile clip keeps a few stray
+    /// pixels from washing it out.
     #[default]
     Disparity,
 }
@@ -264,15 +261,6 @@ impl std::str::FromStr for DepthViz {
                 "invalid depth-viz '{s}', expected one of: metric, disparity"
             )),
         }
-    }
-}
-
-impl std::fmt::Display for DepthViz {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Metric => "metric",
-            Self::Disparity => "disparity",
-        })
     }
 }
 
@@ -317,7 +305,7 @@ mod tests {
             DepthViz::Disparity
         );
         assert!("log".parse::<DepthViz>().is_err());
-        // Depth defaults to the rainbow ramp with near = warm, matching the Ultralytics iOS app.
+        // Depth defaults to the rainbow ramp (jet) with near = warm (disparity).
         assert_eq!(Colormap::default(), Colormap::Jet);
         assert_eq!(DepthViz::default(), DepthViz::Disparity);
     }

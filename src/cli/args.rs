@@ -2,7 +2,6 @@
 
 use crate::InferenceConfig;
 use crate::task::Task;
-use crate::visualizer::color::{Colormap, DepthViz};
 use clap::{Args, Parser, Subcommand};
 
 /// CLI arguments parser.
@@ -24,8 +23,6 @@ use clap::{Args, Parser, Subcommand};
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
-    --colormap <MAP>       Depth colormap: jet (default), inferno, spectral, or gray; depth task only
-    --depth-viz <MODE>     Depth normalization: disparity (default, DepthAnything-style) or metric; depth only
     --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack)
     --verbose              Show verbose output [default: true]
@@ -39,8 +36,6 @@ Examples:
     ultralytics-inference predict --task classify --source image.jpg
     ultralytics-inference predict --task semantic --source image.jpg
     ultralytics-inference predict --task depth --source image.jpg
-    ultralytics-inference predict --task depth --source image.jpg --colormap jet
-    ultralytics-inference predict --task depth --source image.jpg --colormap spectral --depth-viz disparity
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
@@ -143,15 +138,6 @@ pub struct PredictArgs {
     /// shell argument parsing issues (e.g. use --classes 0,1 not --classes 0, 1).
     #[arg(long, allow_hyphen_values = true)]
     pub classes: Option<String>,
-
-    /// Depth colormap for visualization (`jet`, `inferno`, `spectral`, or `gray`); depth task only
-    #[arg(long, default_value_t = Colormap::default())]
-    pub colormap: Colormap,
-
-    /// Depth normalization: `disparity` (default, DepthAnything-style, inverse depth +
-    /// percentile clip) or `metric` (min/max); depth task only
-    #[arg(long, default_value_t = DepthViz::default())]
-    pub depth_viz: DepthViz,
 }
 
 /// Parse class IDs from various formats: `"1,2,3"`, `"[1,2,3]"`, `"(1,2,3)"`

@@ -156,8 +156,8 @@ impl DepthMap {
     ///
     /// Uses `colormap` and normalization `viz`; shared by the native and web depth renderers.
     /// `Metric` normalizes the valid-pixel depth min/max (matches Python). `Disparity`
-    /// normalizes inverse depth clipped to the 2–98 percentile — the `DepthAnything` look,
-    /// where near pixels read warm and single-pixel outliers no longer wash out the range.
+    /// normalizes inverse depth (`1/d`) clipped to the 2–98 percentile, so near pixels read
+    /// warm and single-pixel outliers no longer wash out the range.
     #[must_use]
     pub fn colorize(&self, colormap: Colormap, viz: DepthViz) -> Vec<[u8; 3]> {
         let data = &self.data;

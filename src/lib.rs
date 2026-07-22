@@ -135,8 +135,6 @@
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
-//! | `--colormap` | | Depth colormap: `jet`, `inferno`, `spectral`, or `gray` (depth task only) | `jet` |
-//! | `--depth-viz` | | Depth normalization: `disparity` or `metric` (depth task only) | `disparity` |
 //! | `--show` | | Display results in a window | `false` |
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, xnnpack) | `cpu` |
 //! | `--verbose` | | Show verbose output | `true` |
@@ -247,6 +245,12 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! Annotated depth is the colorized map blended over the image at `alpha = 0.6` with the
+//! `jet` colormap and `disparity` normalization.
+//! [`annotate_image_with`](annotate::annotate_image_with) selects a different
+//! [`Colormap`](visualizer::color::Colormap) or [`DepthViz`](visualizer::color::DepthViz);
+//! the CLI always renders the default.
 //!
 //! ## Custom Configuration
 //!

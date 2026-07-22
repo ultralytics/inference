@@ -6,7 +6,7 @@
 //! annotations on images based on inference results.
 
 use crate::results::Results;
-use crate::visualizer::color::{COLORS, Colormap, DepthViz, POSE_COLORS};
+use crate::visualizer::color::{COLORS, Colormap, DEPTH_ALPHA, DepthViz, POSE_COLORS};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
@@ -177,14 +177,18 @@ pub fn annotate_image(
         top_k,
         Colormap::default(),
         DepthViz::default(),
+        DEPTH_ALPHA,
     )
 }
 
-/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap` and
-/// normalization `viz`.
+/// Annotate an image like [`annotate_image`], but with an explicit depth `colormap`,
+/// normalization `viz`, and overlay opacity `depth_alpha`.
 ///
-/// Only depth results use `colormap`/`viz`; every other task ignores them. See
-/// [`annotate_image`] for the general behavior.
+/// Only depth results use `colormap`/`viz`/`depth_alpha`; every other task ignores them.
+/// `depth_alpha` is the depth-overlay opacity in `0.0..=1.0`:
+/// [`DEPTH_ALPHA`](crate::visualizer::color::DEPTH_ALPHA) (`0.6`, the [`annotate_image`]
+/// default) blends it over the image; `1.0` renders the full colorized map, `0.0` shows only
+/// the source. See [`annotate_image`] for the general behavior.
 #[must_use]
 pub fn annotate_image_with(
     image: &DynamicImage,
@@ -192,6 +196,7 @@ pub fn annotate_image_with(
     top_k: Option<usize>,
     colormap: Colormap,
     viz: DepthViz,
+    depth_alpha: f32,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
 
@@ -221,43 +226,42 @@ pub fn annotate_image_with(
     draw_obb(&mut img, result, font.as_ref());
     draw_classification(&mut img, result, font.as_ref(), top_k.unwrap_or(5));
 
-    // Depth is rendered side-by-side (original | colorized depth), matching the Python
-    // `plot(side_by_side=True)`, so it replaces the returned image rather than drawing in place.
-    if let Some(side_by_side) = compose_depth_side_by_side(&img, result, colormap, viz) {
-        return DynamicImage::ImageRgb8(side_by_side);
-    }
+    draw_depth_map(&mut img, result, colormap, viz, depth_alpha);
 
     DynamicImage::ImageRgb8(img)
 }
 
-/// Build an `original | colorized-depth` side-by-side image, or `None` when the result
-/// has no depth map. Colorization (`colormap` + normalization `viz`) is delegated to
+/// Draw the colorized depth map over `img` in place at opacity `alpha`
+/// (`(1 - alpha) * image + alpha * depth`): `1.0` is the full colorized map, lower blends.
+///
+/// No-op when the result carries no depth map or the map's resolution disagrees with the
+/// image. Colorization (`colormap` + normalization `viz`) is delegated to
 /// [`DepthMap::colorize`](crate::results::DepthMap::colorize).
-fn compose_depth_side_by_side(
-    img: &image::RgbImage,
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn draw_depth_map(
+    img: &mut image::RgbImage,
     result: &Results,
     colormap: Colormap,
     viz: DepthViz,
-) -> Option<image::RgbImage> {
-    let depth = result.depth.as_ref()?;
+    alpha: f32,
+) {
+    let Some(depth) = result.depth.as_ref() else {
+        return;
+    };
     let (width, height) = img.dimensions();
-    let (w, h) = (width as usize, height as usize);
     // Depth map is stored at original image resolution; bail if it disagrees with the image.
-    if depth.data.shape() != [h, w] {
-        return None;
+    if depth.data.shape() != [height as usize, width as usize] {
+        return;
     }
-    let colored = depth.colorize(colormap, viz);
-
-    let mut out = image::RgbImage::new(width * 2, height);
-    for y in 0..h {
-        for x in 0..w {
-            #[allow(clippy::cast_possible_truncation)]
-            let (px, py) = (x as u32, y as u32);
-            out.put_pixel(px, py, *img.get_pixel(px, py));
-            out.put_pixel(px + width, py, Rgb(colored[y * w + x]));
+    let alpha = alpha.clamp(0.0, 1.0);
+    // `colorize` returns row-major RGB, the same order `pixels_mut` walks.
+    for (px, heat) in img.pixels_mut().zip(depth.colorize(colormap, viz)) {
+        for (channel, &h) in px.0.iter_mut().zip(heat.iter()) {
+            *channel = f32::from(*channel)
+                .mul_add(1.0 - alpha, f32::from(h) * alpha)
+                .round() as u8;
         }
     }
-    Some(out)
 }
 
 /// Draw a thick line segment between two points using Bresenham's algorithm.
@@ -1191,15 +1195,17 @@ mod tests {
     }
 
     #[test]
-    fn test_annotate_depth_side_by_side() {
+    fn test_annotate_depth_blends_in_place() {
         let mut r = base_results(HashMap::new());
         let mut depth = ndarray::Array2::<f32>::zeros((128, 128));
         depth[[10, 10]] = 5.0;
         depth[[20, 20]] = 2.0;
         r.depth = Some(DepthMap::new(depth, (128, 128)));
         let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
-        // Depth renders original | colorized-depth, so the output is double width.
-        assert_eq!(out.width(), 256);
+        // Depth blends over the image, so the output keeps the input size.
+        assert_eq!(out.width(), 128);
         assert_eq!(out.height(), 128);
+        // A valid pixel picks up the colormap, so it no longer matches the black input.
+        assert_ne!(out.to_rgb8().get_pixel(10, 10).0, [0, 0, 0]);
     }
 }

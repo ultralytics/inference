@@ -186,7 +186,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --rect
 # Semantic segmentation: write per-image PNG class maps to runs/semantic/predictN/results/
 ultralytics-inference predict --task semantic --source cityscapes/ --save-json
 
-# Depth estimation: save a colorized side-by-side (image | depth) to runs/depth/predictN/
+# Depth estimation: blend the colorized depth over the image into runs/depth/predictN/
 ultralytics-inference predict --task depth --source image.jpg
 ```
 
@@ -264,8 +264,6 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                       | `true`                                |
 | `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                                        | `false`                               |
 | `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                                                     | `false`                               |
-| `--colormap`    |       | Depth colormap: `jet`, `inferno`, `spectral`, or `gray` (depth task only)                                                                                                                             | `jet`                                 |
-| `--depth-viz`   |       | Depth normalization: `disparity` (inverse depth, near = high color) or `metric` (min/max, near = low color) (depth task only)                                                                         | `disparity`                           |
 | `--show`        |       | Display results in a window                                                                                                                                                                           | `false`                               |
 | `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                 |
 | `--verbose`     |       | Show verbose output                                                                                                                                                                                   | `true`                                |
@@ -408,6 +406,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+**Depth Visualization:**
+
+Depth results are rendered by blending the colorized depth map over the source image at
+`alpha = 0.6`, using the `jet` colormap and `disparity` normalization. This matches the
+Ultralytics Python `Annotator.depth_map` default, so the CLI needs no depth flags and
+`--save` produces the same image Python's `plot()` does.
+
+Set the colormap and normalization explicitly through the library (`Jet` + `Disparity`
+below are the defaults; swap in any other variant):
+
+```rust
+use ultralytics_inference::YOLOModel;
+use ultralytics_inference::annotate::{annotate_image_with, load_image};
+use ultralytics_inference::visualizer::color::{Colormap, DepthViz};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut model = YOLOModel::load("yolo26n-depth.onnx")?;
+    let results = model.predict("image.jpg")?;
+
+    // Per-pixel depth in meters, at the original image resolution
+    if let Some(depth) = &results[0].depth {
+        println!("{:?} {:?}m", depth.data.shape(), depth.min_depth());
+    }
+
+    // inferno / jet / spectral / gray, and disparity (inverse depth) or metric (linear)
+    let image = load_image("image.jpg")?;
+    let annotated = annotate_image_with(&image, &results[0], None, Colormap::Jet, DepthViz::Disparity);
+    annotated.save("depth.jpg")?;
+
+    Ok(())
+}
+```
+
+`disparity` colors `1/d` instead of `d`, clipped to the 2nd-98th percentile. Inverting the
+depth spends the color range on nearby detail rather than the distant background, so near
+objects read warm and a few stray pixels cannot wash out the rest. `metric` colors depth
+directly, linearly between its min and max.
 
 For runnable programs you can copy and adapt, see the [examples](examples/README.md) directory.
 

@@ -91,9 +91,9 @@ pub(crate) struct JsResults {
     /// class-filtered pixels.
     #[serde(with = "serde_bytes")]
     semantic_mask: Vec<u8>,
-    /// Depth map as an opaque `RGBA` image (`width*height*4`), colorized with the
+    /// Depth map as a translucent `RGBA` overlay (`width*height*4`), colorized with the
     /// requested colormap over valid (`>0`) pixels; empty for other tasks. A
-    /// `Uint8Array`, drawable straight onto a canvas.
+    /// `Uint8Array`, drawable straight onto a canvas to blend over the frame.
     #[serde(with = "serde_bytes")]
     depth: Vec<u8>,
     /// Depth range `[min, max]` in meters over valid pixels; `None` for other tasks.
@@ -256,10 +256,13 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
     Vec::new()
 }
 
-/// Colorize the depth map into an opaque RGBA image (`width*height*4`) with the given
+/// Colorize the depth map into an RGBA overlay (`width*height*4`) with the given
 /// `colormap` and normalization `viz`; invalid pixels are black. Empty when the result has
 /// no depth map or its resolution does not match the image.
-#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+///
+/// Fully opaque (`alpha = 255`): the blend opacity is applied by the consumer at draw
+/// time (`annotate` composites at `0.6` to match native, the demo exposes a slider), so
+/// this stays the raw colorized map and can be shown at full opacity.
 fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8> {
     let Some(depth) = &r.depth else {
         return Vec::new();
@@ -270,7 +273,7 @@ fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8
     }
     let mut buf = vec![0u8; w * h * 4];
     for (px, rgb) in buf.chunks_exact_mut(4).zip(depth.colorize(colormap, viz)) {
-        px.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]); // invalid pixels are [0,0,0] -> opaque black
+        px.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
     }
     buf
 }
