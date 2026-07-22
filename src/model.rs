@@ -1277,10 +1277,8 @@ impl YOLOModel {
         let start_preprocess = Instant::now();
         let mut preprocessed_results = Vec::with_capacity(images.len());
 
-        // Check if we can use rect inference
-        // 1. Enabled in config
-        // 2. Model supports dynamic shapes
-        // 3. Batch is homogeneous (all images have same dimensions) or batch size is 1
+        // Rect inference additionally needs a homogeneous batch: mixed sizes can't share
+        // one padded shape, so they fall back to square below.
         let use_rect = self.rect_enabled();
         let uniform_shape = if images.len() > 1 {
             let first_dims = images[0].dimensions();
