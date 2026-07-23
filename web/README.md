@@ -16,8 +16,8 @@
 
 Run [Ultralytics](https://www.ultralytics.com/) YOLO models directly in the browser,
 with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm
-fallback) and covers detection, segmentation, pose, classification, OBB, and
-semantic segmentation, behind a small TypeScript API with a built-in
+fallback) and covers detection, segmentation, pose, classification, OBB,
+semantic segmentation, and depth estimation, behind a small TypeScript API with a built-in
 `annotate()` that draws results straight to a canvas.
 
 ```ts
@@ -108,7 +108,7 @@ async function frame() {
 Runs [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8),
 [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and
 [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for detection,
-segmentation, pose, OBB, classification, and semantic segmentation.
+segmentation, pose, OBB, classification, semantic segmentation, and depth estimation.
 
 Pass a bare ONNX name and it is **auto-downloaded** from the
 [Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the
@@ -119,8 +119,9 @@ await YOLO.load("yolo26n.onnx"); // auto-downloads from the release: .../downloa
 ```
 
 Auto-download covers **Ultralytics YOLO26**, **Ultralytics YOLO11**, and **Ultralytics YOLOv8** in sizes `n/s/m/l/x`
-with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, and `-sem` (semantic, Ultralytics YOLO26
-only). A value containing a `/` or a scheme is used as a URL/path as-is.
+with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, `-sem` (semantic), and `-depth` (depth
+estimation) — the last two Ultralytics YOLO26 only. A value containing a `/` or a scheme is
+used as a URL/path as-is.
 
 > **CORS note:** GitHub release assets do not send `Access-Control-Allow-Origin`,
 > so a browser cannot fetch them cross-origin. Host the `.onnx` **same-origin**
@@ -130,10 +131,8 @@ only). A value containing a `/` or a scheme is used as a URL/path as-is.
 
 ## 📐 Results Shape
 
-`predict()` resolves to a `Results` object shaped like the Ultralytics
-`Results`:
-
-Field names match the Rust/Ultralytics `Results` API 1-1:
+`predict()` resolves to a `Results` object whose field names match the
+Rust/Ultralytics `Results` API 1-1:
 
 | Field              | Type                                                                 | Tasks                 |
 | ------------------ | -------------------------------------------------------------------- | --------------------- |
