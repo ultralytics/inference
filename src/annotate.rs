@@ -16,6 +16,10 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+/// Re-exported so `annotate::find_next_run_dir` keeps working; the implementation lives in
+/// [`crate::io`] alongside the other save-path helpers.
+pub use crate::io::find_next_run_dir;
+
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
@@ -46,15 +50,6 @@ fn render_scale(width: u32, height: u32) -> (f32, i32) {
     let scale_factor = (max_dim / 640.0).max(1.0);
     let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
     (scale_factor, thickness)
-}
-
-/// Return the next unused run directory under `base` with the given `prefix`.
-///
-/// Tries `<base>/<prefix>` first, then `<base>/<prefix>2`, `<base>/<prefix>3`, and so on
-/// until a path that does not yet exist is found.
-#[must_use]
-pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
-    crate::io::find_next_run_dir(base, prefix)
 }
 
 /// Load an image from `path`, working around a zune-jpeg stride bug for JPEG files.
@@ -1075,17 +1070,6 @@ mod tests {
         // Indexing beyond the palette wraps rather than panicking.
         let _ = get_class_color(0);
         let _ = get_class_color(1000);
-    }
-
-    #[test]
-    fn test_find_next_run_dir_numbering() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path().to_string_lossy().into_owned();
-        let first = find_next_run_dir(&base, "predict");
-        assert!(first.ends_with("predict"));
-        std::fs::create_dir_all(&first).unwrap();
-        let second = find_next_run_dir(&base, "predict");
-        assert!(second.ends_with("predict2"));
     }
 
     #[test]

@@ -128,8 +128,8 @@ pub fn run_prediction(args: &PredictArgs) {
     let need_predict_dir = needs_predict_dir(save, save_json, model.task());
 
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
-        let parent_dir = predict_parent_dir(model.task());
-        let dir = find_next_run_dir(parent_dir, "predict");
+        let parent_dir = format!("runs/{}", model.task().as_str());
+        let dir = find_next_run_dir(&parent_dir, "predict");
         if let Err(e) = crate::io::ensure_dir(Path::new(&dir)) {
             error!("Failed to create save directory '{dir}': {e}");
             process::exit(1);
@@ -245,7 +245,7 @@ pub fn run_prediction(args: &PredictArgs) {
                 {
                     for result in results {
                         // Build detection summary
-                        let detection_summary = format_detection_summary(&result);
+                        let detection_summary = result.detection_summary();
 
                         // Get image dimensions from result
                         let inference_shape = result.inference_shape();
@@ -482,18 +482,6 @@ fn needs_predict_dir(save: bool, save_json: bool, task: Task) -> bool {
     }
 }
 
-const fn predict_parent_dir(task: Task) -> &'static str {
-    match task {
-        Task::Detect => "runs/detect",
-        Task::Segment => "runs/segment",
-        Task::Pose => "runs/pose",
-        Task::Classify => "runs/classify",
-        Task::Obb => "runs/obb",
-        Task::Semantic => "runs/semantic",
-        Task::Depth => "runs/depth",
-    }
-}
-
 fn needs_results_dir(save_json: bool, task: Task) -> bool {
     save_json && task == Task::Semantic
 }
@@ -530,12 +518,6 @@ fn semantic_output_stem(image_path: &str, frame_idx: usize, total_frames: Option
     } else {
         format!("{base_stem}_{frame_idx:06}")
     }
-}
-
-/// Count detections per class and format as summary string (e.g., "4 persons, 1 bus").
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn format_detection_summary(result: &Results) -> String {
-    result.detection_summary()
 }
 
 #[cfg(test)]
@@ -702,17 +684,6 @@ mod tests {
     }
 
     #[test]
-    fn test_predict_parent_dir_by_task() {
-        assert_eq!(predict_parent_dir(Task::Detect), "runs/detect");
-        assert_eq!(predict_parent_dir(Task::Segment), "runs/segment");
-        assert_eq!(predict_parent_dir(Task::Pose), "runs/pose");
-        assert_eq!(predict_parent_dir(Task::Classify), "runs/classify");
-        assert_eq!(predict_parent_dir(Task::Obb), "runs/obb");
-        assert_eq!(predict_parent_dir(Task::Semantic), "runs/semantic");
-        assert_eq!(predict_parent_dir(Task::Depth), "runs/depth");
-    }
-
-    #[test]
     fn test_predict_dir_needed_for_saves_and_semantic_json() {
         assert!(needs_predict_dir(false, true, Task::Semantic));
         assert!(!needs_predict_dir(false, true, Task::Detect));
@@ -757,7 +728,7 @@ mod tests {
         );
     }
 
-    /// Test `format_detection_summary` with boxes - single detection.
+    /// Test `Results::detection_summary` with boxes - single detection.
     #[test]
     fn test_format_summary_single_box() {
         // Boxes data: [x1, y1, x2, y2, conf, cls] - 6 columns
@@ -774,11 +745,11 @@ mod tests {
         );
         result.boxes = Some(boxes);
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "1 person");
     }
 
-    /// Test `format_detection_summary` with boxes - multiple classes.
+    /// Test `Results::detection_summary` with boxes - multiple classes.
     #[test]
     fn test_format_summary_multiple_boxes() {
         // 3 boxes: 2 persons (class 0), 1 bus (class 2)
@@ -802,11 +773,11 @@ mod tests {
         );
         result.boxes = Some(boxes);
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "2 persons, 1 bus");
     }
 
-    /// Test `format_detection_summary` with empty boxes.
+    /// Test `Results::detection_summary` with empty boxes.
     #[test]
     fn test_format_summary_empty_boxes() {
         let data = Array2::from_shape_vec((0, 6), vec![]).unwrap();
@@ -821,7 +792,7 @@ mod tests {
         );
         result.boxes = Some(boxes);
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "(no detections)");
     }
 
@@ -839,11 +810,11 @@ mod tests {
             (2, 3),
         ));
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "person, car, bus");
     }
 
-    /// Test `format_detection_summary` with OBB detections.
+    /// Test `Results::detection_summary` with OBB detections.
     #[test]
     fn test_format_summary_obb() {
         // OBB data: [x, y, w, h, rotation, conf, cls] - 7 columns
@@ -866,11 +837,11 @@ mod tests {
         );
         result.obb = Some(obb);
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "2 cars");
     }
 
-    /// Test `format_detection_summary` with empty OBB.
+    /// Test `Results::detection_summary` with empty OBB.
     #[test]
     fn test_format_summary_empty_obb() {
         let data = Array2::from_shape_vec((0, 7), vec![]).unwrap();
@@ -885,11 +856,11 @@ mod tests {
         );
         result.obb = Some(obb);
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "(no detections)");
     }
 
-    /// Test `format_detection_summary` with classification probs.
+    /// Test `Results::detection_summary` with classification probs.
     #[test]
     fn test_format_summary_probs() {
         let data = ndarray::Array1::from_vec(vec![0.1, 0.7, 0.15, 0.03, 0.02]);
@@ -914,13 +885,13 @@ mod tests {
         );
         result.probs = Some(probs);
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         // Top5 should include dog (0.7)
         assert!(summary.contains("dog"));
         assert!(summary.contains("0.70"));
     }
 
-    /// Test `format_detection_summary` with no results (empty result).
+    /// Test `Results::detection_summary` with no results (empty result).
     #[test]
     fn test_format_summary_no_results() {
         let result = Results::new(
@@ -931,11 +902,11 @@ mod tests {
             (640, 640),
         );
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "(no detections)");
     }
 
-    /// Test `format_detection_summary` with unknown class (uses "object" fallback).
+    /// Test `Results::detection_summary` with unknown class (uses "object" fallback).
     #[test]
     fn test_format_summary_unknown_class() {
         // Class 99 doesn't exist in names
@@ -952,7 +923,7 @@ mod tests {
         );
         result.boxes = Some(boxes);
 
-        let summary = format_detection_summary(&result);
+        let summary = result.detection_summary();
         assert_eq!(summary, "1 object");
     }
 }

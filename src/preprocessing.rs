@@ -490,27 +490,13 @@ fn calculate_letterbox_params(
     (geom, (scale, scale))
 }
 
-/// Convert an RGB image to a normalized NCHW tensor (FP32).
-///
-/// # Arguments
-///
-/// * `image` - RGB image to convert.
-///
-/// # Returns
-///
-/// Array4 with shape (1, 3, H, W) and values in [0, 1].
-fn image_to_tensor(image: &RgbImage) -> Array4<f32> {
-    image_to_tensor_generic(image, 0.0, |v| f32::from(v) / 255.0)
-}
-
 /// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.
 ///
-/// Shared structure for the f32 and f16 variants: allocates the `(1, 3, H, W)`
-/// tensor, splits it into per-channel slices, and fills each pixel with
-/// `convert` applied to the source byte. The caller supplies the element type's
-/// zero value and the per-byte conversion so each variant keeps its exact
-/// arithmetic (the f16 path hoists its scale constant into the closure).
-fn image_to_tensor_generic<T: Clone>(
+/// Allocates the `(1, 3, H, W)` tensor, splits it into per-channel slices, and fills each
+/// pixel with `convert` applied to the source byte. The caller supplies the element type's
+/// zero value and the per-byte conversion, so the f32 and f16 callers each keep their exact
+/// arithmetic (the f16 one hoists its scale constant into the closure).
+fn image_to_tensor<T: Clone>(
     image: &RgbImage,
     zero: T,
     mut convert: impl FnMut(u8) -> T,
@@ -532,25 +518,6 @@ fn image_to_tensor_generic<T: Clone>(
     }
 
     tensor
-}
-
-/// Convert an RGB image to a normalized NCHW tensor (FP16).
-///
-/// Converts directly from u8 to f16, avoiding intermediate f32 conversion.
-///
-/// # Arguments
-///
-/// * `image` - RGB image to convert.
-///
-/// # Returns
-///
-/// Array4 with shape (1, 3, H, W) and f16 values in [0, 1].
-fn image_to_tensor_f16(image: &RgbImage) -> Array4<f16> {
-    // Precompute 1/255 as f16 for direct conversion
-    let scale = f16::from_f32(1.0 / 255.0);
-    image_to_tensor_generic(image, f16::ZERO, move |v| {
-        f16::from_f32(f32::from(v)) * scale
-    })
 }
 
 /// Convert a `DynamicImage` to an HWC ndarray.
@@ -640,14 +607,15 @@ pub fn preprocess_image_center_crop(
     let (cropped, scale) = center_crop_image(image, target_size);
 
     // Convert to normalized NCHW tensor
-    let tensor = image_to_tensor(&cropped);
+    let tensor = image_to_tensor(&cropped, 0.0, |v| f32::from(v) / 255.0);
 
-    // Optionally compute FP16 tensor
-    let tensor_f16 = if half {
-        Some(image_to_tensor_f16(&cropped))
-    } else {
-        None
-    };
+    // Optionally compute FP16 tensor, converting u8 straight to f16 with a hoisted 1/255.
+    let tensor_f16 = half.then(|| {
+        let scale = f16::from_f32(1.0 / 255.0);
+        image_to_tensor(&cropped, f16::ZERO, move |v| {
+            f16::from_f32(f32::from(v)) * scale
+        })
+    });
 
     // For classification, we don't need complex coordinate mapping back to original
     // But we provide approximate scale/padding to satisfy strict types if needed.
@@ -809,6 +777,24 @@ mod tests {
         assert!((clipped[1] - 0.0).abs() < 1e-6);
         assert!((clipped[2] - 640.0).abs() < 1e-6);
         assert!((clipped[3] - 480.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_preprocess_image_center_crop() {
+        // Classification path: center-crop to the model size, normalize to [0, 1], and
+        // emit the FP16 tensor only when asked. A non-square source exercises the crop.
+        let img = image::DynamicImage::new_rgb8(400, 300);
+        for half in [false, true] {
+            let res = preprocess_image_center_crop(&img, (224, 224), half);
+            assert_eq!(res.tensor.dim(), (1, 3, 224, 224));
+            assert_eq!(res.orig_shape, (300, 400));
+            assert_eq!(res.padding, (0.0, 0.0));
+            assert!(res.tensor.iter().all(|v| (0.0..=1.0).contains(v)));
+            assert_eq!(res.tensor_f16.is_some(), half);
+            if let Some(t16) = &res.tensor_f16 {
+                assert_eq!(t16.dim(), res.tensor.dim());
+            }
+        }
     }
 
     #[test]
