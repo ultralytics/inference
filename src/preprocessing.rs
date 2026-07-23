@@ -780,6 +780,24 @@ mod tests {
     }
 
     #[test]
+    fn test_preprocess_image_center_crop() {
+        // Classification path: center-crop to the model size, normalize to [0, 1], and
+        // emit the FP16 tensor only when asked. A non-square source exercises the crop.
+        let img = image::DynamicImage::new_rgb8(400, 300);
+        for half in [false, true] {
+            let res = preprocess_image_center_crop(&img, (224, 224), half);
+            assert_eq!(res.tensor.dim(), (1, 3, 224, 224));
+            assert_eq!(res.orig_shape, (300, 400));
+            assert_eq!(res.padding, (0.0, 0.0));
+            assert!(res.tensor.iter().all(|v| (0.0..=1.0).contains(v)));
+            assert_eq!(res.tensor_f16.is_some(), half);
+            if let Some(t16) = &res.tensor_f16 {
+                assert_eq!(t16.dim(), res.tensor.dim());
+            }
+        }
+    }
+
+    #[test]
     fn test_preprocess_image_static_centered_letterbox() {
         // 480×640 wide image, target=1024×1024, is_dynamic=false.
         // Scale = min(1024/480, 1024/640) = 1024/640 = 1.6; nh=768, nw=1024, pad_top≈128.
