@@ -1030,7 +1030,7 @@ fn postprocess_segment(
 /// `min_transposed_features` (pose passes `4 + kpt_features`, OBB passes `6`); otherwise
 /// the output is treated as the transposed `[1, preds, features]`. 2D shapes pick the
 /// larger axis as the prediction count; anything else yields `(0, false)`.
-fn parse_transposed_shape(
+const fn parse_transposed_shape(
     shape: &[usize],
     expected_features: usize,
     min_transposed_features: usize,
