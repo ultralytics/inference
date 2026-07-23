@@ -21,6 +21,9 @@ const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 /// Variants only available for the yolo26 family.
 const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth"];
 
+/// Every auto-downloadable model filename, as the cross product of family, size, and variant.
+///
+/// `-sem` and `-depth` are only emitted for the `yolo26` family.
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES
         .iter()
@@ -40,6 +43,7 @@ fn downloadable_models() -> Vec<String> {
         .collect()
 }
 
+/// Human-readable summary of the supported families, sizes, and variants for error messages.
 fn supported_models_help() -> String {
     let variants_display = [
         "detect",
@@ -120,6 +124,7 @@ fn generate_bar(progress: f64, width: usize) -> String {
     format!("{}{}", "━".repeat(filled), "─".repeat(width - filled))
 }
 
+/// Whether a download error is worth retrying: timeouts, I/O errors, and 5xx responses.
 const fn is_transient(e: &ureq::Error) -> bool {
     match e {
         ureq::Error::Timeout(_) | ureq::Error::Io(_) => true,

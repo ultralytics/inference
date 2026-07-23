@@ -708,7 +708,7 @@ export class YOLO {
     return new YOLO(new LiteRtEngine(pipeline, backend));
   }
 
-  /** The model's task (`detect`, `segment`, `pose`, `classify`, `obb`, `semantic`). */
+  /** The model's task (`detect`, `segment`, `pose`, `classify`, `obb`, `semantic`, `depth`). */
   get task(): string {
     return this.engine.task;
   }

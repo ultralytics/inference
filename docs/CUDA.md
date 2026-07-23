@@ -89,7 +89,7 @@ The first run builds and caches a TensorRT engine at `<model_dir>/.trt_cache/<mo
 The TensorRT EP compiles a hardware-specific engine the **first time a given
 model + input shape + precision is loaded**. This happens _during model load_
 (inside `YOLOModel::load*`), and it can take from tens of seconds to several
-minutes, it is **not** a hang.
+minutes; it is **not** a hang.
 
 | Model input                            | Approx. first-build time |
 | -------------------------------------- | ------------------------ |
@@ -100,8 +100,9 @@ What to expect and how to avoid surprises:
 
 - **It's cached.** Builds are written to `<model_dir>/.trt_cache/<stem>_{fp16,fp32}/`
   (engine **and** timing cache). Later loads of the same model reuse them and
-  start in seconds. **Keep `.trt_cache/` between runs** (don't delete it / add it
-  to `.gitignore`, not to clean builds) to avoid paying the cost again.
+  start in seconds. **Keep `.trt_cache/` between runs** to avoid paying the cost
+  again: add it to `.gitignore` rather than deleting it, and leave it in place
+  across clean builds.
 - **Cache is keyed to the build context.** A new engine is built whenever the
   model file, GPU/driver/TensorRT version, precision (`--half`), or **input
   shape** changes. **Dynamic-shape models rebuild per new input size** - feed

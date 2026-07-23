@@ -126,6 +126,7 @@ pub(crate) struct CudaStreamHandle {
 }
 
 impl CudaStreamHandle {
+    /// Open a CUDA context on `device_id` and take its default stream.
     pub(crate) fn open(device_id: usize) -> Result<Self> {
         let ctx = CudaContext::new(device_id).map_err(|e| {
             InferenceError::ModelLoadError(format!("cudarc CudaContext::new({device_id}): {e:?}"))

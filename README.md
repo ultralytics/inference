@@ -328,7 +328,7 @@ ultralytics-inference = { git = "https://github.com/ultralytics/inference.git" }
 **Basic Usage:**
 
 ```rust
-use ultralytics_inference::{YOLOModel, InferenceConfig};
+use ultralytics_inference::YOLOModel;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load model - metadata (classes, task, imgsz) is read automatically
@@ -673,13 +673,13 @@ Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
 **Key findings:**
 
 - **FP16 models are ~50% smaller** (5.2 MB vs 10.2 MB)
-- **FP32 is slightly faster on CPU** (~21ms vs ~24ms) due to CPU's native FP32 support
+- **FP32 is slightly faster on CPU** (~21ms vs ~24ms) due to the CPU's native FP32 support
 - FP16 requires upcasting to FP32 for computation on most CPUs, adding overhead
 - Use **FP32 for CPU** inference, **FP16 for GPU** (where it provides speedup)
 
 ### Threading Optimization
 
-ONNX Runtime threading is set to auto (`num_threads: 0`) which lets ORT choose optimal thread count:
+ONNX Runtime threading is set to auto (`num_threads: 0`), which lets ORT choose the optimal thread count:
 
 - Manual threading (4 threads): ~40ms inference
 - Auto threading (0 = ORT decides): ~21ms inference

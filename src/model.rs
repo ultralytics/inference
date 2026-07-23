@@ -601,6 +601,7 @@ impl YOLOModel {
         bind_compute_stream!(ep, compute_stream)
     }
 
+    /// Read the running macOS `(major, minor)` version from `sw_vers`, or `None` if unavailable.
     #[cfg(feature = "coreml")]
     fn macos_version() -> Option<(u32, u32)> {
         let out = std::process::Command::new("sw_vers")
@@ -615,6 +616,7 @@ impl YOLOModel {
         ))
     }
 
+    /// Build the `CoreML` execution provider, tuned for the model at `model_path`.
     #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
         use ort::ep::coreml::{ModelFormat, SpecializationStrategy};
@@ -1620,15 +1622,10 @@ impl YOLOModel {
         Ok((outputs, t.elapsed().as_secs_f64() * 1000.0))
     }
 
-    /// Run ONNX inference with FP32 input, calling `cb` with zero-copy output views.
-    ///
-    /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
-    /// buffers (no extra Vec allocation), plus the measured `session.run()` time in ms.
-    /// This avoids a ~40 ms memcpy for large semantic segmentation outputs.
+    /// Feed an FP32 input tensor and run timed inference, returning the ORT outputs.
     ///
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
     #[cfg_attr(coverage_nightly, coverage(off))]
-    /// Feed an FP32 input tensor and run timed inference, returning the ORT outputs.
     fn run_f32_input<'s>(
         session: &'s mut Session,
         input_name: &str,
@@ -1654,6 +1651,11 @@ impl YOLOModel {
         Self::run_timed(session, ort::inputs![input_name => input_tensor])
     }
 
+    /// Run ONNX inference with FP32 input, calling `cb` with zero-copy output views.
+    ///
+    /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
+    /// buffers (no extra Vec allocation), plus the measured `session.run()` time in ms.
+    /// This avoids a ~40 ms memcpy for large semantic segmentation outputs.
     fn run_inference_with<R>(
         session: &mut Session,
         input_name: &str,

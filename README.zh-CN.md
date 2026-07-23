@@ -327,7 +327,7 @@ ultralytics-inference = { git = "https://github.com/ultralytics/inference.git" }
 **基础用法：**
 
 ```rust
-use ultralytics_inference::{YOLOModel, InferenceConfig};
+use ultralytics_inference::YOLOModel;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 加载模型 - 自动读取元数据（类别、任务、imgsz）

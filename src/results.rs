@@ -245,6 +245,10 @@ pub struct Results {
     pub path: String,
 }
 
+/// Format the first `count` class IDs as a summary like `"4 persons, 1 bus"`.
+///
+/// Entries are sorted by class ID, names are pluralized via [`crate::utils::pluralize`] when
+/// the count is above 1, and unknown IDs fall back to `"object"`. Empty when `count` is 0.
 fn format_class_counts(
     cls: &ArrayView1<'_, f32>,
     count: usize,
