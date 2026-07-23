@@ -736,22 +736,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_letterbox_params_square() {
+    fn test_letterbox_params() {
+        // Square input into a square target: exact fit, no padding.
         let (geom, _scale) = calculate_letterbox_params(640, 640, (640, 640), 32);
+        assert_eq!((geom.new_w, geom.new_h), (640, 640));
+        assert_eq!((geom.pad_left, geom.pad_top), (0, 0));
 
-        assert_eq!(geom.new_w, 640);
-        assert_eq!(geom.new_h, 640);
-        assert_eq!(geom.pad_left, 0);
-        assert_eq!(geom.pad_top, 0);
-    }
-
-    #[test]
-    fn test_letterbox_params_wide() {
+        // Wide input is scaled down to fit and padded top/bottom, not left/right.
         let (geom, _) = calculate_letterbox_params(1280, 720, (640, 640), 32);
+        assert!(geom.new_w <= 640 && geom.new_h <= 640);
+        assert_eq!(geom.pad_left, 0);
 
-        // Wide image should be scaled down with height padded
-        assert!(geom.new_w <= 640);
-        assert!(geom.new_h <= 640);
+        // Tall input is the mirror case: padded left/right, not top/bottom.
+        let (geom, _) = calculate_letterbox_params(480, 640, (640, 640), 32);
+        assert!(geom.pad_left > 0);
+        assert_eq!(geom.pad_top, 0);
     }
 
     #[test]
@@ -825,24 +824,6 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_rect_size_square_is_stride_aligned() {
-        let (h, w) = calculate_rect_size(640, 640, (640, 640), 32);
-        assert_eq!((h, w), (640, 640));
-        // Result is always a multiple of the stride.
-        let (h, w) = calculate_rect_size(800, 600, (640, 640), 32);
-        assert_eq!(h % 32, 0);
-        assert_eq!(w % 32, 0);
-    }
-
-    #[test]
-    fn test_letterbox_params_tall_pads_width() {
-        // Tall image (height > width) letterboxed into a square pads left/right.
-        let (geom, _) = calculate_letterbox_params(480, 640, (640, 640), 32);
-        assert!(geom.pad_left > 0);
-        assert_eq!(geom.pad_top, 0);
-    }
-
-    #[test]
     fn test_preprocess_image_public_wrapper() {
         let img = image::DynamicImage::new_rgb8(320, 240);
         let res = preprocess_image(&img, (640, 640), 32);
@@ -882,12 +863,16 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_rect_size_various() {
-        // Portrait and landscape both round up to stride multiples and stay within target.
-        let (h, w) = calculate_rect_size(400, 1000, (640, 640), 32);
-        assert_eq!((h % 32, w % 32), (0, 0));
-        assert!(h <= 640 && w <= 640);
-        let (h, w) = calculate_rect_size(1000, 400, (640, 640), 32);
-        assert_eq!((h % 32, w % 32), (0, 0));
+    fn test_calculate_rect_size() {
+        // A square input at the target size is returned unchanged.
+        assert_eq!(calculate_rect_size(640, 640, (640, 640), 32), (640, 640));
+
+        // Portrait, landscape, and non-aligned inputs all round to stride multiples
+        // and stay within the target.
+        for (w, h) in [(400u32, 1000u32), (1000, 400), (800, 600)] {
+            let (rh, rw) = calculate_rect_size(w, h, (640, 640), 32);
+            assert_eq!((rh % 32, rw % 32), (0, 0));
+            assert!(rh <= 640 && rw <= 640);
+        }
     }
 }

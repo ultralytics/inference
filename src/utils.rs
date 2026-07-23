@@ -283,23 +283,15 @@ mod tests {
 
     #[test]
     fn test_calculate_iou() {
-        let box1 = [0.0, 0.0, 10.0, 10.0];
-        let box2 = [5.0, 5.0, 15.0, 15.0];
-        let iou = calculate_iou(&box1, &box2);
-        assert!((iou - 0.142_857).abs() < 0.001); // 25 / (100 + 100 - 25)
-    }
-
-    #[test]
-    fn test_calculate_iou_full_overlap() {
-        let box1 = [0.0, 0.0, 10.0, 10.0];
-        assert!((calculate_iou(&box1, &box1) - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_calculate_iou_no_overlap() {
-        let box1 = [0.0, 0.0, 5.0, 5.0];
-        let box2 = [10.0, 10.0, 20.0, 20.0];
-        assert!(calculate_iou(&box1, &box2) < 1e-6);
+        // (box1, box2, expected): partial overlap 25 / (100 + 100 - 25), identical, disjoint.
+        let cases = [
+            ([0.0, 0.0, 10.0, 10.0], [5.0, 5.0, 15.0, 15.0], 0.142_857),
+            ([0.0, 0.0, 10.0, 10.0], [0.0, 0.0, 10.0, 10.0], 1.0),
+            ([0.0, 0.0, 5.0, 5.0], [10.0, 10.0, 20.0, 20.0], 0.0),
+        ];
+        for (box1, box2, expected) in cases {
+            assert!((calculate_iou(&box1, &box2) - expected).abs() < 0.001);
+        }
     }
 
     #[test]
@@ -318,48 +310,39 @@ mod tests {
 
     #[test]
     fn test_nms_per_class() {
-        // Two overlapping boxes of different classes should both be kept
+        // Overlapping boxes of different classes are kept; non-overlapping ones always are.
         let boxes = vec![
-            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),        // class 0
-            ([1.0, 1.0, 11.0, 11.0], 0.8, 1),        // class 1 (different class)
-            ([100.0, 100.0, 110.0, 110.0], 0.95, 0), // class 0, non-overlapping
+            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),
+            ([1.0, 1.0, 11.0, 11.0], 0.8, 1),
+            ([100.0, 100.0, 110.0, 110.0], 0.95, 0),
+        ];
+        assert_eq!(nms_per_class(&boxes, 0.5).len(), 3);
+
+        // Overlapping within one class: the lower score is suppressed.
+        let boxes = vec![
+            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),
+            ([1.0, 1.0, 11.0, 11.0], 0.8, 0),
         ];
         let keep = nms_per_class(&boxes, 0.5);
-        // All 3 boxes should be kept (overlapping boxes are different classes)
-        assert_eq!(keep.len(), 3);
+        assert_eq!(keep, vec![0]);
     }
 
     #[test]
-    fn test_nms_per_class_suppression() {
-        // Two overlapping boxes of the same class - lower score suppressed
-        let boxes = vec![
-            ([0.0, 0.0, 10.0, 10.0], 0.9, 0), // class 0, higher score
-            ([1.0, 1.0, 11.0, 11.0], 0.8, 0), // class 0, lower score (suppressed)
-        ];
-        let keep = nms_per_class(&boxes, 0.5);
-        assert_eq!(keep.len(), 1);
-        assert!(keep.contains(&0)); // Keep higher score box
-    }
-
-    #[test]
-    fn test_nms_rotated_per_class_keeps_all_different_classes() {
-        let boxes = vec![
+    fn test_nms_rotated_per_class() {
+        // Same rotated box twice: kept across classes, suppressed within one.
+        let across = vec![
             ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
-            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 1), // same position, different class
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 1),
         ];
-        let keep = nms_rotated_per_class(&boxes, 0.5);
-        assert_eq!(keep.len(), 2);
+        assert_eq!(nms_rotated_per_class(&across, 0.5).len(), 2);
+
+        let within = vec![
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 0),
+        ];
+        assert_eq!(nms_rotated_per_class(&within, 0.5), vec![0]);
     }
 
-    #[test]
-    fn test_nms_rotated_per_class_suppresses_same_class() {
-        let boxes = vec![
-            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
-            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 0), // identical box, same class, lower score
-        ];
-        let keep = nms_rotated_per_class(&boxes, 0.5);
-        assert_eq!(keep.len(), 1);
-    }
     #[test]
     fn test_pluralize() {
         assert_eq!(pluralize("person"), "persons");
