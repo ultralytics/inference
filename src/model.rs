@@ -601,6 +601,7 @@ impl YOLOModel {
         bind_compute_stream!(ep, compute_stream)
     }
 
+    /// Read the running macOS `(major, minor)` version from `sw_vers`, or `None` if unavailable.
     #[cfg(feature = "coreml")]
     fn macos_version() -> Option<(u32, u32)> {
         let out = std::process::Command::new("sw_vers")
@@ -615,6 +616,7 @@ impl YOLOModel {
         ))
     }
 
+    /// Build the CoreML execution provider, tuned for the model at `model_path`.
     #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
         use ort::ep::coreml::{ModelFormat, SpecializationStrategy};

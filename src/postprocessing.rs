@@ -1050,6 +1050,10 @@ const fn parse_transposed_shape(
     }
 }
 
+/// Post-process pose model output into boxes plus `nk` keypoints per detection.
+///
+/// Handles both `[1, features, preds]` and `[1, preds, features]` layouts, applies NMS, and
+/// scales boxes and keypoints back to the original image with the letterbox metadata.
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,

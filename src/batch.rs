@@ -128,6 +128,7 @@ where
         self.process();
     }
 
+    /// Run the buffered batch through the model, hand it to the callback, and clear the buffers.
     fn process(&mut self) {
         if self.images.is_empty() {
             return;
@@ -141,6 +142,7 @@ where
         self.metas.clear();
     }
 
+    /// Batch-infer the buffered images, falling back to one image at a time on failure.
     fn run_inference(&mut self) -> Vec<Vec<Results>> {
         if let Ok(batch_results) = self.model.predict_batch(&self.images, &self.paths) {
             return batch_results;

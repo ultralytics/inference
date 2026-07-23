@@ -23,7 +23,11 @@ use crate::{error, verbose, warn};
 
 const DEFAULT_OBB_IMAGES: &[&str] = &[crate::download::DEFAULT_OBB_IMAGE];
 
-/// Run YOLO model inference.
+/// Run the `predict` command end to end.
+///
+/// Loads (downloading if needed) the model, iterates the source, and prints, annotates, and
+/// saves results according to `args`. Errors are reported to stderr and exit the process,
+/// since this is the CLI entry point.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
     clippy::too_many_lines,
@@ -416,6 +420,9 @@ pub fn run_prediction(args: &PredictArgs) {
     verbose!("💡 Learn more at https://docs.ultralytics.com/modes/predict");
 }
 
+/// Resolve the model path from `--model`, falling back to the task's default nano model.
+///
+/// Returns the path and whether it came from the fallback (the caller downloads defaults).
 fn resolve_model_path(args: &PredictArgs) -> (String, bool) {
     let model_is_default = args.model.is_none();
     let model_path = args
@@ -431,6 +438,11 @@ fn parse_device_arg(device: Option<&str>) -> Result<Option<crate::Device>, Strin
         .transpose()
 }
 
+/// Build an [`InferenceConfig`] from the parsed CLI arguments.
+///
+/// Optional arguments (`--imgsz`, `--device`, `--classes`) are only applied when present,
+/// so unset flags keep the [`InferenceConfig`] defaults. An empty `--classes` list is
+/// ignored rather than treated as "match nothing".
 fn build_inference_config(
     args: &PredictArgs,
     device: Option<crate::Device>,
@@ -470,6 +482,10 @@ const fn default_source_urls(task: Task) -> &'static [&'static str] {
     }
 }
 
+/// Whether a `runs/<task>/predictN` directory is needed for this run.
+///
+/// Without the `annotate` feature there is nothing to save but the semantic class maps,
+/// so `save` is ignored.
 fn needs_predict_dir(save: bool, save_json: bool, task: Task) -> bool {
     #[cfg(feature = "annotate")]
     {
@@ -490,6 +506,9 @@ const fn precision_label(is_half: bool) -> &'static str {
     if is_half { "FP16" } else { "FP32" }
 }
 
+/// Map an ONNX Runtime execution provider name to its display label, e.g. `"CoreML"`.
+///
+/// Falls back to `"CPU"` for unrecognized providers.
 fn provider_label(provider: &str) -> &'static str {
     let provider = provider.to_ascii_lowercase();
     if provider.contains("coreml") {
@@ -509,6 +528,10 @@ fn provider_label(provider: &str) -> &'static str {
     }
 }
 
+/// File stem for a semantic class-map PNG.
+///
+/// A single image keeps its own stem; every other source appends the zero-padded frame
+/// index so directory, glob, and video runs stay ordered and collision-free.
 fn semantic_output_stem(image_path: &str, frame_idx: usize, total_frames: Option<usize>) -> String {
     let base_stem = std::path::Path::new(image_path)
         .file_stem()
