@@ -128,8 +128,8 @@ pub fn run_prediction(args: &PredictArgs) {
     let need_predict_dir = needs_predict_dir(save, save_json, model.task());
 
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
-        let parent_dir = predict_parent_dir(model.task());
-        let dir = find_next_run_dir(parent_dir, "predict");
+        let parent_dir = format!("runs/{}", model.task().as_str());
+        let dir = find_next_run_dir(&parent_dir, "predict");
         if let Err(e) = crate::io::ensure_dir(Path::new(&dir)) {
             error!("Failed to create save directory '{dir}': {e}");
             process::exit(1);
@@ -482,18 +482,6 @@ fn needs_predict_dir(save: bool, save_json: bool, task: Task) -> bool {
     }
 }
 
-const fn predict_parent_dir(task: Task) -> &'static str {
-    match task {
-        Task::Detect => "runs/detect",
-        Task::Segment => "runs/segment",
-        Task::Pose => "runs/pose",
-        Task::Classify => "runs/classify",
-        Task::Obb => "runs/obb",
-        Task::Semantic => "runs/semantic",
-        Task::Depth => "runs/depth",
-    }
-}
-
 fn needs_results_dir(save_json: bool, task: Task) -> bool {
     save_json && task == Task::Semantic
 }
@@ -699,17 +687,6 @@ mod tests {
             default_source_urls(Task::Obb),
             &[crate::download::DEFAULT_OBB_IMAGE]
         );
-    }
-
-    #[test]
-    fn test_predict_parent_dir_by_task() {
-        assert_eq!(predict_parent_dir(Task::Detect), "runs/detect");
-        assert_eq!(predict_parent_dir(Task::Segment), "runs/segment");
-        assert_eq!(predict_parent_dir(Task::Pose), "runs/pose");
-        assert_eq!(predict_parent_dir(Task::Classify), "runs/classify");
-        assert_eq!(predict_parent_dir(Task::Obb), "runs/obb");
-        assert_eq!(predict_parent_dir(Task::Semantic), "runs/semantic");
-        assert_eq!(predict_parent_dir(Task::Depth), "runs/depth");
     }
 
     #[test]

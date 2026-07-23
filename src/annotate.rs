@@ -48,15 +48,6 @@ fn render_scale(width: u32, height: u32) -> (f32, i32) {
     (scale_factor, thickness)
 }
 
-/// Return the next unused run directory under `base` with the given `prefix`.
-///
-/// Tries `<base>/<prefix>` first, then `<base>/<prefix>2`, `<base>/<prefix>3`, and so on
-/// until a path that does not yet exist is found.
-#[must_use]
-pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
-    crate::io::find_next_run_dir(base, prefix)
-}
-
 /// Load an image from `path`, working around a zune-jpeg stride bug for JPEG files.
 ///
 /// JPEG files are decoded with `jpeg_decoder` directly to avoid a stride mismatch
@@ -1075,17 +1066,6 @@ mod tests {
         // Indexing beyond the palette wraps rather than panicking.
         let _ = get_class_color(0);
         let _ = get_class_color(1000);
-    }
-
-    #[test]
-    fn test_find_next_run_dir_numbering() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path().to_string_lossy().into_owned();
-        let first = find_next_run_dir(&base, "predict");
-        assert!(first.ends_with("predict"));
-        std::fs::create_dir_all(&first).unwrap();
-        let second = find_next_run_dir(&base, "predict");
-        assert!(second.ends_with("predict2"));
     }
 
     #[test]
