@@ -252,7 +252,7 @@ struct BilinearVideoDecoder {
 
 #[cfg(feature = "video")]
 impl BilinearVideoDecoder {
-    /// Open `path` with FFmpeg and set up the decoder and bilinear RGB24 scaler.
+    /// Open `path` with `FFmpeg` and set up the decoder and bilinear `RGB24` scaler.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn new(path: &Path) -> Result<Self> {
         ffmpeg::init().map_err(|e| InferenceError::VideoError(format!("FFmpeg init: {e}")))?;

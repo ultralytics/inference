@@ -616,7 +616,7 @@ impl YOLOModel {
         ))
     }
 
-    /// Build the CoreML execution provider, tuned for the model at `model_path`.
+    /// Build the `CoreML` execution provider, tuned for the model at `model_path`.
     #[cfg(feature = "coreml")]
     fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
         use ort::ep::coreml::{ModelFormat, SpecializationStrategy};
