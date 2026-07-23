@@ -1665,31 +1665,29 @@ fn postprocess_obb_end2end(
             let user_cap = config.max_det.min(max_det);
             flat.reserve(user_cap * 7);
 
-            for i in 0..max_det {
-                let base = i * feats;
-                let conf = output[base + 4];
-                if conf < config.confidence_threshold {
-                    break;
-                }
-                let cls = output[base + 5] as usize;
-                if !config.keep_class(cls) {
-                    continue;
-                }
-                let cx = (output[base] - pad_left) / scale_x;
-                let cy = (output[base + 1] - pad_top) / scale_y;
-                flat.extend_from_slice(&[
-                    cx.clamp(0.0, max_w),
-                    cy.clamp(0.0, max_h),
-                    output[base + 2] / scale_x,
-                    output[base + 3] / scale_y,
-                    output[base + 6],
-                    conf,
-                    cls as f32,
-                ]);
-                if flat.len() >= user_cap * 7 {
-                    break;
-                }
-            }
+            // The shared decoder's xyxy box is unused here: OBB keeps `xywhr`, so the raw
+            // row is rescaled below and the rotation angle is read from column 6.
+            decode_end2end(
+                output,
+                max_det,
+                feats,
+                preprocess,
+                config,
+                user_cap,
+                |base, _bbox, conf, cls| {
+                    let cx = (output[base] - pad_left) / scale_x;
+                    let cy = (output[base + 1] - pad_top) / scale_y;
+                    flat.extend_from_slice(&[
+                        cx.clamp(0.0, max_w),
+                        cy.clamp(0.0, max_h),
+                        output[base + 2] / scale_x,
+                        output[base + 3] / scale_y,
+                        output[base + 6],
+                        conf,
+                        cls as f32,
+                    ]);
+                },
+            );
         }
     }
 
