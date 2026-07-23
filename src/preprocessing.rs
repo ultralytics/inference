@@ -492,12 +492,11 @@ fn calculate_letterbox_params(
 
 /// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.
 ///
-/// Shared structure for the f32 and f16 variants: allocates the `(1, 3, H, W)`
-/// tensor, splits it into per-channel slices, and fills each pixel with
-/// `convert` applied to the source byte. The caller supplies the element type's
-/// zero value and the per-byte conversion so each variant keeps its exact
-/// arithmetic (the f16 path hoists its scale constant into the closure).
-fn image_to_tensor_generic<T: Clone>(
+/// Allocates the `(1, 3, H, W)` tensor, splits it into per-channel slices, and fills each
+/// pixel with `convert` applied to the source byte. The caller supplies the element type's
+/// zero value and the per-byte conversion, so the f32 and f16 callers each keep their exact
+/// arithmetic (the f16 one hoists its scale constant into the closure).
+fn image_to_tensor<T: Clone>(
     image: &RgbImage,
     zero: T,
     mut convert: impl FnMut(u8) -> T,
@@ -608,12 +607,12 @@ pub fn preprocess_image_center_crop(
     let (cropped, scale) = center_crop_image(image, target_size);
 
     // Convert to normalized NCHW tensor
-    let tensor = image_to_tensor_generic(&cropped, 0.0, |v| f32::from(v) / 255.0);
+    let tensor = image_to_tensor(&cropped, 0.0, |v| f32::from(v) / 255.0);
 
     // Optionally compute FP16 tensor, converting u8 straight to f16 with a hoisted 1/255.
     let tensor_f16 = half.then(|| {
         let scale = f16::from_f32(1.0 / 255.0);
-        image_to_tensor_generic(&cropped, f16::ZERO, move |v| {
+        image_to_tensor(&cropped, f16::ZERO, move |v| {
             f16::from_f32(f32::from(v)) * scale
         })
     });
