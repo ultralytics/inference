@@ -824,7 +824,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_preprocess_image_public_wrapper() {
         let img = image::DynamicImage::new_rgb8(320, 240);
         let res = preprocess_image(&img, (640, 640), 32);

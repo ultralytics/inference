@@ -2059,17 +2059,32 @@ mod tests {
 
     #[test]
     fn test_parse_detect_shape() {
-        // Standard YOLO output [1, 84, 8400]
-        let (nc, np, transposed) = parse_detect_shape(&[1, 84, 8400], 80);
-        assert_eq!(nc, 80);
-        assert_eq!(np, 8400);
-        assert!(!transposed);
+        // (shape, expected_classes) -> (nc, num_preds, transposed). `expected_classes == 0`
+        // means the model had no metadata, so the class count is inferred as features - 4
+        // and the layout from which dimension is smaller.
+        type Case<'a> = (&'a [usize], usize, (usize, usize, bool));
+        let cases: &[Case<'_>] = &[
+            // 3D, with and without metadata, both layouts.
+            (&[1, 84, 8400], 80, (80, 8400, false)),
+            (&[1, 8400, 84], 80, (80, 8400, true)),
+            (&[1, 84, 8400], 0, (80, 8400, false)),
+            (&[1, 8400, 84], 0, (80, 8400, true)),
+            // 2D [features, preds] and its transpose.
+            (&[84, 8400], 80, (80, 8400, false)),
+            (&[84, 8400], 0, (80, 8400, false)),
+            (&[8400, 84], 0, (80, 8400, true)),
+        ];
+        for (shape, expected_classes, expected) in cases {
+            assert_eq!(
+                parse_detect_shape(shape, *expected_classes),
+                *expected,
+                "shape {shape:?}, expected_classes {expected_classes}"
+            );
+        }
 
-        // Transposed format [1, 8400, 84]
-        let (nc, np, transposed) = parse_detect_shape(&[1, 8400, 84], 80);
-        assert_eq!(nc, 80);
-        assert_eq!(np, 8400);
-        assert!(transposed);
+        // Degenerate dims and unsupported ranks yield zero predictions.
+        assert_eq!(parse_detect_shape(&[2, 3], 80).1, 0);
+        assert_eq!(parse_detect_shape(&[1, 2, 3, 4], 80).1, 0);
     }
 
     #[test]
@@ -2084,22 +2099,6 @@ mod tests {
         assert_eq!(infer_end2end_kpt_shape(&[1, 56, 8400]), None);
         // shape[2] <= 6 -> None (no keypoint features)
         assert_eq!(infer_end2end_kpt_shape(&[1, 300, 6]), None);
-    }
-
-    #[test]
-    fn test_parse_detect_shape_no_metadata() {
-        // When metadata is missing (expected_classes == 0), infer from shape
-        // Standard YOLO output [1, 84, 8400] with no metadata
-        let (nc, np, transposed) = parse_detect_shape(&[1, 84, 8400], 0);
-        assert_eq!(nc, 80); // Inferred: 84 - 4 = 80 classes
-        assert_eq!(np, 8400);
-        assert!(!transposed);
-
-        // Transposed format [1, 8400, 84] with no metadata
-        let (nc, np, transposed) = parse_detect_shape(&[1, 8400, 84], 0);
-        assert_eq!(nc, 80); // Inferred: 84 - 4 = 80 classes
-        assert_eq!(np, 8400);
-        assert!(transposed);
     }
 
     #[test]
@@ -2484,9 +2483,10 @@ mod tests {
 
     #[test]
     fn test_postprocess_semantic_binary_fast_path() {
-        // nc=1 (binary segmentation): positive logit → foreground (1), non-positive → background (0).
-        let (oh, ow, nc) = (1, 4, 1);
-        let output = vec![1.0f32, -1.0, 0.001, -0.001];
+        // nc=1 (binary segmentation): a positive logit is foreground (1), anything else is
+        // background (0). Exactly 0.0 is not > 0, so it lands on background too.
+        let (oh, ow, nc) = (1, 5, 1);
+        let output = vec![1.0f32, -1.0, 0.001, -0.001, 0.0];
         let result = postprocess_semantic(
             &output,
             &[1, nc, oh, ow],
@@ -2497,50 +2497,10 @@ mod tests {
             (oh as u32, ow as u32),
         );
         let sm = result.semantic_mask.unwrap();
-        assert_eq!(sm.data[[0, 0]], 1);
-        assert_eq!(sm.data[[0, 1]], 0);
-        assert_eq!(sm.data[[0, 2]], 1);
-        assert_eq!(sm.data[[0, 3]], 0);
-    }
-
-    #[test]
-    fn test_postprocess_semantic_binary_zero_logit() {
-        // Exactly 0.0 is not > 0, so it must be treated as background (class 0).
-        let (oh, ow, nc) = (1, 1, 1);
-        let result = postprocess_semantic(
-            &[0.0f32],
-            &[1, nc, oh, ow],
-            make_names(2),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (oh as u32, ow as u32),
+        assert_eq!(
+            sm.data.iter().copied().collect::<Vec<u16>>(),
+            [1, 0, 1, 0, 0]
         );
-        assert_eq!(result.semantic_mask.unwrap().data[[0, 0]], 0);
-    }
-
-    #[test]
-    fn test_postprocess_semantic_large_nc_fast_path() {
-        // nc=33 exceeds the old 32-element stack buffer; verify no panic and correct argmax.
-        let (oh, ow, nc) = (2, 2, 33);
-        let plane = oh * ow;
-        let mut output = vec![0.0f32; nc * plane];
-        for px in 0..plane {
-            output[32 * plane + px] = 1.0; // class 32 wins everywhere
-        }
-        let result = postprocess_semantic(
-            &output,
-            &[1, nc, oh, ow],
-            make_names(nc),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (oh as u32, ow as u32),
-        );
-        let sm = result.semantic_mask.unwrap();
-        for &val in &sm.data {
-            assert_eq!(val, 32);
-        }
     }
 
     #[test]
@@ -2574,29 +2534,27 @@ mod tests {
     }
 
     #[test]
-    fn test_postprocess_semantic_large_nc_slow_path() {
-        // nc=33 through the letterbox bilinear path (lh!=oh triggers it).
-        // oh=2, ow=4 wide image letterboxed into 8x8:
-        //   gain=2.0, pad rows=2 top+bottom, crop rows 2..6, crop_w=8 (no x padding).
-        let (oh, ow, lh, lw, nc) = (2, 4, 8, 8, 33);
-        let plane = lh * lw;
-        let mut output = vec![0.0f32; nc * plane];
-        for px in 0..plane {
-            output[32 * plane + px] = 1.0; // class 32 wins everywhere in model space
-        }
-        let result = postprocess_semantic(
-            &output,
-            &[1, nc, lh, lw],
-            make_names(nc),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (lh as u32, lw as u32),
-        );
-        let sm = result.semantic_mask.unwrap();
-        assert_eq!(sm.data.shape(), &[oh, ow]);
-        for &val in &sm.data {
-            assert_eq!(val, 32);
+    fn test_postprocess_semantic_large_nc() {
+        // nc=33 exceeds the old 32-element stack buffer. Class 32 wins everywhere, through
+        // the fast path (lh==oh) and the letterbox bilinear path (a 2x4 image padded into
+        // 8x8: gain=2.0, 2 pad rows top and bottom, crop rows 2..6, no x padding).
+        const NC: usize = 33;
+        for (oh, ow, lh, lw) in [(2usize, 2usize, 2usize, 2usize), (2, 4, 8, 8)] {
+            let plane = lh * lw;
+            let mut output = vec![0.0f32; NC * plane];
+            output[32 * plane..].fill(1.0);
+            let result = postprocess_semantic(
+                &output,
+                &[1, NC, lh, lw],
+                make_names(NC),
+                ndarray::Array3::zeros((oh, ow, 3)),
+                String::new(),
+                Speed::default(),
+                (lh as u32, lw as u32),
+            );
+            let sm = result.semantic_mask.unwrap();
+            assert_eq!(sm.data.shape(), &[oh, ow]);
+            assert!(sm.data.iter().all(|&v| v == 32), "{lh}x{lw} -> {oh}x{ow}");
         }
     }
 
@@ -2689,57 +2647,51 @@ mod tests {
     }
 
     #[test]
-    fn test_postprocess_semantic_mask_passthrough() {
-        // Pre-argmaxed u8 output at native resolution: values map 1:1 to u16 class map.
+    fn test_postprocess_semantic_mask() {
+        // Fast path: pre-argmaxed u8 output already at the original resolution maps 1:1
+        // onto the u16 class map, in both the 2D [h, w] and 3D [1, h, w] layouts.
         let (oh, ow) = (2, 3);
         let output: Vec<u8> = vec![0, 5, 3, 7, 2, 19];
-        let result = postprocess_semantic_mask(
-            &output,
-            &[oh, ow],
-            make_names(20),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (oh as u32, ow as u32),
-        );
-        let sm = result.semantic_mask.unwrap();
-        assert_eq!(sm.data.shape(), &[oh, ow]);
-        assert_eq!(sm.data[[0, 0]], 0);
-        assert_eq!(sm.data[[0, 1]], 5);
-        assert_eq!(sm.data[[0, 2]], 3);
-        assert_eq!(sm.data[[1, 0]], 7);
-        assert_eq!(sm.data[[1, 1]], 2);
-        assert_eq!(sm.data[[1, 2]], 19);
-        assert_eq!(sm.orig_shape(), (oh as u32, ow as u32));
-    }
+        for shape in [vec![oh, ow], vec![1, oh, ow]] {
+            let result = postprocess_semantic_mask(
+                &output,
+                &shape,
+                make_names(20),
+                ndarray::Array3::zeros((oh, ow, 3)),
+                String::new(),
+                Speed::default(),
+                (oh as u32, ow as u32),
+            );
+            let sm = result.semantic_mask.unwrap();
+            assert_eq!(sm.data.shape(), &[oh, ow]);
+            assert_eq!(
+                sm.data.iter().copied().collect::<Vec<u16>>(),
+                [0, 5, 3, 7, 2, 19]
+            );
+            assert_eq!(sm.orig_shape(), (oh as u32, ow as u32));
+            assert_eq!(sm.classes_present(), 6);
+        }
 
-    #[test]
-    fn test_postprocess_semantic_mask_empty_no_panic() {
+        // Slow path, plain upscale: a 4x4 mask of one class fills an 8x8 image.
         let r = postprocess_semantic_mask(
-            &[],
-            &[4, 4],
-            make_names(10),
-            ndarray::Array3::zeros((4, 4, 3)),
+            &[5u8; 16],
+            &[1, 4, 4],
+            make_names(6),
+            ndarray::Array3::zeros((8, 8, 3)),
             String::new(),
             Speed::default(),
-            (4, 4),
+            (8, 8),
         );
-        assert!(r.semantic_mask.is_none());
-    }
+        let sm = r.semantic_mask.unwrap();
+        assert_eq!(sm.data.shape(), [8, 8]);
+        assert!(sm.data.iter().all(|&v| v == 5));
 
-    #[test]
-    fn test_postprocess_semantic_mask_letterbox_nn_upsample() {
-        // oh=2, ow=4 wide image letterboxed into 8x8.
-        // letterbox_crop_bounds gives top=2, left=0, crop_h=4, crop_w=8.
-        // Content rows 2..6 set to class 7; padding rows 0..2 and 6..8 set to 99.
-        // After NN upsample all orig pixels should map into content → class 7.
+        // Slow path, letterboxed: a 2x4 wide image padded into 8x8 puts content in rows
+        // 2..6 (letterbox_crop_bounds -> top=2, left=0, crop 4x8). Padding rows carry a
+        // sentinel class that must be cropped away, so every output pixel is class 7.
         let (oh, ow, lh, lw) = (2, 4, 8, 8);
         let mut output = vec![99u8; lh * lw];
-        for row in 2..6 {
-            for col in 0..lw {
-                output[row * lw + col] = 7;
-            }
-        }
+        output[2 * lw..6 * lw].fill(7);
         let result = postprocess_semantic_mask(
             &output,
             &[lh, lw],
@@ -2751,8 +2703,20 @@ mod tests {
         );
         let sm = result.semantic_mask.unwrap();
         assert_eq!(sm.data.shape(), &[oh, ow]);
-        for &val in &sm.data {
-            assert_eq!(val, 7, "expected class 7 but got {val}");
+        assert!(sm.data.iter().all(|&v| v == 7));
+
+        // Empty output yields no mask instead of panicking, at either rank.
+        for shape in [vec![4, 4], vec![1, 0, 0]] {
+            let r = postprocess_semantic_mask(
+                &[],
+                &shape,
+                make_names(10),
+                ndarray::Array3::zeros((4, 4, 3)),
+                String::new(),
+                Speed::default(),
+                (4, 4),
+            );
+            assert!(r.semantic_mask.is_none(), "shape {shape:?}");
         }
     }
 
@@ -2819,25 +2783,6 @@ mod tests {
         // Segment predicate needs proto channel count to disambiguate nm.
         assert!(is_end2end_segment_shape(&[1, 300, 6 + 32], Some(32)));
         assert!(!is_end2end_segment_shape(&[1, 300, 6 + 32], None));
-    }
-
-    #[test]
-    fn test_parse_detect_shape_2d_and_fallback() {
-        // 2D [features, preds] with metadata.
-        let (nc, np, t) = parse_detect_shape(&[84, 8400], 80);
-        assert_eq!((nc, np, t), (80, 8400, false));
-        // No metadata: layout inferred from which dim is smaller.
-        let (nc, np, t) = parse_detect_shape(&[84, 8400], 0);
-        assert_eq!((nc, np, t), (80, 8400, false));
-        // No metadata, transposed [preds, features].
-        let (nc, np, t) = parse_detect_shape(&[8400, 84], 0);
-        assert_eq!((nc, np, t), (80, 8400, true));
-        // Degenerate small dims -> zero predictions.
-        let (_, np, _) = parse_detect_shape(&[2, 3], 80);
-        assert_eq!(np, 0);
-        // Unsupported rank -> zero predictions.
-        let (_, np, _) = parse_detect_shape(&[1, 2, 3, 4], 80);
-        assert_eq!(np, 0);
     }
 
     #[test]
@@ -2911,29 +2856,6 @@ mod tests {
     }
 
     #[test]
-    fn test_postprocess_obb_single_box() {
-        let names = make_names(1);
-        let pre = unit_preprocess((100, 100));
-        let config = InferenceConfig::default();
-        // [features=6, preds=1] layout: [cx, cy, w, h, class_score, angle]
-        let output = [50.0, 50.0, 20.0, 10.0, 0.9, 0.0];
-        let r = postprocess_obb(
-            &output,
-            &[1, 6, 1],
-            &pre,
-            &config,
-            names,
-            ndarray::Array3::zeros((100, 100, 3)),
-            String::new(),
-            Speed::default(),
-            (640, 640),
-        );
-        let obb = r.obb.unwrap();
-        assert_eq!(obb.len(), 1);
-        assert!((obb.conf()[0] - 0.9).abs() < 1e-6);
-    }
-
-    #[test]
     fn test_postprocess_detect_end2end_thresholds() {
         let names = make_names(1);
         let pre = unit_preprocess((100, 100));
@@ -2955,40 +2877,6 @@ mod tests {
             (640, 640),
         );
         assert_eq!(r.boxes.unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_postprocess_semantic_mask_fast_and_slow() {
-        let names = make_names(3);
-        // Fast path: model output already at original resolution (lh==oh, lw==ow).
-        let out: Vec<u8> = vec![0, 1, 1, 2];
-        let r = postprocess_semantic_mask(
-            &out,
-            &[1, 2, 2],
-            Arc::clone(&names),
-            ndarray::Array3::zeros((2, 2, 3)),
-            String::new(),
-            Speed::default(),
-            (2, 2),
-        );
-        let sm = r.semantic_mask.unwrap();
-        assert_eq!(sm.data.shape(), [2, 2]);
-        assert_eq!(sm.classes_present(), 3);
-
-        // Slow path: mask smaller than the original image triggers NN upsample.
-        let small: Vec<u8> = vec![5u8; 4 * 4];
-        let r = postprocess_semantic_mask(
-            &small,
-            &[1, 4, 4],
-            names,
-            ndarray::Array3::zeros((8, 8, 3)),
-            String::new(),
-            Speed::default(),
-            (8, 8),
-        );
-        let sm = r.semantic_mask.unwrap();
-        assert_eq!(sm.data.shape(), [8, 8]);
-        assert!(sm.data.iter().all(|&v| v == 5));
     }
 
     #[test]
@@ -3260,21 +3148,5 @@ mod tests {
         let sm = r.semantic_mask.unwrap();
         // All originally class-1 pixels are filtered out to IGNORE.
         assert!(sm.data.iter().all(|&v| v == SemanticMask::IGNORE));
-    }
-
-    #[test]
-    fn test_postprocess_semantic_mask_degenerate() {
-        let names = make_names(1);
-        // Empty output -> no mask, no panic.
-        let r = postprocess_semantic_mask(
-            &[],
-            &[1, 0, 0],
-            names,
-            ndarray::Array3::zeros((4, 4, 3)),
-            String::new(),
-            Speed::default(),
-            (4, 4),
-        );
-        assert!(r.semantic_mask.is_none());
     }
 }
