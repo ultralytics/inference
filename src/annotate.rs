@@ -16,6 +16,10 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+/// Re-exported so `annotate::find_next_run_dir` keeps working; the implementation lives in
+/// [`crate::io`] alongside the other save-path helpers.
+pub use crate::io::find_next_run_dir;
+
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
