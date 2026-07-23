@@ -110,27 +110,15 @@ mod tests {
     }
 
     #[test]
-    fn test_device_display() {
-        assert_eq!(Device::Cpu.to_string(), "cpu");
-        assert_eq!(Device::Cuda(0).to_string(), "cuda:0");
-        assert_eq!(Device::Cuda(1).to_string(), "cuda:1");
-        assert_eq!(Device::CoreMl.to_string(), "coreml");
-        assert_eq!(Device::DirectMl(0).to_string(), "directml:0");
-        assert_eq!(Device::IntelCpu.to_string(), "intel:cpu");
-        assert_eq!(Device::IntelGpu.to_string(), "intel:gpu");
-        assert_eq!(Device::IntelNpu.to_string(), "intel:npu");
-        assert_eq!(Device::Xnnpack.to_string(), "xnnpack");
-        assert_eq!(Device::TensorRt(2).to_string(), "tensorrt:2");
-        assert_eq!(Device::Rocm(3).to_string(), "rocm:3");
-    }
-
-    #[test]
     fn test_device_display_roundtrip() {
         for s in [
             "cpu",
             "cuda:0",
+            "cuda:1",
             "coreml",
             "directml:0",
+            "tensorrt:2",
+            "rocm:3",
             "intel:cpu",
             "intel:gpu",
             "intel:npu",
