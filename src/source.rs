@@ -238,6 +238,57 @@ use video_rs::ffmpeg;
 /// pixel values during colorspace conversion. Those differences can affect
 /// borderline confidence predictions and lead to small detection drift.
 /// For consistency, this decoder uses `SWS_BILINEAR` explicitly.
+/// Convert a decoded video frame to a tightly-packed RGB24 [`DynamicImage`] using a BILINEAR
+/// scaler. `scaler` caches the conversion context and is initialized lazily from the frame's
+/// format and dimensions, so pass a persistent `Option` to reuse it across frames or a fresh
+/// `None` for a one-shot conversion.
+#[cfg(feature = "video")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn frame_to_rgb_image(
+    scaler: &mut Option<ffmpeg::software::scaling::context::Context>,
+    decoded: &ffmpeg::util::frame::video::Video,
+) -> Result<DynamicImage> {
+    // Initialize scaler on first frame (we need actual dimensions).
+    if scaler.is_none() {
+        *scaler = Some(
+            ffmpeg::software::scaling::context::Context::get(
+                decoded.format(),
+                decoded.width(),
+                decoded.height(),
+                ffmpeg::format::Pixel::RGB24,
+                decoded.width(),
+                decoded.height(),
+                ffmpeg::software::scaling::flag::Flags::BILINEAR,
+            )
+            .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
+        );
+    }
+
+    let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
+    scaler
+        .as_mut()
+        .unwrap()
+        .run(decoded, &mut rgb_frame)
+        .map_err(|e| InferenceError::VideoError(format!("Scale: {e}")))?;
+
+    let width = rgb_frame.width();
+    let height = rgb_frame.height();
+    let data = rgb_frame.data(0);
+    let stride = rgb_frame.stride(0);
+
+    // Copy tightly-packed RGB data (stride may be wider than width*3).
+    let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height as usize {
+        let row = &data[y * stride..y * stride + (width as usize) * 3];
+        rgb_data.extend_from_slice(row);
+    }
+
+    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+        InferenceError::ImageError("Failed to create image from video frame".into())
+    })?;
+    Ok(DynamicImage::ImageRgb8(img_buffer))
+}
+
 #[cfg(feature = "video")]
 struct BilinearVideoDecoder {
     input_ctx: ffmpeg::format::context::Input,
@@ -343,45 +394,7 @@ impl BilinearVideoDecoder {
         &mut self,
         decoded: &ffmpeg::util::frame::video::Video,
     ) -> Result<DynamicImage> {
-        // Initialize scaler on first frame (we need actual dimensions)
-        if self.scaler.is_none() {
-            self.scaler = Some(
-                ffmpeg::software::scaling::context::Context::get(
-                    decoded.format(),
-                    decoded.width(),
-                    decoded.height(),
-                    ffmpeg::format::Pixel::RGB24,
-                    decoded.width(),
-                    decoded.height(),
-                    ffmpeg::software::scaling::flag::Flags::BILINEAR,
-                )
-                .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
-            );
-        }
-
-        let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
-        self.scaler
-            .as_mut()
-            .unwrap()
-            .run(decoded, &mut rgb_frame)
-            .map_err(|e| InferenceError::VideoError(format!("Scale: {e}")))?;
-
-        let width = rgb_frame.width();
-        let height = rgb_frame.height();
-        let data = rgb_frame.data(0);
-        let stride = rgb_frame.stride(0);
-
-        // Copy tightly-packed RGB data (stride may be wider than width*3)
-        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
-        for y in 0..height as usize {
-            let row = &data[y * stride..y * stride + (width as usize) * 3];
-            rgb_data.extend_from_slice(row);
-        }
-
-        let img_buffer = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
-            InferenceError::ImageError("Failed to create image from video frame".into())
-        })?;
-        Ok(DynamicImage::ImageRgb8(img_buffer))
+        frame_to_rgb_image(&mut self.scaler, decoded)
     }
 }
 
@@ -720,40 +733,12 @@ impl SourceIterator {
                         && decoder.send_packet(&packet).is_ok()
                         && decoder.receive_frame(&mut decoded).is_ok()
                     {
-                        // Convert to DynamicImage
-                        // Handle pixel formatting manually or use a helper
-                        // For simplicity, we assume RGB24 or BGR24 or similar, likely need swscale
-
-                        // We need a scaler to ensure RGB output
-                        let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
-                        let mut scaler = ffmpeg::software::scaling::context::Context::get(
-                            decoded.format(),
-                            decoded.width(),
-                            decoded.height(),
-                            ffmpeg::format::Pixel::RGB24,
-                            decoded.width(),
-                            decoded.height(),
-                            ffmpeg::software::scaling::flag::Flags::BILINEAR,
-                        )
-                        .unwrap();
-
-                        scaler.run(&decoded, &mut rgb_frame).ok();
-
-                        let width = rgb_frame.width();
-                        let height = rgb_frame.height();
-                        let data = rgb_frame.data(0);
-                        let stride = rgb_frame.stride(0);
-
-                        // Tightly packed RGB data
-                        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
-                        for y in 0..height as usize {
-                            let row = &data[y * stride..y * stride + (width as usize) * 3];
-                            rgb_data.extend_from_slice(row);
-                        }
-
-                        let img_buffer =
-                            image::RgbImage::from_raw(width, height, rgb_data).unwrap();
-                        let img = DynamicImage::ImageRgb8(img_buffer);
+                        // Convert the decoded frame to RGB via the shared scaler helper.
+                        let mut scaler = None;
+                        let img = match frame_to_rgb_image(&mut scaler, &decoded) {
+                            Ok(img) => img,
+                            Err(e) => return Some(Err(e)),
+                        };
 
                         let meta = SourceMeta {
                             frame_idx: self.current_frame,
