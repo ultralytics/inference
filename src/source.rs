@@ -243,6 +243,7 @@ use video_rs::ffmpeg;
 /// format and dimensions, so pass a persistent `Option` to reuse it across frames or a fresh
 /// `None` for a one-shot conversion.
 #[cfg(feature = "video")]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn frame_to_rgb_image(
     scaler: &mut Option<ffmpeg::software::scaling::context::Context>,
     decoded: &ffmpeg::util::frame::video::Video,
