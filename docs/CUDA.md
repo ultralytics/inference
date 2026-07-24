@@ -198,7 +198,7 @@ through `YOLOModel::predict_image` in library code.
 
 | Symptom                                                                    | Fix                                                                                      |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `cudarc-* build script failed: \`nvcc --version\` failed`                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).    |
+| ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).    |
 | `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`. |
 | `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.          |
 | TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.           |
