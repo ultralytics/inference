@@ -24,7 +24,7 @@
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
 //! - **Supported YOLO Versions** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports)
-//! - **All Tasks** - Detection, segmentation, pose estimation, classification, OBB, semantic segmentation, and depth estimation (last two YOLO26 only)
+//! - **All Tasks** - [Detection](https://docs.ultralytics.com/tasks/detect), [segmentation](https://docs.ultralytics.com/tasks/segment), [pose estimation](https://docs.ultralytics.com/tasks/pose), [classification](https://docs.ultralytics.com/tasks/classify), [OBB](https://docs.ultralytics.com/tasks/obb), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), and [depth estimation](https://docs.ultralytics.com/tasks/depth) (last two YOLO26 only)
 //! - **Ultralytics API** - Results API for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
 //! - **Multiple Sources** - Images, directories, glob patterns, video, webcam, streams
