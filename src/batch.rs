@@ -148,7 +148,7 @@ where
             return batch_results;
         }
 
-        eprintln!("WARNING ⚠️ Batch inference failed. Falling back to single-image inference...");
+        crate::warn!("Batch inference failed. Falling back to single-image inference...");
 
         let mut fallback_results = Vec::with_capacity(self.images.len());
         for (idx, img) in self.images.iter().enumerate() {
