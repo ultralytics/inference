@@ -241,8 +241,6 @@ fn preprocess_image(
     Ok((orig_img, pre))
 }
 
-/// Parse a JS colormap name into a [`Colormap`], falling back to the default (`jet`)
-/// for an empty or unknown value. Only depth results use it.
 /// Wrap a raw `width * height * 4` RGBA buffer (e.g. a canvas/webcam `ImageData`)
 /// as a `DynamicImage`, erroring when the buffer size disagrees with the dimensions.
 fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::DynamicImage, JsError> {
@@ -258,6 +256,8 @@ fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::Dynami
         .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))
 }
 
+/// Parse a JS colormap name into a [`Colormap`], falling back to the default (`jet`)
+/// for an empty or unknown value. Only depth results use it.
 fn parse_colormap(s: &str) -> Colormap {
     s.parse().unwrap_or_default()
 }
