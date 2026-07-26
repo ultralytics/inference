@@ -443,24 +443,25 @@ impl Results {
     pub fn summary(&self, normalize: bool) -> Vec<HashMap<String, SummaryValue>> {
         let mut results = Vec::new();
 
-        if let Some(ref probs) = self.probs {
-            let class_id = probs.top1();
-            let mut entry = HashMap::new();
-            entry.insert(
-                "name".to_string(),
-                SummaryValue::String(
-                    self.names
-                        .get(&class_id)
-                        .cloned()
-                        .unwrap_or_else(|| class_id.to_string()),
+        // One `{name, class, confidence}` entry, the shared head of every summary row.
+        let entry_for = |class_id: usize, confidence: f32| {
+            HashMap::from([
+                (
+                    "name".to_string(),
+                    SummaryValue::String(
+                        self.names
+                            .get(&class_id)
+                            .cloned()
+                            .unwrap_or_else(|| class_id.to_string()),
+                    ),
                 ),
-            );
-            entry.insert("class".to_string(), SummaryValue::Int(class_id));
-            entry.insert(
-                "confidence".to_string(),
-                SummaryValue::Float(probs.top1conf()),
-            );
-            results.push(entry);
+                ("class".to_string(), SummaryValue::Int(class_id)),
+                ("confidence".to_string(), SummaryValue::Float(confidence)),
+            ])
+        };
+
+        if let Some(ref probs) = self.probs {
+            results.push(entry_for(probs.top1(), probs.top1conf()));
             return results;
         }
 
@@ -479,18 +480,7 @@ impl Results {
             for i in 0..boxes.len() {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 let class_id = cls[i] as usize;
-                let mut entry = HashMap::new();
-                entry.insert(
-                    "name".to_string(),
-                    SummaryValue::String(
-                        self.names
-                            .get(&class_id)
-                            .cloned()
-                            .unwrap_or_else(|| class_id.to_string()),
-                    ),
-                );
-                entry.insert("class".to_string(), SummaryValue::Int(class_id));
-                entry.insert("confidence".to_string(), SummaryValue::Float(conf[i]));
+                let mut entry = entry_for(class_id, conf[i]);
 
                 let mut box_coords = HashMap::new();
                 box_coords.insert("x1".to_string(), SummaryValue::Float(xyxy[[i, 0]] / w));
