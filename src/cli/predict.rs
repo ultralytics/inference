@@ -274,7 +274,6 @@ pub fn run_prediction(args: &PredictArgs) {
                         if let Some(ref cdir) = results_dir
                             && let Some(ref sm) = result.semantic_mask
                         {
-
                             let stem =
                                 semantic_output_stem(image_path, meta.frame_idx, meta.total_frames);
                             let out_path = cdir.join(format!("{stem}.png"));
