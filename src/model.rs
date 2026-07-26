@@ -207,58 +207,48 @@ impl YOLOModel {
             InferenceError::ModelLoadError(format!("Failed to create session builder: {e}"))
         })?;
 
-        // Register execution providers based on features and device config
+        // Register execution providers based on features and device config, as
+        // `(provider, name)` pairs in registration order: the first one registered is the
+        // one ORT will prefer, so it names the session (CPU when none are registered).
         #[allow(unused_mut)]
-        let mut eps: Vec<ort::execution_providers::ExecutionProviderDispatch> = Vec::new();
-        #[allow(unused_mut)]
-        let mut provider_name = "CPUExecutionProvider";
+        let mut eps: Vec<(ort::execution_providers::ExecutionProviderDispatch, &str)> = Vec::new();
 
         if let Some(device) = &config.device {
             // User requested specific device
             match device {
                 crate::Device::Cpu => {}
                 #[cfg(feature = "cuda")]
-                crate::Device::Cuda(i) => {
-                    eps.push(Self::build_cuda_ep(*i as i32, cuda_pre_stream_ptr));
-                    provider_name = "CUDAExecutionProvider";
-                }
+                crate::Device::Cuda(i) => eps.push((
+                    Self::build_cuda_ep(*i as i32, cuda_pre_stream_ptr),
+                    "CUDAExecutionProvider",
+                )),
                 #[cfg(feature = "coreml")]
                 crate::Device::CoreMl => {
                     if matches!(Self::macos_version(), Some((major, _)) if major >= 11) {
-                        eps.push(Self::build_coreml_ep(path));
-                        provider_name = "CoreMLExecutionProvider";
+                        eps.push((Self::build_coreml_ep(path), "CoreMLExecutionProvider"));
                     } else {
                         warn!("WARNING ⚠️  CoreML requires macOS 11+; falling back to CPU.");
                     }
                 }
                 #[cfg(feature = "tensorrt")]
-                crate::Device::TensorRt(i) => {
-                    eps.push(Self::build_tensorrt_ep(
-                        path,
-                        *i as i32,
-                        config.half,
-                        cuda_pre_stream_ptr,
-                    ));
-                    provider_name = "TensorRTExecutionProvider";
-                }
+                crate::Device::TensorRt(i) => eps.push((
+                    Self::build_tensorrt_ep(path, *i as i32, config.half, cuda_pre_stream_ptr),
+                    "TensorRTExecutionProvider",
+                )),
                 #[cfg(feature = "rocm")]
-                crate::Device::Rocm(i) => {
-                    eps.push(
-                        ort::execution_providers::ROCmExecutionProvider::default()
-                            .with_device_id(*i as i32)
-                            .build(),
-                    );
-                    provider_name = "ROCmExecutionProvider";
-                }
+                crate::Device::Rocm(i) => eps.push((
+                    ort::execution_providers::ROCmExecutionProvider::default()
+                        .with_device_id(*i as i32)
+                        .build(),
+                    "ROCmExecutionProvider",
+                )),
                 #[cfg(feature = "directml")]
-                crate::Device::DirectMl(i) => {
-                    eps.push(
-                        ort::execution_providers::DirectMLExecutionProvider::default()
-                            .with_device_id(*i as i32)
-                            .build(),
-                    );
-                    provider_name = "DirectMLExecutionProvider";
-                }
+                crate::Device::DirectMl(i) => eps.push((
+                    ort::execution_providers::DirectMLExecutionProvider::default()
+                        .with_device_id(*i as i32)
+                        .build(),
+                    "DirectMLExecutionProvider",
+                )),
                 #[cfg(feature = "openvino")]
                 crate::Device::IntelCpu | crate::Device::IntelGpu | crate::Device::IntelNpu => {
                     let dt = match device {
@@ -266,14 +256,16 @@ impl YOLOModel {
                         crate::Device::IntelNpu => "NPU",
                         _ => "CPU",
                     };
-                    eps.push(Self::build_openvino_ep(path, dt));
-                    provider_name = "OpenVINOExecutionProvider";
+                    eps.push((
+                        Self::build_openvino_ep(path, dt),
+                        "OpenVINOExecutionProvider",
+                    ));
                 }
                 #[cfg(feature = "xnnpack")]
-                crate::Device::Xnnpack => {
-                    eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
-                    provider_name = "XNNPACKExecutionProvider";
-                }
+                crate::Device::Xnnpack => eps.push((
+                    ort::execution_providers::XNNPACKExecutionProvider::default().build(),
+                    "XNNPACKExecutionProvider",
+                )),
                 // Handle cases where feature is disabled but enum variant exists
                 #[allow(unreachable_patterns)]
                 _ => {
@@ -285,64 +277,50 @@ impl YOLOModel {
         } else {
             // Default: Register all available providers in preference order
             #[cfg(feature = "tensorrt")]
-            {
-                eps.push(Self::build_tensorrt_ep(
-                    path,
-                    0,
-                    config.half,
-                    cuda_pre_stream_ptr,
-                ));
-                provider_name = "TensorRTExecutionProvider";
-            }
+            eps.push((
+                Self::build_tensorrt_ep(path, 0, config.half, cuda_pre_stream_ptr),
+                "TensorRTExecutionProvider",
+            ));
 
             #[cfg(feature = "cuda")]
-            {
-                eps.push(Self::build_cuda_ep(0, cuda_pre_stream_ptr));
-                if provider_name == "CPUExecutionProvider" {
-                    provider_name = "CUDAExecutionProvider";
-                }
-            }
+            eps.push((
+                Self::build_cuda_ep(0, cuda_pre_stream_ptr),
+                "CUDAExecutionProvider",
+            ));
 
             #[cfg(feature = "coreml")]
             if matches!(Self::macos_version(), Some((major, _)) if major >= 11) {
-                eps.push(Self::build_coreml_ep(path));
-                if provider_name == "CPUExecutionProvider" {
-                    provider_name = "CoreMLExecutionProvider";
-                }
+                eps.push((Self::build_coreml_ep(path), "CoreMLExecutionProvider"));
             }
 
             #[cfg(feature = "rocm")]
-            {
-                eps.push(ort::execution_providers::ROCmExecutionProvider::default().build());
-                if provider_name == "CPUExecutionProvider" {
-                    provider_name = "ROCmExecutionProvider";
-                }
-            }
+            eps.push((
+                ort::execution_providers::ROCmExecutionProvider::default().build(),
+                "ROCmExecutionProvider",
+            ));
 
             #[cfg(feature = "directml")]
-            {
-                eps.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
-                if provider_name == "CPUExecutionProvider" {
-                    provider_name = "DirectMLExecutionProvider";
-                }
-            }
+            eps.push((
+                ort::execution_providers::DirectMLExecutionProvider::default().build(),
+                "DirectMLExecutionProvider",
+            ));
 
             #[cfg(feature = "openvino")]
-            {
-                eps.push(ort::execution_providers::OpenVINOExecutionProvider::default().build());
-                if provider_name == "CPUExecutionProvider" {
-                    provider_name = "OpenVINOExecutionProvider";
-                }
-            }
+            eps.push((
+                ort::execution_providers::OpenVINOExecutionProvider::default().build(),
+                "OpenVINOExecutionProvider",
+            ));
 
             #[cfg(feature = "xnnpack")]
-            {
-                eps.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
-                if provider_name == "CPUExecutionProvider" {
-                    provider_name = "XNNPACKExecutionProvider";
-                }
-            }
+            eps.push((
+                ort::execution_providers::XNNPACKExecutionProvider::default().build(),
+                "XNNPACKExecutionProvider",
+            ));
         }
+
+        let provider_name = eps
+            .first()
+            .map_or("CPUExecutionProvider", |&(_, name)| name);
 
         if !eps.is_empty() {
             crate::info!(
@@ -350,19 +328,22 @@ impl YOLOModel {
                 eps.len(),
                 provider_name
             );
-            session_builder = session_builder.with_execution_providers(eps).map_err(|e| {
-                // The GPU EPs are marked `error_on_failure` only on the
-                // cuda-preprocess fast path (see `build_cuda_ep`), so a dlopen
-                // failure surfaces here as a clear, actionable error instead of
-                // silently falling back to CPU and then panicking later at
-                // `bind_input` with "no data transfer registered" (#251).
-                let gpu = matches!(
-                    provider_name,
-                    "CUDAExecutionProvider" | "TensorRTExecutionProvider"
-                );
-                if gpu {
-                    InferenceError::ModelLoadError(format!(
-                        "{provider_name} failed to load, so the cuda-preprocess fast path \
+            let providers: Vec<_> = eps.into_iter().map(|(ep, _)| ep).collect();
+            session_builder = session_builder
+                .with_execution_providers(providers)
+                .map_err(|e| {
+                    // The GPU EPs are marked `error_on_failure` only on the
+                    // cuda-preprocess fast path (see `build_cuda_ep`), so a dlopen
+                    // failure surfaces here as a clear, actionable error instead of
+                    // silently falling back to CPU and then panicking later at
+                    // `bind_input` with "no data transfer registered" (#251).
+                    let gpu = matches!(
+                        provider_name,
+                        "CUDAExecutionProvider" | "TensorRTExecutionProvider"
+                    );
+                    if gpu {
+                        InferenceError::ModelLoadError(format!(
+                            "{provider_name} failed to load, so the cuda-preprocess fast path \
                          cannot run on the GPU: {e}\n\
                          Hint: ensure the matching CUDA runtime and cuDNN 9 (plus TensorRT 10 \
                          for TensorRt) are installed and on the library path. If the bundled \
@@ -370,13 +351,13 @@ impl YOLOModel {
                          `ORT_CUDA_VERSION=12` or `ORT_CUDA_VERSION=13` to match your CUDA \
                          install. To use CPU preprocessing instead, set \
                          `InferenceConfig::with_cuda_preprocess(false)`."
-                    ))
-                } else {
-                    InferenceError::ModelLoadError(format!(
-                        "Failed to set execution providers: {e}"
-                    ))
-                }
-            })?;
+                        ))
+                    } else {
+                        InferenceError::ModelLoadError(format!(
+                            "Failed to set execution providers: {e}"
+                        ))
+                    }
+                })?;
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
@@ -1851,14 +1832,8 @@ mod tests {
 
     #[test]
     fn test_model_accessors_with_dummy() {
-        // Since we can't easily mock YOLOModel (it wraps internal ORT session),
-        // we can at least test specific public methods if we had a valid model.
-        // But for getters, we need an instance.
-        // We can use the auto-downloaded yolo26n.onnx if available,
-        // but unit tests should be hermetic if possible.
-        // However, we rely on yolo26n.onnx for other tests.
-
-        // Only run if model exists or can be downloaded
+        // The accessors need a real instance (YOLOModel wraps an ORT session and can't be
+        // mocked), so this only asserts when yolo26n.onnx is present or downloadable.
         if let Ok(model) = YOLOModel::load("yolo26n.onnx") {
             assert_eq!(model.task(), Task::Detect);
             assert!(model.num_classes() > 0);
@@ -1873,48 +1848,40 @@ mod tests {
         }
     }
 
-    // Issue #148 , PR #149: GatherElements out-of-range on an all-zeros dummy input is benign
-    // during `CoreML` warmup (the DFL head produces invalid gather indices for zero activations).
+    // Only the `CoreML` GatherElements warmup error may be swallowed; everything else must
+    // reach the caller.
     #[test]
-    fn test_warmup_gather_elements_suppressed_for_coreml() {
-        assert!(is_benign_coreml_warmup_error(
-            "CoreMLExecutionProvider",
-            "GatherElements op: Out of range value in index tensor"
-        ));
-    }
-
-    // The same GatherElements error on CPU/CUDA is a real bug and must not be hidden.
-    #[test]
-    fn test_warmup_gather_elements_propagates_for_other_providers() {
-        assert!(!is_benign_coreml_warmup_error(
-            "CPUExecutionProvider",
-            "GatherElements op: Out of range value in index tensor"
-        ));
-        assert!(!is_benign_coreml_warmup_error(
-            "CUDAExecutionProvider",
-            "GatherElements op: Out of range value in index tensor"
-        ));
-    }
-
-    // graph_input_cast_0 is a real `CoreML` misconfiguration (MLProgram adds a cast node that
-    // renames the ONNX input). It must propagate so the caller sees the failure.
-    // The fix (`NeuralNetwork` format) prevents this error from occurring at all, but it must
-    // never be silently swallowed if it somehow reappears.
-    #[test]
-    fn test_warmup_graph_input_cast_error_propagates() {
-        assert!(!is_benign_coreml_warmup_error(
-            "CoreMLExecutionProvider",
-            "Feature graph_input_cast_0 is required but not specified"
-        ));
-    }
-
-    // Any unrecognized `CoreML` error must propagate.
-    #[test]
-    fn test_warmup_unrecognised_coreml_error_propagates() {
-        assert!(!is_benign_coreml_warmup_error(
-            "CoreMLExecutionProvider",
-            "Some unexpected `CoreML` error"
-        ));
+    fn test_warmup_error_suppression() {
+        const GATHER: &str = "GatherElements op: Out of range value in index tensor";
+        let cases = [
+            // Issue #148, PR #149: out-of-range on an all-zeros dummy input is benign during
+            // `CoreML` warmup (the DFL head gathers invalid indices for zero activations).
+            ("CoreMLExecutionProvider", GATHER, true),
+            // The same error on CPU/CUDA is a real bug and must not be hidden.
+            ("CPUExecutionProvider", GATHER, false),
+            ("CUDAExecutionProvider", GATHER, false),
+            // graph_input_cast_0 is a real `CoreML` misconfiguration (MLProgram adds a cast node
+            // that renames the ONNX input). The `NeuralNetwork` format prevents it, but it must
+            // never be silently swallowed if it somehow reappears.
+            (
+                "CoreMLExecutionProvider",
+                "Feature graph_input_cast_0 is required but not specified",
+                false,
+            ),
+            // Any unrecognized `CoreML` error must propagate.
+            (
+                "CoreMLExecutionProvider",
+                "Some unexpected `CoreML` error",
+                false,
+            ),
+        ];
+        for (provider, msg, benign) in cases {
+            assert_eq!(
+                is_benign_coreml_warmup_error(provider, msg),
+                benign,
+                "{provider}: {msg}"
+            );
+        }
     }
 
     #[cfg(all(feature = "coreml", target_os = "macos"))]
@@ -1932,22 +1899,16 @@ mod tests {
     #[test]
     fn test_apply_postprocess_time_stamps_all_results() {
         let names = Arc::new(HashMap::new());
-        let mut batch: Vec<Vec<Results>> = vec![
+        let result = || {
             vec![Results::new(
                 Array3::zeros((4, 4, 3)),
                 String::new(),
                 Arc::clone(&names),
                 Speed::new(0.0, 0.0, 0.0),
                 (4, 4),
-            )],
-            vec![Results::new(
-                Array3::zeros((4, 4, 3)),
-                String::new(),
-                Arc::clone(&names),
-                Speed::new(0.0, 0.0, 0.0),
-                (4, 4),
-            )],
-        ];
+            )]
+        };
+        let mut batch: Vec<Vec<Results>> = vec![result(), result()];
         YOLOModel::apply_postprocess_time(&mut batch, Instant::now(), 2.0);
         for img in &batch {
             for r in img {
@@ -1959,16 +1920,16 @@ mod tests {
     #[test]
     fn test_concat_f32_and_f16_batch() {
         let img = image::DynamicImage::new_rgb8(64, 48);
-        let r0 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
-        let r1 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
-
-        let f32_batch = YOLOModel::concat_f32_batch(&[r0, r1]).unwrap();
-        assert_eq!(f32_batch.dim().0, 2); // two images stacked on the batch axis
-
-        let r0 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
-        let r1 = crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true);
-        let f16_batch = YOLOModel::concat_f16_batch(&[r0, r1]).unwrap();
-        assert_eq!(f16_batch.dim().0, 2);
+        // FP16 preprocessing keeps both tensors, so one pair feeds both concat paths.
+        let pair = || {
+            [
+                crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true),
+                crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true),
+            ]
+        };
+        // two images stacked on the batch axis
+        assert_eq!(YOLOModel::concat_f32_batch(&pair()).unwrap().dim().0, 2);
+        assert_eq!(YOLOModel::concat_f16_batch(&pair()).unwrap().dim().0, 2);
     }
 
     #[test]
