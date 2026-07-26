@@ -68,33 +68,14 @@ pub fn postprocess(
     end2end: bool,
     kpt_shape: Option<(usize, usize)>,
 ) -> Results {
+    let results = Results::new(orig_img, path, names, speed, inference_shape);
     match task {
         Task::Detect => {
             let (output, shape) = &outputs[0];
             if end2end || is_end2end_detect_shape(shape) {
-                postprocess_detect_end2end(
-                    output,
-                    shape,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                )
+                postprocess_detect_end2end(output, shape, preprocess, config, results)
             } else {
-                postprocess_detect(
-                    output,
-                    shape,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                )
+                postprocess_detect(output, shape, preprocess, config, results)
             }
         }
         Task::Segment => {
@@ -104,27 +85,9 @@ pub fn postprocess(
                 .get(1)
                 .and_then(|(_, s)| if s.len() == 4 { Some(s[1]) } else { None });
             if end2end || is_end2end_segment_shape(&outputs[0].1, proto_channels) {
-                postprocess_segment_end2end(
-                    outputs,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                )
+                postprocess_segment_end2end(outputs, preprocess, config, results)
             } else {
-                postprocess_segment(
-                    outputs,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                )
+                postprocess_segment(outputs, preprocess, config, results)
             }
         }
         Task::Pose => {
@@ -136,42 +99,31 @@ pub fn postprocess(
                 || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_pose_shape(shape, nk, kd));
             if is_end2end {
                 let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
-                postprocess_pose_end2end(
-                    output,
-                    shape,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                    nk,
-                    kpt_dim,
-                )
+                postprocess_pose_end2end(output, shape, preprocess, config, results, nk, kpt_dim)
             } else {
-                postprocess_pose(
-                    output,
-                    shape,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                )
+                postprocess_pose(output, shape, preprocess, config, results)
             }
         }
         Task::Classify => {
             let (output, _) = &outputs[0];
-            postprocess_classify(output, names, orig_img, path, speed, inference_shape)
+            postprocess_classify(output, results)
+        }
+        Task::Obb => {
+            let (output, shape) = &outputs[0];
+            if end2end || is_end2end_obb_shape(shape) {
+                postprocess_obb_end2end(output, shape, preprocess, config, results)
+            } else {
+                postprocess_obb(output, shape, preprocess, config, results)
+            }
+        }
+        Task::Depth => {
+            let (output, shape) = &outputs[0];
+            postprocess_depth(output, shape, results)
         }
         Task::Semantic => {
             let (output, shape) = &outputs[0];
-            let n_classes = names.len();
-            let mut results =
-                postprocess_semantic(output, shape, names, orig_img, path, speed, inference_shape);
+            let n_classes = results.names.len();
+            let mut results = postprocess_semantic(output, shape, results);
             // Adapt the `classes` filter to semantic segmentation: pixels whose
             // class is not kept become IGNORE. Only meaningful for multi-class
             // models, matching Ultralytics.
@@ -186,38 +138,6 @@ pub fn postprocess(
                 }
             }
             results
-        }
-        Task::Obb => {
-            let (output, shape) = &outputs[0];
-            if end2end || is_end2end_obb_shape(shape) {
-                postprocess_obb_end2end(
-                    output,
-                    shape,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                )
-            } else {
-                postprocess_obb(
-                    output,
-                    shape,
-                    preprocess,
-                    config,
-                    names,
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                )
-            }
-        }
-        Task::Depth => {
-            let (output, shape) = &outputs[0];
-            postprocess_depth(output, shape, names, orig_img, path, speed, inference_shape)
         }
     }
 }
@@ -271,27 +191,17 @@ const fn is_end2end_obb_shape(shape: &[usize]) -> bool {
 /// Post-process detection model output.
 ///
 /// Zero-copy implementation using stride-based indexing to avoid memory allocations.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::similar_names,
-    clippy::cast_precision_loss
-)]
+#[allow(clippy::similar_names, clippy::cast_precision_loss)]
 fn postprocess_detect(
     output: &[f32],
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
 ) -> Results {
-    let nc = names.len();
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
-
     // Parse output shape - handle both [1, 84, 8400] and [1, 8400, 84] formats
-    let (num_classes, num_predictions, is_transposed) = parse_detect_shape(output_shape, nc);
+    let (num_classes, num_predictions, is_transposed) =
+        parse_detect_shape(output_shape, results.names.len());
 
     if output.is_empty() || num_predictions == 0 {
         return results;
@@ -414,6 +324,34 @@ fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
         })
         .max_by(|(_, a), (_, b)| a.total_cmp(b))
         .unwrap_or((0, f32::NEG_INFINITY))
+}
+
+/// Decode row `i` of a `[preds, features]` head into a detection candidate.
+///
+/// Picks the best of the `num_classes` class scores and, when it clears the confidence
+/// threshold and the class filter, returns the box scaled back to the original image and
+/// clipped to it, with its score and class. `None` means the row is dropped.
+fn decode_row(
+    output_2d: &Array2<f32>,
+    i: usize,
+    num_classes: usize,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+) -> Option<([f32; 4], f32, usize)> {
+    let (best_class, best_score) = best_class_score(&output_2d.slice(s![i, 4..4 + num_classes]));
+    if best_score < config.confidence_threshold || !config.keep_class(best_class) {
+        return None;
+    }
+    let bbox = scale_and_clip_box(
+        &xywh_to_xyxy(
+            output_2d[[i, 0]],
+            output_2d[[i, 1]],
+            output_2d[[i, 2]],
+            output_2d[[i, 3]],
+        ),
+        preprocess,
+    );
+    Some((bbox, best_score, best_class))
 }
 
 /// Run per-class NMS over `(bbox, score, class, extra)` candidates and return the kept
@@ -840,17 +778,12 @@ fn build_instance_masks(
 /// * `outputs` - Vector of model outputs (detection features and mask prototypes).
 /// * `preprocess` - Preprocessing metadata.
 /// * `config` - Inference configuration.
-/// * `names` - Class mapping.
-/// * `orig_img` - Original image.
-/// * `path` - Source path.
-/// * `speed` - Timing metrics.
-/// * `inference_shape` - Inference input dimensions.
+/// * `results` - Pre-built results container to fill in.
 ///
 /// # Returns
 ///
 /// `Results` struct containing boxes and masks.
 #[allow(
-    clippy::too_many_arguments,
     clippy::similar_names,
     clippy::cast_precision_loss,
     clippy::too_many_lines,
@@ -862,13 +795,10 @@ fn postprocess_segment(
     outputs: Vec<(&[f32], Vec<usize>)>,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
 ) -> Results {
-    let mut results = Results::new(orig_img, path, Arc::clone(&names), speed, inference_shape);
+    let nc = results.names.len();
+    let inference_shape = results.inference_shape();
 
     if outputs.len() < 2 {
         // Protos output missing - log warning for user visibility
@@ -887,7 +817,7 @@ fn postprocess_segment(
 
     // Derive nm from the protos tensor so non-default prototype counts work correctly.
     let num_masks = if shape1.len() == 4 { shape1[1] } else { 32 };
-    let expected_features = 4 + names.len() + num_masks;
+    let expected_features = 4 + nc + num_masks;
 
     // Manual shape check
     let (num_preds, is_transposed) = if shape0.len() == 3 {
@@ -911,36 +841,13 @@ fn postprocess_segment(
     // Convert to 2D [preds, features]
     let output_2d = output_to_2d(output0, num_preds, expected_features, is_transposed);
 
-    // Filter and NMS
-    let mut candidates = Vec::new(); // (bbox, score, class, original_index)
-
-    for i in 0..num_preds {
-        let scores = output_2d.slice(s![i, 4..4 + names.len()]);
-        let (best_class, best_score) = best_class_score(&scores);
-
-        if best_score < config.confidence_threshold {
-            continue;
-        }
-
-        // Box
-        let cx = output_2d[[i, 0]];
-        let cy = output_2d[[i, 1]];
-        let w = output_2d[[i, 2]];
-        let h = output_2d[[i, 3]];
-        let clipped = scale_and_clip_box(&xywh_to_xyxy(cx, cy, w, h), preprocess);
-
-        // Filter by class if specified
-        if !config.keep_class(best_class) {
-            continue;
-        }
-
-        candidates.push((
-            [clipped[0], clipped[1], clipped[2], clipped[3]],
-            best_score,
-            best_class,
-            i, // Keep index to get coefficients
-        ));
-    }
+    // Filter and NMS. The original row index is kept to look the coefficients up later.
+    let candidates: Vec<([f32; 4], f32, usize, usize)> = (0..num_preds)
+        .filter_map(|i| {
+            decode_row(&output_2d, i, nc, preprocess, config)
+                .map(|(bbox, score, class)| (bbox, score, class, i))
+        })
+        .collect();
 
     if candidates.is_empty() {
         return results;
@@ -958,7 +865,7 @@ fn postprocess_segment(
         write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
 
         // Extract coefficients: [orig_idx, 4+nc..]
-        let start = 4 + names.len();
+        let start = 4 + nc;
         let coeffs = output_2d.slice(s![*orig_idx, start..start + num_masks]);
         for m in 0..num_masks {
             mask_coeffs[[out_idx, m]] = coeffs[m];
@@ -1004,25 +911,6 @@ fn postprocess_segment(
     results
 }
 
-/// Post-process pose estimation model output.
-///
-/// Extracts bounding boxes and keypoints (skeleton) from the model output.
-///
-/// # Arguments
-///
-/// * `output` - Flat vector of model output.
-/// * `output_shape` - Output tensor dimensions.
-/// * `preprocess` - Preprocessing metadata.
-/// * `config` - Inference configuration.
-/// * `names` - Class name mapping.
-/// * `orig_img` - Original image.
-/// * `path` - Source image path.
-/// * `speed` - Timing data.
-/// * `inference_shape` - Inference input dimensions.
-///
-/// # Returns
-///
-/// `Results` struct containing boxes and keypoints.
 /// Derive `(num_preds, is_transposed)` from a pose/OBB output shape.
 ///
 /// A `[1, features, preds]` layout is detected when the feature axis equals
@@ -1055,7 +943,6 @@ const fn parse_transposed_shape(
 /// Handles both `[1, features, preds]` and `[1, preds, features]` layouts, applies NMS, and
 /// scales boxes and keypoints back to the original image with the letterbox metadata.
 #[allow(
-    clippy::too_many_arguments,
     clippy::too_many_lines,
     clippy::similar_names,
     clippy::type_complexity,
@@ -1067,14 +954,9 @@ fn postprocess_pose(
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
 ) -> Results {
-    let num_classes = names.len().max(1);
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+    let num_classes = results.names.len().max(1);
 
     // Standard COCO pose has 17 keypoints, each with (x, y, conf)
     let num_keypoints = 17;
@@ -1117,48 +999,24 @@ fn postprocess_pose(
     let mut candidates: Vec<([f32; 4], f32, usize, Vec<[f32; 3]>)> = Vec::new();
 
     for i in 0..num_preds {
-        // Get class score(s) - for pose, typically just "person" class
-        let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = best_class_score(&class_scores);
-
-        if best_score < config.confidence_threshold {
+        let Some((bbox, best_score, best_class)) =
+            decode_row(&output_2d, i, num_classes, preprocess, config)
+        else {
             continue;
-        }
+        };
 
-        // Extract box coordinates (xywh format)
-        let cx = output_2d[[i, 0]];
-        let cy = output_2d[[i, 1]];
-        let w = output_2d[[i, 2]];
-        let h = output_2d[[i, 3]];
-
-        // Convert to xyxy, then scale to original image space and clip
-        let clipped = scale_and_clip_box(&xywh_to_xyxy(cx, cy, w, h), preprocess);
-
-        // Extract keypoints (after class scores)
+        // Extract keypoints (after class scores), scaled to original image space.
         let kpt_start = 4 + num_classes;
-        let mut keypoints = Vec::with_capacity(num_keypoints);
-        for k in 0..num_keypoints {
-            let kpt_offset = kpt_start + k * kpt_dim;
-            let kpt_x = output_2d[[i, kpt_offset]];
-            let kpt_y = output_2d[[i, kpt_offset + 1]];
-            let kpt_conf = output_2d[[i, kpt_offset + 2]];
+        let keypoints = (0..num_keypoints)
+            .map(|k| {
+                let off = kpt_start + k * kpt_dim;
+                let (x, y) =
+                    scale_keypoint(output_2d[[i, off]], output_2d[[i, off + 1]], preprocess);
+                [x, y, output_2d[[i, off + 2]]]
+            })
+            .collect();
 
-            // Scale keypoint coordinates to original image space
-            let (scaled_x, scaled_y) = scale_keypoint(kpt_x, kpt_y, preprocess);
-            keypoints.push([scaled_x, scaled_y, kpt_conf]);
-        }
-
-        // Filter by class if specified
-        if !config.keep_class(best_class) {
-            continue;
-        }
-
-        candidates.push((
-            [clipped[0], clipped[1], clipped[2], clipped[3]],
-            best_score,
-            best_class,
-            keypoints,
-        ));
+        candidates.push((bbox, best_score, best_class, keypoints));
     }
 
     if candidates.is_empty() {
@@ -1204,25 +1062,12 @@ fn postprocess_pose(
 /// # Arguments
 ///
 /// * `output` - Raw model output vector.
-/// * `names` - Class name mapping.
-/// * `orig_img` - Original image.
-/// * `path` - Source path.
-/// * `speed` - Timing metrics.
-/// * `inference_shape` - Inference dimensions.
+/// * `results` - Pre-built results container to fill in.
 ///
 /// # Returns
 ///
 /// `Results` struct containing classification probabilities.
-fn postprocess_classify(
-    output: &[f32],
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
-) -> Results {
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
-
+fn postprocess_classify(output: &[f32], mut results: Results) -> Results {
     if output.is_empty() {
         return results;
     }
@@ -1258,33 +1103,20 @@ fn postprocess_classify(
 /// * `output_shape` - Output tensor shape.
 /// * `preprocess` - Preprocessing metadata.
 /// * `config` - Inference configuration.
-/// * `names` - Class name mapping.
-/// * `orig_img` - Original image.
-/// * `path` - Source path.
-/// * `speed` - Timing metrics.
-/// * `inference_shape` - Inference dimensions.
+/// * `results` - Pre-built results container to fill in.
 ///
 /// # Returns
 ///
 /// `Results` struct containing oriented bounding boxes.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::similar_names
-)]
+#[allow(clippy::too_many_lines, clippy::similar_names)]
 fn postprocess_obb(
     output: &[f32],
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
 ) -> Results {
-    let num_classes = names.len().max(1);
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+    let num_classes = results.names.len().max(1);
 
     // OBB format: [xywh, class_scores..., rotation_angle]
     // features = 4 (bbox) + num_classes + 1 (angle)
@@ -1437,20 +1269,14 @@ fn decode_end2end(
 }
 
 /// Post-process YOLO26 end-to-end detection output `[1, max_det, 6]`.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss)]
 fn postprocess_detect_end2end(
     output: &[f32],
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
-
     if output_shape.len() != 3 || output.is_empty() {
         return results;
     }
@@ -1487,7 +1313,6 @@ fn postprocess_detect_end2end(
 ///
 /// `output0`: `[1, max_det, 6 + nm]`, `output1`: `[1, nm, mh, mw]` (protos).
 #[allow(
-    clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::too_many_lines,
     clippy::needless_pass_by_value,
@@ -1498,13 +1323,9 @@ fn postprocess_segment_end2end(
     outputs: Vec<(&[f32], Vec<usize>)>,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+    let inference_shape = results.inference_shape();
     if outputs.len() < 2 {
         eprintln!(
             "WARNING ⚠️ End2end segmentation missing protos output (got {} outputs).",
@@ -1576,25 +1397,16 @@ fn postprocess_segment_end2end(
 }
 
 /// Post-process YOLO26 end-to-end pose output `[1, max_det, 6 + nk*kpt_dim]`.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::cast_precision_loss,
-    clippy::similar_names
-)]
+#[allow(clippy::cast_precision_loss, clippy::similar_names)]
 fn postprocess_pose_end2end(
     output: &[f32],
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
     nk: usize,
     kpt_dim: usize,
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
     if output_shape.len() != 3 || output.is_empty() || nk == 0 || kpt_dim < 2 {
         return results;
     }
@@ -1643,19 +1455,14 @@ fn postprocess_pose_end2end(
 
 /// Post-process YOLO26 end-to-end OBB output `[1, max_det, 7]`
 /// with layout `[cx, cy, w, h, conf, cls, angle]`.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss)]
 fn postprocess_obb_end2end(
     output: &[f32],
     output_shape: &[usize],
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
+    mut results: Results,
 ) -> Results {
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
     let mut flat: Vec<f32> = Vec::new();
 
     if output_shape.len() == 3 && !output.is_empty() {
@@ -1856,25 +1663,14 @@ pub fn postprocess_semantic_mask(
 /// padding and bilinear-resize the cropped region back to the original `(H, W)`, mirroring
 /// `ops.scale_masks` in the Python `DepthPredictor`.
 #[allow(
-    clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
-    clippy::similar_names,
-    clippy::implicit_hasher
+    clippy::similar_names
 )]
-fn postprocess_depth(
-    output: &[f32],
-    shape: &[usize],
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
-) -> Results {
-    let oh = orig_img.shape()[0];
-    let ow = orig_img.shape()[1];
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> Results {
+    let oh = results.orig_img.shape()[0];
+    let ow = results.orig_img.shape()[1];
 
     if shape.len() < 2 || output.is_empty() {
         return results;
@@ -1922,24 +1718,14 @@ fn postprocess_depth(
 /// Memory traffic per output pixel drops from 4*nc strided reads to 4*nc contiguous
 /// reads; the source channels for one source pixel fit in ~80 bytes (1-2 cache lines).
 #[allow(
-    clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
     clippy::similar_names
 )]
-fn postprocess_semantic(
-    output: &[f32],
-    shape: &[usize],
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
-) -> Results {
-    let oh = orig_img.shape()[0];
-    let ow = orig_img.shape()[1];
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+fn postprocess_semantic(output: &[f32], shape: &[usize], mut results: Results) -> Results {
+    let oh = results.orig_img.shape()[0];
+    let ow = results.orig_img.shape()[1];
 
     if shape.len() < 4 || output.is_empty() {
         return results;
@@ -2019,30 +1805,26 @@ fn postprocess_semantic(
             let w01 = fyi * fx;
             let w11 = fy * fx;
 
-            *cell = if nc == 1 {
-                let base = 0;
-                let v = output[base + row1_base + x1].mul_add(
+            // Interpolate class `c`'s logit from its four neighbors in that class's plane.
+            let logit = |c: usize| {
+                let base = c * plane;
+                output[base + row1_base + x1].mul_add(
                     w11,
                     output[base + row0_base + x1].mul_add(
                         w01,
                         output[base + row1_base + x0]
                             .mul_add(w10, output[base + row0_base + x0] * w00),
                     ),
-                );
-                u16::from(v > 0.0)
+                )
+            };
+
+            *cell = if nc == 1 {
+                u16::from(logit(0) > 0.0)
             } else {
                 let mut best_cls = 0u16;
                 let mut best_val = f32::NEG_INFINITY;
                 for c in 0..nc {
-                    let base = c * plane;
-                    let v = output[base + row1_base + x1].mul_add(
-                        w11,
-                        output[base + row0_base + x1].mul_add(
-                            w01,
-                            output[base + row1_base + x0]
-                                .mul_add(w10, output[base + row0_base + x0] * w00),
-                        ),
-                    );
+                    let v = logit(c);
                     if v > best_val {
                         best_val = v;
                         best_cls = c as u16;
@@ -2060,6 +1842,24 @@ fn postprocess_semantic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Class names `class0..class{nc-1}`.
+    fn make_names(nc: usize) -> Arc<HashMap<usize, String>> {
+        Arc::new((0..nc).map(|i| (i, format!("class{i}"))).collect())
+    }
+
+    /// Identity letterbox geometry (scale 1, no padding) for an `orig`-sized image.
+    /// The `Results` container the dispatcher hands to each post-processor: a zeroed
+    /// `orig`-sized image with `nc` class names, letterboxed to `inference_shape`.
+    fn results_for(nc: usize, orig: (usize, usize), inference_shape: (u32, u32)) -> Results {
+        Results::new(
+            ndarray::Array3::zeros((orig.0, orig.1, 3)),
+            String::new(),
+            make_names(nc),
+            Speed::default(),
+            inference_shape,
+        )
+    }
 
     #[test]
     fn test_parse_detect_shape() {
@@ -2108,27 +1908,12 @@ mod tests {
     #[test]
     fn test_empty_output() {
         let output: Vec<f32> = vec![];
-        let preprocess = PreprocessResult {
-            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
-            tensor_f16: None,
-            orig_shape: (480, 640),
-            scale: (1.0, 1.0),
-            padding: (0.0, 0.0),
-        };
-        let config = InferenceConfig::default();
-        let names = Arc::new(HashMap::new());
-        let orig_img = ndarray::Array3::zeros((480, 640, 3));
-
         let results = postprocess_detect(
             &output,
             &[1, 84, 0],
-            &preprocess,
-            &config,
-            names,
-            orig_img,
-            String::new(),
-            Speed::default(),
-            (640, 640),
+            &unit_preprocess((480, 640)),
+            &InferenceConfig::default(),
+            results_for(0, (480, 640), (640, 640)),
         );
 
         assert!(results.is_empty());
@@ -2147,33 +1932,13 @@ mod tests {
         output[4] = f32::NAN;
         output[5] = 0.9; // This should be selected even with NaN present
 
-        let preprocess = PreprocessResult {
-            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
-            tensor_f16: None,
-            orig_shape: (640, 640),
-            scale: (1.0, 1.0),
-            padding: (0.0, 0.0),
-        };
-        let config = InferenceConfig::default();
-        let names = Arc::new({
-            let mut n = HashMap::new();
-            n.insert(0, "class0".to_string());
-            n.insert(1, "class1".to_string());
-            n
-        });
-        let orig_img = ndarray::Array3::zeros((640, 640, 3));
-
         // This should not panic
         let results = postprocess_detect(
             &output,
             &[1, 84, 1],
-            &preprocess,
-            &config,
-            names,
-            orig_img,
-            String::new(),
-            Speed::default(),
-            (640, 640),
+            &unit_preprocess((640, 640)),
+            &InferenceConfig::default(),
+            results_for(2, (640, 640), (640, 640)),
         );
 
         // Test passed if we got here without panicking - NaN was handled gracefully
@@ -2209,44 +1974,20 @@ mod tests {
         // Test that malformed shapes return empty results instead of panicking
         let output: Vec<f32> = vec![0.0; 100]; // Some data
 
-        let preprocess = PreprocessResult {
-            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
-            tensor_f16: None,
-            orig_shape: (640, 640),
-            scale: (1.0, 1.0),
-            padding: (0.0, 0.0),
-        };
+        let preprocess = unit_preprocess((640, 640));
         let config = InferenceConfig::default();
-        let names = Arc::new(HashMap::new());
-        let orig_img = ndarray::Array3::zeros((640, 640, 3));
 
-        // Empty shape should not panic
-        let results = postprocess_detect(
-            &output,
-            &[],
-            &preprocess,
-            &config,
-            Arc::clone(&names),
-            orig_img.clone(),
-            String::new(),
-            Speed::default(),
-            (640, 640),
-        );
-        assert!(results.is_empty());
-
-        // Single dimension shape should not panic
-        let results = postprocess_detect(
-            &output,
-            &[100],
-            &preprocess,
-            &config,
-            Arc::clone(&names),
-            orig_img,
-            String::new(),
-            Speed::default(),
-            (640, 640),
-        );
-        assert!(results.is_empty());
+        // Empty and single-dimension shapes should not panic
+        for shape in [&[][..], &[100][..]] {
+            let results = postprocess_detect(
+                &output,
+                shape,
+                &preprocess,
+                &config,
+                results_for(0, (640, 640), (640, 640)),
+            );
+            assert!(results.is_empty(), "shape {shape:?}");
+        }
     }
 
     #[test]
@@ -2274,31 +2015,13 @@ mod tests {
             output[idx + num_preds * (offset + 2)] = 0.8; // conf
         }
 
-        let preprocess = PreprocessResult {
-            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
-            tensor_f16: None,
-            orig_shape: (640, 640),
-            scale: (1.0, 1.0),
-            padding: (0.0, 0.0),
-        };
-        let config = InferenceConfig::default();
-        let names = Arc::new({
-            let mut n = HashMap::new();
-            n.insert(0, "person".to_string());
-            n
-        });
-
         // Shape [1, 56, 100]
         let results = postprocess_pose(
             &output,
             &[1, num_features, num_preds],
-            &preprocess,
-            &config,
-            names,
-            ndarray::Array3::zeros((640, 640, 3)),
-            "test.jpg".to_string(),
-            Speed::default(),
-            (640, 640),
+            &unit_preprocess((640, 640)),
+            &InferenceConfig::default(),
+            results_for(1, (640, 640), (640, 640)),
         );
 
         assert!(results.keypoints.is_some());
@@ -2340,21 +2063,12 @@ mod tests {
             }
         }
 
-        let preprocess = PreprocessResult {
-            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
-            tensor_f16: None,
-            orig_shape: (640, 640),
-            scale: (1.0, 1.0),
-            padding: (0.0, 0.0),
-        };
-        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
-
         let results = postprocess(
             vec![(out.as_slice(), vec![1, max_det, feats])],
             Task::Pose,
-            &preprocess,
+            &unit_preprocess((640, 640)),
             &InferenceConfig::default(),
-            names,
+            make_names(1),
             ndarray::Array3::zeros((640, 640, 3)),
             "test.jpg".to_string(),
             Speed::default(),
@@ -2396,31 +2110,13 @@ mod tests {
         // Angle
         output[idx + num_preds * 5] = std::f32::consts::FRAC_PI_4; // 45 degrees
 
-        let preprocess = PreprocessResult {
-            tensor: ndarray::Array4::zeros((1, 3, 640, 640)),
-            tensor_f16: None,
-            orig_shape: (640, 640),
-            scale: (1.0, 1.0),
-            padding: (0.0, 0.0),
-        };
-        let config = InferenceConfig::default();
-        let names = Arc::new({
-            let mut n = HashMap::new();
-            n.insert(0, "object".to_string());
-            n
-        });
-
         // Shape [1, 6, 100]
         let results = postprocess_obb(
             &output,
             &[1, num_features, num_preds],
-            &preprocess,
-            &config,
-            names,
-            ndarray::Array3::zeros((640, 640, 3)),
-            "test.jpg".to_string(),
-            Speed::default(),
-            (640, 640),
+            &unit_preprocess((640, 640)),
+            &InferenceConfig::default(),
+            results_for(1, (640, 640), (640, 640)),
         );
 
         assert!(results.obb.is_some());
@@ -2435,12 +2131,6 @@ mod tests {
             assert_eq!(data[4], std::f32::consts::FRAC_PI_4); // angle
             assert_eq!(data[5], 0.95); // conf
         }
-    }
-
-    // --- semantic helpers ---
-
-    fn make_names(nc: usize) -> Arc<HashMap<usize, String>> {
-        Arc::new((0..nc).map(|i| (i, format!("class{i}"))).collect())
     }
 
     #[test]
@@ -2470,11 +2160,7 @@ mod tests {
         let result = postprocess_semantic(
             &output,
             &[1, nc, oh, ow],
-            make_names(nc),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            "test.jpg".to_string(),
-            Speed::default(),
-            (oh as u32, ow as u32),
+            results_for(nc, (oh, ow), (oh as u32, ow as u32)),
         );
         let sm = result.semantic_mask.unwrap();
         assert_eq!(sm.data.shape(), &[oh, ow]);
@@ -2494,11 +2180,7 @@ mod tests {
         let result = postprocess_semantic(
             &output,
             &[1, nc, oh, ow],
-            make_names(2),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (oh as u32, ow as u32),
+            results_for(2, (oh, ow), (oh as u32, ow as u32)),
         );
         let sm = result.semantic_mask.unwrap();
         assert_eq!(
@@ -2509,31 +2191,12 @@ mod tests {
 
     #[test]
     fn test_postprocess_semantic_malformed_shape_no_panic() {
-        let names = make_names(3);
-        let orig_img = ndarray::Array3::zeros((4, 4, 3));
-
         // Shape too short (needs at least 4 dims)
-        let r = postprocess_semantic(
-            &[0.0f32; 10],
-            &[1, 3],
-            Arc::clone(&names),
-            orig_img.clone(),
-            String::new(),
-            Speed::default(),
-            (4, 4),
-        );
+        let r = postprocess_semantic(&[0.0f32; 10], &[1, 3], results_for(3, (4, 4), (4, 4)));
         assert!(r.semantic_mask.is_none());
 
         // Empty output slice
-        let r = postprocess_semantic(
-            &[],
-            &[1, 3, 4, 4],
-            Arc::clone(&names),
-            orig_img,
-            String::new(),
-            Speed::default(),
-            (4, 4),
-        );
+        let r = postprocess_semantic(&[], &[1, 3, 4, 4], results_for(3, (4, 4), (4, 4)));
         assert!(r.semantic_mask.is_none());
     }
 
@@ -2550,11 +2213,7 @@ mod tests {
             let result = postprocess_semantic(
                 &output,
                 &[1, NC, lh, lw],
-                make_names(NC),
-                ndarray::Array3::zeros((oh, ow, 3)),
-                String::new(),
-                Speed::default(),
-                (lh as u32, lw as u32),
+                results_for(NC, (oh, ow), (lh as u32, lw as u32)),
             );
             let sm = result.semantic_mask.unwrap();
             assert_eq!(sm.data.shape(), &[oh, ow]);
@@ -2575,11 +2234,7 @@ mod tests {
         let result = postprocess_semantic(
             &output,
             &[1, nc, lh, lw],
-            make_names(2),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (lh as u32, lw as u32),
+            results_for(2, (oh, ow), (lh as u32, lw as u32)),
         );
         let sm = result.semantic_mask.unwrap();
         assert_eq!(sm.data.shape(), &[oh, ow]);
@@ -2599,11 +2254,7 @@ mod tests {
         let result = postprocess_depth(
             &output,
             &[1, 1, oh, ow],
-            make_names(1),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (oh as u32, ow as u32),
+            results_for(1, (oh, ow), (oh as u32, ow as u32)),
         );
         let depth = result.depth.unwrap();
         assert_eq!(depth.data.shape(), &[oh, ow]);
@@ -2622,11 +2273,7 @@ mod tests {
         let result = postprocess_depth(
             &output,
             &[1, 1, lh, lw],
-            make_names(1),
-            ndarray::Array3::zeros((oh, ow, 3)),
-            String::new(),
-            Speed::default(),
-            (lh as u32, lw as u32),
+            results_for(1, (oh, ow), (lh as u32, lw as u32)),
         );
         let depth = result.depth.unwrap();
         assert_eq!(depth.data.shape(), &[oh, ow]);
@@ -2638,15 +2285,7 @@ mod tests {
     #[test]
     fn test_postprocess_depth_malformed_shape_no_panic() {
         // Too-short shape and empty output must return an empty Results, not panic.
-        let result = postprocess_depth(
-            &[],
-            &[1],
-            make_names(1),
-            ndarray::Array3::zeros((2, 2, 3)),
-            String::new(),
-            Speed::default(),
-            (2, 2),
-        );
+        let result = postprocess_depth(&[], &[1], results_for(1, (2, 2), (2, 2)));
         assert!(result.depth.is_none());
     }
 
@@ -2749,11 +2388,7 @@ mod tests {
             let result = postprocess_semantic(
                 slice,
                 &[1, nc, oh, ow],
-                make_names(nc),
-                ndarray::Array3::zeros((oh, ow, 3)),
-                String::new(),
-                Speed::default(),
-                (oh as u32, ow as u32),
+                results_for(nc, (oh, ow), (oh as u32, ow as u32)),
             );
             let sm = result.semantic_mask.unwrap();
             for &val in &sm.data {
@@ -2827,43 +2462,23 @@ mod tests {
 
     #[test]
     fn test_postprocess_classify_softmax_and_passthrough() {
-        let names = make_names(3);
-        let img = ndarray::Array3::zeros((8, 8, 3));
-
         // Logits (sum != 1) get softmaxed; argmax index is preserved.
-        let r = postprocess_classify(
-            &[1.0, 2.0, 3.0],
-            Arc::clone(&names),
-            img.clone(),
-            String::new(),
-            Speed::default(),
-            (8, 8),
-        );
+        let r = postprocess_classify(&[1.0, 2.0, 3.0], results_for(3, (8, 8), (8, 8)));
         let probs = r.probs.unwrap();
         assert_eq!(probs.top1(), 2);
         assert!((probs.data.sum() - 1.0).abs() < 1e-5);
 
         // Already-normalized probabilities pass through unchanged.
-        let r = postprocess_classify(
-            &[0.1, 0.2, 0.7],
-            Arc::clone(&names),
-            img.clone(),
-            String::new(),
-            Speed::default(),
-            (8, 8),
-        );
+        let r = postprocess_classify(&[0.1, 0.2, 0.7], results_for(3, (8, 8), (8, 8)));
         assert!((r.probs.unwrap().top1conf() - 0.7).abs() < 1e-6);
 
         // Empty output -> no probs.
-        let r = postprocess_classify(&[], names, img, String::new(), Speed::default(), (8, 8));
+        let r = postprocess_classify(&[], results_for(3, (8, 8), (8, 8)));
         assert!(r.probs.is_none());
     }
 
     #[test]
     fn test_postprocess_detect_end2end_thresholds() {
-        let names = make_names(1);
-        let pre = unit_preprocess((100, 100));
-        let config = InferenceConfig::default(); // conf threshold 0.25
         // Row0 above threshold, row1 below -> only one detection kept.
         let output = [
             10.0, 10.0, 50.0, 50.0, 0.9, 0.0, // keep
@@ -2872,13 +2487,9 @@ mod tests {
         let r = postprocess_detect_end2end(
             &output,
             &[1, 2, 6],
-            &pre,
-            &config,
-            names,
-            ndarray::Array3::zeros((100, 100, 3)),
-            String::new(),
-            Speed::default(),
-            (640, 640),
+            &unit_preprocess((100, 100)),
+            &InferenceConfig::default(), // conf threshold 0.25
+            results_for(1, (100, 100), (640, 640)),
         );
         assert_eq!(r.boxes.unwrap().len(), 1);
     }
@@ -2888,7 +2499,6 @@ mod tests {
         // nc=2 -> features = 6. Three predictions, [features, preds] layout:
         //   pred0: class0 @0.90, pred1: class0 @0.85 (overlaps pred0 -> NMS-suppressed),
         //   pred2: class1 @0.95 (distinct location).
-        let names = make_names(2);
         let pre = unit_preprocess((256, 256));
         let output = vec![
             50.0f32, 52.0, 200.0, // cx
@@ -2905,11 +2515,7 @@ mod tests {
             &[1, 6, 3],
             &pre,
             &InferenceConfig::default(),
-            Arc::clone(&names),
-            ndarray::Array3::zeros((256, 256, 3)),
-            String::new(),
-            Speed::default(),
-            (640, 640),
+            results_for(2, (256, 256), (640, 640)),
         );
         let boxes = r.boxes.expect("detections");
         assert_eq!(boxes.len(), 2);
@@ -2921,11 +2527,7 @@ mod tests {
             &[1, 6, 3],
             &pre,
             &config,
-            names,
-            ndarray::Array3::zeros((256, 256, 3)),
-            String::new(),
-            Speed::default(),
-            (640, 640),
+            results_for(2, (256, 256), (640, 640)),
         );
         let boxes = r.boxes.expect("detections");
         assert_eq!(boxes.len(), 1);
