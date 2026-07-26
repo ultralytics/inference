@@ -248,42 +248,33 @@ pub fn run_prediction(args: &PredictArgs) {
                     .zip(metas.iter().zip(paths.iter().zip(images.iter())))
                 {
                     for result in results {
-                        // Build detection summary
-                        let detection_summary = result.detection_summary();
-
                         // Get image dimensions from result
                         let inference_shape = result.inference_shape();
                         last_inference_shape =
                             (inference_shape.0 as usize, inference_shape.1 as usize);
 
-                        // Format total frames for display
-                        let total_frames_str = meta
-                            .total_frames
-                            .map_or_else(|| "?".to_string(), |n| n.to_string());
-                        let position = if is_video {
-                            format!(
-                                "video 1/1 (frame {}/{total_frames_str})",
-                                meta.frame_idx + 1
-                            )
-                        } else {
-                            format!("image {}/{total_frames_str}", meta.frame_idx + 1)
-                        };
-
-                        verbose!(
-                            "{} {}: {}x{} {}, {:.1}ms",
-                            position,
-                            image_path,
-                            inference_shape.0,
-                            inference_shape.1,
-                            detection_summary,
-                            result.speed.inference.unwrap_or(0.0)
-                        );
+                        if crate::logging::is_verbose() {
+                            let frames = meta
+                                .total_frames
+                                .map_or_else(|| "?".to_string(), |n| n.to_string());
+                            let position = if is_video {
+                                format!("video 1/1 (frame {}/{frames})", meta.frame_idx + 1)
+                            } else {
+                                format!("image {}/{frames}", meta.frame_idx + 1)
+                            };
+                            verbose!(
+                                "{position} {image_path}: {}x{} {}, {:.1}ms",
+                                inference_shape.0,
+                                inference_shape.1,
+                                result.detection_summary(),
+                                result.speed.inference.unwrap_or(0.0)
+                            );
+                        }
 
                         if let Some(ref cdir) = results_dir
                             && let Some(ref sm) = result.semantic_mask
                         {
-                            // For video/webcam sources every frame shares the same path stem,
-                            // so append the frame index to avoid overwriting earlier frames.
+
                             let stem =
                                 semantic_output_stem(image_path, meta.frame_idx, meta.total_frames);
                             let out_path = cdir.join(format!("{stem}.png"));
