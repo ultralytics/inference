@@ -1124,7 +1124,7 @@ impl YOLOModel {
 
         // Semantic fast form: the ONNX emits a single uint8 class map. Extract
         // it directly (no f32 logits, no CPU argmax) and run the dedicated
-        // mask post-processor - mirrors the CPU `run_inference_u8_with` path.
+        // mask post-processor - mirrors the CPU `extract_and_invoke_u8` path.
         if semantic_u8 {
             let name = self.output_names.first().ok_or_else(|| {
                 InferenceError::InferenceError("semantic model has no output".into())
@@ -1402,87 +1402,60 @@ impl YOLOModel {
             Ok(batch_results)
         };
 
-        if self.has_semantic_mask_output() {
-            // Fast path: the exported ONNX graph already contains ArgMax+Cast(uint8) nodes,
-            // so ONNX Runtime returns a uint8 class map directly (no f32 logits, no CPU argmax).
-            // Works for both FP32 and FP16 model inputs.
-            debug_assert_eq!(self.metadata.task, crate::task::Task::Semantic);
-            let names = &self.metadata.names;
-            let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
-            let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
-            let mut batch_results: Vec<Vec<Results>> = Vec::new();
+        // Resolve the output dtype path before the session is mutably borrowed below.
+        let semantic_mask_output = self.has_semantic_mask_output();
 
-            if self.fp16_input {
-                let batch_tensor = Self::concat_f16_batch(&preprocessed_results)?;
-                Self::run_inference_f16_u8_with(
-                    &mut self.session,
-                    &self.input_name,
-                    &self.output_names,
-                    &batch_tensor,
-                    |outputs, inference_ms_total| {
-                        batch_results = Self::semantic_mask_batch_results(
-                            outputs,
-                            inference_ms_total,
-                            n_images_f,
-                            preprocess_time,
-                            preprocessed_results,
-                            image_arrays,
-                            paths_ref,
-                            names,
-                        );
-                        Ok(())
-                    },
-                )?;
-            } else {
-                let batch_tensor = Self::concat_f32_batch(&preprocessed_results)?;
-                Self::run_inference_u8_with(
-                    &mut self.session,
-                    &self.input_name,
-                    &self.output_names,
-                    &batch_tensor,
-                    |outputs, inference_ms_total| {
-                        batch_results = Self::semantic_mask_batch_results(
-                            outputs,
-                            inference_ms_total,
-                            n_images_f,
-                            preprocess_time,
-                            preprocessed_results,
-                            image_arrays,
-                            paths_ref,
-                            names,
-                        );
-                        Ok(())
-                    },
-                )?;
-            }
-            return Ok(batch_results);
-        }
-
-        if self.fp16_input {
+        // One forward pass, whatever the input precision: the batch tensor only lives
+        // long enough to be uploaded, while the outputs outlive it.
+        let (outputs, inference_ms_total) = if self.fp16_input {
             let batch_tensor = {
                 let pre_borrow = preprocessed_results_opt.borrow();
                 Self::concat_f16_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
             };
-            Self::run_inference_f16_with(
-                &mut self.session,
-                &self.input_name,
-                &self.output_names,
-                &batch_tensor,
-                postprocess_cb,
-            )
+            Self::run_f16_input(&mut self.session, &self.input_name, &batch_tensor)?
         } else {
             let batch_tensor = {
                 let pre_borrow = preprocessed_results_opt.borrow();
                 Self::concat_f32_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
             };
-            Self::run_inference_with(
-                &mut self.session,
-                &self.input_name,
+            Self::run_f32_input(&mut self.session, &self.input_name, &batch_tensor)?
+        };
+
+        if semantic_mask_output {
+            // Fast path: the exported ONNX graph already contains ArgMax+Cast(uint8) nodes,
+            // so ONNX Runtime returns a uint8 class map directly (no f32 logits, no CPU argmax).
+            debug_assert_eq!(self.metadata.task, crate::task::Task::Semantic);
+            let names = &self.metadata.names;
+            let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
+            let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
+            let mut batch_results: Vec<Vec<Results>> = Vec::new();
+            Self::extract_and_invoke_u8(
+                &outputs,
                 &self.output_names,
-                &batch_tensor,
-                postprocess_cb,
-            )
+                inference_ms_total,
+                |outputs, inference_ms_total| {
+                    batch_results = Self::semantic_mask_batch_results(
+                        outputs,
+                        inference_ms_total,
+                        n_images_f,
+                        preprocess_time,
+                        preprocessed_results,
+                        image_arrays,
+                        paths_ref,
+                        names,
+                    );
+                    Ok(())
+                },
+            )?;
+            return Ok(batch_results);
         }
+
+        Self::extract_and_invoke(
+            &outputs,
+            &self.output_names,
+            inference_ms_total,
+            postprocess_cb,
+        )
     }
 
     /// Run inference on a raw array.
@@ -1651,23 +1624,11 @@ impl YOLOModel {
         Self::run_timed(session, ort::inputs![input_name => input_tensor])
     }
 
-    /// Run ONNX inference with FP32 input, calling `cb` with zero-copy output views.
+    /// Build zero-copy slice views over ORT output tensors and call `cb`.
     ///
     /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
     /// buffers (no extra Vec allocation), plus the measured `session.run()` time in ms.
     /// This avoids a ~40 ms memcpy for large semantic segmentation outputs.
-    fn run_inference_with<R>(
-        session: &mut Session,
-        input_name: &str,
-        output_names: &[String],
-        input: &ndarray::Array4<f32>,
-        cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        let (outputs, ms) = Self::run_f32_input(session, input_name, input)?;
-        Self::extract_and_invoke(&outputs, output_names, ms, cb)
-    }
-
-    /// Build zero-copy slice views over ORT output tensors and call `cb`.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn extract_and_invoke<R>(
         outputs: &ort::session::SessionOutputs<'_>,
@@ -1715,21 +1676,8 @@ impl YOLOModel {
         cb(&views, inference_ms)
     }
 
-    /// Run ONNX inference with FP32 input where outputs are `uint8` tensors
-    /// (e.g. a semantic segmentation model that has ArgMax+Cast(uint8) baked in). Zero-copy.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn run_inference_u8_with<R>(
-        session: &mut Session,
-        input_name: &str,
-        output_names: &[String],
-        input: &ndarray::Array4<f32>,
-        cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        let (outputs, ms) = Self::run_f32_input(session, input_name, input)?;
-        Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
-    }
-
-    /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`.
+    /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`
+    /// (e.g. a semantic segmentation model that has ArgMax+Cast(uint8) baked in).
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn extract_and_invoke_u8<R>(
         outputs: &ort::session::SessionOutputs<'_>,
@@ -1753,33 +1701,6 @@ impl YOLOModel {
             .collect::<Result<_>>()?;
 
         cb(&views, inference_ms)
-    }
-
-    /// Run ONNX inference with FP16 input where outputs are `uint8` tensors
-    /// (e.g. a semantic segmentation model with FP16 input that has ArgMax+Cast(uint8) baked in).
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn run_inference_f16_u8_with<R>(
-        session: &mut Session,
-        input_name: &str,
-        output_names: &[String],
-        input: &ndarray::Array4<f16>,
-        cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        let (outputs, ms) = Self::run_f16_input(session, input_name, input)?;
-        Self::extract_and_invoke_u8(&outputs, output_names, ms, cb)
-    }
-
-    /// Run ONNX inference with FP16 input, zero-copy callback (FP16 outputs are converted).
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn run_inference_f16_with<R>(
-        session: &mut Session,
-        input_name: &str,
-        output_names: &[String],
-        input: &ndarray::Array4<f16>,
-        cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        let (outputs, ms) = Self::run_f16_input(session, input_name, input)?;
-        Self::extract_and_invoke(&outputs, output_names, ms, cb)
     }
 
     /// Get the model's task type as detected from ONNX metadata.
