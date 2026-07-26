@@ -227,7 +227,7 @@ impl YOLOModel {
                     if matches!(Self::macos_version(), Some((major, _)) if major >= 11) {
                         eps.push((Self::build_coreml_ep(path), "CoreMLExecutionProvider"));
                     } else {
-                        warn!("WARNING ⚠️  CoreML requires macOS 11+; falling back to CPU.");
+                        warn!("CoreML requires macOS 11+; falling back to CPU.");
                     }
                 }
                 #[cfg(feature = "tensorrt")]
@@ -416,47 +416,41 @@ impl YOLOModel {
             .map(|o| o.name().to_string())
             .collect();
 
-        // Resolve image size
-        // Priority:
-        // 1. User config
-        // 2. Model metadata
-        // 3. Dynamic default (1024 for OBB, 640 for others)
-        // 4. Static input shape
-        // 5. Hard default (640)
-        let resolved_imgsz = if let Some(sz) = config.imgsz {
+        // The input's own [1, 3, H, W] shape, when the export pinned it.
+        let fixed_imgsz = if is_dynamic {
+            None
+        } else {
+            input_info.and_then(|i| match i.dtype() {
+                ValueType::Tensor { shape, .. }
+                    if shape.len() == 4 && shape[2] > 0 && shape[3] > 0 =>
+                {
+                    #[allow(clippy::cast_sign_loss)]
+                    Some((shape[2] as usize, shape[3] as usize))
+                }
+                _ => None,
+            })
+        };
+
+        let resolved_imgsz = if let Some(fixed) = fixed_imgsz {
+            if let Some(requested) = config.imgsz
+                && requested != fixed
+            {
+                warn!(
+                    "imgsz={requested:?} ignored: this model has a fixed input shape of {fixed:?}."
+                );
+            }
+            fixed
+        } else if let Some(sz) = config.imgsz {
             sz
         } else if let Some(sz) = metadata.imgsz {
             sz
-        } else if is_dynamic {
-            // Dynamic input without metadata -> apply robust defaults
+        } else {
             match metadata.task {
                 Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
                 _ => InferenceConfig::DEFAULT_IMGSZ,
             }
-        } else {
-            // Static input without metadata -> try to read from tensor shape
-            // Typically [1, 3, H, W]
-            let task_default = match metadata.task {
-                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
-                _ => InferenceConfig::DEFAULT_IMGSZ,
-            };
-            input_info
-                .and_then(|i| {
-                    if let ValueType::Tensor { shape, .. } = i.dtype() {
-                        if shape.len() == 4 && shape[2] > 0 && shape[3] > 0 {
-                            #[allow(clippy::cast_sign_loss)]
-                            Some((shape[2] as usize, shape[3] as usize))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(task_default)
         };
 
-        // Update config with resolved values
         let config = InferenceConfig {
             imgsz: Some(resolved_imgsz),
             half: config.half || metadata.half, // Use half if user requested OR model was exported with half
@@ -1248,7 +1242,7 @@ impl YOLOModel {
         let stride = self.metadata.stride as usize;
         if target_size.0 % stride != 0 || target_size.1 % stride != 0 {
             warn!(
-                "WARNING ⚠️ imgsz=[{:?}] must be multiple of max stride {}, updating to [{}, {}]",
+                "imgsz=[{:?}] must be multiple of max stride {}, updating to [{}, {}]",
                 target_size,
                 stride,
                 (target_size.0 as f32 / stride as f32).ceil() as usize * stride,

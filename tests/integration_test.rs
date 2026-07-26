@@ -222,9 +222,11 @@ fn test_depth_results_has_map() {
     let mut model =
         YOLOModel::load(model_path.to_string_lossy().as_ref()).expect("depth model should load");
     assert_eq!(model.task(), Task::Depth);
-    let results = model
-        .predict("https://ultralytics.com/images/bus.jpg")
-        .expect("prediction should succeed");
+    // `predict` takes a filesystem path, so fetch the sample image first.
+    let source =
+        ultralytics_inference::download::download_image("https://ultralytics.com/images/bus.jpg")
+            .expect("sample image should download");
+    let results = model.predict(&source).expect("prediction should succeed");
 
     let depth = results[0]
         .depth
