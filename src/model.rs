@@ -399,15 +399,13 @@ impl YOLOModel {
             )
         });
 
-        // Check for dynamic input dimensions
-        // Dimensions are typically [-1, 3, -1, -1] for dynamic batch/height/width
-        // ort 2.0 returns Option<i64> (None means dynamic/unknown)
+        // Check for a dynamic spatial input shape, i.e. `[N, 3, -1, -1]`.
+        // ort 2.0 reports a dynamic/unknown dim as -1 or 0. Only the height and width
+        // matter: a dynamic batch (`[-1, 3, 640, 640]`) still pins the spatial size, and
+        // ONNX Runtime rejects any other height/width.
         let is_dynamic = input_info.is_some_and(|i| {
-            if let ValueType::Tensor { shape, .. } = i.dtype() {
-                shape.iter().any(|d| *d == -1 || *d == 0)
-            } else {
-                false
-            }
+            matches!(i.dtype(), ValueType::Tensor { shape, .. }
+                if shape.len() == 4 && (shape[2] <= 0 || shape[3] <= 0))
         });
 
         let output_names: Vec<String> = session
@@ -416,20 +414,15 @@ impl YOLOModel {
             .map(|o| o.name().to_string())
             .collect();
 
-        // The input's own [1, 3, H, W] shape, when the export pinned it.
-        let fixed_imgsz = if is_dynamic {
-            None
-        } else {
-            input_info.and_then(|i| match i.dtype() {
-                ValueType::Tensor { shape, .. }
-                    if shape.len() == 4 && shape[2] > 0 && shape[3] > 0 =>
-                {
-                    #[allow(clippy::cast_sign_loss)]
-                    Some((shape[2] as usize, shape[3] as usize))
-                }
-                _ => None,
-            })
-        };
+        // The height and width the export pinned, whatever the batch dimension does.
+        let fixed_imgsz = input_info.and_then(|i| match i.dtype() {
+            ValueType::Tensor { shape, .. } if shape.len() == 4 && shape[2] > 0 && shape[3] > 0 =>
+            {
+                #[allow(clippy::cast_sign_loss)]
+                Some((shape[2] as usize, shape[3] as usize))
+            }
+            _ => None,
+        });
 
         let resolved_imgsz = if let Some(fixed) = fixed_imgsz {
             if let Some(requested) = config.imgsz
@@ -1265,8 +1258,9 @@ impl YOLOModel {
         };
         let actual_rect = use_rect && uniform_shape;
 
-        // Warn if rect requested but disabled due to mixed batch
-        if self.config.rect && !uniform_shape {
+        // Warn if rect was actually in play but disabled due to mixed batch. `use_rect` is
+        // already false on a fixed-shape input, where rect never applied to begin with.
+        if use_rect && !uniform_shape {
             warn!(
                 "Batch contains images of different sizes. Rectangular inference disabled for this batch (falling back to square padding)."
             );
