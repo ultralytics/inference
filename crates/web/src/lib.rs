@@ -241,6 +241,21 @@ fn preprocess_image(
     Ok((orig_img, pre))
 }
 
+/// Wrap a raw `width * height * 4` RGBA buffer (e.g. a canvas/webcam `ImageData`)
+/// as a `DynamicImage`, erroring when the buffer size disagrees with the dimensions.
+fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::DynamicImage, JsError> {
+    let expected = (width as usize) * (height as usize) * 4;
+    if rgba.len() != expected {
+        return Err(JsError::new(&format!(
+            "rgba buffer is {} bytes, expected {expected} for {width}x{height}",
+            rgba.len()
+        )));
+    }
+    image::RgbaImage::from_raw(width, height, rgba)
+        .map(image::DynamicImage::ImageRgba8)
+        .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))
+}
+
 /// Parse a JS colormap name into a [`Colormap`], falling back to the default (`jet`)
 /// for an empty or unknown value. Only depth results use it.
 fn parse_colormap(s: &str) -> Colormap {
@@ -386,17 +401,8 @@ impl YoloModel {
         colormap: String,
         depth_viz: String,
     ) -> Result<JsValue, JsError> {
-        let expected = (width as usize) * (height as usize) * 4;
-        if rgba.len() != expected {
-            return Err(JsError::new(&format!(
-                "rgba buffer is {} bytes, expected {expected} for {width}x{height}",
-                rgba.len()
-            )));
-        }
-        let img = image::RgbaImage::from_raw(width, height, rgba)
-            .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))?;
         self.run(
-            image::DynamicImage::ImageRgba8(img),
+            rgba_to_image(rgba, width, height)?,
             conf,
             iou,
             classes,
@@ -664,16 +670,7 @@ impl YoloPipeline {
         height: u32,
     ) -> Result<Float32Array, JsError> {
         let t0 = now_ms();
-        let expected = (width as usize) * (height as usize) * 4;
-        if rgba.len() != expected {
-            return Err(JsError::new(&format!(
-                "rgba buffer is {} bytes, expected {expected} for {width}x{height}",
-                rgba.len()
-            )));
-        }
-        let img = image::RgbaImage::from_raw(width, height, rgba)
-            .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))?;
-        let dynimg = image::DynamicImage::ImageRgba8(img);
+        let dynimg = rgba_to_image(rgba, width, height)?;
 
         let (orig_img, pre) = preprocess_image(
             &dynimg,
