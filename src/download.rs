@@ -124,6 +124,36 @@ fn generate_bar(progress: f64, width: usize) -> String {
     format!("{}{}", "━".repeat(filled), "─".repeat(width - filled))
 }
 
+/// Render one progress line, e.g. `Downloading …: 42% ━━━──── 4.2MB/10MB 1.1MB/s 3.8s`.
+///
+/// The percentage and bar are dropped when the server sent no `content-length`
+/// (`total_size == 0`), so the same line serves the in-flight updates and the final one.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn progress_line(desc: &str, downloaded: u64, total_size: u64, elapsed: f64) -> String {
+    let rate = if elapsed > 0.0 {
+        downloaded as f64 / elapsed
+    } else {
+        0.0
+    };
+    let done = format_bytes(downloaded as f64);
+    let speed = format_bytes(rate);
+    let time = format_time(elapsed);
+    if total_size == 0 {
+        return format!("{desc}: {done} {speed}/s {time}");
+    }
+    let progress = (downloaded as f64 / total_size as f64).min(1.0);
+    format!(
+        "{desc}: {}% {} {done}/{} {speed}/s {time}",
+        (progress * 100.0) as u8,
+        generate_bar(progress, BAR_WIDTH),
+        format_bytes(total_size as f64),
+    )
+}
+
 /// Whether a download error is worth retrying: timeouts, I/O errors, and 5xx responses.
 const fn is_transient(e: &ureq::Error) -> bool {
     match e {
@@ -236,30 +266,10 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                         last_update = now;
 
                         let elapsed = start_time.elapsed().as_secs_f64();
-                        let rate = if elapsed > 0.0 {
-                            downloaded as f64 / elapsed
-                        } else {
-                            0.0
-                        };
-                        if total_size > 0 {
-                            let progress = (downloaded as f64 / total_size as f64).min(1.0);
-                            let bar = generate_bar(progress, BAR_WIDTH);
-                            eprint!(
-                                "\r\x1b[K{desc}: {}% {bar} {}/{} {}/s {}",
-                                (progress * 100.0) as u8,
-                                format_bytes(downloaded as f64),
-                                format_bytes(total_size as f64),
-                                format_bytes(rate),
-                                format_time(elapsed)
-                            );
-                        } else {
-                            eprint!(
-                                "\r\x1b[K{desc}: {} {}/s {}",
-                                format_bytes(downloaded as f64),
-                                format_bytes(rate),
-                                format_time(elapsed)
-                            );
-                        }
+                        eprint!(
+                            "\r\x1b[K{}",
+                            progress_line(&desc, downloaded, total_size, elapsed)
+                        );
                         std::io::stderr().flush().ok();
                     }
                     writer.flush().map_err(|e| {
@@ -281,27 +291,10 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
             stream_result?;
 
             let elapsed = start_time.elapsed().as_secs_f64();
-            let rate = if elapsed > 0.0 {
-                downloaded as f64 / elapsed
-            } else {
-                0.0
-            };
-            if total_size > 0 {
-                eprintln!(
-                    "\r\x1b[K{desc}: 100% {} {} {}/s {}",
-                    generate_bar(1.0, BAR_WIDTH),
-                    format_bytes(total_size as f64),
-                    format_bytes(rate),
-                    format_time(elapsed)
-                );
-            } else {
-                eprintln!(
-                    "\r\x1b[K{desc}: {} {}/s {}",
-                    format_bytes(downloaded as f64),
-                    format_bytes(rate),
-                    format_time(elapsed)
-                );
-            }
+            eprintln!(
+                "\r\x1b[K{}",
+                progress_line(&desc, downloaded, total_size, elapsed)
+            );
 
             if let Err(e) = fs::rename(&temp_path, dest) {
                 let _ = fs::remove_file(&temp_path);
