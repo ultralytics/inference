@@ -260,30 +260,24 @@ pub fn run_prediction(args: &PredictArgs) {
                         let total_frames_str = meta
                             .total_frames
                             .map_or_else(|| "?".to_string(), |n| n.to_string());
-
-                        if is_video {
-                            verbose!(
-                                "video 1/1 (frame {}/{}) {}: {}x{} {}, {:.1}ms",
-                                meta.frame_idx + 1,
-                                total_frames_str,
-                                image_path,
-                                inference_shape.0,
-                                inference_shape.1,
-                                detection_summary,
-                                result.speed.inference.unwrap_or(0.0)
-                            );
+                        let position = if is_video {
+                            format!(
+                                "video 1/1 (frame {}/{total_frames_str})",
+                                meta.frame_idx + 1
+                            )
                         } else {
-                            verbose!(
-                                "image {}/{} {}: {}x{} {}, {:.1}ms",
-                                meta.frame_idx + 1,
-                                total_frames_str,
-                                image_path,
-                                inference_shape.0,
-                                inference_shape.1,
-                                detection_summary,
-                                result.speed.inference.unwrap_or(0.0)
-                            );
-                        }
+                            format!("image {}/{total_frames_str}", meta.frame_idx + 1)
+                        };
+
+                        verbose!(
+                            "{} {}: {}x{} {}, {:.1}ms",
+                            position,
+                            image_path,
+                            inference_shape.0,
+                            inference_shape.1,
+                            detection_summary,
+                            result.speed.inference.unwrap_or(0.0)
+                        );
 
                         if let Some(ref cdir) = results_dir
                             && let Some(ref sm) = result.semantic_mask
@@ -293,37 +287,33 @@ pub fn run_prediction(args: &PredictArgs) {
                             let stem =
                                 semantic_output_stem(image_path, meta.frame_idx, meta.total_frames);
                             let out_path = cdir.join(format!("{stem}.png"));
-                            let (h, w) = (sm.data.shape()[0], sm.data.shape()[1]);
+                            let (h, w) = (sm.data.shape()[0] as u32, sm.data.shape()[1] as u32);
                             let max_id = sm.data.iter().copied().max().unwrap_or(0);
-                            if max_id > 255 {
+                            let saved = if max_id > 255 {
                                 // Class IDs exceed 8-bit range; save as 16-bit grayscale PNG.
                                 warn!(
                                     "Semantic class IDs exceed 255 (max={max_id}); saving 16-bit PNG: {}",
                                     out_path.display()
                                 );
-                                let buf: Vec<u16> = sm.data.iter().copied().collect();
-                                if let Some(img16) =
-                                    image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(
-                                        w as u32, h as u32, buf,
-                                    )
-                                    && let Err(e) = img16.save(&out_path)
-                                {
-                                    error!(
-                                        "Failed to save semantic mask '{}': {e}",
-                                        out_path.display()
-                                    );
-                                }
+                                image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(
+                                    w,
+                                    h,
+                                    sm.data.iter().copied().collect(),
+                                )
+                                .map(|img| img.save(&out_path))
                             } else {
-                                let buf: Vec<u8> = sm.data.iter().map(|&v| v as u8).collect();
-                                if let Some(gray) =
-                                    image::GrayImage::from_raw(w as u32, h as u32, buf)
-                                    && let Err(e) = gray.save(&out_path)
-                                {
-                                    error!(
-                                        "Failed to save semantic mask '{}': {e}",
-                                        out_path.display()
-                                    );
-                                }
+                                image::GrayImage::from_raw(
+                                    w,
+                                    h,
+                                    sm.data.iter().map(|&v| v as u8).collect(),
+                                )
+                                .map(|img| img.save(&out_path))
+                            };
+                            if let Some(Err(e)) = saved {
+                                error!(
+                                    "Failed to save semantic mask '{}': {e}",
+                                    out_path.display()
+                                );
                             }
                         }
 
