@@ -454,6 +454,8 @@ mod tests {
     fn test_format_time() {
         assert_eq!(format_time(5.5), "5.5s");
         assert_eq!(format_time(65.0), "1:05.0");
+        // >= 3600s switches to the H:MM:SS.s layout.
+        assert!(format_time(3661.5).starts_with("1:01:"));
     }
 
     #[test]
@@ -461,19 +463,28 @@ mod tests {
         assert_eq!(generate_bar(0.0, 10), "──────────");
         assert_eq!(generate_bar(1.0, 10), "━━━━━━━━━━");
         assert_eq!(generate_bar(0.5, 10), "━━━━━─────");
-    }
-
-    #[test]
-    fn test_format_time_hours_branch() {
-        // >= 3600s uses the H:MM:SS.s layout.
-        let s = format_time(3661.5);
-        assert!(s.starts_with("1:01:"), "got {s}");
-    }
-
-    #[test]
-    fn test_generate_bar_clamps_overshoot() {
         // progress > 1.0 never exceeds the bar width.
         assert_eq!(generate_bar(2.0, 6), "━━━━━━");
+    }
+
+    #[test]
+    fn test_progress_line() {
+        // With content-length: percentage, bar, transferred/total, and rate.
+        let line = progress_line(5 * 1_048_576, 10 * 1_048_576, 2.0);
+        assert!(line.contains(" 50% "), "{line}");
+        assert!(line.contains("5.0MB/10.0MB"), "{line}");
+        assert!(line.contains("2.5MB/s"), "{line}");
+        assert!(line.contains('━') && line.contains('─'), "{line}");
+
+        // A server that sent no content-length drops the percentage and the bar.
+        let line = progress_line(1024, 0, 1.0);
+        assert!(!line.contains('%'), "{line}");
+        assert!(!line.contains('━') && !line.contains('─'), "{line}");
+        assert_eq!(line.trim(), "1.0KB 1.0KB/s 1.0s");
+
+        // Zero elapsed must not divide by zero, and an overshooting server clamps at 100%.
+        assert!(progress_line(1024, 0, 0.0).contains("0B/s"), "zero elapsed");
+        assert!(progress_line(20, 10, 1.0).contains("100%"), "overshoot");
     }
 
     #[test]
