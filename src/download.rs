@@ -128,11 +128,6 @@ fn generate_bar(progress: f64, width: usize) -> String {
 ///
 /// The percentage and bar are dropped when the server sent no `content-length`
 /// (`total_size == 0`), so the same line serves the in-flight updates and the final one.
-///
-/// Deliberately short and free of the URL and destination path: the caller rewrites this
-/// line in place with a carriage return, which only returns to the start of the current
-/// *visual* row. A line long enough to wrap would leave its earlier rows on screen and
-/// scroll a fresh bar for every update, so the description is printed once, above.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
