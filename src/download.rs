@@ -128,12 +128,17 @@ fn generate_bar(progress: f64, width: usize) -> String {
 ///
 /// The percentage and bar are dropped when the server sent no `content-length`
 /// (`total_size == 0`), so the same line serves the in-flight updates and the final one.
+///
+/// Deliberately short and free of the URL and destination path: the caller rewrites this
+/// line in place with a carriage return, which only returns to the start of the current
+/// *visual* row. A line long enough to wrap would leave its earlier rows on screen and
+/// scroll a fresh bar for every update, so the description is printed once, above.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn progress_line(desc: &str, downloaded: u64, total_size: u64, elapsed: f64) -> String {
+fn progress_line(downloaded: u64, total_size: u64, elapsed: f64) -> String {
     let rate = if elapsed > 0.0 {
         downloaded as f64 / elapsed
     } else {
@@ -143,11 +148,11 @@ fn progress_line(desc: &str, downloaded: u64, total_size: u64, elapsed: f64) -> 
     let speed = format_bytes(rate);
     let time = format_time(elapsed);
     if total_size == 0 {
-        return format!("{desc}: {done} {speed}/s {time}");
+        return format!("  {done} {speed}/s {time}");
     }
     let progress = (downloaded as f64 / total_size as f64).min(1.0);
     format!(
-        "{desc}: {}% {} {done}/{} {speed}/s {time}",
+        "  {:>3}% {} {done}/{} {speed}/s {time}",
         (progress * 100.0) as u8,
         generate_bar(progress, BAR_WIDTH),
         format_bytes(total_size as f64),
@@ -221,7 +226,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
             let mut downloaded: u64 = 0;
             let start_time = Instant::now();
-            let desc: String = format!("Downloading {url} to '{}'", dest.display());
+            eprintln!("Downloading {url} to '{}'", dest.display());
             let stream_result: std::result::Result<(), (InferenceError, bool)> = {
                 let mut writer = BufWriter::new(File::create(&temp_path).map_err(|e| {
                     (
@@ -266,10 +271,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                         last_update = now;
 
                         let elapsed = start_time.elapsed().as_secs_f64();
-                        eprint!(
-                            "\r\x1b[K{}",
-                            progress_line(&desc, downloaded, total_size, elapsed)
-                        );
+                        eprint!("\r\x1b[K{}", progress_line(downloaded, total_size, elapsed));
                         std::io::stderr().flush().ok();
                     }
                     writer.flush().map_err(|e| {
@@ -291,10 +293,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
             stream_result?;
 
             let elapsed = start_time.elapsed().as_secs_f64();
-            eprintln!(
-                "\r\x1b[K{}",
-                progress_line(&desc, downloaded, total_size, elapsed)
-            );
+            eprintln!("\r\x1b[K{}", progress_line(downloaded, total_size, elapsed));
 
             if let Err(e) = fs::rename(&temp_path, dest) {
                 let _ = fs::remove_file(&temp_path);
