@@ -272,8 +272,10 @@ fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8
         return Vec::new();
     }
     let mut buf = vec![0u8; w * h * 4];
-    for (px, rgb) in buf.chunks_exact_mut(4).zip(depth.colorize(colormap, viz)) {
-        px.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    // `buf` is exactly `w * h` RGBA pixels, so the trailing partial chunk is always empty.
+    let (pixels, _) = buf.as_chunks_mut::<4>();
+    for (px, rgb) in pixels.iter_mut().zip(depth.colorize(colormap, viz)) {
+        *px = [rgb[0], rgb[1], rgb[2], 255];
     }
     buf
 }
