@@ -548,7 +548,6 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
 
                 let class_id = cls[i] as usize;
                 let color = get_class_color(class_id);
-                let (r, g, b) = (color.0[0], color.0[1], color.0[2]);
 
                 mask_present = true;
 
@@ -560,10 +559,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
                 for y in y1..y2 {
                     for x in x1..x2 {
                         if masks.data[[i, y as usize, x as usize]] > 0.5 {
-                            let pixel = overlay.get_pixel_mut(x, y);
-                            pixel.0[0] = r;
-                            pixel.0[1] = g;
-                            pixel.0[2] = b;
+                            *overlay.get_pixel_mut(x, y) = color;
                         }
                     }
                 }
