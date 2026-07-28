@@ -529,7 +529,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 
 所选版本中缺失的 provider 在运行时将不可用，推理会回退到 CPU。
 
-> CUDA 与 TensorRT 二进制基于 CUDA 13 构建。在 CUDA 12 环境下，请使用 `ORT_CUDA_VERSION=12` 重新构建 ONNX Runtime。
+> CUDA 与 TensorRT 二进制基于 CUDA 13 构建，且未发布 CUDA 12 版本。若需在 CUDA 12 上运行，请自行编译 ONNX Runtime，并通过 `ORT_LIB_PATH` 链接该构建。
 
 **可用 Features：**
 

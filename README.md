@@ -533,7 +533,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 
 Providers missing from the chosen build are then absent at runtime and inference falls back to CPU.
 
-> The CUDA and TensorRT binaries are built against CUDA 13. On a CUDA 12 install, rebuild ONNX Runtime with `ORT_CUDA_VERSION=12`.
+> The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
 
 **Available Features:**
 
