@@ -120,8 +120,8 @@ ab_glyph = { version = "^0.2", optional = true }
 
 # Native-only dependencies. None of these build for `wasm32-unknown-unknown`
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# ONNX Runtime 1.24.2
-ort = { version = "2.0.0-rc.12", default-features = false, features = [
+# ONNX Runtime 1.28.0
+ort = { version = "=2.0.0-rc.13", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",

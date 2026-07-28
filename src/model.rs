@@ -294,26 +294,23 @@ impl YOLOModel {
             }
 
             #[cfg(feature = "rocm")]
-            eps.push((
-                ort::execution_providers::ROCmExecutionProvider::default().build(),
-                "ROCmExecutionProvider",
-            ));
+            eps.push((ort::ep::ROCm::default().build(), "ROCmExecutionProvider"));
 
             #[cfg(feature = "directml")]
             eps.push((
-                ort::execution_providers::DirectMLExecutionProvider::default().build(),
+                ort::ep::DirectML::default().build(),
                 "DirectMLExecutionProvider",
             ));
 
             #[cfg(feature = "openvino")]
             eps.push((
-                ort::execution_providers::OpenVINOExecutionProvider::default().build(),
+                ort::ep::OpenVINO::default().build(),
                 "OpenVINOExecutionProvider",
             ));
 
             #[cfg(feature = "xnnpack")]
             eps.push((
-                ort::execution_providers::XNNPACKExecutionProvider::default().build(),
+                ort::ep::XNNPACK::default().build(),
                 "XNNPACKExecutionProvider",
             ));
         }
@@ -523,8 +520,8 @@ impl YOLOModel {
     fn build_cuda_ep(
         device_id: i32,
         compute_stream: Option<*mut ()>,
-    ) -> ort::execution_providers::ExecutionProviderDispatch {
-        let ep = ort::execution_providers::CUDAExecutionProvider::default()
+    ) -> ort::ep::ExecutionProviderDispatch {
+        let ep = ort::ep::CUDA::default()
             .with_device_id(device_id)
             .with_tf32(true);
         bind_compute_stream!(ep, compute_stream)
@@ -547,7 +544,7 @@ impl YOLOModel {
         device_id: i32,
         fp16: bool,
         compute_stream: Option<*mut ()>,
-    ) -> ort::execution_providers::ExecutionProviderDispatch {
+    ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -557,7 +554,7 @@ impl YOLOModel {
         let cache_dir = parent.join(".trt_cache").join(format!("{stem}_{suffix}"));
         let _ = std::fs::create_dir_all(&cache_dir);
         let cache_str = cache_dir.to_string_lossy().into_owned();
-        let ep = ort::execution_providers::TensorRTExecutionProvider::default()
+        let ep = ort::ep::TensorRT::default()
             .with_device_id(device_id)
             .with_fp16(fp16)
             .with_engine_cache(true)
@@ -586,13 +583,13 @@ impl YOLOModel {
 
     /// Build the `CoreML` execution provider, tuned for the model at `model_path`.
     #[cfg(feature = "coreml")]
-    fn build_coreml_ep(model_path: &Path) -> ort::execution_providers::ExecutionProviderDispatch {
+    fn build_coreml_ep(model_path: &Path) -> ort::ep::ExecutionProviderDispatch {
         use ort::ep::coreml::{ModelFormat, SpecializationStrategy};
 
         // MLProgram with static input shapes and FastPrediction avoids the ORT CoreML EP
         // input-rename bug: the rename ("images" -> "graph_input_cast_0") only occurs when
         // CoreML inserts a dynamic FP32->FP16 cast, which static-shape specialization skips.
-        let mut ep = ort::execution_providers::CoreMLExecutionProvider::default()
+        let mut ep = ort::ep::CoreML::default()
             .with_model_format(ModelFormat::MLProgram)
             .with_specialization_strategy(SpecializationStrategy::FastPrediction)
             .with_static_input_shapes(true);
@@ -633,7 +630,7 @@ impl YOLOModel {
     fn build_openvino_ep(
         model_path: &Path,
         device_type: &str,
-    ) -> ort::execution_providers::ExecutionProviderDispatch {
+    ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -643,7 +640,7 @@ impl YOLOModel {
             .join(".ov_cache")
             .join(format!("{stem}_{}", device_type.to_ascii_lowercase()));
         let _ = std::fs::create_dir_all(&cache_dir);
-        ort::execution_providers::OpenVINOExecutionProvider::default()
+        ort::ep::OpenVINO::default()
             .with_device_type(device_type)
             .with_cache_dir(cache_dir.to_string_lossy())
             .build()

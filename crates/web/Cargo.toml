@@ -28,16 +28,16 @@ ultralytics-inference = { path = "../..", default-features = false }
 # `download-binaries` ort under Cargo feature unification) and never tries to
 # build the browser-only crates for the host.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# Same ONNX Runtime version as the native crate (ort-web 0.2.1+1.24 pins it),
+# Same ONNX Runtime version as the native crate (ort-web 0.3.0+1.27 pins it),
 # but with `alternative-backend` so ort bridges to ort-web instead of linking
 # the native runtime.
-ort = { version = "=2.0.0-rc.12", default-features = false, features = [
+ort = { version = "=2.0.0-rc.13", default-features = false, features = [
     "std",
     "ndarray",
     "alternative-backend",
     "half",
 ] }
-ort-web = "0.2.1"
+ort-web = "0.3.0"
 wasm-bindgen = "0.2.126"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
