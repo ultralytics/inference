@@ -211,7 +211,7 @@ impl YOLOModel {
         // `(provider, name)` pairs in registration order: the first one registered is the
         // one ORT will prefer, so it names the session (CPU when none are registered).
         #[allow(unused_mut)]
-        let mut eps: Vec<(ort::execution_providers::ExecutionProviderDispatch, &str)> = Vec::new();
+        let mut eps: Vec<(ort::ep::ExecutionProviderDispatch, &str)> = Vec::new();
 
         if let Some(device) = &config.device {
             // User requested specific device
@@ -237,14 +237,12 @@ impl YOLOModel {
                 )),
                 #[cfg(feature = "rocm")]
                 crate::Device::Rocm(i) => eps.push((
-                    ort::execution_providers::ROCmExecutionProvider::default()
-                        .with_device_id(*i as i32)
-                        .build(),
+                    ort::ep::ROCm::default().with_device_id(*i as i32).build(),
                     "ROCmExecutionProvider",
                 )),
                 #[cfg(feature = "directml")]
                 crate::Device::DirectMl(i) => eps.push((
-                    ort::execution_providers::DirectMLExecutionProvider::default()
+                    ort::ep::DirectML::default()
                         .with_device_id(*i as i32)
                         .build(),
                     "DirectMLExecutionProvider",
@@ -263,7 +261,7 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "xnnpack")]
                 crate::Device::Xnnpack => eps.push((
-                    ort::execution_providers::XNNPACKExecutionProvider::default().build(),
+                    ort::ep::XNNPACK::default().build(),
                     "XNNPACKExecutionProvider",
                 )),
                 // Handle cases where feature is disabled but enum variant exists
