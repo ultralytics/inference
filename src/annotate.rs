@@ -5,7 +5,12 @@
 //! This module provides functions for drawing bounding boxes, labels, and other
 //! annotations on images based on inference results.
 
+#[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
+use crate::parallel::*;
 use crate::results::Results;
+
+/// Pixels handed to one task when blending a full-frame overlay across cores.
+const BLEND_CHUNK: usize = 4096;
 use crate::visualizer::color::{COLORS, Colormap, DEPTH_ALPHA, DepthViz, POSE_COLORS};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
@@ -249,14 +254,23 @@ fn draw_depth_map(
         return;
     }
     let alpha = alpha.clamp(0.0, 1.0);
-    // `colorize` returns row-major RGB, the same order `pixels_mut` walks.
-    for (px, heat) in img.pixels_mut().zip(depth.colorize(colormap, viz)) {
-        for (channel, &h) in px.0.iter_mut().zip(heat.iter()) {
-            *channel = f32::from(*channel)
-                .mul_add(1.0 - alpha, f32::from(h) * alpha)
-                .round() as u8;
-        }
-    }
+    // `colorize` returns row-major RGB, the same order the sample buffer walks. Blending a
+    // full frame is per-pixel independent, so it splits across cores like the colorize
+    // itself; `crate::parallel` is sequential on wasm.
+    let heat = depth.colorize(colormap, viz);
+    img.as_flat_samples_mut()
+        .samples
+        .par_chunks_mut(BLEND_CHUNK * 3)
+        .enumerate()
+        .for_each(|(c, dst)| {
+            for (k, channel) in dst.iter_mut().enumerate() {
+                let i = c * BLEND_CHUNK * 3 + k;
+                let h = heat[i / 3][i % 3];
+                *channel = f32::from(*channel)
+                    .mul_add(1.0 - alpha, f32::from(h) * alpha)
+                    .round() as u8;
+            }
+        });
 }
 
 /// Draw a thick line segment between two points using Bresenham's algorithm.
@@ -533,12 +547,13 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
         let conf = boxes.conf();
         let cls = boxes.cls();
 
-        // Create an overlay image for masks to handle overlaps correctly
-        let mut overlay = img.clone();
+        // Overlay copy so overlapping masks compose against the original pixels. Only the
+        // mask path needs it, so a box-only result (detect/pose/obb) never pays for it.
+        let mut overlay = result.masks.is_some().then(|| img.clone());
         let mut mask_present = false;
 
         // Draw masks onto the overlay
-        if let Some(ref masks) = result.masks {
+        if let (Some(masks), Some(overlay)) = (result.masks.as_ref(), overlay.as_mut()) {
             let mask_n = masks.data.dim().0;
 
             for i in 0..boxes.len() {
@@ -566,24 +581,17 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             }
         }
 
-        // Blend overlay with original image
-        if mask_present {
+        // Blend overlay with original image. Walking the two sample buffers directly keeps
+        // this a linear pass; `get_pixel_mut` recomputed the offset for all 300k+ pixels.
+        if let Some(overlay) = overlay.filter(|_| mask_present) {
             let alpha = 0.3;
-            for y in 0..height {
-                for x in 0..width {
-                    let p_img = img.get_pixel_mut(x, y);
-                    let p_overlay = overlay.get_pixel(x, y);
-
-                    p_img.0[0] = f32::from(p_overlay.0[0])
-                        .mul_add(alpha, f32::from(p_img.0[0]) * (1.0 - alpha))
-                        as u8;
-                    p_img.0[1] = f32::from(p_overlay.0[1])
-                        .mul_add(alpha, f32::from(p_img.0[1]) * (1.0 - alpha))
-                        as u8;
-                    p_img.0[2] = f32::from(p_overlay.0[2])
-                        .mul_add(alpha, f32::from(p_img.0[2]) * (1.0 - alpha))
-                        as u8;
-                }
+            for (px, src) in img
+                .as_flat_samples_mut()
+                .samples
+                .iter_mut()
+                .zip(overlay.as_raw())
+            {
+                *px = f32::from(*src).mul_add(alpha, f32::from(*px) * (1.0 - alpha)) as u8;
             }
         }
 
