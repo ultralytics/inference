@@ -527,7 +527,9 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 combination is published, and asking for one that is not stops the build with
 `no builds available that satisfy the requested feature set`. To take the closest available build
 instead of an error, enable `lax-feature-matching` on `ort` in your own `Cargo.toml`; providers
-missing from that build are then absent at runtime and inference falls back to CPU.
+missing from that build are then absent at runtime and inference falls back to CPU. The
+CUDA and TensorRT binaries are built against CUDA 13; `ORT_CUDA_VERSION=12` rebuilds them for a
+CUDA 12 install.
 
 **Available Features:**
 

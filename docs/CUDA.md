@@ -19,10 +19,11 @@
 | TensorRT               | 10.x        | `ldconfig -p \| grep libnvinfer` (only for `tensorrt` / `cuda-preprocess`)                                               |
 | GPU compute capability | sm_70+      | `nvidia-smi --query-gpu=compute_cap --format=csv`                                                                        |
 
-> **CUDA 13 only.** ONNX Runtime deprecated CUDA 12, so the `cuda` and `tensorrt` EP libraries
-> shipped through `ort` are CUDA 13 builds. A CUDA 12 driver stack will fail to load them. The
-> toolkit range above still applies to `cuda-preprocess`, which compiles its own kernel through
-> `cudarc` and is independent of the EP binaries.
+> **Prebuilt EP binaries are CUDA 13.** ONNX Runtime deprecated CUDA 12, so the `cuda` and
+> `tensorrt` libraries `ort` downloads are built against CUDA 13. On a CUDA 12 install, rebuild
+> ONNX Runtime for it with `ORT_CUDA_VERSION=12` (the loader suggests this too when the bundled
+> runtime's CUDA major does not match). The toolkit range above is what `cuda-preprocess`
+> compiles its kernel against through `cudarc`, independent of which EP binary is linked.
 
 `cuda-preprocess` only needs `libcudart.so` and `libnvrtc.so` at **runtime**. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
 
@@ -201,11 +202,11 @@ through `YOLOModel::predict_image` in library code.
 
 ## Troubleshooting
 
-| Symptom                                                                    | Fix                                                                                             |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).           |
-| `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.        |
-| `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                 |
-| TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.                  |
-| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.          |
-| CUDA EP fails to load on a CUDA 12 system                                  | `ort` ships CUDA 13 binaries only. Upgrade the driver stack, or build ONNX Runtime from source. |
+| Symptom                                                                    | Fix                                                                                      |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).    |
+| `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`. |
+| `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.          |
+| TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.           |
+| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.   |
+| CUDA EP fails to load on a CUDA 12 system                                  | The downloaded binaries are CUDA 13. Rebuild ONNX Runtime with `ORT_CUDA_VERSION=12`.    |
