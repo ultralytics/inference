@@ -746,6 +746,14 @@ fn draw_pose(
         let n_persons = kpt_data.shape()[0];
         let n_kpts = kpt_data.shape()[1];
 
+        // Post-processing clips keypoints into the frame, so one sitting exactly on a border
+        // was outside the image and is really "not seen": drawing it anchors a limb to the
+        // edge. Ultralytics drops these the same way (`x % w != 0 and y % h != 0`).
+        #[allow(clippy::cast_precision_loss)]
+        let visible = |x: f32, y: f32, conf: f32| {
+            conf >= KPT_CONF_THRES && x > 0.0 && y > 0.0 && x < width as f32 && y < height as f32
+        };
+
         for person_idx in 0..n_persons {
             for (limb_idx, &[kpt_a, kpt_b]) in skeleton.iter().enumerate() {
                 if kpt_a >= n_kpts || kpt_b >= n_kpts {
@@ -759,7 +767,7 @@ fn draw_pose(
                 let y2 = kpt_data[[person_idx, kpt_b, 1]];
                 let conf2 = kpt_data[[person_idx, kpt_b, 2]];
 
-                if conf1 >= KPT_CONF_THRES && conf2 >= KPT_CONF_THRES {
+                if visible(x1, y1, conf1) && visible(x2, y2, conf2) {
                     let color_idx = limb_colors[limb_idx % limb_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_line_segment(img, x1, y1, x2, y2, color, thickness);
@@ -771,12 +779,7 @@ fn draw_pose(
                 let y = kpt_data[[person_idx, kpt_idx, 1]];
                 let conf = kpt_data[[person_idx, kpt_idx, 2]];
 
-                if conf >= KPT_CONF_THRES
-                    && x >= 0.0
-                    && y >= 0.0
-                    && x < width as f32
-                    && y < height as f32
-                {
+                if visible(x, y, conf) {
                     let color_idx = kpt_colors[kpt_idx % kpt_colors.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_filled_circle(img, x as i32, y as i32, radius, color);

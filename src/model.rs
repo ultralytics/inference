@@ -1376,18 +1376,34 @@ impl YOLOModel {
 
         // One forward pass, whatever the input precision: the batch tensor only lives
         // long enough to be uploaded, while the outputs outlive it.
-        let (outputs, inference_ms_total) = if self.fp16_input {
-            let batch_tensor = {
-                let pre_borrow = preprocessed_results_opt.borrow();
-                Self::concat_f16_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
-            };
-            Self::run_f16_input(&mut self.session, &self.input_name, &batch_tensor)?
-        } else {
-            let batch_tensor = {
-                let pre_borrow = preprocessed_results_opt.borrow();
-                Self::concat_f32_batch(pre_borrow.as_ref().expect("preprocessed_results"))?
-            };
-            Self::run_f32_input(&mut self.session, &self.input_name, &batch_tensor)?
+        // A batch of one is the common case (single image, video, webcam) and there is
+        // nothing to join: `concatenate` would allocate and copy the whole NCHW tensor to
+        // reproduce the one already sitting in `preprocessed_results`, so feed that instead.
+        let (outputs, inference_ms_total) = {
+            let pre_borrow = preprocessed_results_opt.borrow();
+            let pre = pre_borrow.as_deref().expect("preprocessed_results");
+            if self.fp16_input {
+                match pre {
+                    [single] => {
+                        let tensor = single.tensor_f16.as_ref().expect("fp16 tensor");
+                        Self::run_f16_input(&mut self.session, &self.input_name, tensor)?
+                    }
+                    batch => {
+                        let batch_tensor = Self::concat_f16_batch(batch)?;
+                        Self::run_f16_input(&mut self.session, &self.input_name, &batch_tensor)?
+                    }
+                }
+            } else {
+                match pre {
+                    [single] => {
+                        Self::run_f32_input(&mut self.session, &self.input_name, &single.tensor)?
+                    }
+                    batch => {
+                        let batch_tensor = Self::concat_f32_batch(batch)?;
+                        Self::run_f32_input(&mut self.session, &self.input_name, &batch_tensor)?
+                    }
+                }
+            }
         };
 
         if semantic_mask_output {
