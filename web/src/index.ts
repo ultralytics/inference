@@ -365,6 +365,8 @@ interface LiteRtTensor {
 }
 interface LiteRtCompiledModel {
   run(input: LiteRtTensor | LiteRtTensor[]): Promise<LiteRtTensor[]>;
+  // The compiled model knows its real input shape; the metadata only claims one.
+  getInputDetails?(): readonly { readonly shape: Int32Array | number[] }[];
   delete?(): void;
 }
 interface LiteRtModule {
@@ -430,6 +432,12 @@ class LiteRtBackend {
     private readonly model: LiteRtCompiledModel,
     readonly device: string,
   ) {}
+
+  /** Input shape the compiled model actually expects, when LiteRT reports it. */
+  get inputShape(): number[] | undefined {
+    const shape = this.model.getInputDetails?.()[0]?.shape;
+    return shape && Array.from(shape);
+  }
 
   /** Import LiteRT.js, init its wasm, and compile the model, falling back from
    * WebGPU to wasm (CPU) if the GPU accelerator cannot compile. */
@@ -705,6 +713,12 @@ export class YOLO {
       );
     }
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
+    // The compiled model outranks the metadata: `pipeline.inputShape` is what sizes the
+    // input tensor below, so a stale `imgsz` would build one the model rejects.
+    // Signed on purpose: the engine reports a dynamic axis as a negative number, and wasm
+    // rejects those rather than reading one as a huge unsigned size.
+    const shape = backend.inputShape;
+    if (shape) pipeline.setInputShape(new Int32Array(shape));
     return new YOLO(new LiteRtEngine(pipeline, backend));
   }
 
