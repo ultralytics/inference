@@ -519,6 +519,18 @@ cargo build --release --features "cuda,tensorrt"
 
 > NVIDIA 安装、要求和 GPU 预处理快速路径见 [`docs/CUDA.md`](docs/CUDA.md)。
 
+每个加速器 feature 都会链接包含该 provider 的预编译 ONNX Runtime。并非所有组合都有对应的预编译版本，请求不存在的组合会导致构建失败，并提示 `no builds available that satisfy the requested feature set`。若希望选用最接近的可用版本而不是直接报错，可在 `ort` 上启用 `lax-feature-matching`：
+
+```toml
+[dependencies]
+ultralytics-inference = { version = "0.0.31", features = ["coreml", "xnnpack"] }
+ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
+```
+
+所选版本中缺失的 provider 在运行时将不可用，推理会回退到 CPU。
+
+> CUDA 与 TensorRT 二进制基于 CUDA 13 构建，且未发布 CUDA 12 版本。若需在 CUDA 12 上运行，请自行编译 ONNX Runtime，并通过 `ORT_LIB_PATH` 链接该构建。
+
 **可用 Features：**
 
 默认 features（除非传入 `--no-default-features`）：`annotate`、`visualize`。

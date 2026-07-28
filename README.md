@@ -523,6 +523,18 @@ cargo build --release --features "cuda,tensorrt"
 
 > NVIDIA setup, requirements, and the GPU preprocessing fast path are documented in [`docs/CUDA.md`](docs/CUDA.md).
 
+Each accelerator feature links a prebuilt ONNX Runtime containing that provider. Not every combination is published, and asking for one that is not stops the build with `no builds available that satisfy the requested feature set`. To take the closest available build instead of an error, enable `lax-feature-matching` on `ort`:
+
+```toml
+[dependencies]
+ultralytics-inference = { version = "0.0.31", features = ["coreml", "xnnpack"] }
+ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
+```
+
+Providers missing from the chosen build are then absent at runtime and inference falls back to CPU.
+
+> The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
+
 **Available Features:**
 
 Default features (enabled unless `--no-default-features` is passed): `annotate`, `visualize`.

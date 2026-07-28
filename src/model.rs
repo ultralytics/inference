@@ -340,12 +340,11 @@ impl YOLOModel {
                         InferenceError::ModelLoadError(format!(
                             "{provider_name} failed to load, so the cuda-preprocess fast path \
                          cannot run on the GPU: {e}\n\
-                         Hint: ensure the matching CUDA runtime and cuDNN 9 (plus TensorRT 10 \
-                         for TensorRt) are installed and on the library path. If the bundled \
-                         ONNX Runtime picked the wrong CUDA major version, rebuild with \
-                         `ORT_CUDA_VERSION=12` or `ORT_CUDA_VERSION=13` to match your CUDA \
-                         install. To use CPU preprocessing instead, set \
-                         `InferenceConfig::with_cuda_preprocess(false)`."
+                         Hint: the downloaded ONNX Runtime is built against CUDA 13, so it needs \
+                         a CUDA 13 runtime and cuDNN 9 (plus TensorRT 10 for TensorRt) installed \
+                         and on the library path. On CUDA 12, compile ONNX Runtime for it and \
+                         link that build with `ORT_LIB_PATH`. To use CPU preprocessing instead, \
+                         set `InferenceConfig::with_cuda_preprocess(false)`."
                         ))
                     } else {
                         InferenceError::ModelLoadError(format!(
