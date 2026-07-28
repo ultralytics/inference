@@ -10,8 +10,13 @@ use std::sync::Arc;
 
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
+#[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
+use crate::parallel::*;
 use crate::utils::pluralize;
 use crate::visualizer::color::{Colormap, DepthViz};
+
+/// Pixels handed to one task when colorizing a depth map across cores.
+const COLORIZE_CHUNK: usize = 4096;
 
 /// Timing information for inference operations (in milliseconds).
 #[derive(Debug, Clone, Default)]
@@ -183,16 +188,44 @@ impl DepthMap {
                 (lo, 1.0 / (hi - lo).max(1e-6), true)
             }
         };
-        data.iter()
-            .map(|&d| {
-                if d > 0.0 {
-                    let v = if disparity { 1.0 / d } else { d };
-                    colormap.sample(((v - lo) * inv).clamp(0.0, 1.0))
-                } else {
-                    black
+        // Per-pixel colormap sampling over a full frame (590k pixels at 768x768), so it is
+        // worth spreading across cores; `crate::parallel` is sequential on wasm.
+        let Some(src) = data.as_slice() else {
+            // Non-contiguous storage cannot be chunked; fall back to the sequential map.
+            return data
+                .iter()
+                .map(|&d| Self::pixel(d, lo, inv, disparity, colormap, black))
+                .collect();
+        };
+        let mut out = vec![black; src.len()];
+        out.par_chunks_mut(COLORIZE_CHUNK)
+            .enumerate()
+            .for_each(|(c, dst)| {
+                let base = c * COLORIZE_CHUNK;
+                for (k, px) in dst.iter_mut().enumerate() {
+                    *px = Self::pixel(src[base + k], lo, inv, disparity, colormap, black);
                 }
-            })
-            .collect()
+            });
+        out
+    }
+
+    /// Map one depth sample to its color: invalid (non-positive) pixels stay `black`,
+    /// everything else is normalized into `[0, 1]` and sampled from `colormap`.
+    #[inline]
+    fn pixel(
+        d: f32,
+        lo: f32,
+        inv: f32,
+        disparity: bool,
+        colormap: Colormap,
+        black: [u8; 3],
+    ) -> [u8; 3] {
+        if d > 0.0 {
+            let v = if disparity { 1.0 / d } else { d };
+            colormap.sample(((v - lo) * inv).clamp(0.0, 1.0))
+        } else {
+            black
+        }
     }
 }
 

@@ -24,7 +24,7 @@ use wide::f32x8;
 use crate::parallel::*;
 use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use ndarray::{Array2, Array3, ArrayView1, ArrayViewMut2, Zip, s};
+use ndarray::{Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
@@ -393,13 +393,20 @@ fn output_to_2d(
     features: usize,
     is_transposed: bool,
 ) -> Array2<f32> {
-    if is_transposed {
-        Array2::from_shape_vec((num_preds, features), data.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)))
+    let shape = if is_transposed {
+        (num_preds, features)
     } else {
-        let arr = Array2::from_shape_vec((features, num_preds), data.to_vec())
-            .unwrap_or_else(|_| Array2::zeros((0, 0)));
-        arr.t().to_owned()
+        (features, num_preds)
+    };
+    let Ok(view) = ArrayView2::from_shape(shape, data) else {
+        return Array2::zeros((0, 0));
+    };
+    // The transpose is materialized on purpose: callers walk a prediction at a time, and a
+    // strided view would read a column per access.
+    if is_transposed {
+        view.to_owned()
+    } else {
+        view.t().to_owned()
     }
 }
 
@@ -730,8 +737,8 @@ fn build_instance_masks(
     inference_shape: (u32, u32),
 ) -> Option<Array3<f32>> {
     // Protos: [1, num_masks, mh, mw] -> [num_masks, mh*mw]
-    let protos = match Array2::from_shape_vec((num_masks, mh * mw), protos_data.to_vec()) {
-        Ok(arr) => arr,
+    let protos = match ArrayView2::from_shape((num_masks, mh * mw), protos_data) {
+        Ok(view) => view,
         Err(e) => {
             eprintln!("WARNING ⚠️ Failed to build protos array: {e}. Skipping mask generation.");
             return None;
@@ -872,8 +879,6 @@ fn postprocess_segment(
         }
     }
 
-    results.boxes = Some(Boxes::new(boxes_data.clone(), preprocess.orig_shape));
-
     // Protos: [1, 32, 160, 160] -> [32, 25600]
     // Validate protos shape before indexing to prevent panic
     if shape1.len() < 4 {
@@ -881,6 +886,7 @@ fn postprocess_segment(
             "WARNING ⚠️ Protos output has unexpected shape (expected 4 dims, got {}). Skipping mask generation.",
             shape1.len()
         );
+        results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
         return results;
     }
     let mh = shape1[2];
@@ -894,7 +900,7 @@ fn postprocess_segment(
         );
     }
 
-    let Some(masks_data) = build_instance_masks(
+    let masks_data = build_instance_masks(
         &mask_coeffs,
         output1,
         num_masks,
@@ -903,10 +909,11 @@ fn postprocess_segment(
         &boxes_data,
         preprocess,
         inference_shape,
-    ) else {
-        return results;
-    };
-    results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
+    );
+    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    if let Some(masks_data) = masks_data {
+        results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
+    }
 
     results
 }
@@ -996,7 +1003,7 @@ fn postprocess_pose(
     let num_classes = derived_classes.max(1);
 
     // Filter and NMS - store candidates with keypoints
-    let mut candidates: Vec<([f32; 4], f32, usize, Vec<[f32; 3]>)> = Vec::new();
+    let mut candidates: Vec<([f32; 4], f32, usize, Vec<[f32; 3]>)> = Vec::with_capacity(256);
 
     for i in 0..num_preds {
         let Some((bbox, best_score, best_class)) =
@@ -1150,7 +1157,8 @@ fn postprocess_obb(
     let num_classes = derived_classes.max(1);
 
     // Filter and NMS - store candidates with angle
-    let mut candidates: Vec<([f32; 5], f32, usize)> = Vec::new(); // [cx, cy, w, h, angle], conf, class
+    // [cx, cy, w, h, angle], conf, class
+    let mut candidates: Vec<([f32; 5], f32, usize)> = Vec::with_capacity(256);
 
     for i in 0..num_preds {
         // Get class scores
