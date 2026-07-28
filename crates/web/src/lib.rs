@@ -545,7 +545,10 @@ impl YoloModel {
         let t_post = now_ms();
         let config = make_config(conf, iou, classes);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
-        let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
+        // The tensor actually fed to the model, which `rect` makes differ from `imgsz`.
+        // `build_instance_masks` turns this into prototype-space crop coordinates.
+        let tensor_shape = pre.tensor.shape();
+        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
         // Postprocess time runs from output extraction to the postprocess call.
         let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, now_ms() - t_post);
 
@@ -693,11 +696,12 @@ impl YoloPipeline {
     /// The ONNX path reads the same fact off its session; this is the LiteRT equivalent,
     /// which only the JS engine can see.
     ///
-    /// Expects NCHW `[N, 3, H, W]`, what `ai_edge_torch` emits. Any other rank or layout
-    /// (a channels-last `[N, H, W, 3]`, a dynamic axis) is ignored, leaving the metadata
-    /// size in place.
+    /// Expects NCHW `[N, 3, H, W]`, what `ai_edge_torch` emits, with the signed dimensions
+    /// the engine reports. Any other rank or layout (a channels-last `[N, H, W, 3]`) and any
+    /// non-positive axis, which is how a dynamic dimension is reported, is ignored and leaves
+    /// the metadata size in place.
     #[wasm_bindgen(js_name = setInputShape)]
-    pub fn set_input_shape(&mut self, shape: Vec<u32>) {
+    pub fn set_input_shape(&mut self, shape: Vec<i32>) {
         if let [_, 3, h, w] = shape[..]
             && h > 0
             && w > 0

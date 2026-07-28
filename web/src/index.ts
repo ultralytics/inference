@@ -715,8 +715,10 @@ export class YOLO {
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
     // The compiled model outranks the metadata: `pipeline.inputShape` is what sizes the
     // input tensor below, so a stale `imgsz` would build one the model rejects.
+    // Signed on purpose: the engine reports a dynamic axis as a negative number, and wasm
+    // rejects those rather than reading one as a huge unsigned size.
     const shape = backend.inputShape;
-    if (shape) pipeline.setInputShape(new Uint32Array(shape));
+    if (shape) pipeline.setInputShape(new Int32Array(shape));
     return new YOLO(new LiteRtEngine(pipeline, backend));
   }
 
