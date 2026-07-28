@@ -523,6 +523,12 @@ cargo build --release --features "cuda,tensorrt"
 
 > NVIDIA setup, requirements, and the GPU preprocessing fast path are documented in [`docs/CUDA.md`](docs/CUDA.md).
 
+Each accelerator feature links a prebuilt ONNX Runtime containing that provider. Not every
+combination is published, and asking for one that is not stops the build with
+`no builds available that satisfy the requested feature set`. To take the closest available build
+instead of an error, enable `lax-feature-matching` on `ort` in your own `Cargo.toml`; providers
+missing from that build are then absent at runtime and inference falls back to CPU.
+
 **Available Features:**
 
 Default features (enabled unless `--no-default-features` is passed): `annotate`, `visualize`.

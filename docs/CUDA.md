@@ -199,45 +199,13 @@ through `YOLOModel::predict_image` in library code.
 
 [`YOLOModel::predict_image`]: crate::YOLOModel::predict_image
 
-## Combining execution providers
-
-EP support is decided at compile time: each feature pulls in the matching `ort` EP and links a
-prebuilt ONNX Runtime that contains it. Not every combination has a prebuilt binary, and asking
-for one that does not exist stops the build:
-
-```
-!!! The ort-sys crate did not download prebuilt binaries because there are no builds
-    available that satisfy the requested feature set 'coreml, xnnpack'.
-```
-
-That error is deliberate. It used to be a silent fallback to a CPU-only runtime, which left you
-with a build that quietly ignored the accelerator you asked for.
-
-If you would rather have the closest available build than an error, enable `lax-feature-matching`
-on `ort` in your own `Cargo.toml`:
-
-```toml
-[dependencies]
-ultralytics-inference = { version = "0.0.31", features = ["coreml", "xnnpack"] }
-ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
-```
-
-The build then succeeds, but any EP missing from the chosen binary is not there at runtime and
-inference falls back to CPU. Prefer one EP per build unless you have checked that the
-combination ships as a prebuilt.
-
-The browser build is separate: it runs on ONNX Runtime Web through `ort-web`, which pins its own
-runtime version. If you self-host that runtime with `ortBaseUrl` instead of the default CDN, copy
-the `dist/` folder matching the version `ort-web` pins (currently 1.27).
-
 ## Troubleshooting
 
-| Symptom                                                                    | Fix                                                                                                          |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).                        |
-| `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.                     |
-| `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                              |
-| TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.                               |
-| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.                       |
-| `no builds available that satisfy the requested feature set '...'`         | That EP combination has no prebuilt binary. Build with one EP, or enable `lax-feature-matching` (see above). |
-| CUDA EP fails to load on a CUDA 12 system                                  | `ort` ships CUDA 13 binaries only. Upgrade the driver stack, or build ONNX Runtime from source.              |
+| Symptom                                                                    | Fix                                                                                             |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).           |
+| `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.        |
+| `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                 |
+| TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.                  |
+| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.          |
+| CUDA EP fails to load on a CUDA 12 system                                  | `ort` ships CUDA 13 binaries only. Upgrade the driver stack, or build ONNX Runtime from source. |
