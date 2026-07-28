@@ -593,23 +593,23 @@ impl YOLOModel {
             .with_static_input_shapes(true);
 
         if let Some(cache_base) = dirs::cache_dir() {
+            let fnv1a = |bytes: &[u8]| {
+                bytes.iter().fold(14_695_981_039_346_656_037u64, |h, &b| {
+                    h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
+                })
+            };
             let canonical = model_path
                 .canonicalize()
                 .unwrap_or_else(|_| model_path.to_path_buf());
+            let ort_build = fnv1a(ort::info().as_bytes());
             let stem = canonical
                 .file_stem()
                 .map_or_else(|| "model".to_owned(), |s| s.to_string_lossy().into_owned());
-            let hash = canonical
-                .as_os_str()
-                .as_encoded_bytes()
-                .iter()
-                .fold(14_695_981_039_346_656_037u64, |h, &b| {
-                    h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
-                });
+            let hash = fnv1a(canonical.as_os_str().as_encoded_bytes());
             let cache_dir = cache_base
                 .join("ultralytics-inference")
                 .join("coreml")
-                .join(format!("{stem}_{hash:016x}_mlprogram"));
+                .join(format!("{stem}_{hash:016x}_{ort_build:016x}_mlprogram"));
             if std::fs::create_dir_all(&cache_dir).is_ok() {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
