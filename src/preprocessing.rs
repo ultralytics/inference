@@ -406,7 +406,15 @@ fn fused_zerocopy_preprocess(
 
 /// Convert f32 tensor to f16 tensor.
 fn tensor_f32_to_f16(tensor: &Array4<f32>) -> Array4<half::f16> {
-    tensor.mapv(half::f16::from_f32)
+    use half::slice::HalfFloatSliceExt;
+    // `mapv` converts one element at a time; `half`'s slice conversion is vectorized where
+    // the target supports it. Falls back to `mapv` if the tensor is not contiguous.
+    let Some(src) = tensor.as_slice() else {
+        return tensor.mapv(half::f16::from_f32);
+    };
+    let mut out = vec![half::f16::ZERO; src.len()];
+    out.convert_from_f32_slice(src);
+    Array4::from_shape_vec(tensor.raw_dim(), out).expect("shape matches the source tensor")
 }
 
 /// Calculate target size for rectangular inference mode.
@@ -648,7 +656,10 @@ pub fn preprocess_image_center_crop(
 /// 2. `scale`: Scale factors applied (same for x and y).
 #[allow(clippy::similar_names)]
 fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbImage, (f32, f32)) {
-    use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
+    use fast_image_resize::{
+        PixelType, ResizeAlg, ResizeOptions, Resizer,
+        images::{Image, ImageRef},
+    };
 
     let (src_w, src_h) = image.dimensions();
     #[allow(clippy::cast_possible_truncation)]
@@ -678,9 +689,17 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
         ((src_w as f32 * scale_y) as u32, target_h)
     };
 
-    // Resize first
-    let src_rgb = image.to_rgb8();
-    let src_image = Image::from_vec_u8(src_w, src_h, src_rgb.into_raw(), PixelType::U8x3)
+    // Resize first. Borrow the source samples when the image is already RGB8 (the common
+    // case): `to_rgb8` would clone the full frame just to hand it straight to the resizer.
+    let owned_rgb;
+    let src_bytes: &[u8] = match image {
+        DynamicImage::ImageRgb8(rgb) => rgb.as_raw(),
+        other => {
+            owned_rgb = other.to_rgb8();
+            owned_rgb.as_raw()
+        }
+    };
+    let src_image = ImageRef::new(src_w, src_h, src_bytes, PixelType::U8x3)
         .expect("Failed to create source image");
 
     // Valid dimensions check
