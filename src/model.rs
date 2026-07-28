@@ -598,6 +598,11 @@ impl YOLOModel {
             .with_static_input_shapes(true);
 
         if let Some(cache_base) = dirs::cache_dir() {
+            let fnv1a = |bytes: &[u8]| {
+                bytes.iter().fold(14_695_981_039_346_656_037u64, |h, &b| {
+                    h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
+                })
+            };
             let canonical = model_path
                 .canonicalize()
                 .unwrap_or_else(|_| model_path.to_path_buf());
@@ -1798,13 +1803,6 @@ fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
     provider == "CoreMLExecutionProvider"
         && msg.contains("GatherElements")
         && msg.contains("Out of range")
-}
-
-/// FNV-1a over `bytes`, for naming cache directories from a path and a runtime build.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(14_695_981_039_346_656_037u64, |h, &b| {
-        h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
-    })
 }
 
 /// Convert an ONNX Runtime tensor shape (`i64` dims) to `usize` for indexing.
