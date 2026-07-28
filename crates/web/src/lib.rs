@@ -33,7 +33,8 @@ use wasm_bindgen::prelude::*;
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{postprocess, postprocess_semantic_mask};
 use ultralytics_inference::preprocessing::{
-    PreprocessResult, preprocess_image_center_crop, preprocess_image_with_precision,
+    PreprocessResult, calculate_rect_size, preprocess_image_center_crop,
+    preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
 use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
@@ -228,6 +229,7 @@ fn preprocess_image(
     imgsz: (usize, usize),
     stride: u32,
     task: Task,
+    rect: bool,
 ) -> Result<(Array3<u8>, PreprocessResult), JsError> {
     let rgb = dynimg.to_rgb8();
     let (w, h) = rgb.dimensions();
@@ -236,7 +238,15 @@ fn preprocess_image(
     let pre = if task == Task::Classify {
         preprocess_image_center_crop(dynimg, imgsz, false)
     } else {
-        preprocess_image_with_precision(dynimg, imgsz, stride, false)
+        // Rectangular inference pads only up to the stride instead of to a square, so a
+        // 16:9 frame skips ~40% of its pixels. Only a model that left its height and width
+        // dynamic can accept the resulting shape; see `YoloModel::rect`.
+        let target = if rect {
+            calculate_rect_size(w, h, imgsz, stride)
+        } else {
+            imgsz
+        };
+        preprocess_image_with_precision(dynimg, target, stride, false)
     };
     Ok((orig_img, pre))
 }
@@ -290,6 +300,9 @@ pub struct YoloModel {
     output_names: Vec<String>,
     /// Network input size as `(height, width)`.
     imgsz: (usize, usize),
+    /// Whether the export left height/width dynamic, so rectangular inference can
+    /// feed a per-frame shape instead of padding every frame to a square.
+    rect: bool,
     /// Active device label (`"webgpu"` or `"cpu"`).
     device: &'static str,
 }
@@ -440,7 +453,24 @@ impl YoloModel {
         metadata: ModelMetadata,
         device: Device,
     ) -> Result<Self, JsError> {
-        let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
+        // The height and width the export pinned, whatever the batch dimension does.
+        // ONNX Runtime rejects every other size, so this outranks the metadata, which can
+        // disagree with the export (a 224 classify model can carry `imgsz: 640`). Matches
+        // the native `YOLOModel::load_with_config` resolution.
+        let fixed_imgsz = session.inputs().first().and_then(|i| match i.dtype() {
+            ValueType::Tensor { shape, .. } if shape.len() == 4 && shape[2] > 0 && shape[3] > 0 =>
+            {
+                #[allow(clippy::cast_sign_loss)]
+                Some((shape[2] as usize, shape[3] as usize))
+            }
+            _ => None,
+        });
+        let imgsz = fixed_imgsz
+            .or(metadata.imgsz)
+            .unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
+        // A pinned height/width can only ever take `imgsz`, so rect applies exactly when
+        // the export left them dynamic - the same invariant as the native `rect_enabled`.
+        let rect = fixed_imgsz.is_none();
         let output_names = session
             .outputs()
             .iter()
@@ -451,6 +481,7 @@ impl YoloModel {
             metadata,
             output_names,
             imgsz,
+            rect,
             device: device.label(),
         })
     }
@@ -491,6 +522,7 @@ impl YoloModel {
             self.imgsz,
             self.metadata.stride,
             self.metadata.task,
+            self.rect,
         )?;
 
         // Resolve the output dtype path before borrowing the session for inference.
@@ -513,7 +545,10 @@ impl YoloModel {
         let t_post = now_ms();
         let config = make_config(conf, iou, classes);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
-        let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
+        // The tensor actually fed to the model, which `rect` makes differ from `imgsz`.
+        // `build_instance_masks` turns this into prototype-space crop coordinates.
+        let tensor_shape = pre.tensor.shape();
+        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
         // Postprocess time runs from output extraction to the postprocess call.
         let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, now_ms() - t_post);
 
@@ -653,6 +688,28 @@ impl YoloPipeline {
         vec![1, 3, self.imgsz.0 as u32, self.imgsz.1 as u32]
     }
 
+    /// Adopt the input shape the engine reports for the compiled model.
+    ///
+    /// Without it the size comes from the metadata, which the graph itself never has to
+    /// agree with, and [`input_shape`](Self::input_shape) is what the caller sizes its
+    /// input tensor from - so a stale `imgsz` would feed the model a tensor it rejects.
+    /// The ONNX path reads the same fact off its session; this is the LiteRT equivalent,
+    /// which only the JS engine can see.
+    ///
+    /// Expects NCHW `[N, 3, H, W]`, what `ai_edge_torch` emits, with the signed dimensions
+    /// the engine reports. Any other rank or layout (a channels-last `[N, H, W, 3]`) and any
+    /// non-positive axis, which is how a dynamic dimension is reported, is ignored and leaves
+    /// the metadata size in place.
+    #[wasm_bindgen(js_name = setInputShape)]
+    pub fn set_input_shape(&mut self, shape: Vec<i32>) {
+        if let [_, 3, h, w] = shape[..]
+            && h > 0
+            && w > 0
+        {
+            self.imgsz = (h as usize, w as usize);
+        }
+    }
+
     /// Preprocess raw RGBA pixels (e.g. a webcam `ImageData`) into the NCHW f32
     /// input tensor an Ultralytics LiteRT/TFLite model expects, normalized to
     /// `[0, 1]`, the same preprocessing as the ONNX path.
@@ -672,11 +729,14 @@ impl YoloPipeline {
         let t0 = now_ms();
         let dynimg = rgba_to_image(rgba, width, height)?;
 
+        // `rect: false` - the engine allocated its input tensor from `inputShape`, so the
+        // shape has to stay put across frames.
         let (orig_img, pre) = preprocess_image(
             &dynimg,
             self.imgsz,
             self.metadata.stride,
             self.metadata.task,
+            false,
         )?;
         let data = pre
             .tensor
