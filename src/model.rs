@@ -606,11 +606,6 @@ impl YOLOModel {
             let canonical = model_path
                 .canonicalize()
                 .unwrap_or_else(|_| model_path.to_path_buf());
-            // Compiled CoreML artifacts belong to the ONNX Runtime build that wrote them.
-            // Loading ones written by another build fails with "Feature ... is required but
-            // not specified" on models CoreML partitions differently between versions (the
-            // TopK in YOLO26 detect and in OBB), so the runtime build is part of the key and
-            // an upgrade recompiles instead of reusing something it cannot run.
             let ort_build = fnv1a(ort::info().as_bytes());
             let stem = canonical
                 .file_stem()
