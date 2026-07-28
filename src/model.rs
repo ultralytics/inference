@@ -601,20 +601,20 @@ impl YOLOModel {
             let canonical = model_path
                 .canonicalize()
                 .unwrap_or_else(|_| model_path.to_path_buf());
+            // Compiled CoreML artifacts belong to the ONNX Runtime build that wrote them.
+            // Loading ones written by another build fails with "Feature ... is required but
+            // not specified" on models CoreML partitions differently between versions (the
+            // TopK in YOLO26 detect and in OBB), so the runtime build is part of the key and
+            // an upgrade recompiles instead of reusing something it cannot run.
+            let ort_build = fnv1a(ort::info().as_bytes());
             let stem = canonical
                 .file_stem()
                 .map_or_else(|| "model".to_owned(), |s| s.to_string_lossy().into_owned());
-            let hash = canonical
-                .as_os_str()
-                .as_encoded_bytes()
-                .iter()
-                .fold(14_695_981_039_346_656_037u64, |h, &b| {
-                    h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
-                });
+            let hash = fnv1a(canonical.as_os_str().as_encoded_bytes());
             let cache_dir = cache_base
                 .join("ultralytics-inference")
                 .join("coreml")
-                .join(format!("{stem}_{hash:016x}_mlprogram"));
+                .join(format!("{stem}_{hash:016x}_{ort_build:016x}_mlprogram"));
             if std::fs::create_dir_all(&cache_dir).is_ok() {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
@@ -1798,6 +1798,13 @@ fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
     provider == "CoreMLExecutionProvider"
         && msg.contains("GatherElements")
         && msg.contains("Out of range")
+}
+
+/// FNV-1a over `bytes`, for naming cache directories from a path and a runtime build.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(14_695_981_039_346_656_037u64, |h, &b| {
+        h.wrapping_mul(1_099_511_628_211) ^ u64::from(b)
+    })
 }
 
 /// Convert an ONNX Runtime tensor shape (`i64` dims) to `usize` for indexing.
