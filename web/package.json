@@ -66,7 +66,7 @@
     }
   },
   "devDependencies": {
-    "@litertjs/core": "^2.5.0",
+    "@litertjs/core": "^2.5.3",
     "typescript": "^5.4.0"
   }
 }
