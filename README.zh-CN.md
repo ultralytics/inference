@@ -1,12 +1,26 @@
 <!-- Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license -->
 
-<a href="https://www.ultralytics.com/"><img src="https://raw.githubusercontent.com/ultralytics/assets/main/logo/Ultralytics_Logotype_Original.svg" width="320" alt="Ultralytics 标志"></a>
+<div align="center">
+  <p>
+    <a href="https://www.ultralytics.com/events/yolovision?utm_source=github&utm_medium=social&utm_campaign=yolovision26&utm_content=banner" target="_blank">
+      <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/yolov8/banner-yolov8.png" alt="Ultralytics YOLO 横幅"></a>
+  </p>
+
+[中文](https://docs.ultralytics.com/zh/inference) | [한국어](https://docs.ultralytics.com/ko/inference) | [日本語](https://docs.ultralytics.com/ja/inference) | [Русский](https://docs.ultralytics.com/ru/inference) | [Deutsch](https://docs.ultralytics.com/de/inference) | [Français](https://docs.ultralytics.com/fr/inference) | [Español](https://docs.ultralytics.com/es/inference) | [Português](https://docs.ultralytics.com/pt/inference) | [Türkçe](https://docs.ultralytics.com/tr/inference) | [Tiếng Việt](https://docs.ultralytics.com/vi/inference) | [العربية](https://docs.ultralytics.com/ar/inference) <br>
+
+</div>
 
 # 🦀 Ultralytics YOLO Rust Inference
 
+<div align="center">
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+</div>
+
 用 Rust 编写的高性能 YOLO 推理库。本库基于 ONNX Runtime，为运行 YOLO 模型提供快速、安全、高效的接口，API 设计与 [Ultralytics Python 包](https://github.com/ultralytics/ultralytics)保持一致。
+
+<div align="center">
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
 [![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
@@ -21,6 +35,8 @@
 [![MSRV](https://img.shields.io/crates/msrv/ultralytics-inference?logo=rust&logoColor=white&color=CE422B)](https://crates.io/crates/ultralytics-inference)
 [![License](https://img.shields.io/crates/l/ultralytics-inference?label=license&color=blue)](https://github.com/ultralytics/inference/blob/main/LICENSE)
 [![dependency status](https://deps.rs/repo/github/ultralytics/inference/status.svg)](https://deps.rs/repo/github/ultralytics/inference)
+
+</div>
 
 ## ✨ 功能
 
@@ -198,7 +214,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.32 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.33 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -218,7 +234,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.32 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.33 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -315,7 +331,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.32"
+ultralytics-inference = "0.0.33"
 ```
 
 ```toml
@@ -523,7 +539,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.32", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.33", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
