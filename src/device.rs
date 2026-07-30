@@ -56,16 +56,16 @@ impl FromStr for Device {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_lowercase();
         if let Some(rest) = s.strip_prefix("cuda") {
-            return Ok(Self::Cuda(parse_device_index(rest)));
+            return Ok(Self::Cuda(parse_device_index(rest, &s)?));
         }
         if let Some(rest) = s.strip_prefix("directml") {
-            return Ok(Self::DirectMl(parse_device_index(rest)));
+            return Ok(Self::DirectMl(parse_device_index(rest, &s)?));
         }
         if let Some(rest) = s.strip_prefix("tensorrt") {
-            return Ok(Self::TensorRt(parse_device_index(rest)));
+            return Ok(Self::TensorRt(parse_device_index(rest, &s)?));
         }
         if let Some(rest) = s.strip_prefix("rocm") {
-            return Ok(Self::Rocm(parse_device_index(rest)));
+            return Ok(Self::Rocm(parse_device_index(rest, &s)?));
         }
         match s.as_str() {
             "cpu" => Ok(Self::Cpu),
@@ -81,10 +81,18 @@ impl FromStr for Device {
 }
 
 /// Parse a trailing device index like `":0"`, defaulting to `0` when absent.
-fn parse_device_index(s: &str) -> usize {
-    s.strip_prefix(':')
-        .and_then(|i| i.parse().ok())
-        .unwrap_or(0)
+///
+/// Anything else is an error rather than a silent fallback to device 0: a typo such as
+/// `cuda:abc`, `cuda:-1`, or `cudax` would otherwise run the whole job on the wrong device
+/// without telling anyone. `full` is the complete device string, for the error message.
+fn parse_device_index(s: &str, full: &str) -> Result<usize, String> {
+    match s.strip_prefix(':') {
+        None if s.is_empty() => Ok(0),
+        Some(index) => index
+            .parse()
+            .map_err(|_| format!("Invalid device index in '{full}': expected an integer")),
+        None => Err(format!("Unknown device: {full}")),
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +115,25 @@ mod tests {
         assert!(Device::from_str("intel").is_err());
         assert!(Device::from_str("intel:tpu").is_err());
         assert!(Device::from_str("openvino").is_err());
+    }
+
+    /// A malformed index used to silently resolve to device 0.
+    #[test]
+    fn test_parse_device_rejects_bad_index() {
+        for s in [
+            "cuda:abc",
+            "cuda:-1",
+            "cuda:",
+            "cuda:1.5",
+            "cudax",
+            "cuda0",
+            "tensorrt:x",
+            "rocm:-2",
+            "directmlfoo",
+            "cuda:99999999999999999999",
+        ] {
+            assert!(Device::from_str(s).is_err(), "{s} should not parse");
+        }
     }
 
     #[test]
