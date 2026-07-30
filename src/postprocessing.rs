@@ -985,7 +985,9 @@ fn postprocess_pose(
     num_keypoints: usize,
     kpt_dim: usize,
 ) -> Results {
-    if num_keypoints == 0 || kpt_dim < 2 {
+    // `Keypoints` stores either `(N, K, 2)` or `(N, K, 3)`, so a wider layout has nowhere to
+    // put its remaining channels.
+    if num_keypoints == 0 || !(2..=3).contains(&kpt_dim) {
         return results;
     }
 
@@ -1006,26 +1008,24 @@ fn postprocess_pose(
         return results;
     }
 
-    // Infer actual feature count from data
+    // The head width has to agree with the metadata. Deriving a replacement class count from
+    // the surplus instead would read keypoint columns as class scores: a `[1, 68, N]` head with
+    // `kpt_shape (17, 3)` and one class would decode as 13 classes with keypoints starting at
+    // offset 17, which looks plausible and is entirely wrong.
     let actual_features = output.len() / num_preds;
-    if actual_features < 4 + kpt_features {
+    if actual_features != expected_features {
         eprintln!(
-            "WARNING ⚠️ Pose model has insufficient features ({actual_features}), expected at least {}",
-            4 + kpt_features
+            "WARNING ⚠️ Pose head width {actual_features} disagrees with the model metadata (expected {expected_features} for {num_classes} classes and kpt_shape ({num_keypoints}, {kpt_dim})). Returning empty results."
         );
         return results;
     }
 
     // Convert to 2D [preds, features]
-    let output_2d = output_to_2d(output, num_preds, actual_features, is_transposed);
+    let output_2d = output_to_2d(output, num_preds, expected_features, is_transposed);
 
     if output_2d.is_empty() {
         return results;
     }
-
-    // Derive number of classes from actual features
-    let derived_classes = actual_features.saturating_sub(4 + kpt_features);
-    let num_classes = derived_classes.max(1);
 
     // Filter and NMS - store candidates with keypoints
     let mut candidates: Vec<([f32; 4], f32, usize, Vec<[f32; 3]>)> = Vec::with_capacity(256);
@@ -2167,10 +2167,30 @@ mod tests {
         );
     }
 
-    /// Degenerate keypoint layouts are rejected rather than panicking on the offset math.
+    /// A head width that disagrees with the metadata must return empty rather than reading
+    /// keypoint columns as class scores. Here `kpt_shape (17, 3)` and one class expect 56
+    /// features but the head is 68 wide, which used to decode as 13 classes.
+    #[test]
+    fn test_postprocess_pose_head_width_mismatch_is_empty() {
+        let num_preds = 100;
+        let results = postprocess_pose(
+            &vec![0.5; 68 * num_preds],
+            &[1, 68, num_preds],
+            &unit_preprocess((640, 640)),
+            &InferenceConfig::default(),
+            results_for(1, (640, 640), (640, 640)),
+            17,
+            3,
+        );
+        assert!(results.keypoints.is_none());
+        assert!(results.boxes.is_none());
+    }
+
+    /// Degenerate keypoint layouts are rejected rather than panicking on the offset math or
+    /// truncating channels `Keypoints` cannot store.
     #[test]
     fn test_postprocess_pose_rejects_degenerate_kpt_shape() {
-        for (nk, kpt_dim) in [(0, 3), (17, 1)] {
+        for (nk, kpt_dim) in [(0, 3), (17, 1), (17, 4)] {
             let results = postprocess_pose(
                 &vec![0.0; 5600],
                 &[1, 56, 100],
