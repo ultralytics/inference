@@ -126,6 +126,12 @@ impl Task {
     pub const fn has_semantic_mask(&self) -> bool {
         matches!(self, Self::Semantic)
     }
+
+    /// Returns `true` only for the `Depth` task, which outputs a per-pixel depth map.
+    #[must_use]
+    pub const fn has_depth(&self) -> bool {
+        matches!(self, Self::Depth)
+    }
 }
 
 impl fmt::Display for Task {
@@ -211,6 +217,9 @@ mod tests {
         assert!(Task::Obb.has_obb());
         assert!(Task::Semantic.has_semantic_mask());
         assert!(!Task::Detect.has_semantic_mask());
+        assert!(Task::Depth.has_depth());
+        assert!(!Task::Semantic.has_depth());
+        assert!(!Task::Depth.has_semantic_mask());
     }
 
     #[test]
