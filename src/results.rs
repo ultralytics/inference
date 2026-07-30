@@ -886,12 +886,13 @@ impl Keypoints {
     }
 }
 
-/// Sort key that ranks NaN below every real probability.
+/// Order two probabilities so that any NaN ranks below every real value, ascending otherwise.
 ///
-/// `f32::total_cmp` orders a positive NaN *above* infinity, so comparing raw values would let
-/// a NaN win the top-1 argmax. This mirrors how the detection head picks its best class score.
-const fn rank(v: f32) -> f32 {
-    if v.is_nan() { f32::NEG_INFINITY } else { v }
+/// `f32::total_cmp` alone would let a positive NaN win the top-1 argmax, since it orders NaN
+/// above infinity. Testing `is_nan` separately rather than substituting a sentinel keeps
+/// `f32::NEG_INFINITY` a distinct, orderable input.
+fn cmp_prob(a: f32, b: f32) -> std::cmp::Ordering {
+    b.is_nan().cmp(&a.is_nan()).then_with(|| a.total_cmp(&b))
 }
 
 /// Classification probabilities.
@@ -928,7 +929,7 @@ impl Probs {
         self.data
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| rank(**a).total_cmp(&rank(**b)))
+            .max_by(|(_, a), (_, b)| cmp_prob(**a, **b))
             .map_or(0, |(i, _)| i)
     }
     /// Get the indices of the top-5 classes.
@@ -953,7 +954,7 @@ impl Probs {
     #[must_use]
     pub fn top_k(&self, k: usize) -> Vec<usize> {
         let mut indices: Vec<usize> = (0..self.data.len()).collect();
-        indices.sort_by(|&a, &b| rank(self.data[b]).total_cmp(&rank(self.data[a])));
+        indices.sort_by(|&a, &b| cmp_prob(self.data[b], self.data[a]));
         indices.truncate(k);
         indices
     }
@@ -1334,10 +1335,20 @@ mod tests {
     #[test]
     fn test_probs_with_nan_does_not_panic() {
         let probs = Probs::new(array![0.1, f32::NAN, 0.7, 0.05]);
-        assert_eq!(probs.top1(), 2, "NaN sorts below a real probability");
+        assert_eq!(probs.top1(), 2, "NaN ranks below a real probability");
         assert!((probs.top1conf() - 0.7).abs() < 1e-6);
-        assert_eq!(probs.top_k(4).len(), 4);
+        assert_eq!(probs.top_k(4), vec![2, 0, 3, 1], "the NaN class sorts last");
         assert_eq!(probs.top5conf().len(), 4);
+
+        // Negative infinity is a real value, so it must still outrank a NaN. A sentinel-based
+        // ranking would tie these two and hand the argmax to the NaN.
+        let probs = Probs::new(array![f32::NEG_INFINITY, f32::NAN]);
+        assert_eq!(probs.top1(), 0);
+        assert_eq!(probs.top_k(2), vec![0, 1]);
+
+        // All-NaN input still has to return an in-range index rather than panicking.
+        let probs = Probs::new(array![f32::NAN, f32::NAN]);
+        assert!(probs.top1() < 2);
     }
 
     #[test]

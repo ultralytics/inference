@@ -120,10 +120,17 @@ fn nms_by_class<T>(
         return vec![];
     }
 
-    // Sort by score (descending). `total_cmp` keeps a NaN score from panicking and gives the
-    // sort a total order, which `sort_by` requires.
+    // Sort by score (descending), with any NaN last. `total_cmp` alone would rank a positive
+    // NaN above every finite score, letting it suppress a valid overlapping box of the same
+    // class; testing `is_nan` first processes every real score before the NaNs.
     let mut indices: Vec<usize> = (0..boxes.len()).collect();
-    indices.sort_by(|&a, &b| boxes[b].1.total_cmp(&boxes[a].1));
+    indices.sort_by(|&a, &b| {
+        boxes[a]
+            .1
+            .is_nan()
+            .cmp(&boxes[b].1.is_nan())
+            .then_with(|| boxes[b].1.total_cmp(&boxes[a].1))
+    });
 
     let mut keep = vec![];
     let mut suppressed = vec![false; boxes.len()];
@@ -319,6 +326,14 @@ mod tests {
             ([100.0, 100.0, 110.0, 110.0], 0.9, 0),
         ];
         assert_eq!(nms_per_class(&boxes, 0.5).len(), 2);
+
+        // A NaN-scored box overlapping a valid one of the same class must not outrank it and
+        // suppress it: the real detection is processed first and survives.
+        let boxes = vec![
+            ([0.0, 0.0, 10.0, 10.0], f32::NAN, 0),
+            ([1.0, 1.0, 11.0, 11.0], 0.9, 0),
+        ];
+        assert_eq!(nms_per_class(&boxes, 0.5), vec![1]);
     }
 
     #[test]
