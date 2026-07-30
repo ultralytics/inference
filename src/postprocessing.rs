@@ -548,13 +548,15 @@ fn extract_detect_boxes(
         return Array2::zeros((0, 6));
     }
 
-    // Top-K Selection & Sort
+    // Top-K Selection & Sort. `total_cmp` keeps a NaN score from panicking, and both of these
+    // need the total order it provides: `select_nth_unstable_by` has unspecified behavior with
+    // an inconsistent comparator.
     let nms_limit = (max_det * 10).min(candidates.len());
     if candidates.len() > nms_limit {
-        candidates.select_nth_unstable_by(nms_limit, |a, b| b.score.partial_cmp(&a.score).unwrap());
+        candidates.select_nth_unstable_by(nms_limit, |a, b| b.score.total_cmp(&a.score));
         candidates.truncate(nms_limit);
     }
-    candidates.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+    candidates.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
 
     // Population of SoA for NMS (small copy, very fast)
     let n = candidates.len();

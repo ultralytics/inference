@@ -886,6 +886,14 @@ impl Keypoints {
     }
 }
 
+/// Sort key that ranks NaN below every real probability.
+///
+/// `f32::total_cmp` orders a positive NaN *above* infinity, so comparing raw values would let
+/// a NaN win the top-1 argmax. This mirrors how the detection head picks its best class score.
+const fn rank(v: f32) -> f32 {
+    if v.is_nan() { f32::NEG_INFINITY } else { v }
+}
+
 /// Classification probabilities.
 ///
 /// Stores class probabilities with convenience methods for top predictions.
@@ -915,16 +923,12 @@ impl Probs {
     /// # Returns
     ///
     /// * The class ID with the highest probability.
-    ///
-    /// # Panics
-    ///
-    /// Panics if valid comparison cannot be made (e.g. NaN) in `max_by`.
     #[must_use]
     pub fn top1(&self) -> usize {
         self.data
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| rank(**a).total_cmp(&rank(**b)))
             .map_or(0, |(i, _)| i)
     }
     /// Get the indices of the top-5 classes.
@@ -949,11 +953,7 @@ impl Probs {
     #[must_use]
     pub fn top_k(&self, k: usize) -> Vec<usize> {
         let mut indices: Vec<usize> = (0..self.data.len()).collect();
-        indices.sort_by(|&a, &b| {
-            self.data[b]
-                .partial_cmp(&self.data[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        indices.sort_by(|&a, &b| rank(self.data[b]).total_cmp(&rank(self.data[a])));
         indices.truncate(k);
         indices
     }
@@ -1327,6 +1327,17 @@ mod tests {
         assert!((probs.top1conf() - 0.7).abs() < 1e-6);
         let c5 = probs.top5conf();
         assert!((c5[0] - 0.7).abs() < 1e-6);
+    }
+
+    /// A NaN probability used to panic in `top1`, and with it `top1conf`, `top5conf`, and
+    /// `summary`. `total_cmp` orders NaN instead, so the real class still wins.
+    #[test]
+    fn test_probs_with_nan_does_not_panic() {
+        let probs = Probs::new(array![0.1, f32::NAN, 0.7, 0.05]);
+        assert_eq!(probs.top1(), 2, "NaN sorts below a real probability");
+        assert!((probs.top1conf() - 0.7).abs() < 1e-6);
+        assert_eq!(probs.top_k(4).len(), 4);
+        assert_eq!(probs.top5conf().len(), 4);
     }
 
     #[test]

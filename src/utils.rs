@@ -120,9 +120,10 @@ fn nms_by_class<T>(
         return vec![];
     }
 
-    // Sort by score (descending)
+    // Sort by score (descending). `total_cmp` keeps a NaN score from panicking and gives the
+    // sort a total order, which `sort_by` requires.
     let mut indices: Vec<usize> = (0..boxes.len()).collect();
-    indices.sort_by(|&a, &b| boxes[b].1.partial_cmp(&boxes[a].1).unwrap());
+    indices.sort_by(|&a, &b| boxes[b].1.total_cmp(&boxes[a].1));
 
     let mut keep = vec![];
     let mut suppressed = vec![false; boxes.len()];
@@ -160,10 +161,6 @@ fn nms_by_class<T>(
 /// # Returns
 ///
 /// Indices of boxes to keep
-///
-/// # Panics
-///
-/// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
 #[must_use]
 pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Vec<usize> {
     nms_by_class(boxes, iou_threshold, calculate_iou)
@@ -183,10 +180,6 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
 /// # Returns
 ///
 /// Indices of boxes to keep
-///
-/// # Panics
-///
-/// Panics if `partial_cmp` fails for floating point comparisons (e.g. NaN).
 #[must_use]
 pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f32) -> Vec<usize> {
     nms_by_class(boxes, iou_threshold, calculate_probiou)
@@ -319,6 +312,13 @@ mod tests {
         ];
         let keep = nms_per_class(&boxes, 0.5);
         assert_eq!(keep, vec![0]);
+
+        // A NaN score used to panic in the sort comparator.
+        let boxes = vec![
+            ([0.0, 0.0, 10.0, 10.0], f32::NAN, 0),
+            ([100.0, 100.0, 110.0, 110.0], 0.9, 0),
+        ];
+        assert_eq!(nms_per_class(&boxes, 0.5).len(), 2);
     }
 
     #[test]
