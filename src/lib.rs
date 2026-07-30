@@ -300,6 +300,9 @@
 //! - [`Keypoints`] - Pose keypoints with `xy()`, `xyn()`, `conf()` methods
 //! - [`Probs`] - Classification probabilities with `top1()`, `top5()`, `top1conf()`, `top5conf()` methods
 //! - [`Obb`] - Oriented bounding boxes with `xyxyxyxy()`, `xywhr()`, `conf()`, `cls()` methods
+//! - [`SemanticMask`] - Per-pixel class map with `class_ids()`, `classes_present()` methods
+//! - [`DepthMap`] - Per-pixel depth map with `min_depth()`, `max_depth()`, `colorize()` methods
+//! - [`Speed`] - Per-stage timings with a `total()` method
 //!
 //! ## Module Overview
 //!

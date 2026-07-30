@@ -735,9 +735,9 @@ impl Boxes {
     }
 }
 
-/// Segmentation masks.
+/// Per-instance segmentation masks produced by the `segment` task.
 ///
-/// Placeholder for future segmentation support.
+/// Holds the raw mask tensor. Polygon `xy`/`xyn` contours are not derived.
 #[derive(Debug, Clone)]
 pub struct Masks {
     /// Raw mask data with shape (N, H, W).
@@ -786,9 +786,10 @@ impl Masks {
     // contour properties are not derived yet.
 }
 
-/// Pose keypoints.
+/// Skeletal keypoints produced by the `pose` task, one set per detected object.
 ///
-/// Placeholder for future pose estimation support.
+/// Carries visibility scores only when the model exports three channels per keypoint;
+/// [`conf`](Self::conf) returns `None` otherwise.
 #[derive(Debug, Clone)]
 pub struct Keypoints {
     /// Raw keypoint data with shape (N, K, 2) or (N, K, 3) if confidence included.
@@ -979,9 +980,10 @@ impl Probs {
     }
 }
 
-/// Oriented bounding boxes.
+/// Rotated bounding boxes produced by the `obb` task.
 ///
-/// Placeholder for future OBB support.
+/// Boxes are stored as `xywhr`; [`xyxyxyxy`](Self::xyxyxyxy) expands them to corner points
+/// and [`xyxy`](Self::xyxy) gives the enclosing axis-aligned box.
 #[derive(Debug, Clone)]
 pub struct Obb {
     /// Raw OBB data with shape (N, 7) containing [x, y, w, h, rotation, conf, cls].
