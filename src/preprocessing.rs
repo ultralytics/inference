@@ -104,8 +104,18 @@ impl LetterboxGeometry {
         let (target_h, target_w) = (target.0 as f32, target.1 as f32);
         let (orig_hf, orig_wf) = (orig_h as f32, orig_w as f32);
         let scale = (target_h / orig_hf).min(target_w / orig_wf);
-        let new_w = (orig_wf * scale).round() as u32;
-        let new_h = (orig_hf * scale).round() as u32;
+        // Rounding can collapse an extreme aspect ratio to zero: a 10000x1 source at imgsz 640
+        // scales its height to 0.064, which would letterbox the entire tensor and throw the
+        // image away. Keep at least one pixel per axis, leaving a genuinely empty source at 0.
+        let extent = |orig_extent: f32, orig: u32| {
+            if orig == 0 {
+                0
+            } else {
+                ((orig_extent * scale).round() as u32).max(1)
+            }
+        };
+        let new_w = extent(orig_wf, orig_w);
+        let new_h = extent(orig_hf, orig_h);
         let pad_left = (target.1 as u32).saturating_sub(new_w) / 2;
         let pad_top = (target.0 as u32).saturating_sub(new_h) / 2;
         (
@@ -285,6 +295,14 @@ fn fused_zerocopy_preprocess(
     } = *geom;
 
     let (dst_h, dst_w) = target_size;
+
+    // A zero-extent source or image region has no pixels to sample. Every row would take the
+    // padding branch below anyway, but the LUT and scale setup would first underflow on
+    // `src_w - 1` / `src_h - 1` and divide by zero, so return the letterbox fill directly.
+    if src_w == 0 || src_h == 0 || new_width == 0 || new_height == 0 {
+        return Array4::from_elem((1, 3, dst_h, dst_w), LETTERBOX_NORM);
+    }
+
     let channel_size = dst_h * dst_w;
     let src_stride = (src_w * 3) as usize;
 
@@ -753,6 +771,44 @@ fn bankers_round(v: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An aspect ratio worse than the target size rounds one extent to zero, which used to
+    /// discard the image and hand the model a uniformly gray tensor.
+    #[test]
+    fn test_extreme_aspect_ratio_keeps_image_content() {
+        let (geom, _) = calculate_letterbox_params(10000, 1, (640, 640), 32);
+        assert!(geom.new_h >= 1, "height collapsed to {}", geom.new_h);
+        assert!(geom.new_w >= 1);
+
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            10000,
+            1,
+            image::Rgb([255, 0, 0]),
+        ));
+        let res = preprocess_image(&img, (640, 640), 32);
+        let tensor = res.tensor;
+        assert!(
+            tensor.iter().any(|&v| (v - LETTERBOX_NORM).abs() > 1e-6),
+            "every pixel is letterbox fill, so the image was thrown away"
+        );
+    }
+
+    /// A zero-dimension image underflowed `src_w - 1` in the LUT builder, which panics under
+    /// the overflow checks the dev profile enables.
+    #[test]
+    fn test_zero_dimension_image_does_not_panic() {
+        for (w, h) in [(0, 0), (0, 64), (64, 0)] {
+            let img = DynamicImage::ImageRgb8(image::RgbImage::new(w, h));
+            let res = preprocess_image(&img, (640, 640), 32);
+            assert_eq!(res.tensor.shape(), &[1, 3, 640, 640]);
+            assert!(
+                res.tensor
+                    .iter()
+                    .all(|&v| (v - LETTERBOX_NORM).abs() < 1e-6),
+                "an empty source has no pixels, so the tensor is all letterbox fill"
+            );
+        }
+    }
 
     #[test]
     fn test_letterbox_params() {
