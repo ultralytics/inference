@@ -358,18 +358,24 @@ pub fn run_prediction(args: &PredictArgs) {
             },
         );
 
-        // Main thread: consume frames from channel and run inference
+        // Main thread: consume frames from channel and run inference. One unreadable file must
+        // not abandon the rest of the source, so skip it and carry on like Ultralytics does.
+        let mut skipped = 0usize;
         for item in receiver {
             let (img, meta) = match item {
                 Ok(val) => val,
                 Err(e) => {
                     error!("Error reading source: {e}");
-                    break;
+                    skipped += 1;
+                    continue;
                 }
             };
             batch_processor.add(img, meta.path.clone(), meta);
         }
         batch_processor.flush();
+        if skipped > 0 {
+            warn!("Skipped {skipped} unreadable input(s) in the source");
+        }
     }
 
     if let Some(saver) = result_saver
