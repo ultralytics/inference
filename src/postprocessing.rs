@@ -97,11 +97,11 @@ pub fn postprocess(
             let resolved_kpt = kpt_shape.or_else(|| infer_end2end_kpt_shape(shape));
             let is_end2end = end2end
                 || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_pose_shape(shape, nk, kd));
+            let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
             if is_end2end {
-                let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
                 postprocess_pose_end2end(output, shape, preprocess, config, results, nk, kpt_dim)
             } else {
-                postprocess_pose(output, shape, preprocess, config, results)
+                postprocess_pose(output, shape, preprocess, config, results, nk, kpt_dim)
             }
         }
         Task::Classify => {
@@ -387,12 +387,24 @@ fn write_box_row(boxes: &mut Array2<f32>, row: usize, bbox: &[f32; 4], score: f3
 /// When `is_transposed` the data is already laid out `[preds, features]`;
 /// otherwise it is `[features, preds]` and gets transposed. Returns an empty
 /// array on shape mismatch, matching the per-task fallbacks.
+///
+/// The length check is exact on purpose. `ArrayView2::from_shape` accepts a buffer *longer*
+/// than the shape needs and silently views a prefix, so a feature count that disagrees with
+/// the tensor would otherwise reinterpret the output with the wrong stride and decode
+/// plausible-looking garbage instead of reporting a mismatch.
 fn output_to_2d(
     data: &[f32],
     num_preds: usize,
     features: usize,
     is_transposed: bool,
 ) -> Array2<f32> {
+    if num_preds
+        .checked_mul(features)
+        .is_none_or(|len| len != data.len())
+    {
+        return Array2::zeros((0, 0));
+    }
+
     let shape = if is_transposed {
         (num_preds, features)
     } else {
@@ -845,8 +857,13 @@ fn postprocess_segment(
         return results;
     }
 
-    // Convert to 2D [preds, features]
+    // Convert to 2D [preds, features]. `output_to_2d` yields an empty array when the feature
+    // count disagrees with the buffer, which `decode_row` cannot index.
     let output_2d = output_to_2d(output0, num_preds, expected_features, is_transposed);
+
+    if output_2d.is_empty() {
+        return results;
+    }
 
     // Filter and NMS. The original row index is kept to look the coefficients up later.
     let candidates: Vec<([f32; 4], f32, usize, usize)> = (0..num_preds)
@@ -945,10 +962,13 @@ const fn parse_transposed_shape(
     }
 }
 
-/// Post-process pose model output into boxes plus `nk` keypoints per detection.
+/// Post-process pose model output into boxes plus `num_keypoints` keypoints per detection.
 ///
 /// Handles both `[1, features, preds]` and `[1, preds, features]` layouts, applies NMS, and
 /// scales boxes and keypoints back to the original image with the letterbox metadata.
+///
+/// `num_keypoints` and `kpt_dim` come from the model's `kpt_shape` metadata, so non-COCO
+/// keypoint counts and 2-channel (no visibility) exports decode correctly.
 #[allow(
     clippy::too_many_lines,
     clippy::similar_names,
@@ -962,15 +982,20 @@ fn postprocess_pose(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     mut results: Results,
+    num_keypoints: usize,
+    kpt_dim: usize,
 ) -> Results {
+    if num_keypoints == 0 || kpt_dim < 2 {
+        return results;
+    }
+
     let num_classes = results.names.len().max(1);
 
-    // Standard COCO pose has 17 keypoints, each with (x, y, conf)
-    let num_keypoints = 17;
-    let kpt_dim = 3; // x, y, visibility/confidence
-    let kpt_features = num_keypoints * kpt_dim; // 51
+    // Keypoint layout comes from the model's `kpt_shape` metadata: COCO pose is (17, 3), but
+    // custom models use other counts, and `kpt_dim` is 2 when the export carries no visibility.
+    let kpt_features = num_keypoints * kpt_dim;
 
-    // Pose typically has 1 class (person), so features = 4 + 1 + 51 = 56
+    // Pose typically has 1 class (person), so COCO features = 4 + 1 + 51 = 56
     let expected_features = 4 + num_classes + kpt_features;
 
     // Parse output shape ([1, features, preds] vs transposed [1, preds, features]).
@@ -1012,14 +1037,20 @@ fn postprocess_pose(
             continue;
         };
 
-        // Extract keypoints (after class scores), scaled to original image space.
+        // Extract keypoints (after class scores), scaled to original image space. The third
+        // channel is the visibility score, which `kpt_dim == 2` exports do not carry.
         let kpt_start = 4 + num_classes;
         let keypoints = (0..num_keypoints)
             .map(|k| {
                 let off = kpt_start + k * kpt_dim;
                 let (x, y) =
                     scale_keypoint(output_2d[[i, off]], output_2d[[i, off + 1]], preprocess);
-                [x, y, output_2d[[i, off + 2]]]
+                let conf = if kpt_dim > 2 {
+                    output_2d[[i, off + 2]]
+                } else {
+                    0.0
+                };
+                [x, y, conf]
             })
             .collect();
 
@@ -1048,11 +1079,14 @@ fn postprocess_pose(
         // Store box data
         write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
 
-        // Store keypoints
+        // Store keypoints. Only `kpt_dim` channels exist, so a 2-channel layout has no
+        // confidence slot to write.
         for (k, kpt) in kpts.iter().enumerate() {
             keypoints_data[[out_idx, k, 0]] = kpt[0]; // x
             keypoints_data[[out_idx, k, 1]] = kpt[1]; // y
-            keypoints_data[[out_idx, k, 2]] = kpt[2]; // confidence
+            if kpt_dim > 2 {
+                keypoints_data[[out_idx, k, 2]] = kpt[2]; // confidence
+            }
         }
     }
 
@@ -2030,6 +2064,8 @@ mod tests {
             &unit_preprocess((640, 640)),
             &InferenceConfig::default(),
             results_for(1, (640, 640), (640, 640)),
+            17,
+            3,
         );
 
         assert!(results.keypoints.is_some());
@@ -2043,6 +2079,108 @@ mod tests {
             // Verify values
             assert_eq!(kpts.data[[0, 0, 0]], 100.0);
             assert_eq!(kpts.data[[0, 0, 2]], 0.8);
+        }
+    }
+
+    /// A non-COCO keypoint count must be honored instead of assuming 17x3. With the count
+    /// hardcoded, the extra keypoint columns were read as class scores, so every row cleared
+    /// the confidence threshold and keypoints were read from the wrong offset.
+    #[test]
+    fn test_postprocess_pose_custom_kpt_shape() {
+        // 21 keypoints x 3 channels, 1 class: 4 + 1 + 63 = 68 features.
+        let (nk, kpt_dim, num_preds) = (21, 3, 100);
+        let num_features = 4 + 1 + nk * kpt_dim;
+        let mut output = vec![0.0; num_preds * num_features];
+
+        // One real detection in column 0; every other column stays at zero confidence.
+        let col = |feat: usize| feat * num_preds;
+        output[col(0)] = 100.0; // cx
+        output[col(1)] = 100.0; // cy
+        output[col(2)] = 50.0; // w
+        output[col(3)] = 50.0; // h
+        output[col(4)] = 0.9; // class score
+        for k in 0..nk {
+            let off = 5 + k * kpt_dim;
+            output[col(off)] = 100.0; // x
+            output[col(off + 1)] = 110.0; // y
+            output[col(off + 2)] = 0.8; // visibility
+        }
+
+        let results = postprocess_pose(
+            &output,
+            &[1, num_features, num_preds],
+            &unit_preprocess((640, 640)),
+            &InferenceConfig::default(),
+            results_for(1, (640, 640), (640, 640)),
+            nk,
+            kpt_dim,
+        );
+
+        let kpts = results.keypoints.expect("keypoints decoded");
+        assert_eq!(kpts.data.shape(), &[1, nk, kpt_dim]);
+        let boxes = results.boxes.expect("boxes decoded");
+        assert_eq!(boxes.len(), 1, "only one row clears the threshold");
+        #[allow(clippy::float_cmp)]
+        {
+            assert_eq!(boxes.cls()[0], 0.0, "class comes from the class column");
+            assert_eq!(kpts.data[[0, 0, 0]], 100.0);
+            assert_eq!(kpts.data[[0, 0, 1]], 110.0);
+            assert_eq!(kpts.data[[0, 0, 2]], 0.8);
+        }
+    }
+
+    /// A 2-channel export carries no visibility, so it must decode to `(N, K, 2)` rather than
+    /// being rejected for having "insufficient features".
+    #[test]
+    fn test_postprocess_pose_kpt_dim_two() {
+        let (nk, kpt_dim, num_preds) = (17, 2, 50);
+        let num_features = 4 + 1 + nk * kpt_dim; // 39
+        let mut output = vec![0.0; num_preds * num_features];
+
+        let col = |feat: usize| feat * num_preds;
+        output[col(0)] = 80.0;
+        output[col(1)] = 90.0;
+        output[col(2)] = 40.0;
+        output[col(3)] = 40.0;
+        output[col(4)] = 0.7;
+        for k in 0..nk {
+            let off = 5 + k * kpt_dim;
+            output[col(off)] = 80.0;
+            output[col(off + 1)] = 95.0;
+        }
+
+        let results = postprocess_pose(
+            &output,
+            &[1, num_features, num_preds],
+            &unit_preprocess((640, 640)),
+            &InferenceConfig::default(),
+            results_for(1, (640, 640), (640, 640)),
+            nk,
+            kpt_dim,
+        );
+
+        let kpts = results.keypoints.expect("keypoints decoded");
+        assert_eq!(kpts.data.shape(), &[1, nk, kpt_dim]);
+        assert!(
+            kpts.conf().is_none(),
+            "a 2-channel layout has no visibility scores"
+        );
+    }
+
+    /// Degenerate keypoint layouts are rejected rather than panicking on the offset math.
+    #[test]
+    fn test_postprocess_pose_rejects_degenerate_kpt_shape() {
+        for (nk, kpt_dim) in [(0, 3), (17, 1)] {
+            let results = postprocess_pose(
+                &vec![0.0; 5600],
+                &[1, 56, 100],
+                &unit_preprocess((640, 640)),
+                &InferenceConfig::default(),
+                results_for(1, (640, 640), (640, 640)),
+                nk,
+                kpt_dim,
+            );
+            assert!(results.keypoints.is_none(), "nk {nk}, kpt_dim {kpt_dim}");
         }
     }
 
@@ -2452,9 +2590,13 @@ mod tests {
         // [features, preds] gets transposed to [preds, features].
         let b = output_to_2d(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3, false);
         assert_eq!(b.shape(), [2, 3]);
-        // Shape mismatch -> empty array.
+        // Buffer too short -> empty array.
         let c = output_to_2d(&[1.0, 2.0, 3.0], 2, 3, true);
         assert!(c.is_empty());
+        // Buffer too long is also a mismatch: `ArrayView2::from_shape` would happily view the
+        // first 6 of these 8 values, silently decoding with the wrong stride.
+        let d = output_to_2d(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 2, 3, true);
+        assert!(d.is_empty());
     }
 
     #[test]
@@ -2676,6 +2818,36 @@ mod tests {
             None,
         );
         assert!(r.masks.is_none());
+    }
+
+    /// A class count that disagrees with the real head width used to panic: `output_to_2d`
+    /// returns an empty array and `decode_row` indexed row 0 of it. Pose and obb already
+    /// guarded this; segment did not.
+    #[test]
+    fn test_dispatch_segment_feature_mismatch_is_empty() {
+        // Head is 4 + 80 + 32 = 116 wide, but the metadata carries a single class, so the
+        // expected feature count (37) cannot be reshaped from the buffer.
+        let num_preds = 40;
+        let det = vec![0.5f32; 116 * num_preds];
+        let protos = vec![0.0f32; 32 * 8 * 8];
+        let r = postprocess(
+            vec![
+                (&det, vec![1, 116, num_preds]),
+                (&protos, vec![1, 32, 8, 8]),
+            ],
+            Task::Segment,
+            &unit_preprocess((16, 16)),
+            &InferenceConfig::default(),
+            make_names(1),
+            ndarray::Array3::zeros((16, 16, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false,
+            None,
+        );
+        assert!(r.masks.is_none());
+        assert!(r.boxes.is_none());
     }
 
     #[test]
