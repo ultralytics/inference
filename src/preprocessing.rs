@@ -477,10 +477,13 @@ pub fn calculate_rect_size(
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let new_w = (orig_w * scale).round() as usize;
 
-    // Round up to nearest multiple of stride
+    // Round up to nearest multiple of stride. A degenerate source rounds an extent to zero
+    // (a zero-width image, or an aspect ratio past what the target can represent), which would
+    // hand the model a zero-width input and the CUDA preprocess a zero-sized kernel grid, so
+    // keep at least one stride step on each axis.
     let stride = stride as usize;
-    let rect_h = ((new_h + stride - 1) / stride) * stride;
-    let rect_w = ((new_w + stride - 1) / stride) * stride;
+    let rect_h = (((new_h + stride - 1) / stride) * stride).max(stride);
+    let rect_w = (((new_w + stride - 1) / stride) * stride).max(stride);
 
     (rect_h, rect_w)
 }
@@ -807,6 +810,17 @@ mod tests {
                     .all(|&v| (v - LETTERBOX_NORM).abs() < 1e-6),
                 "an empty source has no pixels, so the tensor is all letterbox fill"
             );
+
+            // `rect` mode picks its own target before preprocessing, so that target has to
+            // stay nonzero too: a zero extent would hand the model an empty input and the
+            // CUDA preprocess a zero-sized kernel grid.
+            let rect = calculate_rect_size(w, h, (640, 640), 32);
+            assert!(
+                rect.0 >= 32 && rect.1 >= 32,
+                "rect target {rect:?} collapsed for a {w}x{h} source"
+            );
+            let res = preprocess_image(&img, rect, 32);
+            assert_eq!(res.tensor.shape(), &[1, 3, rect.0, rect.1]);
         }
     }
 
