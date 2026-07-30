@@ -1082,9 +1082,14 @@ fn postprocess_classify(output: &[f32], mut results: Results) -> Results {
     // Probs::new expects an Array1, which we can create from the slice
     let mut probs_vec = output.to_vec();
 
-    // Check if softmax is already applied (sum ≈ 1.0)
+    // Treat the head as already-normalized only when it actually looks like a distribution:
+    // every value within `0..=1` and summing to about 1. Gating on `sum > 0.0` instead let a
+    // vector of negative logits through untouched, so raw logits were stored as probabilities
+    // and `top1conf` could report a negative confidence.
     let sum: f32 = probs_vec.iter().sum();
-    if (sum - 1.0).abs() > 0.1 && sum > 0.0 {
+    let is_distribution =
+        (sum - 1.0).abs() <= 0.1 && probs_vec.iter().all(|&v| (0.0..=1.0).contains(&v));
+    if !is_distribution {
         // Apply softmax normalization
         let max_val = probs_vec.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let exp_vals: Vec<f32> = probs_vec.iter().map(|&v| (v - max_val).exp()).collect();
@@ -2483,6 +2488,24 @@ mod tests {
         // Empty output -> no probs.
         let r = postprocess_classify(&[], results_for(3, (8, 8), (8, 8)));
         assert!(r.probs.is_none());
+
+        // All-negative logits sum to a negative number, which used to skip softmax entirely
+        // and store the raw logits, so `top1conf` reported something like -3.0.
+        let r = postprocess_classify(&[-5.0, -3.0, -8.0], results_for(3, (8, 8), (8, 8)));
+        let probs = r.probs.unwrap();
+        assert_eq!(probs.top1(), 1, "the largest logit still wins");
+        let conf = probs.top1conf();
+        assert!(
+            (0.0..=1.0).contains(&conf),
+            "confidence must be a probability, got {conf}"
+        );
+        assert!((probs.data.sum() - 1.0).abs() < 1e-5);
+
+        // A vector that sums to ~1 but holds a negative value is not a distribution either.
+        let r = postprocess_classify(&[-0.5, 0.5, 1.0], results_for(3, (8, 8), (8, 8)));
+        let probs = r.probs.unwrap();
+        assert!(probs.data.iter().all(|&v| (0.0..=1.0).contains(&v)));
+        assert!((probs.data.sum() - 1.0).abs() < 1e-5);
     }
 
     #[test]
