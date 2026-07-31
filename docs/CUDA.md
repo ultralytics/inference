@@ -183,8 +183,10 @@ the CPU path runs and the flag is silently ignored:
 - the task is not `Classify` (which uses center-crop, not letterbox),
 - the model takes an FP32 input tensor (FP16-input models keep the CPU path).
 
-It is wired into `predict_image` specifically (single-frame). `predict_batch`
-and the multi-image batch path always use CPU preprocess.
+`predict_batch` and the multi-image path use the same kernel, writing each image
+into its own slot of one `[N, 3, H, W]` device buffer, so a batch is uploaded
+without a host-side concatenation. The batch path additionally excludes
+`Semantic`, whose baked-in `ArgMax` output is handled by the CPU path.
 
 ## CLI
 
@@ -195,10 +197,18 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg \
   --device tensorrt:0 --half
 ```
 
-This uses the TensorRT EP (FP16 + engine cache). The `cuda-preprocess` kernel
-fast path is **not** used by the CLI - the CLI runs through the batch
-processor, which uses CPU preprocess. The GPU preprocess path is reached only
-through `YOLOModel::predict_image` in library code.
+This uses the TensorRT EP (FP16 + engine cache). The CLI runs through the batch
+processor, which calls `predict_batch`, so the `cuda-preprocess` kernel is used
+only when `--batch` is greater than 1. At `--batch 1` the batch processor still
+calls `predict_batch` with a single image, which takes the CPU preprocess path.
+
+```bash
+ultralytics-inference predict --model yolo26n-b16.onnx --source images/ \
+  --device tensorrt:0 --half --batch 16
+```
+
+The model must be exported with a matching batch size, or with a dynamic batch
+axis. A model whose input pins `[16, 3, 640, 640]` cannot run at `--batch 1`.
 
 [`YOLOModel::predict_image`]: crate::YOLOModel::predict_image
 
