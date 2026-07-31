@@ -172,8 +172,14 @@ impl YOLOModel {
                 config.device,
                 None | Some(crate::Device::Cuda(_) | crate::Device::TensorRt(_))
             );
+            // Open the context on the device the session will run on. Defaulting to 0 here
+            // would hand a GPU-0 pointer to a session executing on another GPU.
+            let device_index = match config.device {
+                Some(crate::Device::Cuda(i) | crate::Device::TensorRt(i)) => i,
+                _ => 0,
+            };
             if config.cuda_preprocess && device_eligible {
-                match crate::cuda_inference::CudaStreamHandle::open(0) {
+                match crate::cuda_inference::CudaStreamHandle::open(device_index) {
                     Ok(h) => Some(h),
                     Err(e) => {
                         warn!("cuda-preprocess: stream init failed ({e:?}); using CPU preprocess");
@@ -1037,6 +1043,35 @@ impl YOLOModel {
         }
     }
 
+    /// Memory descriptors for a device-resident input and host-readable outputs.
+    ///
+    /// `device_id` must name the GPU the input buffer lives on. Naming device 0 for a
+    /// session running on another GPU hands ORT a pointer it cannot read.
+    #[cfg(feature = "cuda-preprocess")]
+    fn device_memory_info(
+        device_id: usize,
+    ) -> Result<(
+        ort::memory::MemoryInfo<'static>,
+        ort::memory::MemoryInfo<'static>,
+    )> {
+        use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
+
+        let build = |device: AllocationDevice, id: usize, what: &str| {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            MemoryInfo::new(
+                device,
+                id as i32,
+                AllocatorType::Device,
+                MemoryType::Default,
+            )
+            .map_err(|e| InferenceError::InferenceError(format!("{what} meminfo: {e}")))
+        };
+        Ok((
+            build(AllocationDevice::CUDA, device_id, "cuda")?,
+            build(AllocationDevice::CPU, 0, "cpu")?,
+        ))
+    }
+
     /// CUDA-preprocess fast path used by [`Self::predict_image`] when
     /// `cuda_preprocessor` is populated. Runs the fused letterbox+normalize kernel,
     /// hands the resulting device buffer to ORT via `TensorRefMut::from_raw`,
@@ -1048,7 +1083,6 @@ impl YOLOModel {
         image: &DynamicImage,
         path: String,
     ) -> Result<Vec<Results>> {
-        use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
         use ort::value::TensorRefMut;
 
         // Computed before `run_binding` borrows the session: true when the
@@ -1080,27 +1114,15 @@ impl YOLOModel {
         let geom = pre.preprocess(&rgb_bytes, h, w, false, target, 0)?;
         let (dst_h, dst_w) = target;
         let dev_ptr = pre.input_dev_ptr();
+        let device_id = pre.device_id();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
 
-        let cuda_mem = MemoryInfo::new(
-            AllocationDevice::CUDA,
-            0,
-            AllocatorType::Device,
-            MemoryType::Default,
-        )
-        .map_err(|e| InferenceError::InferenceError(format!("cuda meminfo: {e}")))?;
-        let cpu_mem = MemoryInfo::new(
-            AllocationDevice::CPU,
-            0,
-            AllocatorType::Device,
-            MemoryType::Default,
-        )
-        .map_err(|e| InferenceError::InferenceError(format!("cpu meminfo: {e}")))?;
+        let (cuda_mem, cpu_mem) = Self::device_memory_info(device_id)?;
         let shape: Vec<i64> = vec![1, 3, dst_h as i64, dst_w as i64];
         // SAFETY: dev_ptr is owned by `cuda_preprocessor` (stored on `self`) and remains
-        // valid for the duration of this call. ORT consumes it during
-        // `run_binding`, which is synchronized via the shared cuda stream.
+        // valid for the duration of this call. ORT consumes it during `run_binding`, which
+        // is synchronized via the shared cuda stream.
         let in_tensor = unsafe {
             TensorRefMut::<f32>::from_raw(cuda_mem, dev_ptr as *mut core::ffi::c_void, shape.into())
                 .map_err(|e| InferenceError::InferenceError(format!("from_raw: {e}")))?
@@ -1218,7 +1240,6 @@ impl YOLOModel {
         images: &[&DynamicImage],
         paths: &[String],
     ) -> Result<Vec<Vec<Results>>> {
-        use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
         use ort::value::TensorRefMut;
 
         let n_images = images.len();
@@ -1263,31 +1284,15 @@ impl YOLOModel {
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
 
         let (dst_h, dst_w) = target;
-        let dev_ptr = self
-            .cuda_preprocessor
-            .as_ref()
-            .expect("cuda_preprocessor")
-            .input_dev_ptr();
+        let pre = self.cuda_preprocessor.as_ref().expect("cuda_preprocessor");
+        let dev_ptr = pre.input_dev_ptr();
+        let device_id = pre.device_id();
 
-        let cuda_mem = MemoryInfo::new(
-            AllocationDevice::CUDA,
-            0,
-            AllocatorType::Device,
-            MemoryType::Default,
-        )
-        .map_err(|e| InferenceError::InferenceError(format!("cuda meminfo: {e}")))?;
-        let cpu_mem = MemoryInfo::new(
-            AllocationDevice::CPU,
-            0,
-            AllocatorType::Device,
-            MemoryType::Default,
-        )
-        .map_err(|e| InferenceError::InferenceError(format!("cpu meminfo: {e}")))?;
+        let (cuda_mem, cpu_mem) = Self::device_memory_info(device_id)?;
+        // The buffer was sized for `slots >= n_images` at load, checked before dispatch.
         let shape: Vec<i64> = vec![n_images as i64, 3, dst_h as i64, dst_w as i64];
-        // SAFETY: dev_ptr is owned by `cuda_preprocessor` (stored on `self`) and remains
-        // valid for the duration of this call, and the buffer was sized for `slots >=
-        // n_images` images at load. ORT consumes it during `run_binding`, which is
-        // synchronized via the shared cuda stream.
+        // SAFETY: as in `predict_image_cuda_pre`; the pointer is owned by
+        // `cuda_preprocessor` and outlives this call.
         let in_tensor = unsafe {
             TensorRefMut::<f32>::from_raw(cuda_mem, dev_ptr as *mut core::ffi::c_void, shape.into())
                 .map_err(|e| InferenceError::InferenceError(format!("from_raw: {e}")))?
