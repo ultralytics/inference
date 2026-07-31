@@ -231,6 +231,13 @@ impl CudaPreprocessor {
         self.input_dev_ptr
     }
 
+    /// Number of images the input buffer was sized for. A caller passing more than this
+    /// must not use the device path: the buffer cannot be grown without invalidating the
+    /// pointer already handed to ONNX Runtime.
+    pub(crate) const fn slots(&self) -> usize {
+        self.batch
+    }
+
     /// H2D-copy the source frame, launch the fused preprocess kernel writing
     /// into the input buffer, and return the letterbox geometry needed by
     /// post-processing.
@@ -317,7 +324,12 @@ impl CudaPreprocessor {
 
         // Write into this image's slot of the `[N, 3, H, W]` buffer. The kernel indexes
         // from its `dst` base, so a sub-view is all the batching it needs.
-        let slot_elems = 3 * self.dst_h * self.dst_w;
+        //
+        // The stride is the *target* plane, not the backing buffer's. `finalize` rounds the
+        // buffer up to the stride, so a model input that is not stride-aligned (1000x1000
+        // backed by 1024x1024) would otherwise place image 1 after a 1024x1024 plane while
+        // ORT, reading the `[N, 3, dst_h, dst_w]` tensor, expects it after a 1000x1000 one.
+        let slot_elems = 3 * dst_h * dst_w;
         let mut slot_view = self
             .input_dev
             .slice_mut(slot * slot_elems..(slot + 1) * slot_elems);
