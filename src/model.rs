@@ -13,10 +13,14 @@ use std::time::Instant;
 use half::f16;
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array3;
+// `model` is native-only, so rayon is used directly rather than via `crate::parallel`
+// (which exists to give the wasm-shared pipeline sequential shims).
 use ort::session::Session;
 use ort::value::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 
 use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_download_model};
 use crate::error::{InferenceError, Result};
@@ -659,10 +663,32 @@ impl YOLOModel {
     ///
     /// `label` names the precision in error messages (e.g. "FP32"). Shared tail for
     /// the FP32 and FP16 batch builders.
-    fn concat_views<T: Clone>(
+    fn concat_views<T: Copy + Send + Sync + Default>(
         arrays: &[ndarray::ArrayView4<'_, T>],
         label: &str,
     ) -> Result<ndarray::Array4<T>> {
+        // The preprocessor hands back one contiguous `[1, 3, H, W]` block per image, all
+        // the same shape, so the batch is just those blocks laid end to end. Copy them in
+        // parallel: `ndarray::concatenate` clones element by element on one thread, which
+        // costs more than the forward pass itself on a batched GPU run.
+        if let Some((first, rest)) = arrays.split_first()
+            && rest.iter().all(|a| a.shape() == first.shape())
+            && let Some(slices) = arrays
+                .iter()
+                .map(|a| a.as_slice())
+                .collect::<Option<Vec<_>>>()
+        {
+            let per_image = first.len();
+            let (_, c, h, w) = first.dim();
+            let mut buf = vec![T::default(); per_image * arrays.len()];
+            buf.par_chunks_mut(per_image)
+                .zip(slices)
+                .for_each(|(dst, src)| dst.copy_from_slice(src));
+            return ndarray::Array4::from_shape_vec((arrays.len(), c, h, w), buf).map_err(|e| {
+                InferenceError::InferenceError(format!("Failed to build {label} batch: {e}"))
+            });
+        }
+
         let batch = ndarray::concatenate(ndarray::Axis(0), arrays).map_err(|e| {
             InferenceError::InferenceError(format!("Failed to concatenate {label} tensors: {e}"))
         })?;
@@ -1259,7 +1285,6 @@ impl YOLOModel {
 
         // Preprocess all images
         let start_preprocess = Instant::now();
-        let mut preprocessed_results = Vec::with_capacity(images.len());
 
         // Rect inference additionally needs a homogeneous batch: mixed sizes can't share
         // one padded shape, so they fall back to square below.
@@ -1280,28 +1305,28 @@ impl YOLOModel {
             );
         }
 
-        // We will stack tensors later
-        for image in images {
-            // Determine target size for this image
-            let current_target_size = if actual_rect {
-                let (w, h) = image.dimensions();
-                calculate_rect_size(w, h, target_size, self.metadata.stride)
-            } else {
-                target_size
-            };
+        // Each image letterboxes independently, so the batch fans out across cores
+        // instead of paying the per-image resize serially.
+        let (stride, task, fp16_input) =
+            (self.metadata.stride, self.metadata.task, self.fp16_input);
+        let preprocessed_results: Vec<_> = images
+            .par_iter()
+            .map(|image| {
+                // Determine target size for this image
+                let current_target_size = if actual_rect {
+                    let (w, h) = image.dimensions();
+                    calculate_rect_size(w, h, target_size, stride)
+                } else {
+                    target_size
+                };
 
-            let res = if self.metadata.task == Task::Classify {
-                preprocess_image_center_crop(image, current_target_size, self.fp16_input)
-            } else {
-                preprocess_image_with_precision(
-                    image,
-                    current_target_size,
-                    self.metadata.stride,
-                    self.fp16_input,
-                )
-            };
-            preprocessed_results.push(res);
-        }
+                if task == Task::Classify {
+                    preprocess_image_center_crop(image, current_target_size, fp16_input)
+                } else {
+                    preprocess_image_with_precision(image, current_target_size, stride, fp16_input)
+                }
+            })
+            .collect();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time =
             start_preprocess.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
@@ -1317,11 +1342,9 @@ impl YOLOModel {
         let end2end = self.metadata.end2end;
         let kpt_shape = self.metadata.kpt_shape;
 
-        // Compute orig_img arrays now (cheap; no copy of pixels yet other than what image_to_array does).
-        let mut image_arrays = Vec::with_capacity(n_images);
-        for image in images {
-            image_arrays.push(image_to_array(image));
-        }
+        // Compute orig_img arrays now. `image_to_array` copies the full frame, so run the
+        // batch across cores like the preprocess fan-out above.
+        let image_arrays: Vec<Array3<u8>> = images.par_iter().map(|i| image_to_array(i)).collect();
         // Move preprocessed_results into an Option so the closure can consume it.
         let preprocessed_results_opt = std::cell::RefCell::new(Some(preprocessed_results));
         let image_arrays_opt = std::cell::RefCell::new(Some(image_arrays));
