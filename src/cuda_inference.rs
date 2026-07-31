@@ -123,6 +123,7 @@ pub(crate) struct PreGeom {
 pub(crate) struct CudaStreamHandle {
     ctx: Arc<CudaContext>,
     stream: Arc<CudaStream>,
+    device_id: usize,
 }
 
 impl CudaStreamHandle {
@@ -132,7 +133,11 @@ impl CudaStreamHandle {
             InferenceError::ModelLoadError(format!("cudarc CudaContext::new({device_id}): {e:?}"))
         })?;
         let stream = ctx.default_stream();
-        Ok(Self { ctx, stream })
+        Ok(Self {
+            ctx,
+            stream,
+            device_id,
+        })
     }
 
     /// Raw cudarc stream pointer, suitable for `ort`'s `with_compute_stream`.
@@ -174,6 +179,8 @@ pub(crate) struct CudaPreprocessor {
     dst_w: usize,
     /// Number of `3 * dst_h * dst_w` slots the input buffer holds.
     batch: usize,
+    /// CUDA device the context, stream and buffers live on.
+    device_id: usize,
 }
 
 impl CudaPreprocessor {
@@ -187,7 +194,11 @@ impl CudaPreprocessor {
         dst_w: usize,
         batch: usize,
     ) -> Result<Self> {
-        let CudaStreamHandle { ctx, stream } = handle;
+        let CudaStreamHandle {
+            ctx,
+            stream,
+            device_id,
+        } = handle;
 
         let ptx = compile_ptx_with_opts(KERNEL_SRC, cudarc::nvrtc::CompileOptions::default())
             .map_err(|e| InferenceError::ModelLoadError(format!("NVRTC compile: {e:?}")))?;
@@ -222,6 +233,7 @@ impl CudaPreprocessor {
             dst_h,
             dst_w,
             batch,
+            device_id,
         })
     }
 
@@ -229,6 +241,13 @@ impl CudaPreprocessor {
     /// stable for the lifetime of this preprocessor.
     pub(crate) const fn input_dev_ptr(&self) -> u64 {
         self.input_dev_ptr
+    }
+
+    /// CUDA device the input buffer lives on. The `MemoryInfo` describing that buffer to
+    /// ONNX Runtime must name this device, not device 0, or a session running on another
+    /// GPU is handed a pointer it cannot read.
+    pub(crate) const fn device_id(&self) -> usize {
+        self.device_id
     }
 
     /// Number of images the input buffer was sized for. A caller passing more than this
