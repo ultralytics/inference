@@ -469,7 +469,13 @@ impl YOLOModel {
             let stride = metadata.stride as usize;
             let round_up = |v: usize| v.div_ceil(stride) * stride;
             let (dst_h, dst_w) = (round_up(resolved_imgsz.0), round_up(resolved_imgsz.1));
-            match crate::cuda_inference::CudaPreprocessor::finalize(handle, dst_h, dst_w) {
+            // One slot per image the model's input accepts, so a batched run fills
+            // `[N, 3, H, W]` on the device instead of concatenating on the host.
+            let slots = Self::fixed_batch(&session)
+                .or(config.batch)
+                .unwrap_or(1)
+                .max(1);
+            match crate::cuda_inference::CudaPreprocessor::finalize(handle, dst_h, dst_w, slots) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     return Err(InferenceError::ModelLoadError(format!(
@@ -564,6 +570,7 @@ impl YOLOModel {
             .with_timing_cache_path(cache_str)
             .with_max_workspace_size(4 * 1024 * 1024 * 1024)
             .with_builder_optimization_level(5);
+
         bind_compute_stream!(ep, compute_stream)
     }
 
@@ -1070,7 +1077,7 @@ impl YOLOModel {
             .cuda_preprocessor
             .as_mut()
             .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
-        let geom = pre.preprocess(&rgb_bytes, h, w, false, target)?;
+        let geom = pre.preprocess(&rgb_bytes, h, w, false, target, 0)?;
         let (dst_h, dst_w) = target;
         let dev_ptr = pre.input_dev_ptr();
         #[allow(clippy::cast_precision_loss)]
@@ -1201,6 +1208,158 @@ impl YOLOModel {
         Ok(vec![result])
     }
 
+    /// Batched twin of [`Self::predict_image_cuda_pre`]: letterboxes every image straight
+    /// into its slot of the device-side `[N, 3, H, W]` input, so a batch costs no host
+    /// tensor allocation and no concatenation - which otherwise dominate a batched GPU run.
+    #[cfg(feature = "cuda-preprocess")]
+    #[allow(unsafe_code, clippy::cast_precision_loss)]
+    fn predict_batch_cuda_pre(
+        &mut self,
+        images: &[&DynamicImage],
+        paths: &[String],
+    ) -> Result<Vec<Vec<Results>>> {
+        use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
+        use ort::value::TensorRefMut;
+
+        let n_images = images.len();
+        let n_images_f = n_images as f64;
+        let start_preprocess = Instant::now();
+
+        // A batch shares one letterbox target: `rect` needs a uniform batch and the models
+        // that reach here have a fixed input anyway, so use the model's own size.
+        let target = self
+            .metadata
+            .imgsz
+            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+
+        // RGB extraction is per-image and host-side, so fan it out; the device uploads
+        // below must stay ordered on the shared stream.
+        let frames: Vec<(Vec<u8>, u32, u32)> = images
+            .par_iter()
+            .map(|image| {
+                let rgb = image.to_rgb8();
+                let (w, h) = (rgb.width(), rgb.height());
+                (rgb.into_raw(), h, w)
+            })
+            .collect();
+
+        let mut geoms = Vec::with_capacity(n_images);
+        for (slot, (bytes, h, w)) in frames.iter().enumerate() {
+            let pre = self
+                .cuda_preprocessor
+                .as_mut()
+                .expect("predict_batch_cuda_pre invariant: cuda_preprocessor.is_some()");
+            geoms.push(pre.preprocess(bytes, *h, *w, false, target, slot)?);
+        }
+        let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
+
+        let (dst_h, dst_w) = target;
+        let dev_ptr = self
+            .cuda_preprocessor
+            .as_ref()
+            .expect("cuda_preprocessor")
+            .input_dev_ptr();
+
+        let cuda_mem = MemoryInfo::new(
+            AllocationDevice::CUDA,
+            0,
+            AllocatorType::Device,
+            MemoryType::Default,
+        )
+        .map_err(|e| InferenceError::InferenceError(format!("cuda meminfo: {e}")))?;
+        let cpu_mem = MemoryInfo::new(
+            AllocationDevice::CPU,
+            0,
+            AllocatorType::Device,
+            MemoryType::Default,
+        )
+        .map_err(|e| InferenceError::InferenceError(format!("cpu meminfo: {e}")))?;
+        let shape: Vec<i64> = vec![n_images as i64, 3, dst_h as i64, dst_w as i64];
+        // SAFETY: dev_ptr is owned by `cuda_preprocessor` (stored on `self`) and remains
+        // valid for the duration of this call, and the buffer was sized for `slots >=
+        // n_images` images at load. ORT consumes it during `run_binding`, which is
+        // synchronized via the shared cuda stream.
+        let in_tensor = unsafe {
+            TensorRefMut::<f32>::from_raw(cuda_mem, dev_ptr as *mut core::ffi::c_void, shape.into())
+                .map_err(|e| InferenceError::InferenceError(format!("from_raw: {e}")))?
+        };
+
+        let start_inference = Instant::now();
+        let mut binding = self
+            .session
+            .create_binding()
+            .map_err(|e| InferenceError::InferenceError(format!("create_binding: {e}")))?;
+        binding
+            .bind_input(&self.input_name, &in_tensor)
+            .map_err(|e| InferenceError::InferenceError(format!("bind_input: {e}")))?;
+        for n in &self.output_names {
+            binding
+                .bind_output_to_device(n, &cpu_mem)
+                .map_err(|e| InferenceError::InferenceError(format!("bind_output: {e}")))?;
+        }
+        let outputs = self
+            .session
+            .run_binding(&binding)
+            .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
+        binding
+            .synchronize_outputs()
+            .map_err(|e| InferenceError::InferenceError(format!("sync_outputs: {e}")))?;
+        let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0 / n_images_f;
+
+        // Reuse each frame's RGB buffer as the annotator's HWC array; no copy.
+        let mut origs = Vec::with_capacity(n_images);
+        for (bytes, h, w) in frames {
+            origs.push(
+                ndarray::Array3::from_shape_vec((h as usize, w as usize, 3), bytes)
+                    .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))?,
+            );
+        }
+
+        let start_postprocess = Instant::now();
+        let mut batch_results =
+            Self::extract_and_invoke(&outputs, &self.output_names, inference_time, |outs, _ms| {
+                let mut results = Vec::with_capacity(n_images);
+                for (i, (orig_img, geom)) in origs.into_iter().zip(&geoms).enumerate() {
+                    let (h, w) = (orig_img.shape()[0] as u32, orig_img.shape()[1] as u32);
+                    // Slice image `i` out of each batched output. `postprocess` wants the
+                    // full rank with a batch of one, not the batch dim stripped.
+                    let img_outputs: Vec<(&[f32], Vec<usize>)> = outs
+                        .iter()
+                        .map(|(data, shape)| {
+                            let per_image = data.len() / n_images;
+                            let mut img_shape = shape.clone();
+                            img_shape[0] = 1;
+                            (&data[i * per_image..(i + 1) * per_image], img_shape)
+                        })
+                        .collect();
+                    let pre = crate::preprocessing::PreprocessResult {
+                        tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
+                        tensor_f16: None,
+                        orig_shape: (h, w),
+                        scale: (geom.scale, geom.scale),
+                        padding: (geom.pad_y as f32, geom.pad_x as f32),
+                    };
+                    results.push(vec![postprocess(
+                        img_outputs,
+                        self.metadata.task,
+                        &pre,
+                        &self.config,
+                        Arc::clone(&self.metadata.names),
+                        orig_img,
+                        paths.get(i).cloned().unwrap_or_default(),
+                        Speed::new(preprocess_time, inference_time, 0.0),
+                        (dst_h as u32, dst_w as u32),
+                        self.metadata.end2end,
+                        self.metadata.kpt_shape,
+                    )]);
+                }
+                Ok(results)
+            })?;
+        Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
+
+        Ok(batch_results)
+    }
+
     /// Run inference on the default Ultralytics sample images.
     ///
     /// Downloads default `bus.jpg` and `zidane.jpg` if not present, then runs inference on both.
@@ -1260,6 +1419,21 @@ impl YOLOModel {
     ) -> Result<Vec<Vec<Results>>> {
         if images.is_empty() {
             return Ok(Vec::new());
+        }
+
+        // Same fast path (and same allowlist) as `predict_image`, filling one device slot
+        // per image. Single images keep using `predict_image`'s arm, which already ran.
+        #[cfg(feature = "cuda-preprocess")]
+        if images.len() > 1
+            && self.cuda_preprocessor.is_some()
+            && !self.fp16_input
+            && !self.has_semantic_mask_output()
+            && matches!(
+                self.metadata.task,
+                Task::Detect | Task::Segment | Task::Pose | Task::Obb | Task::Depth
+            )
+        {
+            return self.predict_batch_cuda_pre(images, paths);
         }
 
         // Get target size from config or metadata
