@@ -1225,12 +1225,21 @@ impl YOLOModel {
         let n_images_f = n_images as f64;
         let start_preprocess = Instant::now();
 
-        // A batch shares one letterbox target: `rect` needs a uniform batch and the models
-        // that reach here have a fixed input anyway, so use the model's own size.
-        let target = self
+        // One letterbox target for the whole batch, chosen the same way the CPU batch path
+        // chooses it: `rect` applies only when the model is dynamic and every source shares
+        // a shape, since a mixed batch cannot share one padded target.
+        let imgsz = self
             .metadata
             .imgsz
             .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+        let first_dims = images[0].dimensions();
+        let uniform_shape = images.iter().all(|img| img.dimensions() == first_dims);
+        let target = if self.rect_enabled() && uniform_shape {
+            let (w, h) = first_dims;
+            calculate_rect_size(w, h, imgsz, self.metadata.stride)
+        } else {
+            imgsz
+        };
 
         // RGB extraction is per-image and host-side, so fan it out; the device uploads
         // below must stay ordered on the shared stream.
@@ -1423,9 +1432,15 @@ impl YOLOModel {
 
         // Same fast path (and same allowlist) as `predict_image`, filling one device slot
         // per image. Single images keep using `predict_image`'s arm, which already ran.
+        // `predict_batch` is public and its length is not tied to `config.batch`, so a batch
+        // larger than the buffer was sized for falls back to the CPU path rather than
+        // indexing past the last slot.
         #[cfg(feature = "cuda-preprocess")]
         if images.len() > 1
-            && self.cuda_preprocessor.is_some()
+            && self
+                .cuda_preprocessor
+                .as_ref()
+                .is_some_and(|p| images.len() <= p.slots())
             && !self.fp16_input
             && !self.has_semantic_mask_output()
             && matches!(
