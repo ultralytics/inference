@@ -768,6 +768,19 @@ impl YOLOModel {
             )
     }
 
+    /// Batch size the export pinned on the model input, or `None` when it is dynamic.
+    /// Authoritative over a configured batch, the way the pinned height/width is.
+    fn fixed_batch(session: &Session) -> Option<usize> {
+        match session.inputs().first()?.dtype() {
+            ValueType::Tensor { shape, .. } if shape.len() == 4 && shape[0] > 0 =>
+            {
+                #[allow(clippy::cast_sign_loss)]
+                Some(shape[0] as usize)
+            }
+            _ => None,
+        }
+    }
+
     /// Maximum allowed image dimension to prevent OOM during warmup.
     const MAX_IMGSZ: usize = 8192;
 
@@ -798,11 +811,18 @@ impl YOLOModel {
             )));
         }
 
+        // Match whatever the export pinned on the batch axis, exactly as the height and
+        // width are matched above: a `[8, 3, 640, 640]` model rejects a batch-1 warmup and
+        // would fail the whole `load`. A dynamic batch takes the configured size.
+        let batch =
+            Self::fixed_batch(&self.session).unwrap_or_else(|| self.config.batch.unwrap_or(1));
+
         let warmup_result = Self::run_warmup(
             &mut self.session,
             &self.input_name,
             self.fp16_input,
             target_size,
+            batch,
         );
 
         if let Err(e) = warmup_result {
@@ -1538,17 +1558,18 @@ impl YOLOModel {
         input_name: &str,
         fp16_input: bool,
         size: (usize, usize),
+        batch: usize,
     ) -> Result<()> {
         let (h, w) = size;
         if fp16_input {
-            let dummy = ndarray::Array4::<f16>::zeros((1, 3, h, w));
+            let dummy = ndarray::Array4::<f16>::zeros((batch, 3, h, w));
             let cont = dummy.as_standard_layout();
             let tensor = TensorRef::from_array_view(&cont).map_err(|e| {
                 InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
             })?;
             Self::run_timed(session, ort::inputs![input_name => tensor])?;
         } else {
-            let dummy = ndarray::Array4::<f32>::zeros((1, 3, h, w));
+            let dummy = ndarray::Array4::<f32>::zeros((batch, 3, h, w));
             let cont = dummy.as_standard_layout();
             let tensor = TensorRef::from_array_view(cont.view()).map_err(|e| {
                 InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
