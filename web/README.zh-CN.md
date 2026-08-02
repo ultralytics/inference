@@ -303,7 +303,7 @@ Ultralytics 依靠社区协作持续发展，我们重视每一份贡献。无�
 
 [![Ultralytics 开源贡献者](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
 
-## 📜 许可证
+## 📄 许可证
 
 Ultralytics 提供两种许可方式：
 

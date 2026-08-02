@@ -739,7 +739,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`), which lets ORT choose 
 
 - [ ] Python bindings (PyO3)
 
-## 💡 Contributing
+## 💡 Contribute
 
 Ultralytics thrives on community collaboration, and we deeply value your contributions! Whether it's reporting bugs,
 suggesting features, or submitting code changes, your involvement is crucial.
@@ -753,7 +753,7 @@ A heartfelt thank you 🙏 goes out to all our contributors! Your efforts help m
 
 [![Ultralytics open-source contributors](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
 
-## 📜 License
+## 📄 License
 
 Ultralytics offers two licensing options to suit different needs:
 

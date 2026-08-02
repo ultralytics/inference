@@ -316,7 +316,7 @@ npm run build # wasm-pack build + tsc
 Serve the built package over `localhost` (a secure context) with the two
 cross-origin isolation headers above, then open it in a WebGPU browser.
 
-## 💡 Contributing
+## 💡 Contribute
 
 Ultralytics thrives on community collaboration, and we deeply value your contributions! Whether it's reporting bugs,
 suggesting features, or submitting code changes, your involvement is crucial.
@@ -330,7 +330,7 @@ A heartfelt thank you 🙏 goes out to all our contributors! Your efforts help m
 
 [![Ultralytics open-source contributors](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
 
-## 📜 License
+## 📄 License
 
 Ultralytics offers two licensing options to suit different needs:
 
