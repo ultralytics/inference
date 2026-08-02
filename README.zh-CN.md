@@ -502,6 +502,10 @@ inference/
 │   ├── boats.jpg
 │   ├── bus.jpg
 │   └── zidane.jpg
+├── crates/web/             # ultralytics-inference-web：wasm32 WebGPU 绑定
+├── web/                    # @ultralytics/yolo npm 包（TypeScript 封装）
+├── docs/                   # 补充指南
+│   └── CUDA.md             # NVIDIA CUDA 与 TensorRT 配置
 ├── Cargo.toml              # Rust 依赖和 features
 ├── LICENSE                 # AGPL-3.0 License
 ├── README.md               # 英文 README
