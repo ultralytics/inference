@@ -164,8 +164,19 @@ jobs:
     needs: [check, build, publish, sbom]
     if: always() && needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      - name: Get release title
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.check.outputs.current_tag }}
+        run: |
+          TITLE=$(gh release view "$TAG" --json name -q .name 2>/dev/null | tr -d '\n\r"\\') || TITLE=""
+          TITLE=$(printf '%s' "$TITLE" | sed -E "s@#([0-9]+)@<https://github.com/$GH_REPO/pull/\1|#\1>@g")
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
       - name: Notify Success
         if: needs.build.result == 'success' && needs.publish.result == 'success' && needs.sbom.result == 'success'
         uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
@@ -173,7 +184,7 @@ jobs:
           webhook-type: incoming-webhook
           webhook: ${{ secrets.SLACK_WEBHOOK_URL_YOLO }}
           payload: |
-            text: "<!subteam^S082BPCRAJ3> *${{ github.workflow }}* ✅ `${{ github.repository }}` ${{ needs.check.outputs.current_tag }}  <https://github.com/${{ github.repository }}/releases/tag/${{ needs.check.outputs.current_tag }}|*Release*>  ·  <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|*Run*>"
+            text: "<!subteam^S082BPCRAJ3> *${{ github.workflow }}* ✅ `${{ github.repository }}` ${{ steps.release.outputs.title || needs.check.outputs.current_tag }}  <https://github.com/${{ github.repository }}/releases/tag/${{ needs.check.outputs.current_tag }}|*Release*>  ·  <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|*Run*>"
       - name: Notify Failure
         if: needs.build.result != 'success' || needs.publish.result != 'success' || needs.sbom.result != 'success'
         uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
