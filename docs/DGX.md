@@ -68,7 +68,7 @@ be extracted and pointed at by hand.
 Build against it:
 
 ```bash
-export ORT_LIB_LOCATION=$HOME/ortgpu
+export ORT_LIB_PATH=$HOME/ortgpu
 export ORT_PREFER_DYNAMIC_LINK=1
 cargo build --release --features cuda-preprocess
 ```
@@ -113,11 +113,11 @@ Build a shared library with the providers you want, following the
   --use_tensorrt --tensorrt_home /path/to/TensorRT
 ```
 
-Expect a long compile. Then link it exactly as above, pointing `ORT_LIB_LOCATION` at the directory
+Expect a long compile. Then link it exactly as above, pointing `ORT_LIB_PATH` at the directory
 holding the resulting `libonnxruntime.so`:
 
 ```bash
-export ORT_LIB_LOCATION=/path/to/onnxruntime/build/Linux/Release
+export ORT_LIB_PATH=/path/to/onnxruntime/build/Linux/Release
 export ORT_PREFER_DYNAMIC_LINK=1
 cargo build --release --features cuda-preprocess
 ```
