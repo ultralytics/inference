@@ -50,7 +50,7 @@ mkdir -p ~/ortgpu && cd ~/ortgpu
 curl -fLO https://github.com/ultralytics/assets/releases/download/v0.0.0/onnxruntime_gpu-1.24.0-cp312-cp312-linux_aarch64.whl
 unzip -j -o onnxruntime_gpu-1.24.0-cp312-cp312-linux_aarch64.whl 'onnxruntime/capi/libonnxruntime*.so*'
 ln -sf libonnxruntime.so.1.24.0 libonnxruntime.so
-ln -sf libonnxruntime.so.1.24.0 libonnxruntime.so.1   # the SONAME
+ln -sf libonnxruntime.so.1.24.0 libonnxruntime.so.1 # the SONAME
 ```
 
 That leaves `libonnxruntime.so.1.24.0` plus the `cuda`, `tensorrt` and `shared` provider libraries
