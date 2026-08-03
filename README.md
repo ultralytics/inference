@@ -509,7 +509,8 @@ inference/
 ├── crates/web/             # ultralytics-inference-web: wasm32 WebGPU bindings
 ├── web/                    # @ultralytics/yolo npm package (TypeScript wrapper)
 ├── docs/                   # Additional guides
-│   └── CUDA.md             # NVIDIA CUDA and TensorRT setup
+│   ├── CUDA.md             # NVIDIA CUDA and TensorRT setup
+│   └── DGX.md              # DGX Spark (aarch64) setup and benchmarks
 ├── Cargo.toml              # Rust dependencies and features
 ├── LICENSE                 # AGPL-3.0 License
 ├── README.md               # English README
@@ -551,7 +552,7 @@ ultralytics-inference = { version = "0.0.33", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
-Providers missing from the chosen build are then absent at runtime and inference falls back to CPU.
+Providers missing from the chosen build are then absent at runtime and inference falls back to CPU. On `aarch64-unknown-linux-gnu` only a CPU distribution is published, so every GPU feature hits this; see [`docs/DGX.md`](docs/DGX.md) for linking a GPU ONNX Runtime instead of falling back.
 
 > The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
 
