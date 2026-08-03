@@ -141,8 +141,9 @@ fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
 [features]
 default = ["annotate", "visualize"]
 
-# Real-time visualization
-visualize = ["minifb"]
+# Real-time visualization. Implies `annotate`: the viewer displays annotated frames,
+# so `annotate_image` must be available.
+visualize = ["minifb", "annotate"]
 
 # Video file support (requires ffmpeg installed on system)
 video = ["video-rs"]
