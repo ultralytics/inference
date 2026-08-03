@@ -222,3 +222,4 @@ axis. A model whose input pins `[16, 3, 640, 640]` cannot run at `--batch 1`.
 | TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.                                                           |
 | Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.                                                   |
 | CUDA EP fails to load on a CUDA 12 system                                  | The downloaded binaries are CUDA 13 and no CUDA 12 build is published. Compile ONNX Runtime for CUDA 12 and link it with `ORT_LIB_PATH`. |
+| `no builds available that satisfy the requested feature set` on aarch64    | Only a CPU distribution is published for `aarch64-unknown-linux-gnu`. Link a GPU ONNX Runtime yourself, see [DGX.md](DGX.md).            |
