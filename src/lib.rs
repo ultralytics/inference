@@ -271,6 +271,8 @@
 //! See the [CUDA / `TensorRT` acceleration guide](crate::cuda_guide) for setup,
 //! requirements, and the zero-copy GPU preprocess fast path.
 //!
+//! On aarch64 no GPU build is published; see the [DGX Spark guide](crate::dgx_guide).
+//!
 //! Enable hardware acceleration with Cargo features:
 //!
 //! ```bash
@@ -356,6 +358,11 @@
 //! This project is dual-licensed under [AGPL-3.0](https://github.com/ultralytics/inference/blob/main/LICENSE)
 //! for open-source use or [Ultralytics Enterprise License](https://ultralytics.com/license)
 //! for commercial applications.
+
+/// DGX Spark (aarch64) setup guide rendered from `docs/DGX.md`.
+#[allow(clippy::doc_markdown)]
+#[doc = include_str!("../docs/DGX.md")]
+pub mod dgx_guide {}
 
 /// CUDA / `TensorRT` acceleration guide rendered from `docs/CUDA.md`.
 #[allow(clippy::doc_markdown)]
