@@ -18,7 +18,7 @@ This is the first thing to know, because the failure looks like a local misconfi
 distribution is published. Building with `--features cuda`, `tensorrt`, `cuda-preprocess` or
 `xnnpack` fails at link time:
 
-```
+```text
 = note: some `extern` functions couldn't be found
 
   !!! The ort-sys crate did not download prebuilt binaries because there are no builds
