@@ -614,6 +614,10 @@ pub const fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
 ///
 /// Resizes the image so the shortest side matches `target_size`, then center crops.
 ///
+/// A zero-width or zero-height source yields a `target_size` frame of the letterbox
+/// padding color, matching [`preprocess_image`]. `target_size` is returned as requested,
+/// so a zero target yields a zero-extent tensor there too.
+///
 /// # Arguments
 ///
 /// * `image` - Input image.
@@ -664,6 +668,10 @@ pub fn preprocess_image_center_crop(
 ///
 /// Resizes the image such that the shortest side equals the target dimension,
 /// maintaining aspect ratio, then crops the center `target_size`.
+///
+/// A zero-extent source short-circuits to a `target_size` frame of the padding color: the
+/// cover scale divides by each source extent, so `target / 0` would otherwise drive the
+/// resized extents to infinity and request an unbounded allocation.
 ///
 /// # Arguments
 ///
