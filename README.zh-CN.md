@@ -646,7 +646,7 @@ JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的
 
 ### 视频支持（FFmpeg）
 
-视频 features 需要系统安装 FFmpeg。CI 使用 FFmpeg 7.1 和 8.0 构建；FFmpeg 6.1 也可以构建和运行：
+视频 features 需要系统安装 FFmpeg（6、7 或 8）：
 
 ```bash
 # macOS
