@@ -225,10 +225,6 @@ pub fn preprocess_image_with_precision(
     build_preprocess_result(image, target_size, geom, scale, orig_shape, half)
 }
 
-// ================================================================================================
-// Public API Functions
-// ================================================================================================
-
 /// Get or compute the X coordinate LUT for bilinear interpolation.
 ///
 /// Uses 11-bit fixed-point weights matching `OpenCV`'s `INTER_LINEAR` coordinate mapping:
@@ -668,10 +664,6 @@ pub fn preprocess_image_center_crop(
 ///
 /// Resizes the image such that the shortest side equals the target dimension,
 /// maintaining aspect ratio, then crops the center `target_size`.
-///
-/// A zero-extent source short-circuits to a `target_size` frame of the padding color: the
-/// cover scale divides by each source extent, so `target / 0` would otherwise drive the
-/// resized extents to infinity and request an unbounded allocation.
 ///
 /// # Arguments
 ///
