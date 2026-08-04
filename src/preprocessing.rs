@@ -686,6 +686,19 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     #[allow(clippy::cast_possible_truncation)]
     let (target_h, target_w) = (target_size.0 as u32, target_size.1 as u32);
 
+    // A zero-extent source has no pixels to sample, and the cover scale below divides by
+    // each extent: `target / 0` is infinite, which makes the resized extents garbage and
+    // asks the allocator for terabytes. Mirror the letterbox path and hand back a frame of
+    // the padding colour.
+    if src_w == 0 || src_h == 0 || target_w == 0 || target_h == 0 {
+        let blank = RgbImage::from_pixel(
+            target_w.max(1),
+            target_h.max(1),
+            image::Rgb(LETTERBOX_COLOR),
+        );
+        return (blank, (1.0, 1.0));
+    }
+
     // Calculate scale to "cover" the target area
     // scale = max(target_w / src_w, target_h / src_h)
     #[allow(clippy::cast_precision_loss)]
