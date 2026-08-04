@@ -362,7 +362,6 @@
 #[doc = include_str!("../docs/CUDA.md")]
 pub mod cuda_guide {}
 
-// Modules
 #[cfg(feature = "annotate")]
 pub mod annotate;
 pub mod device;
@@ -411,22 +410,17 @@ pub mod results;
 pub mod task;
 pub mod utils;
 
-// Re-export main types for convenience
 pub use device::Device;
 pub use error::{InferenceError, Result};
 pub use inference::InferenceConfig;
+pub use metadata::ModelMetadata;
 #[cfg(not(target_arch = "wasm32"))]
 pub use model::YOLOModel;
+pub use preprocessing::{PreprocessResult, preprocess_image, preprocess_image_with_precision};
 pub use results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::{Source, SourceIterator, SourceMeta};
 pub use task::Task;
-
-// Re-export metadata for advanced use
-pub use metadata::ModelMetadata;
-
-// Re-export preprocessing utilities
-pub use preprocessing::{PreprocessResult, preprocess_image, preprocess_image_with_precision};
 
 /// Library version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
