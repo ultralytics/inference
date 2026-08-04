@@ -689,7 +689,7 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     // A zero-extent source has no pixels to sample, and the cover scale below divides by
     // each extent: `target / 0` is infinite, which makes the resized extents garbage and
     // asks the allocator for terabytes. Mirror the letterbox path and hand back a frame of
-    // the padding colour.
+    // the padding color.
     if src_w == 0 || src_h == 0 || target_w == 0 || target_h == 0 {
         let blank = RgbImage::from_pixel(
             target_w.max(1),
