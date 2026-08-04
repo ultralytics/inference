@@ -225,10 +225,6 @@ pub fn preprocess_image_with_precision(
     build_preprocess_result(image, target_size, geom, scale, orig_shape, half)
 }
 
-// ================================================================================================
-// Public API Functions
-// ================================================================================================
-
 /// Get or compute the X coordinate LUT for bilinear interpolation.
 ///
 /// Uses 11-bit fixed-point weights matching `OpenCV`'s `INTER_LINEAR` coordinate mapping:
@@ -614,6 +610,10 @@ pub const fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
 ///
 /// Resizes the image so the shortest side matches `target_size`, then center crops.
 ///
+/// A zero-width or zero-height source yields a `target_size` frame of the letterbox
+/// padding color, matching [`preprocess_image`]. `target_size` is returned as requested,
+/// so a zero target yields a zero-extent tensor there too.
+///
 /// # Arguments
 ///
 /// * `image` - Input image.
@@ -685,6 +685,13 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     let (src_w, src_h) = image.dimensions();
     #[allow(clippy::cast_possible_truncation)]
     let (target_h, target_w) = (target_size.0 as u32, target_size.1 as u32);
+
+    // The cover scale below divides by each source extent, so `target / 0` is infinite: the
+    // resized extents come out garbage and the allocator is asked for terabytes.
+    if src_w == 0 || src_h == 0 {
+        let blank = RgbImage::from_pixel(target_w, target_h, image::Rgb(LETTERBOX_COLOR));
+        return (blank, (1.0, 1.0));
+    }
 
     // Calculate scale to "cover" the target area
     // scale = max(target_w / src_w, target_h / src_h)
