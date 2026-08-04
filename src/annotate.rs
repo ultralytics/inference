@@ -98,7 +98,6 @@ pub fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
             }
         }
     }
-    // Fallback
     image::open(path)
 }
 /// Return the local path to `font`, downloading it from the Ultralytics asset CDN if absent.
@@ -122,7 +121,6 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
         return None;
     }
 
-    // Download font
     let url = format!("{ASSETS_URL}/{font_name}");
     println!("Downloading {url} to {}", font_path.display());
 
@@ -206,7 +204,6 @@ pub fn annotate_image_with(
         "Arial.ttf"
     };
 
-    // Load font
     let font_path = check_font(font_name);
     let font_data = font_path.and_then(|path| {
         let mut file = File::open(path).ok()?;
@@ -219,7 +216,6 @@ pub fn annotate_image_with(
         .as_ref()
         .and_then(|data| FontRef::try_from_slice(data).ok());
 
-    // Draw all annotations using helpers
     draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref());
     draw_pose(&mut img, result, None, None, None);
@@ -699,33 +695,20 @@ fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
 ///
 /// * `img` - The image to draw on
 /// * `result` - The inference results containing keypoints
-/// * `skeleton` - Optional custom skeleton structure (pairs of keypoint indices).
-///                If `None`, uses the default human pose skeleton from `SKELETON`.
-/// * `limb_colors` - Optional custom color indices for limbs.
-///                   If `None`, uses the default from `LIMB_COLOR_INDICES`.
-/// * `kpt_colors` - Optional custom color indices for keypoints.
-///                  If `None`, uses the default from `KPT_COLOR_INDICES`.
+/// * `skeleton` - Pairs of keypoint indices; `None` uses the human pose `SKELETON`.
+/// * `limb_colors` - Color indices for limbs; `None` uses `LIMB_COLOR_INDICES`.
+/// * `kpt_colors` - Color indices for keypoints; `None` uses `KPT_COLOR_INDICES`.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // Use default human pose configuration
+/// // All `None` draws the default human pose.
 /// draw_pose(&mut img, result, None, None, None);
 ///
-/// // Use custom skeleton for animals
-/// const ANIMAL_SKELETON: [[usize; 2]; 10] = [...];
-/// const ANIMAL_LIMB_COLORS: [usize; 10] = [0, 0, 9, 9, ...];
-/// const ANIMAL_KPT_COLORS: [usize; 15] = [16, 16, 0, 0, ...];
-/// draw_pose(
-///     &mut img,
-///     result,
-///     Some(&ANIMAL_SKELETON),
-///     Some(&ANIMAL_LIMB_COLORS),
-///     Some(&ANIMAL_KPT_COLORS),
-/// );
+/// // Or supply a custom skeleton, for animal keypoints say.
+/// draw_pose(&mut img, result, Some(&SKELETON), Some(&LIMBS), Some(&KPTS));
 /// ```
 #[allow(
-    clippy::doc_overindented_list_items,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
