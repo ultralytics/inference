@@ -686,11 +686,8 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     #[allow(clippy::cast_possible_truncation)]
     let (target_h, target_w) = (target_size.0 as u32, target_size.1 as u32);
 
-    // A zero-extent source has no pixels to sample, and the cover scale below divides by
-    // each source extent: `target / 0` is infinite, which makes the resized extents garbage
-    // and asks the allocator for terabytes. Mirror the letterbox path and hand back a frame
-    // of the padding color at the requested target, leaving the target dimensions alone so
-    // a zero target still yields a zero-extent tensor as it does there.
+    // The cover scale below divides by each source extent, so `target / 0` is infinite: the
+    // resized extents come out garbage and the allocator is asked for terabytes.
     if src_w == 0 || src_h == 0 {
         let blank = RgbImage::from_pixel(target_w, target_h, image::Rgb(LETTERBOX_COLOR));
         return (blank, (1.0, 1.0));
