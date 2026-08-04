@@ -660,7 +660,7 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 
 ### Video Support (FFmpeg)
 
-Video features require FFmpeg (7 or 8) installed on your system:
+Video features require FFmpeg (6, 7 or 8) installed on your system:
 
 ```bash
 # macOS
