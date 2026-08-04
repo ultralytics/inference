@@ -1268,7 +1268,7 @@ fn postprocess_obb(
     results
 }
 
-// -------- YOLO26 end-to-end (NMS-free) postprocessing --------
+// YOLO26 end-to-end (NMS-free) postprocessing.
 //
 // End-to-end exports bake NMS into the graph and produce a tensor of shape
 // `[B, max_det, 6 + extra]`, where the first 6 columns are always
