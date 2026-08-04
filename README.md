@@ -660,8 +660,7 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 
 ### Video Support (FFmpeg)
 
-Video features require FFmpeg installed on your system. CI builds against FFmpeg 7.1 and 8.0;
-FFmpeg 6.1 also builds and runs:
+Video features require FFmpeg (6, 7 or 8) installed on your system:
 
 ```bash
 # macOS
