@@ -16,8 +16,8 @@ static INIT: Once = Once::new();
 
 /// Initialize global video logging configuration.
 ///
-/// ensuring `video-rs` is initialized and `FFmpeg` logs are silenced
-/// (only errors are shown). safe to call multiple times.
+/// Ensures `video-rs` is initialized and `FFmpeg` logs are silenced (only errors
+/// are shown). Safe to call multiple times.
 #[allow(clippy::missing_const_for_fn)]
 pub fn init_logging() {
     #[cfg(feature = "video")]
@@ -92,7 +92,6 @@ impl VideoWriter {
     pub fn new<P: AsRef<Path>>(path: P, width: usize, height: usize, fps: f32) -> Result<Self> {
         let output_path = path.as_ref().to_path_buf();
 
-        // Ensure parent directory exists
         if let Some(parent) = output_path.parent() {
             ensure_dir(parent)?;
         }
@@ -102,7 +101,6 @@ impl VideoWriter {
             InferenceError::VideoError(format!("Failed to create video encoder: {e}"))
         })?;
 
-        // Calculate frame duration
         // video-rs uses a rational time base.
         // We can approximate by converting seconds to Time.
         let seconds_per_frame = 1.0 / f64::from(fps);
@@ -156,6 +154,7 @@ impl VideoWriter {
     ///
     /// Calling this explicitly is optional as `drop` will also clean up,
     /// but this allows catching errors.
+    ///
     /// # Errors
     ///
     /// Returns an error if the encoder fails to finish.
@@ -229,7 +228,6 @@ impl SaveResults {
         if save_as_video {
             #[cfg(feature = "video")]
             {
-                // Video saving logic
                 if self.video_writer.is_none() {
                     let filename = Path::new(&meta.path)
                         .file_name()
@@ -248,7 +246,6 @@ impl SaveResults {
                     let height = annotated.height() as usize;
                     let fps = meta.fps.unwrap_or(30.0);
 
-                    // Ensure directory exists
                     if let Some(parent) = save_path.parent() {
                         ensure_dir(parent)?;
                     }
@@ -261,7 +258,6 @@ impl SaveResults {
                 }
             }
         } else {
-            // Image saving logic
             let (save_dir, filename) = if is_video {
                 // For video sources, create a subfolder: {video_name}_frames/
                 let video_stem = Path::new(&meta.path)
@@ -283,7 +279,6 @@ impl SaveResults {
 
             let save_path = save_dir.join(filename);
 
-            // Ensure directory exists
             ensure_dir(&save_dir)?;
 
             annotated
