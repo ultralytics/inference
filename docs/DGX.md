@@ -100,7 +100,7 @@ The prebuilt wheel above covers the CUDA and TensorRT providers, which is what t
 features need. Building ONNX Runtime yourself is only worth it when you need something the wheel
 does not contain, for example:
 
-- an execution provider it was not built with, such as `xnnpack`, `acl` or `armnn`,
+- an execution provider it was not built with, such as `xnnpack` or `acl`,
 - a CUDA version other than the one it targets (13.0 here),
 - a newer ONNX Runtime than the published wheels.
 

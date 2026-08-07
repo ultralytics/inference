@@ -174,7 +174,6 @@ qnn = ["ort/qnn"]       # Qualcomm
 # Additional accelerators
 xnnpack = ["ort/xnnpack"]
 acl = ["ort/acl"]           # ARM Compute Library
-armnn = ["ort/armnn"]       # ARM NN
 tvm = ["ort/tvm"]           # Apache TVM
 migraphx = ["ort/migraphx"] # AMD MIGraphX
 rknpu = ["ort/rknpu"]       # Rockchip NPU
