@@ -299,7 +299,7 @@ Notes:
   If you load an end2end `.tflite` anyway, the backend auto-switches it to wasm
   (slower) and logs a warning rather than returning empty results.
 
-- **Tasks**: detect, segment, pose, obb, classify, and semantic are all supported.
+- **Tasks**: detect, segment, pose, obb, classify, semantic, and depth are all supported.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
   so serve with `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.
