@@ -274,7 +274,7 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 
   如果仍然加载了 end2end 的 `.tflite`，后端会自动切换到 wasm（较慢）并打印警告，而不是返回空结果。
 
-- **支持的任务**：detect、segment、pose、obb、classify 和 semantic 均已支持。
+- **支持的任务**：detect、segment、pose、obb、classify、semantic 和 depth 均已支持。
 - **跨源隔离**：LiteRT 的多线程 wasm 需要 `SharedArrayBuffer`，因此请以
   `Cross-Origin-Opener-Policy: same-origin` 和 `Cross-Origin-Embedder-Policy: require-corp`
   提供服务。
