@@ -574,7 +574,6 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 | `qnn`             | Qualcomm Neural Networks                                                                 |
 | `xnnpack`         | XNNPACK（跨平台）                                                                        |
 | `acl`             | ARM Compute Library                                                                      |
-| `armnn`           | ARM NN                                                                                   |
 | `tvm`             | Apache TVM                                                                               |
 | `rknpu`           | Rockchip NPU                                                                             |
 | `cann`            | Huawei CANN                                                                              |

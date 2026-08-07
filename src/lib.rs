@@ -341,7 +341,6 @@
 //! | `qnn` | Qualcomm Neural Networks |
 //! | `xnnpack` | XNNPACK (cross-platform) |
 //! | `acl` | ARM Compute Library |
-//! | `armnn` | ARM NN |
 //! | `tvm` | Apache TVM |
 //! | `rknpu` | Rockchip NPU |
 //! | `cann` | Huawei CANN |
