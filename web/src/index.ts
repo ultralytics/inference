@@ -149,31 +149,15 @@ export interface LoadOptions {
 }
 
 /**
- * Resolve the device string passed to wasm. `"cpu"` is honored as-is; every
- * other choice requires a real WebGPU adapter, so `YOLO.device` reports what
- * actually ran.
- *
- * `"webgpu"` is verified rather than trusted: `navigator.gpu` can exist while
- * `requestAdapter()` still resolves to `null` (Chrome on Linux without its
- * Vulkan backend, for one). Returning `"webgpu"` there would make `YOLO.device`
- * claim the GPU ran while the engine quietly executed on CPU — a ~100x
- * slowdown with nothing on screen to explain it.
+ * Resolve the device string passed to wasm. `"cpu"` is honored as-is; anything else
+ * needs a real adapter, since `navigator.gpu` can exist while `requestAdapter()`
+ * still returns `null` — so `YOLO.device` reports what actually ran.
  */
 async function resolveDevice(pref?: "auto" | "webgpu" | "cpu"): Promise<string> {
   if (pref === "cpu") return "cpu";
   const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-  let adapter: unknown = null;
-  if (gpu) {
-    try {
-      adapter = await gpu.requestAdapter();
-    } catch {
-      adapter = null;
-    }
-  }
-  if (adapter) return "webgpu";
-  if (pref === "webgpu") {
-    console.warn("[@ultralytics/yolo] WebGPU requested but no adapter is available; running on CPU.");
-  }
+  if (await gpu?.requestAdapter().catch(() => null)) return "webgpu";
+  if (pref === "webgpu") console.warn("[@ultralytics/yolo] WebGPU requested but no adapter found; running on CPU.");
   return "cpu";
 }
 
