@@ -331,6 +331,7 @@
 //! | `video` | Video file decoding/encoding (requires `FFmpeg`) |
 //! | `cuda` | NVIDIA CUDA acceleration |
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
+//! | `cuda-preprocess` | GPU preprocessing with zero-copy `TensorRT` input |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
 //! | `openvino` | Intel `OpenVINO` |
 //! | `onednn` | Intel oneDNN |
