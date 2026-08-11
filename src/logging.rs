@@ -43,33 +43,12 @@ macro_rules! error {
     }
 }
 
-/// Macro for success messages.
-#[macro_export]
-macro_rules! success {
-    ($($arg:tt)*) => {
-        use colored::Colorize;
-        println!("{} {}", "SUCCESS ✅".green().bold(), format!($($arg)*));
-    }
-}
-
 /// Macro for verbose messages.
 #[macro_export]
 macro_rules! verbose {
     ($($arg:tt)*) => {
         if $crate::logging::is_verbose() {
             println!("{}", format!($($arg)*));
-        }
-    }
-}
-
-/// Macro for section headers.
-#[macro_export]
-macro_rules! section {
-    ($($arg:tt)*) => {
-        use colored::Colorize;
-        if $crate::logging::is_verbose() {
-            println!();
-            println!("{}", format!($($arg)*).cyan().bold());
         }
     }
 }
