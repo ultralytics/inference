@@ -112,7 +112,7 @@ async function frame() {
 ## ✨ 模型
 
 <a href="https://docs.ultralytics.com/tasks" target="_blank">
-    <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/docs/ultralytics-yolov8-tasks-banner.avif" alt="Ultralytics YOLO 支持的任务">
+    <img width="100%" src="https://cdn.ul.run/i/c99d914c3958d0755b5a3d7204b6f24a.avif" alt="Ultralytics YOLO 支持的任务">
 </a>
 <br>
 <br>
