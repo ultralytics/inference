@@ -641,8 +641,9 @@ impl YOLOModel {
     /// single-stream batch-1 workload (GPU runs FP16, one stream, auto thread scheduling). Forcing
     /// those knobs was measured to be a no-op at best and a regression on hybrid CPUs at worst.
     ///
-    /// `device_type` is `None` when no device was requested, which leaves the choice to
-    /// `OpenVINO`'s own default. The cache still applies in that case, under a `_default` suffix.
+    /// `device_type` is `None` when no device was requested, leaving the choice to `OpenVINO`.
+    /// The cache is only passed once its directory exists, since `OpenVINO` fails compilation on a
+    /// `CACHE_DIR` it cannot open, which would break models in read-only directories.
     #[cfg(feature = "openvino")]
     fn build_openvino_ep(
         model_path: &Path,
@@ -655,12 +656,14 @@ impl YOLOModel {
         let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
         let suffix = device_type.map_or_else(|| "default".to_owned(), str::to_ascii_lowercase);
         let cache_dir = parent.join(".ov_cache").join(format!("{stem}_{suffix}"));
-        let _ = std::fs::create_dir_all(&cache_dir);
         let mut ep = ort::ep::OpenVINO::default();
         if let Some(device_type) = device_type {
             ep = ep.with_device_type(device_type);
         }
-        ep.with_cache_dir(cache_dir.to_string_lossy()).build()
+        if std::fs::create_dir_all(&cache_dir).is_ok() {
+            ep = ep.with_cache_dir(cache_dir.to_string_lossy());
+        }
+        ep.build()
     }
 
     /// Distribute the elapsed wall time since `start` evenly across every result in the
