@@ -265,7 +265,7 @@ impl YOLOModel {
                         _ => "CPU",
                     };
                     eps.push((
-                        Self::build_openvino_ep(path, dt),
+                        Self::build_openvino_ep(path, Some(dt)),
                         "OpenVINOExecutionProvider",
                     ));
                 }
@@ -312,7 +312,7 @@ impl YOLOModel {
 
             #[cfg(feature = "openvino")]
             eps.push((
-                ort::ep::OpenVINO::default().build(),
+                Self::build_openvino_ep(path, None),
                 "OpenVINOExecutionProvider",
             ));
 
@@ -640,24 +640,27 @@ impl YOLOModel {
     /// `OpenVINO`'s defaults, which already pick the optimal low-latency configuration for a
     /// single-stream batch-1 workload (GPU runs FP16, one stream, auto thread scheduling). Forcing
     /// those knobs was measured to be a no-op at best and a regression on hybrid CPUs at worst.
+    ///
+    /// `device_type` is `None` when no device was requested, which leaves the choice to
+    /// `OpenVINO`'s own default. The cache still applies in that case, under a `_default` suffix.
     #[cfg(feature = "openvino")]
     fn build_openvino_ep(
         model_path: &Path,
-        device_type: &str,
+        device_type: Option<&str>,
     ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("model");
         let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
-        let cache_dir = parent
-            .join(".ov_cache")
-            .join(format!("{stem}_{}", device_type.to_ascii_lowercase()));
+        let suffix = device_type.map_or_else(|| "default".to_owned(), str::to_ascii_lowercase);
+        let cache_dir = parent.join(".ov_cache").join(format!("{stem}_{suffix}"));
         let _ = std::fs::create_dir_all(&cache_dir);
-        ort::ep::OpenVINO::default()
-            .with_device_type(device_type)
-            .with_cache_dir(cache_dir.to_string_lossy())
-            .build()
+        let mut ep = ort::ep::OpenVINO::default();
+        if let Some(device_type) = device_type {
+            ep = ep.with_device_type(device_type);
+        }
+        ep.with_cache_dir(cache_dir.to_string_lossy()).build()
     }
 
     /// Distribute the elapsed wall time since `start` evenly across every result in the
