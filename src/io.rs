@@ -52,15 +52,28 @@ pub(crate) fn ensure_dir(path: &Path) -> Result<()> {
 ///
 /// Probes with a real file, since permission bits miss ownership, ACLs and read-only mounts.
 /// Execution providers fail model loading on a cache path they cannot write, rather than skip it.
+///
+/// `create_new` never truncates and never follows a symlink, so a name clash leaves the existing
+/// file untouched and only the probe this call created is removed.
 #[cfg(any(feature = "openvino", feature = "tensorrt", feature = "coreml"))]
 pub(crate) fn is_writable_dir(path: &Path) -> bool {
     if ensure_dir(path).is_err() {
         return false;
     }
-    let probe = path.join(format!(".write-probe-{}", std::process::id()));
-    let writable = std::fs::File::create(&probe).is_ok();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let probe = path.join(format!(".write-probe-{}-{nonce}", std::process::id()));
+    if std::fs::File::options()
+        .create_new(true)
+        .write(true)
+        .open(&probe)
+        .is_err()
+    {
+        return false;
+    }
     let _ = std::fs::remove_file(&probe);
-    writable
+    true
 }
 
 /// Return the next available run directory, e.g. `runs/detect/predict`, then `predict2`, `predict3`, ...
@@ -321,6 +334,36 @@ impl SaveResults {
 mod tests {
     use super::*;
     use crate::source::SourceMeta;
+
+    /// Truncation safety itself is guaranteed by `create_new`; what is asserted here is the
+    /// observable contract the execution providers rely on, including the read-only case that
+    /// otherwise turns into a model load failure.
+    #[cfg(any(feature = "openvino", feature = "tensorrt", feature = "coreml"))]
+    #[test]
+    fn test_is_writable_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("cache");
+
+        // Creates the directory, reports writable, and leaves no probe behind.
+        assert!(is_writable_dir(&dir));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+
+        // Existing contents survive untouched.
+        let existing = dir.join("model.blob");
+        std::fs::write(&existing, b"precious").unwrap();
+        assert!(is_writable_dir(&dir));
+        assert_eq!(std::fs::read(&existing).unwrap(), b"precious");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+
+        // An existing but read-only directory reports false rather than being handed to a provider.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+            assert!(!is_writable_dir(&dir));
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
 
     #[test]
     fn test_ensure_dir_creates_nested() {
