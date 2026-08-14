@@ -565,17 +565,19 @@ impl YOLOModel {
         let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
         let suffix = if fp16 { "fp16" } else { "fp32" };
         let cache_dir = parent.join(".trt_cache").join(format!("{stem}_{suffix}"));
-        let _ = std::fs::create_dir_all(&cache_dir);
-        let cache_str = cache_dir.to_string_lossy().into_owned();
-        let ep = ort::ep::TensorRT::default()
+        let mut ep = ort::ep::TensorRT::default()
             .with_device_id(device_id)
             .with_fp16(fp16)
-            .with_engine_cache(true)
-            .with_engine_cache_path(cache_str.clone())
-            .with_timing_cache(true)
-            .with_timing_cache_path(cache_str)
             .with_max_workspace_size(4 * 1024 * 1024 * 1024)
             .with_builder_optimization_level(5);
+        if crate::io::is_writable_dir(&cache_dir) {
+            let cache_str = cache_dir.to_string_lossy().into_owned();
+            ep = ep
+                .with_engine_cache(true)
+                .with_engine_cache_path(cache_str.clone())
+                .with_timing_cache(true)
+                .with_timing_cache_path(cache_str);
+        }
 
         bind_compute_stream!(ep, compute_stream)
     }
@@ -626,7 +628,7 @@ impl YOLOModel {
                 .join("ultralytics-inference")
                 .join("coreml")
                 .join(format!("{stem}_{hash:016x}_{ort_build:016x}_mlprogram"));
-            if std::fs::create_dir_all(&cache_dir).is_ok() {
+            if crate::io::is_writable_dir(&cache_dir) {
                 ep = ep.with_model_cache_dir(cache_dir.to_string_lossy());
             }
         }
@@ -642,8 +644,8 @@ impl YOLOModel {
     /// those knobs was measured to be a no-op at best and a regression on hybrid CPUs at worst.
     ///
     /// `device_type` is `None` when no device was requested, leaving the choice to `OpenVINO`.
-    /// The cache is only passed once its directory exists, since `OpenVINO` fails compilation on a
-    /// `CACHE_DIR` it cannot open, which would break models in read-only directories.
+    /// The cache is only passed once its directory is writable, since the GPU plugin fails
+    /// compilation on a `CACHE_DIR` it cannot write.
     #[cfg(feature = "openvino")]
     fn build_openvino_ep(
         model_path: &Path,
@@ -660,7 +662,7 @@ impl YOLOModel {
         if let Some(device_type) = device_type {
             ep = ep.with_device_type(device_type);
         }
-        if std::fs::create_dir_all(&cache_dir).is_ok() {
+        if crate::io::is_writable_dir(&cache_dir) {
             ep = ep.with_cache_dir(cache_dir.to_string_lossy());
         }
         ep.build()

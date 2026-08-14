@@ -48,6 +48,21 @@ pub(crate) fn ensure_dir(path: &Path) -> Result<()> {
     })
 }
 
+/// Create `path` if needed and report whether a file can actually be written into it.
+///
+/// Probes with a real file, since permission bits miss ownership, ACLs and read-only mounts.
+/// Execution providers fail model loading on a cache path they cannot write, rather than skip it.
+#[cfg(any(feature = "openvino", feature = "tensorrt", feature = "coreml"))]
+pub(crate) fn is_writable_dir(path: &Path) -> bool {
+    if ensure_dir(path).is_err() {
+        return false;
+    }
+    let probe = path.join(format!(".write-probe-{}", std::process::id()));
+    let writable = std::fs::File::create(&probe).is_ok();
+    let _ = std::fs::remove_file(&probe);
+    writable
+}
+
 /// Return the next available run directory, e.g. `runs/detect/predict`, then `predict2`, `predict3`, ...
 #[must_use]
 pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
