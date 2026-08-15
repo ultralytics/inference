@@ -2,7 +2,7 @@
 
 name: 🐛 Bug Report
 # title: " "
-description: Problems with Ultralytics software
+description: Problems with Ultralytics YOLO Rust inference
 labels: [bug, triage]
 type: "bug"
 body:
@@ -28,16 +28,15 @@ body:
         Please select the component where you found the bug.
       multiple: true
       options:
-        - "Install"
-        - "Setup"
-        - "Configuration"
+        - "Install or build"
         - "CLI"
-        - "API"
-        - "Training"
-        - "Validation"
-        - "Prediction"
-        - "Export"
-        - "Integration"
+        - "Rust API"
+        - "Model loading"
+        - "Predict"
+        - "Video"
+        - "Visualize or annotate"
+        - "Hardware acceleration"
+        - "WebGPU (npm)"
         - "Documentation"
         - "Other"
     validations:
@@ -58,19 +57,19 @@ body:
       description: Please provide your system information to help us diagnose the problem.
       placeholder: |
         Please include:
-        - OS (e.g., Ubuntu 20.04, macOS 13.5, Windows 11)
-        - Python version (e.g., 3.11.2)
-        - Package version (e.g., pip list | grep ultralytics)
+        - OS (e.g., Ubuntu 22.04, macOS 15.5, Windows 11)
+        - Rust toolchain (e.g., rustc --version)
+        - Crate version and features (e.g., ultralytics-inference 0.0.35 with cuda,video)
+        - Model (e.g., yolo26n.onnx exported with ultralytics 8.3.x)
         - Hardware (e.g., CPU, GPU model)
-        - Any relevant environment details
 
         Example:
         ```
-        OS: macOS-13.5.2
-        Python: 3.11.2
-        Package: ultralytics==8.3.2
+        OS: macOS-15.5
+        Rust: rustc 1.89.0
+        Crate: ultralytics-inference 0.0.35 (features: coreml,annotate)
+        Model: yolo26n.onnx
         Hardware: Apple M3, 16GB RAM
-        Environment: Terminal
         ```
     validations:
       required: true
@@ -81,8 +80,8 @@ body:
       description: >
         When asking a question, people will be better able to provide help if you provide code that they can easily understand and use to **reproduce** the problem. This is referred to by community members as creating a [minimal reproducible example](https://docs.ultralytics.com/help/minimum-reproducible-example/).
       placeholder: |
-        ```python
-        # Code to reproduce your issue here
+        ```bash
+        ultralytics-inference predict --model yolo26n.onnx --source bus.jpg  # command to reproduce your issue here
         ```
     validations:
       required: true
