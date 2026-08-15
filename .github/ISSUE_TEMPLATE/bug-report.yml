@@ -62,6 +62,7 @@ body:
         - Crate version and features (e.g., ultralytics-inference 0.0.35 with cuda,video)
         - Model (e.g., yolo26n.onnx exported with ultralytics 8.3.x)
         - Hardware (e.g., CPU, GPU model)
+        - For @ultralytics/yolo: npm package version and browser (e.g., Chrome 138, WebGPU)
 
         Example:
         ```
