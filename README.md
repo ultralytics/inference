@@ -609,7 +609,7 @@ It ships as the [`@ultralytics/yolo`](web/README.md) npm package:
 ```ts
 import { YOLO } from "@ultralytics/yolo";
 
-const model = await YOLO.load("yolo26n.onnx");
+const model = await YOLO.load("/models/yolo26n.onnx");
 const results = await model.predict("bus.jpg");
 console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 ```

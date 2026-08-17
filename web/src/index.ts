@@ -11,7 +11,7 @@
  * ```ts
  * import { YOLO } from "@ultralytics/yolo";
  *
- * const model = await YOLO.load("yolo26n.onnx");
+ * const model = await YOLO.load("/models/yolo26n.onnx");
  * const results = await model.predict("bus.jpg");
  * for (const box of results.boxes) {
  *   console.log(box.name, box.conf, box.x1, box.y1, box.x2, box.y2);
@@ -161,22 +161,10 @@ async function resolveDevice(pref?: "auto" | "webgpu" | "cpu"): Promise<string> 
   return "cpu";
 }
 
-/** Ultralytics model assets release (ONNX exports of yolo26 / yolo11 / yolov8). */
-const ASSETS = "https://github.com/ultralytics/assets/releases/download/v8.4.0/";
-
 /** Ultralytics default thresholds (mirrored in the option JSDoc above). */
 const DEFAULT_CONF = 0.25;
 const DEFAULT_IOU = 0.7;
 const DEFAULT_KEYPOINT_THRESHOLD = 0.25;
-
-/**
- * Resolve a model reference to a URL. A bare ONNX name (e.g. `"yolo26n.onnx"`,
- * `"yolo11s-seg.onnx"`, `"yolov8n.onnx"`) auto-downloads from the Ultralytics
- * assets release; anything with a slash or scheme is used as-is.
- */
-function resolveModel(src: string): string {
-  return /^[\w.-]+\.onnx$/i.test(src) ? ASSETS + src : src;
-}
 
 /** A model source: a URL/path, raw bytes, or a `Blob`/`File` (e.g. a dropped file). */
 export type ModelSource = string | URL | ArrayBuffer | Uint8Array | Blob;
@@ -681,9 +669,8 @@ export class YOLO {
    */
   static async load(source: ModelSource, options?: LoadOptions): Promise<YOLO> {
     await ensureInit(options?.wasmUrl);
-    // Fetch once (a bare `.onnx` name resolves to the Ultralytics assets release),
-    // then pick the backend from the extension, or the bytes when it is unknown.
-    const bytes = await fetchModelBytes(typeof source === "string" ? resolveModel(source) : source);
+    // Fetch once, then pick the backend from the extension, or the bytes when it is unknown.
+    const bytes = await fetchModelBytes(source);
     if (inferBackend(source, bytes) === "litert") {
       return YOLO.loadLiteRt(bytes, options);
     }

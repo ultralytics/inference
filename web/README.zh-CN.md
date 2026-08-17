@@ -39,7 +39,7 @@ Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持检测
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("yolo26n.onnx");
+const model = await YOLO.load("/models/yolo26n.onnx");
 const results = await model.predict("bus.jpg");
 await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
@@ -69,7 +69,7 @@ esbuild、Bun），也可直接通过 [esm.sh](https://esm.sh/@ultralytics/yolo)
 import { YOLO, annotate } from "@ultralytics/yolo";
 
 // 首次使用时加载模型并初始化 WebGPU + ONNX Runtime Web。
-const model = await YOLO.load("yolo26n.onnx");
+const model = await YOLO.load("/models/yolo26n.onnx");
 
 const results = await model.predict("bus.jpg");
 for (const box of results.boxes) {
@@ -101,7 +101,7 @@ const model = await YOLO.load(fileInput.files[0]); // 拖入/选择的 .onnx 或
 因此渲染循环很流畅：
 
 ```ts
-const model = await YOLO.load("yolo26n.onnx");
+const model = await YOLO.load("/models/yolo26n.onnx");
 async function frame() {
   const results = await model.predict(video); // <video> 元素
   await annotate(canvas, video, results);
@@ -128,22 +128,13 @@ async function frame() {
 [语义分割](https://docs.ultralytics.com/tasks/semantic)和
 [深度估计](https://docs.ultralytics.com/tasks/depth)。
 
-传入不含路径的 ONNX 文件名时会从
-[Ultralytics assets release](https://github.com/ultralytics/assets/releases) **自动下载**
-（与原生 crate 和 Python 使用的是同一份权重）：
+`YOLO.load` 接受 URL 或路径，浏览器会像加载其他静态资源一样获取它。请从 [Ultralytics assets release](https://github.com/ultralytics/assets/releases) 下载所需权重（与原生 crate 和 Python 使用的是同一份文件），并部署在**同源**位置，或放在启用了 CORS 的源之后：
 
 ```ts
-await YOLO.load("yolo26n.onnx"); // 自动从 release 下载：.../download/v8.4.0/yolo26n.onnx
+await YOLO.load("/models/yolo26n.onnx");
 ```
 
-自动下载覆盖 **Ultralytics YOLO26**、**Ultralytics YOLO11** 和 **Ultralytics YOLOv8** 的
-`n/s/m/l/x` 尺寸，任务后缀支持 `-seg`、`-pose`、`-cls`、`-obb`、`-sem`（语义分割）和
-`-depth`（深度估计）——后两者仅 Ultralytics YOLO26 支持。若取值包含 `/` 或协议前缀，则会按
-URL/路径原样使用。
-
-> **CORS 提示：** GitHub release 资源不会返回 `Access-Control-Allow-Origin`，因此浏览器无法跨域
-> 获取它们。请将 `.onnx` 部署在**同源**位置（例如 `YOLO.load("/models/yolo26n.onnx")`），
-> 或放在启用了 CORS 的源/代理之后。当你把这些资源镜像到这类主机上时，文件名简写会很方便。
+GitHub release 资源不会返回 `Access-Control-Allow-Origin`，因此浏览器无法直接从 release URL 获取它们。该 URL 适用于不受 CORS 限制的原生 crate 和 Python，但在这里不适用。
 
 ## 📐 结果结构
 
@@ -181,7 +172,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
 - **WebGPU**（Chrome/Edge，或启用了 WebGPU 的 Firefox）配合**安全上下文**（`https://` 或
   `http://localhost`）可获得快速路径。在没有 WebGPU 的环境（较旧的浏览器、部分手机）中，
   `YOLO.load` 会自动回退到通用的 **CPU/wasm** 构建，随处可用。可通过
-  `YOLO.load("yolo26n.onnx", { device: "webgpu" | "cpu" })` 指定设备（默认 `"auto"`）。若 WebGPU
+  `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` 指定设备（默认 `"auto"`）。若 WebGPU
   无法启用，加载会回退到 CPU；`model.device` 会报告实际使用的设备。
 - **模型格式**：请使用 Ultralytics 导出为 ONNX，以便元数据（任务、类别名称、`imgsz`）被嵌入模型：
 
@@ -200,7 +191,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   （约 25 MB，之后由浏览器缓存）。如果你设置了 Content-Security-Policy，请在
   `script-src`/`connect-src` 中放行该源。若想完全避开 CDN，可自行托管运行时并指向它：
   ```ts
-  const model = await YOLO.load("yolo26n.onnx", { ortBaseUrl: "/ort/" });
+  const model = await YOLO.load("/models/yolo26n.onnx", { ortBaseUrl: "/ort/" });
   ```
   该目录需包含 ONNX Runtime Web 的入口脚本（`ort.webgpu.min.js`，以及 CPU 回退所需的
   `ort.wasm.min.js`）和 `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` 二进制文件。

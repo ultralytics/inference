@@ -41,7 +41,7 @@ semantic segmentation, and depth estimation, behind a small TypeScript API with 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
 
-const model = await YOLO.load("yolo26n.onnx");
+const model = await YOLO.load("/models/yolo26n.onnx");
 const results = await model.predict("bus.jpg");
 await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
@@ -73,7 +73,7 @@ It ships as an ES module with TypeScript types and works in any modern bundler
 import { YOLO, annotate } from "@ultralytics/yolo";
 
 // Loads the model and initializes WebGPU + ONNX Runtime Web on first use.
-const model = await YOLO.load("yolo26n.onnx");
+const model = await YOLO.load("/models/yolo26n.onnx");
 
 const results = await model.predict("bus.jpg");
 for (const box of results.boxes) {
@@ -107,7 +107,7 @@ Drawable sources (`<video>`, canvas, `ImageBitmap`, `ImageData`) take a
 raw-pixel fast path with no re-encoding, so a render loop is smooth:
 
 ```ts
-const model = await YOLO.load("yolo26n.onnx");
+const model = await YOLO.load("/models/yolo26n.onnx");
 async function frame() {
   const results = await model.predict(video); // <video> element
   await annotate(canvas, video, results);
@@ -134,24 +134,13 @@ Runs [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8),
 [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), and
 [depth estimation](https://docs.ultralytics.com/tasks/depth).
 
-Pass a bare ONNX name and it is **auto-downloaded** from the
-[Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the
-same weights the native crate and Python use):
+`YOLO.load` takes a URL or path, and serves it to the browser like any other asset. Download the weights you want from the [Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the same files the native crate and Python use) and host them **same-origin**, or behind a CORS-enabled origin:
 
 ```ts
-await YOLO.load("yolo26n.onnx"); // auto-downloads from the release: .../download/v8.4.0/yolo26n.onnx
+await YOLO.load("/models/yolo26n.onnx");
 ```
 
-Auto-download covers **Ultralytics YOLO26**, **Ultralytics YOLO11**, and **Ultralytics YOLOv8** in sizes `n/s/m/l/x`
-with task suffixes `-seg`, `-pose`, `-cls`, `-obb`, `-sem` (semantic), and `-depth` (depth
-estimation) — the last two Ultralytics YOLO26 only. A value containing a `/` or a scheme is
-used as a URL/path as-is.
-
-> **CORS note:** GitHub release assets do not send `Access-Control-Allow-Origin`,
-> so a browser cannot fetch them cross-origin. Host the `.onnx` **same-origin**
-> (e.g. `YOLO.load("/models/yolo26n.onnx")`) or behind a CORS-enabled origin /
-> proxy. The bare-name shortcut is convenient when you mirror the assets on such
-> a host.
+GitHub release assets send no `Access-Control-Allow-Origin`, so a browser cannot fetch them from the release URL directly. That URL works for the native crate and Python, which are not subject to CORS, but not here.
 
 ## 📐 Results Shape
 
@@ -193,7 +182,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   context** (`https://` or `http://localhost`) gives the fast path. Without
   WebGPU (older browsers, some phones), `YOLO.load` automatically falls back to a
   portable **CPU/wasm** build that runs everywhere. Pick the device with
-  `YOLO.load("yolo26n.onnx", { device: "webgpu" | "cpu" })` (default `"auto"`). If
+  `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` (default `"auto"`). If
   WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
   actually ran.
 - **Model format**: export your model to ONNX with Ultralytics so the metadata
@@ -216,7 +205,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   Content-Security-Policy, allow that origin in `script-src`/`connect-src`. To
   avoid the CDN entirely, self-host the runtime and point to it:
   ```ts
-  const model = await YOLO.load("yolo26n.onnx", { ortBaseUrl: "/ort/" });
+  const model = await YOLO.load("/models/yolo26n.onnx", { ortBaseUrl: "/ort/" });
   ```
   The folder must contain the ONNX Runtime Web entry scripts (`ort.webgpu.min.js`
   and `ort.wasm.min.js` for the CPU fallback) plus the
