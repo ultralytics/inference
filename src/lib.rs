@@ -16,7 +16,7 @@
 //!
 //!
 //! High-performance YOLO model inference library written in Rust, providing a safe
-//! and efficient interface for running [Ultralytics](https://ultralytics.com) YOLO
+//! and efficient interface for running [Ultralytics](https://www.ultralytics.com) YOLO
 //! models on images, videos, and streams.
 //!
 //! ## Features
@@ -359,7 +359,7 @@
 //! ## License
 //!
 //! This project is dual-licensed under [AGPL-3.0](https://github.com/ultralytics/inference/blob/main/LICENSE)
-//! for open-source use or [Ultralytics Enterprise License](https://ultralytics.com/license)
+//! for open-source use or [Ultralytics Enterprise License](https://www.ultralytics.com/license)
 //! for commercial applications.
 
 /// DGX Spark (aarch64) setup guide rendered from `docs/DGX.md`.
