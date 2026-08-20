@@ -100,6 +100,9 @@ cargo install ultralytics-inference --no-default-features
 # Enable video support
 cargo install ultralytics-inference --features video
 
+# Enable FP16 ONNX to FP32 promotion
+cargo install ultralytics-inference --features fp16-to-fp32
+
 # Enable multiple accelerators
 cargo install ultralytics-inference --features "cuda,tensorrt"
 ```
@@ -568,6 +571,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `annotate`        | Image annotation for `--save` (default)                                                               |
 | `visualize`       | Real-time window display for `--show` (default)                                                       |
 | `video`           | Video file decoding/encoding (requires FFmpeg)                                                        |
+| `fp16-to-fp32`    | In-memory FP16 ONNX to FP32 promotion for CPU inference                                               |
 | `cuda`            | NVIDIA CUDA support                                                                                   |
 | `tensorrt`        | NVIDIA TensorRT optimization                                                                          |
 | `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
@@ -590,7 +594,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `amd`             | Convenience: ROCm + MIGraphX                                                                          |
 | `intel`           | Convenience: OpenVINO + oneDNN                                                                        |
 | `mobile`          | Convenience: NNAPI + CoreML + QNN                                                                     |
-| `all`             | Convenience: annotate + visualize + video                                                             |
+| `all`             | Convenience: annotate + visualize + video + fp16-to-fp32                                              |
 
 ## 🌐 Browser / WebGPU (WASM)
 
@@ -653,12 +657,13 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 | `imageproc` | Drawing boxes and shapes       |
 | `ab_glyph`  | Text rendering (embedded font) |
 
-### Optional Dependencies (for Video & Visualization)
+### Optional Dependencies (for Video, Visualization & ONNX Conversion)
 
-| Crate      | Purpose                            |
-| ---------- | ---------------------------------- |
-| `minifb`   | Window creation and buffer display |
-| `video-rs` | Video decoding/encoding (ffmpeg)   |
+| Crate      | Purpose                                     |
+| ---------- | ------------------------------------------- |
+| `minifb`   | Window creation and buffer display          |
+| `video-rs` | Video decoding/encoding (ffmpeg)            |
+| `onnx-rs`  | FP16 ONNX to FP32 graph conversion (opt-in) |
 
 ### Video Support (FFmpeg)
 

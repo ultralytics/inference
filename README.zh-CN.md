@@ -100,6 +100,9 @@ cargo install ultralytics-inference --no-default-features
 # 启用视频支持
 cargo install ultralytics-inference --features video
 
+# 启用 FP16 ONNX 到 FP32 提升
+cargo install ultralytics-inference --features fp16-to-fp32
+
 # 启用多个加速后端
 cargo install ultralytics-inference --features "cuda,tensorrt"
 ```
@@ -564,6 +567,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 | `annotate`        | 为 `--save` 提供图片标注（默认）                                                         |
 | `visualize`       | 为 `--show` 提供实时窗口显示（默认）                                                     |
 | `video`           | 视频文件解码/编码（需要 FFmpeg）                                                         |
+| `fp16-to-fp32`    | 在内存中将 FP16 ONNX 提升为 FP32，以便进行 CPU 推理                                      |
 | `cuda`            | NVIDIA CUDA 支持                                                                         |
 | `tensorrt`        | NVIDIA TensorRT 优化                                                                     |
 | `cuda-preprocess` | GPU 预处理 + TensorRT 零拷贝输入（需要 CUDA toolkit；见 [`docs/CUDA.md`](docs/CUDA.md)） |
@@ -586,7 +590,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 | `amd`             | 便捷组合：ROCm + MIGraphX                                                                |
 | `intel`           | 便捷组合：OpenVINO + oneDNN                                                              |
 | `mobile`          | 便捷组合：NNAPI + CoreML + QNN                                                           |
-| `all`             | 便捷组合：annotate + visualize + video                                                   |
+| `all`             | 便捷组合：annotate + visualize + video + fp16-to-fp32                                    |
 
 ## 🌐 浏览器 / WebGPU（WASM）
 
@@ -639,12 +643,13 @@ JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的
 | `imageproc` | 绘制框和形状 |
 | `ab_glyph`  | 文本渲染字体 |
 
-### 可选依赖（用于视频和可视化）
+### 可选依赖（用于视频、可视化和 ONNX 转换）
 
-| Crate      | 用途                    |
-| ---------- | ----------------------- |
-| `minifb`   | 窗口创建和缓冲区显示    |
-| `video-rs` | 视频解码/编码（ffmpeg） |
+| Crate      | 用途                                 |
+| ---------- | ------------------------------------ |
+| `minifb`   | 窗口创建和缓冲区显示                 |
+| `video-rs` | 视频解码/编码（ffmpeg）              |
+| `onnx-rs`  | FP16 ONNX 到 FP32 图转换（选择启用） |
 
 ### 视频支持（FFmpeg）
 
