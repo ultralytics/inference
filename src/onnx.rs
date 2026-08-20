@@ -147,16 +147,23 @@ fn rewrite_tensor(input: &[u8], output: &mut Vec<u8>, promoted: &mut usize) -> R
             "FP32 inference does not support ONNX FP16 external tensor data",
         ));
     }
-    if has_field(input, 5)? {
+    let int32_data = has_field(input, 5)?;
+    if int32_data && has_field(input, 9)? {
         return Err(model_error(
-            "FP32 inference requires ONNX FP16 tensors stored as raw_data",
+            "ONNX FP16 tensor has both int32_data and raw_data",
         ));
     }
 
+    let mut wrote_int32_data = false;
     for field in Fields::new(input) {
         let field = field?;
         match field.number {
             2 => write_varint_field(output, field.number, FLOAT),
+            5 if !wrote_int32_data => {
+                write_message(output, 9, |output| rewrite_int32_data(input, output))?;
+                wrote_int32_data = true;
+            }
+            5 => {}
             9 => write_message(output, field.number, |output| {
                 let data = field.message()?;
                 if !data.len().is_multiple_of(2) {
@@ -172,6 +179,32 @@ fn rewrite_tensor(input: &[u8], output: &mut Vec<u8>, promoted: &mut usize) -> R
         }
     }
     *promoted += 1;
+    Ok(())
+}
+
+fn rewrite_int32_data(input: &[u8], output: &mut Vec<u8>) -> Result<()> {
+    for field in Fields::new(input) {
+        let field = field?;
+        if field.number != 5 {
+            continue;
+        }
+        if field.wire == 0 {
+            write_fp16_bits(output, field.varint()?)?;
+        } else {
+            let data = field.message()?;
+            let mut position = 0;
+            while position < data.len() {
+                write_fp16_bits(output, read_varint(data, &mut position)?)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_fp16_bits(output: &mut Vec<u8>, bits: u64) -> Result<()> {
+    let bits = u16::try_from(bits)
+        .map_err(|_| model_error("ONNX FP16 int32_data value exceeds 16 bits"))?;
+    output.extend_from_slice(&f16::from_bits(bits).to_f32().to_le_bytes());
     Ok(())
 }
 
@@ -533,5 +566,39 @@ mod tests {
         );
         assert_eq!(find_bytes(metadata, 2).unwrap(), Some(b"32".as_slice()));
         assert!(promote_fp16_to_fp32(&promoted).unwrap().is_none());
+    }
+
+    #[test]
+    fn promotes_packed_fp16_int32_data() {
+        let mut tensor = Vec::new();
+        write_varint_field(&mut tensor, 2, FLOAT16);
+        write_message(&mut tensor, 5, |output| {
+            write_varint(output, u64::from(f16::from_f32(1.5).to_bits()));
+            write_varint(output, u64::from(f16::from_f32(-2.0).to_bits()));
+            Ok(())
+        })
+        .unwrap();
+        let mut graph = Vec::new();
+        write_message(&mut graph, 5, |output| {
+            output.extend_from_slice(&tensor);
+            Ok(())
+        })
+        .unwrap();
+        let mut model = Vec::new();
+        write_message(&mut model, 7, |output| {
+            output.extend_from_slice(&graph);
+            Ok(())
+        })
+        .unwrap();
+
+        let promoted = promote_fp16_to_fp32(&model).unwrap().unwrap();
+        let tensor = find_bytes(find_bytes(&promoted, 7).unwrap().unwrap(), 5)
+            .unwrap()
+            .unwrap();
+        assert!(!has_field(tensor, 5).unwrap());
+        assert_eq!(
+            find_bytes(tensor, 9).unwrap().unwrap(),
+            [0, 0, 192, 63, 0, 0, 0, 192]
+        );
     }
 }

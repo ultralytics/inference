@@ -385,7 +385,9 @@ impl YOLOModel {
             })?;
 
         let promotion_start = Instant::now();
-        let promoted_model = if config.quantize == Some(Quantization::Fp32) {
+        let promoted_model = if config.quantize == Some(Quantization::Fp32)
+            && provider_name == "CPUExecutionProvider"
+        {
             crate::onnx::promote_fp16_to_fp32(&std::fs::read(path)?)?
         } else {
             None
