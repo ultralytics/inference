@@ -169,7 +169,7 @@ fn rewrite_tensor(input: &[u8], output: &mut Vec<u8>, promoted: &mut usize) -> R
                 if !data.len().is_multiple_of(2) {
                     return Err(model_error("ONNX FP16 tensor has an invalid byte length"));
                 }
-                for value in data.chunks_exact(2) {
+                for value in data.as_chunks::<2>().0 {
                     let bits = u16::from_le_bytes([value[0], value[1]]);
                     output.extend_from_slice(&f16::from_bits(bits).to_f32().to_le_bytes());
                 }
