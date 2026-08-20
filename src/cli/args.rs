@@ -20,7 +20,7 @@ use clap::{Args, Parser, Subcommand};
     --rect                 Enable rectangular inference (minimal padding) [default: true]
     --batch <BATCH>        Batch size for inference [default: 1]
     --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w8a16, or w8a32
-    --save                 Save generated outputs [default: true]
+    --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
     --show                 Display results in a window [default: false]
@@ -107,7 +107,7 @@ pub struct PredictArgs {
     #[arg(long, hide = true)]
     pub half: bool,
 
-    /// Save generated outputs, including predictions and promoted models
+    /// Save annotated images to runs/\<task\>/predict
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub save: bool,
 

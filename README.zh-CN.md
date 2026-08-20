@@ -275,7 +275,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--rect`        |      | 启用矩形推理（最小填充）                                                                                                                                          | `true`                            |
 | `--batch`       |      | 推理 batch size                                                                                                                                                   | `1`                               |
 | `--quantize`    |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w8a16` 或 `w8a32`                                                                           | 模型精度                          |
-| `--save`        |      | 保存生成的输出，包括预测结果和提升后的 FP32 模型                                                                                                                  | `true`                            |
+| `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                            | `true`                            |
 | `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                                              | `false`                           |
 | `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                                              | `false`                           |
 | `--show`        |      | 在窗口中显示结果                                                                                                                                                  | `false`                           |
@@ -285,7 +285,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 旧版 `--half` 标志仍可向后兼容，会映射为 `--quantize 16`，并发出与 Ultralytics Python 相同的弃用警告。显式的 `--quantize` 值优先。
 
-在 CPU 上，`--quantize 32` 会在 ONNX Runtime 创建推理会话前，于内存中将 FP16 ONNX 图提升为 FP32。紧凑的 FP16 源文件保持不变。使用默认的 `--save true` 时，提升后的图也会以 `<model>_fp32.onnx` 写入源文件旁；使用 `--save false` 则仅在内存中转换。
+在 CPU 上，`--quantize 32` 会在 ONNX Runtime 创建推理会话前，于内存中将 FP16 ONNX 图提升为 FP32。紧凑的 FP16 源文件保持不变。
 
 **任务和模型解析：**
 

@@ -398,17 +398,6 @@ impl YOLOModel {
                 promotion_start.elapsed()
             );
         }
-        if config.save
-            && let Some(model) = &promoted_model
-        {
-            let stem = path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("model");
-            let output = path.with_file_name(format!("{stem}_fp32.onnx"));
-            std::fs::write(&output, model)?;
-            crate::info!("Promoted FP32 model saved to {}", output.display());
-        }
         let session = match promoted_model.as_deref() {
             Some(model) => session_builder.commit_from_memory(model),
             None => session_builder.commit_from_file(path),

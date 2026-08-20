@@ -276,7 +276,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                        | `true`                                |
 | `--batch`       |       | Batch size for inference                                                                                                                                                                              | `1`                                   |
 | `--quantize`    |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w8a16`, or `w8a32`                                                                                                   | Model precision                       |
-| `--save`        |       | Save generated outputs, including predictions and promoted FP32 models                                                                                                                                | `true`                                |
+| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                       | `true`                                |
 | `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                                        | `false`                               |
 | `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                                                     | `false`                               |
 | `--show`        |       | Display results in a window                                                                                                                                                                           | `false`                               |
@@ -286,7 +286,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 The legacy `--half` flag remains accepted for backward compatibility, maps to `--quantize 16`, and emits the same deprecation warning as Ultralytics Python. An explicit `--quantize` value wins.
 
-On CPU, `--quantize 32` promotes an FP16 ONNX graph to FP32 in memory before ONNX Runtime creates the inference session. The compact FP16 source remains unchanged. With the default `--save true`, the promoted graph is also written beside it as `<model>_fp32.onnx`; use `--save false` for in-memory conversion only.
+On CPU, `--quantize 32` promotes an FP16 ONNX graph to FP32 in memory before ONNX Runtime creates the inference session. The compact FP16 source remains unchanged.
 
 **Task and Model Resolution:**
 
