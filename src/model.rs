@@ -448,15 +448,20 @@ impl YOLOModel {
             }
         };
 
-        let provider_quantize = (provider_name == "TensorRTExecutionProvider"
-            && config.quantize == Some(Quantization::Fp16))
-        .then_some(Quantization::Fp16);
+        let quantize = if provider_name == "TensorRTExecutionProvider" {
+            Some(if config.quantize == Some(Quantization::Fp16) {
+                Quantization::Fp16
+            } else {
+                Quantization::Fp32
+            })
+        } else {
+            fp16_input
+                .then_some(Quantization::Fp16)
+                .or(metadata.quantize)
+        };
         let config = InferenceConfig {
             imgsz: Some(resolved_imgsz),
-            quantize: metadata
-                .quantize
-                .or_else(|| fp16_input.then_some(Quantization::Fp16))
-                .or(provider_quantize),
+            quantize,
             ..config
         };
 
