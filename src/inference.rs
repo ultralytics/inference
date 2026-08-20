@@ -75,7 +75,7 @@ impl FromStr for Quantization {
             _ => Err(format!(
                 "'quantize={value}' is invalid. Valid 'quantize' values are 8, 16, 32, \
                  'int8', 'fp16', 'fp32', 'w8a8', 'w16a16', 'w8a16', or 'w8a32'. \
-                 See https://docs.ultralytics.com/modes/export/#quantization-options"
+                 See https://docs.ultralytics.com/modes/export#quantization-options"
             )),
         }
     }

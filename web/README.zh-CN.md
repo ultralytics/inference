@@ -27,12 +27,12 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2606.03748-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2606.03748)
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
-[![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
+[![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com)
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://www.reddit.com/r/Ultralytics/)
 
 </div>
 
-直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com/) YOLO 模型，无需服务器，也无需
+直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com) YOLO 模型，无需服务器，也无需
 Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持检测、分割、姿态、分类、OBB、语义分割和
 深度估计，接口是一个小巧的 TypeScript API，内置的 `annotate()` 可直接把结果绘制到 canvas 上。
 

@@ -27,12 +27,12 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2606.03748-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2606.03748)
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
-[![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com/)
+[![Ultralytics Forums](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.ultralytics.com&logo=discourse&label=Forums&color=blue)](https://community.ultralytics.com)
 [![Ultralytics Reddit](https://img.shields.io/reddit/subreddit-subscribers/ultralytics?style=flat&logo=reddit&logoColor=white&label=Reddit&color=blue)](https://www.reddit.com/r/Ultralytics/)
 
 </div>
 
-Run [Ultralytics](https://www.ultralytics.com/) YOLO models directly in the browser,
+Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser,
 with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm
 fallback) and covers detection, segmentation, pose, classification, OBB,
 semantic segmentation, and depth estimation, behind a small TypeScript API with a built-in
