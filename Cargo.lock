@@ -1636,6 +1636,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "onnx-rs"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2646a116e96c9ca9ed8e595464acbbf69139048623e952acfbe1d04d2e097b81"
+
+[[package]]
 name = "openssl"
 version = "0.10.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2673,7 +2679,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ultralytics-inference"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -2689,6 +2695,7 @@ dependencies = [
  "lru",
  "minifb",
  "ndarray",
+ "onnx-rs",
  "ort",
  "rayon",
  "serial_test",
@@ -2700,7 +2707,7 @@ dependencies = [
 
 [[package]]
 name = "ultralytics-inference-web"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "console_error_panic_hook",
  "half",

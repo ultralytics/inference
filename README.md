@@ -214,7 +214,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -234,7 +234,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -286,6 +286,8 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 The legacy `--half` flag remains accepted for backward compatibility, maps to `--quantize 16`, and emits the same deprecation warning as Ultralytics Python. An explicit `--quantize` value wins.
 
+For CPU inference, `--quantize 32` promotes an FP16 ONNX graph to FP32 in memory during model loading. The original compact FP16 file remains unchanged, while ONNX Runtime executes the promoted graph with its optimized FP32 CPU kernels.
+
 **Task and Model Resolution:**
 
 | Invocation                                        | Model used             | Notes                                                               |
@@ -333,7 +335,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.36"
+ultralytics-inference = "0.0.37"
 ```
 
 ```toml
@@ -549,7 +551,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.36", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.37", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 

@@ -213,7 +213,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -233,7 +233,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -285,6 +285,8 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 旧版 `--half` 标志仍可向后兼容，会映射为 `--quantize 16`，并发出与 Ultralytics Python 相同的弃用警告。显式的 `--quantize` 值优先。
 
+进行 CPU 推理时，`--quantize 32` 会在模型加载期间于内存中将 FP16 ONNX 图提升为 FP32。原始的紧凑 FP16 文件保持不变，而 ONNX Runtime 会使用其优化的 FP32 CPU 内核执行提升后的图。
+
 **任务和模型解析：**
 
 | 调用方式                                          | 使用模型               | 说明                                                    |
@@ -332,7 +334,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.36"
+ultralytics-inference = "0.0.37"
 ```
 
 ```toml
@@ -545,7 +547,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.36", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.37", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 

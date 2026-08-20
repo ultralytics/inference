@@ -13,6 +13,7 @@ use std::time::Instant;
 use half::f16;
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array3;
+use onnx_rs::ast::{DataType, Graph, OpType, TensorProto, TypeValue};
 // `model` is native-only, so rayon is used directly rather than via `crate::parallel`
 // (which exists to give the wasm-shared pipeline sequential shims).
 use ort::session::Session;
@@ -52,6 +53,110 @@ macro_rules! bind_compute_stream {
             None => $ep.build(),
         }
     };
+}
+
+fn promote_fp16_to_fp32(model_bytes: &[u8]) -> Result<Option<Vec<u8>>> {
+    let mut model = onnx_rs::parse(model_bytes).map_err(|e| {
+        InferenceError::ModelLoadError(format!(
+            "Failed to decode ONNX model for FP32 inference: {e}"
+        ))
+    })?;
+    let graph = model.graph.as_mut().ok_or_else(|| {
+        InferenceError::ModelLoadError("ONNX model has no inference graph".to_string())
+    })?;
+    let promoted = promote_graph(graph)?;
+    if !promoted {
+        return Ok(None);
+    }
+    Ok(Some(onnx_rs::encode(&model)))
+}
+
+fn promote_graph(graph: &mut Graph<'_>) -> Result<bool> {
+    let mut promoted = false;
+    for tensor in &mut graph.initializer {
+        promoted |= promote_tensor(tensor)?;
+    }
+    for value in graph
+        .input
+        .iter_mut()
+        .chain(&mut graph.output)
+        .chain(&mut graph.value_info)
+    {
+        if let Some(type_) = value.r#type.as_mut()
+            && let Some(TypeValue::Tensor(tensor)) = &mut type_.value
+        {
+            promoted |= promote_element_type(&mut tensor.elem_type);
+        }
+    }
+    for node in &mut graph.node {
+        for attribute in &mut node.attribute {
+            if node.op_type == OpType::Cast
+                && attribute.name == "to"
+                && attribute.i == DataType::Float16 as i64
+            {
+                attribute.i = DataType::Float as i64;
+                promoted = true;
+            }
+            if let Some(tensor) = attribute.t.as_mut() {
+                promoted |= promote_tensor(tensor)?;
+            }
+            for tensor in &mut attribute.tensors {
+                promoted |= promote_tensor(tensor)?;
+            }
+        }
+    }
+    Ok(promoted)
+}
+
+fn promote_tensor(tensor: &mut TensorProto<'_>) -> Result<bool> {
+    if tensor.data_type() != DataType::Float16 {
+        return Ok(false);
+    }
+    if !tensor.external_data().is_empty() {
+        return Err(InferenceError::ModelLoadError(
+            "FP32 inference does not support ONNX FP16 external tensor data".to_string(),
+        ));
+    }
+    let values = if let Some(raw_data) = tensor.as_raw() {
+        if !raw_data.len().is_multiple_of(2) {
+            return Err(InferenceError::ModelLoadError(format!(
+                "FP16 tensor '{}' has an invalid byte length",
+                tensor.name()
+            )));
+        }
+        raw_data
+            .chunks_exact(2)
+            .map(|bytes| f16::from_bits(u16::from_le_bytes([bytes[0], bytes[1]])).to_f32())
+            .collect()
+    } else if let Some(int32_data) = tensor.as_i32() {
+        int32_data
+            .iter()
+            .map(|bits| {
+                let bytes = bits.to_le_bytes();
+                f16::from_bits(u16::from_le_bytes([bytes[0], bytes[1]])).to_f32()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut promoted = TensorProto::from_f32(tensor.name(), tensor.dims().to_vec(), values)
+        .with_doc_string(tensor.doc_string())
+        .with_data_location(tensor.data_location())
+        .with_metadata_props(tensor.metadata_props().to_vec());
+    if let Some(segment) = tensor.segment() {
+        promoted = promoted.with_segment(segment.clone());
+    }
+    *tensor = promoted;
+    Ok(true)
+}
+
+const fn promote_element_type(element_type: &mut DataType) -> bool {
+    if matches!(*element_type, DataType::Float16) {
+        *element_type = DataType::Float;
+        true
+    } else {
+        false
+    }
 }
 
 /// YOLO model for inference.
@@ -366,7 +471,7 @@ impl YOLOModel {
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
-        let session = session_builder
+        session_builder = session_builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}"))
@@ -382,9 +487,18 @@ impl YOLOModel {
             .with_memory_pattern(true)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))
-            })?
-            .commit_from_file(path)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
+            })?;
+
+        let promoted_model = if config.quantize == Some(Quantization::Fp32) {
+            promote_fp16_to_fp32(&std::fs::read(path)?)?
+        } else {
+            None
+        };
+        let session = match promoted_model.as_deref() {
+            Some(bytes) => session_builder.commit_from_memory(bytes),
+            None => session_builder.commit_from_file(path),
+        }
+        .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
         // Extract metadata from model
         let metadata = Self::extract_metadata(&session)?;
@@ -449,7 +563,9 @@ impl YOLOModel {
             }
         };
 
-        let quantize = if provider_name == "TensorRTExecutionProvider" {
+        let quantize = if promoted_model.is_some() {
+            Some(Quantization::Fp32)
+        } else if provider_name == "TensorRTExecutionProvider" {
             Some(if config.quantize == Some(Quantization::Fp16) {
                 Quantization::Fp16
             } else {
@@ -2068,8 +2184,70 @@ fn shape_to_usize(shape: &[i64]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use onnx_rs::ast::{
+        Attribute, AttributeType, Model, Node, TensorTypeProto, TypeProto, ValueInfo,
+    };
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_promote_fp16_onnx_graph_to_fp32() {
+        let data = [f16::from_f32(1.5), f16::from_f32(-2.0)]
+            .into_iter()
+            .flat_map(|value| value.to_bits().to_le_bytes())
+            .collect::<Vec<_>>();
+        let model = Model {
+            graph: Some(Graph {
+                initializer: vec![TensorProto::from_raw(
+                    "weight",
+                    vec![2],
+                    DataType::Float16,
+                    &data,
+                )],
+                value_info: vec![ValueInfo {
+                    name: "hidden",
+                    r#type: Some(TypeProto {
+                        value: Some(TypeValue::Tensor(TensorTypeProto {
+                            elem_type: DataType::Float16,
+                            shape: None,
+                        })),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                node: vec![Node {
+                    op_type: OpType::Cast,
+                    attribute: vec![Attribute {
+                        name: "to",
+                        r#type: AttributeType::Int,
+                        i: DataType::Float16 as i64,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let promoted = promote_fp16_to_fp32(&onnx_rs::encode(&model))
+            .unwrap()
+            .unwrap();
+        let model = onnx_rs::parse(&promoted).unwrap();
+        let graph = model.graph.as_ref().unwrap();
+        let initializer = &graph.initializer[0];
+        assert_eq!(initializer.data_type(), DataType::Float);
+        assert_eq!(&*initializer.as_f32().unwrap(), [1.5, -2.0]);
+        assert_eq!(
+            graph.value_info[0].r#type.as_ref().unwrap().value,
+            Some(TypeValue::Tensor(TensorTypeProto {
+                elem_type: DataType::Float,
+                shape: None
+            }))
+        );
+        assert_eq!(graph.node[0].attribute[0].i, DataType::Float as i64);
+        assert!(promote_fp16_to_fp32(&promoted).unwrap().is_none());
+    }
 
     #[test]
     fn test_model_not_found() {
