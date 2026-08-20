@@ -149,11 +149,9 @@ model.export(format="onnx")  # FP32（默认）
 model.export(format="onnx", quantize=16)  # FP16（半精度）
 ```
 
-> **精度 / 量化：** Ultralytics ≥8.4 使用统一的 `quantize` 参数，取代已弃用的
-> `half=True` / `int8=True` 标志。对于 ONNX，支持的取值为 `32`/`fp32`（FP32，默认）、
-> `16`/`fp16`（FP16）和 `8`/`int8`（INT8——需通过 `data=` 提供校准数据集）。旧的
-> `half=True`（→ `quantize=16`）和 `int8=True`（→ `quantize=8`）仍可用，但会
-> 触发弃用警告。详见
+> **精度 / 量化：** Ultralytics ≥8.4 使用统一的 `quantize` 参数。对于 ONNX，
+> 支持的取值为 `32`/`fp32`（FP32，默认）、`16`/`fp16`（FP16）和 `8`/`int8`
+> （INT8——需通过 `data=` 提供校准数据集）。详见
 > [导出文档](https://docs.ultralytics.com/modes/export) 和
 > [ONNX 集成指南](https://docs.ultralytics.com/integrations/onnx)。
 
@@ -275,7 +273,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--imgsz`       |      | 推理图片尺寸                                                                                                                                                      | 模型元数据                        |
 | `--rect`        |      | 启用矩形推理（最小填充）                                                                                                                                          | `true`                            |
 | `--batch`       |      | 推理 batch size                                                                                                                                                   | `1`                               |
-| `--half`        |      | 使用 FP16 半精度推理                                                                                                                                              | `false`                           |
+| `--quantize`    |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w8a16` 或 `w8a32`                                                                           | 模型精度                          |
 | `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                            | `true`                            |
 | `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                                              | `false`                           |
 | `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                                              | `false`                           |

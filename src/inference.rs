@@ -6,6 +6,66 @@
 //! for YOLO model inference, such as confidence thresholds, Non-Maximum Suppression (NMS),
 //! input image sizing, and hardware execution options.
 
+use std::fmt;
+use std::str::FromStr;
+
+/// Inference precision requested through the `quantize` argument.
+///
+/// Values and aliases match the Ultralytics Python package: `8`/`int8`/`w8a8`,
+/// `16`/`fp16`/`w16a16`, `32`/`fp32`/`w32a32`, `w8a16`, and `w8a32`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Quantization {
+    /// INT8 weights and activations.
+    Int8,
+    /// FP16 weights and activations.
+    Fp16,
+    /// FP32 weights and activations.
+    Fp32,
+    /// INT8 weights and 16-bit activations.
+    W8a16,
+    /// INT8 weights and FP32 activations.
+    W8a32,
+}
+
+impl Quantization {
+    /// Return the canonical Ultralytics `quantize` value.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Int8 => "8",
+            Self::Fp16 => "16",
+            Self::Fp32 => "32",
+            Self::W8a16 => "w8a16",
+            Self::W8a32 => "w8a32",
+        }
+    }
+}
+
+impl fmt::Display for Quantization {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Quantization {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "8" | "int8" | "w8a8" => Ok(Self::Int8),
+            "16" | "fp16" | "w16a16" => Ok(Self::Fp16),
+            "32" | "fp32" | "w32a32" => Ok(Self::Fp32),
+            "w8a16" => Ok(Self::W8a16),
+            "w8a32" => Ok(Self::W8a32),
+            _ => Err(format!(
+                "'quantize={value}' is invalid. Valid 'quantize' values are 8, 16, 32, \
+                 'int8', 'fp16', 'fp32', 'w8a8', 'w16a16', 'w8a16', or 'w8a32'. \
+                 See https://docs.ultralytics.com/modes/export/#quantization-options"
+            )),
+        }
+    }
+}
+
 /// Configuration for YOLO inference.
 ///
 /// This struct is used to customize the behavior of the inference engine.
@@ -53,10 +113,8 @@ pub struct InferenceConfig {
     /// Number of intra-op threads for ONNX Runtime.
     /// Setting this to `0` allows ONNX Runtime to choose the optimal number.
     pub num_threads: usize,
-    /// Whether to use FP16 (half-precision) inference.
-    /// This can improve performance on compatible hardware (e.g., GPUs) but may
-    /// result in slight precision loss.
-    pub half: bool,
+    /// Requested inference precision. `None` uses the model's native precision.
+    pub quantize: Option<Quantization>,
     /// Hardware device to use for inference.
     /// If `None`, the best available device will be automatically selected.
     pub device: Option<crate::Device>,
@@ -90,7 +148,7 @@ impl Default for InferenceConfig {
             imgsz: None,
             batch: None,
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
-            half: Self::DEFAULT_HALF,
+            quantize: Self::DEFAULT_QUANTIZE,
             device: None,
             save: Self::DEFAULT_SAVE,
             save_frames: Self::DEFAULT_SAVE_FRAMES,
@@ -108,8 +166,8 @@ impl InferenceConfig {
     pub const DEFAULT_IOU: f32 = 0.7;
     /// Default maximum number of detections per image.
     pub const DEFAULT_MAX_DET: usize = 300;
-    /// Default for FP16 half-precision inference.
-    pub const DEFAULT_HALF: bool = false;
+    /// Default inference precision. `None` uses the model's native precision.
+    pub const DEFAULT_QUANTIZE: Option<Quantization> = None;
     /// Default for saving annotated results.
     pub const DEFAULT_SAVE: bool = true;
     /// Default for saving individual frames (vs video).
@@ -235,21 +293,18 @@ impl InferenceConfig {
         self
     }
 
-    /// Enable or disable FP16 (half-precision) inference.
+    /// Set the requested inference precision.
     ///
-    /// Using FP16 can significantly speed up inference on GPUs and some CPUS,
-    /// at the cost of potential minor precision loss.
-    ///
-    /// # Arguments
-    ///
-    /// * `half` - `true` to enable FP16, `false` for FP32.
+    /// The accepted schemes match the Python package's `quantize` argument.
+    /// For ONNX models, the exported graph determines which precisions the
+    /// execution provider can use.
     ///
     /// # Returns
     ///
     /// * The modified `InferenceConfig`.
     #[must_use]
-    pub const fn with_half(mut self, half: bool) -> Self {
-        self.half = half;
+    pub const fn with_quantize(mut self, quantize: Quantization) -> Self {
+        self.quantize = Some(quantize);
         self
     }
 
@@ -432,7 +487,7 @@ mod tests {
     fn test_remaining_builders() {
         let config = InferenceConfig::new()
             .with_batch(4)
-            .with_half(true)
+            .with_quantize(Quantization::Fp16)
             .with_cuda_preprocess(false)
             .with_device(crate::Device::Cpu)
             .with_save(false)
@@ -440,7 +495,7 @@ mod tests {
             .with_rect(false);
 
         assert_eq!(config.batch, Some(4));
-        assert!(config.half);
+        assert_eq!(config.quantize, Some(Quantization::Fp16));
         assert!(!config.cuda_preprocess);
         assert_eq!(config.device, Some(crate::Device::Cpu));
         assert!(!config.save);
@@ -458,5 +513,27 @@ mod tests {
         assert!(c.batch.is_none());
         assert!(c.device.is_none());
         assert!(c.classes.is_none());
+        assert_eq!(c.quantize, InferenceConfig::DEFAULT_QUANTIZE);
+    }
+
+    #[test]
+    fn test_quantization_aliases() {
+        for (value, expected) in [
+            ("8", Quantization::Int8),
+            ("int8", Quantization::Int8),
+            ("w8a8", Quantization::Int8),
+            ("16", Quantization::Fp16),
+            ("fp16", Quantization::Fp16),
+            ("w16a16", Quantization::Fp16),
+            ("32", Quantization::Fp32),
+            ("fp32", Quantization::Fp32),
+            ("w32a32", Quantization::Fp32),
+            ("w8a16", Quantization::W8a16),
+            ("W8A32", Quantization::W8a32),
+        ] {
+            assert_eq!(value.parse::<Quantization>().unwrap(), expected);
+        }
+        assert_eq!(Quantization::Int8.to_string(), "8");
+        assert!("4".parse::<Quantization>().is_err());
     }
 }

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{InferenceError, Result};
+use crate::inference::Quantization;
 use crate::task::Task;
 
 /// Metadata extracted from an Ultralytics YOLO ONNX model.
@@ -39,8 +40,8 @@ pub struct ModelMetadata {
     pub imgsz: Option<(usize, usize)>,
     /// Number of input channels (typically 3 for RGB).
     pub channels: usize,
-    /// Whether the model uses FP16 (half precision).
-    pub half: bool,
+    /// Precision recorded by the model export metadata.
+    pub quantize: Option<Quantization>,
     /// Class ID to class name mapping.
     pub names: Arc<HashMap<usize, String>>,
     /// Whether the model was exported with end-to-end NMS-free output
@@ -140,19 +141,15 @@ impl ModelMetadata {
                             ))
                         })?;
                     }
-                    "half" => {
-                        metadata.half = value == "true" || value == "True";
+                    "quantize" => {
+                        metadata.quantize = Self::parse_quantize(value)?;
                     }
                     "end2end" => {
                         metadata.end2end = value == "true" || value == "True";
                     }
                     "args" => {
-                        // Parse args dict for half flag: {'half': True, ...}
-                        if value.contains("'half': True")
-                            || value.contains("\"half\": true")
-                            || value.contains("'half':True")
-                        {
-                            metadata.half = true;
+                        if let Some(quantize) = Self::parse_args_quantize(value)? {
+                            metadata.quantize = Some(quantize);
                         }
                     }
                     _ => {
@@ -180,6 +177,36 @@ impl ModelMetadata {
 
         metadata.names = Arc::new(names);
         Ok(metadata)
+    }
+
+    fn parse_quantize(value: &str) -> Result<Option<Quantization>> {
+        let value = value.trim().trim_matches(|c| c == '\'' || c == '"');
+        if value.eq_ignore_ascii_case("none")
+            || value.eq_ignore_ascii_case("null")
+            || value.is_empty()
+        {
+            return Ok(None);
+        }
+        value.parse().map(Some).map_err(|e| {
+            InferenceError::ModelLoadError(format!("Invalid quantize value in metadata: {e}"))
+        })
+    }
+
+    fn parse_args_quantize(args: &str) -> Result<Option<Quantization>> {
+        let Some((_, value)) = ["'quantize'", "\"quantize\""]
+            .iter()
+            .find_map(|key| args.split_once(key))
+        else {
+            return Ok(None);
+        };
+        let value = value
+            .trim_start()
+            .strip_prefix(':')
+            .unwrap_or(value)
+            .split([',', '}'])
+            .next()
+            .unwrap_or_default();
+        Self::parse_quantize(value)
     }
 
     /// Parse a two-integer YAML value for `key`, accepting either the inline form
@@ -357,7 +384,7 @@ impl Default for ModelMetadata {
             batch: 1,
             imgsz: None,
             channels: 3,
-            half: false,
+            quantize: None,
             names: Arc::new(HashMap::new()),
             end2end: false,
             kpt_shape: None,
@@ -502,18 +529,22 @@ channels: 3
     }
 
     #[test]
-    fn test_pose_kpt_shape_and_half_flags() {
-        let yaml = "task: pose\nkpt_shape: [17, 3]\nhalf: true\nend2end: True";
+    fn test_pose_kpt_shape_and_quantize() {
+        let yaml = "task: pose\nkpt_shape: [17, 3]\nquantize: 16\nend2end: True";
         let m = ModelMetadata::from_yaml_str(yaml).unwrap();
         assert_eq!(m.task, Task::Pose);
         assert_eq!(m.kpt_shape, Some((17, 3)));
-        assert!(m.half);
+        assert_eq!(m.quantize, Some(Quantization::Fp16));
         assert!(m.end2end);
 
-        // half can also arrive embedded in an args dict.
-        let yaml2 = "task: detect\nargs: {'half': True, 'imgsz': 640}";
+        // Quantize normally arrives embedded in the exporter args dictionary.
+        let yaml2 = "task: detect\nargs: {'quantize': 'w8a16', 'imgsz': 640}";
         let m2 = ModelMetadata::from_yaml_str(yaml2).unwrap();
-        assert!(m2.half);
+        assert_eq!(m2.quantize, Some(Quantization::W8a16));
+
+        let yaml3 = "task: detect\nargs: {'quantize': None, 'imgsz': 640}";
+        let m3 = ModelMetadata::from_yaml_str(yaml3).unwrap();
+        assert_eq!(m3.quantize, None);
     }
 
     #[test]

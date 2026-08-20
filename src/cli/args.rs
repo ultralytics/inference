@@ -1,7 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-use crate::InferenceConfig;
 use crate::task::Task;
+use crate::{InferenceConfig, Quantization};
 use clap::{Args, Parser, Subcommand};
 
 /// CLI arguments parser.
@@ -19,7 +19,7 @@ use clap::{Args, Parser, Subcommand};
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
     --rect                 Enable rectangular inference (minimal padding) [default: true]
     --batch <BATCH>        Batch size for inference [default: 1]
-    --half                 Use FP16 half-precision inference [default: false]
+    --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w8a16, or w8a32
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
@@ -40,7 +40,7 @@ Examples:
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
     ultralytics-inference predict --source 0 --conf 0.5 --show
-    ultralytics-inference predict --source assets/ --save --half
+    ultralytics-inference predict --source assets/ --save --quantize 16
     ultralytics-inference predict --source image.jpg --device cuda:0
     ultralytics-inference predict --source image.jpg --classes 0"#)]
 pub struct Cli {
@@ -99,9 +99,9 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub batch: u32,
 
-    /// Use FP16 half-precision inference
-    #[arg(long, default_value_t = InferenceConfig::DEFAULT_HALF)]
-    pub half: bool,
+    /// Inference precision (8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w8a16, or w8a32)
+    #[arg(long)]
+    pub quantize: Option<Quantization>,
 
     /// Save annotated images to runs/\<task\>/predict
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
@@ -190,7 +190,7 @@ mod tests {
         assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
         assert!(predict_args.rect);
         assert_eq!(predict_args.max_det, 300);
-        assert!(!predict_args.half);
+        assert_eq!(predict_args.quantize, InferenceConfig::DEFAULT_QUANTIZE);
         assert!(predict_args.verbose);
         assert!(predict_args.source.is_none());
     }
@@ -206,6 +206,8 @@ mod tests {
             "test.jpg",
             "--conf",
             "0.8",
+            "--quantize",
+            "fp16",
             "--verbose",
             "false",
         ]);
@@ -215,6 +217,7 @@ mod tests {
         assert_eq!(predict_args.model, Some("custom.onnx".to_string()));
         assert_eq!(predict_args.source, Some("test.jpg".to_string()));
         assert!((predict_args.conf - 0.8).abs() < f32::EPSILON);
+        assert_eq!(predict_args.quantize, Some(Quantization::Fp16));
         assert!(!predict_args.verbose);
     }
 

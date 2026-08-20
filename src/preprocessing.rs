@@ -29,6 +29,8 @@ use image::{DynamicImage, GenericImageView, RgbImage};
 use lru::LruCache;
 use ndarray::{Array3, Array4};
 
+use crate::inference::Quantization;
+
 /// Default letterbox padding color (gray).
 pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
 
@@ -141,7 +143,7 @@ fn build_preprocess_result(
     geom: LetterboxGeometry,
     scale: (f32, f32),
     orig_shape: (u32, u32),
-    half: bool,
+    fp16: bool,
 ) -> PreprocessResult {
     let (orig_width, orig_height) = image.dimensions();
 
@@ -161,7 +163,7 @@ fn build_preprocess_result(
         }
     };
 
-    let tensor_f16 = if half {
+    let tensor_f16 = if fp16 {
         Some(tensor_f32_to_f16(&tensor))
     } else {
         None
@@ -196,7 +198,7 @@ pub fn preprocess_image(
     target_size: (usize, usize),
     stride: u32,
 ) -> PreprocessResult {
-    preprocess_image_with_precision(image, target_size, stride, false)
+    preprocess_image_with_precision(image, target_size, stride, None)
 }
 
 /// Preprocess an image for YOLO inference with optional FP16 output.
@@ -206,7 +208,7 @@ pub fn preprocess_image(
 /// * `image` - Input image.
 /// * `target_size` - Target size as (height, width).
 /// * `stride` - Model stride for padding alignment (typically 32).
-/// * `half` - If true, also generate FP16 tensor for FP16 models.
+/// * `quantize` - Requested precision. FP16 also generates an FP16 tensor.
 ///
 /// # Returns
 ///
@@ -216,13 +218,20 @@ pub fn preprocess_image_with_precision(
     image: &DynamicImage,
     target_size: (usize, usize),
     stride: u32,
-    half: bool,
+    quantize: Option<Quantization>,
 ) -> PreprocessResult {
     let (orig_width, orig_height) = image.dimensions();
     let orig_shape = (orig_height, orig_width);
 
     let (geom, scale) = calculate_letterbox_params(orig_width, orig_height, target_size, stride);
-    build_preprocess_result(image, target_size, geom, scale, orig_shape, half)
+    build_preprocess_result(
+        image,
+        target_size,
+        geom,
+        scale,
+        orig_shape,
+        quantize == Some(Quantization::Fp16),
+    )
 }
 
 /// Get or compute the X coordinate LUT for bilinear interpolation.
@@ -618,7 +627,7 @@ pub const fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
 ///
 /// * `image` - Input image.
 /// * `target_size` - Target size as (height, width).
-/// * `half` - If true, also generate FP16 tensor.
+/// * `quantize` - Requested precision. FP16 also generates an FP16 tensor.
 ///
 /// # Returns
 ///
@@ -627,7 +636,7 @@ pub const fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
 pub fn preprocess_image_center_crop(
     image: &DynamicImage,
     target_size: (usize, usize),
-    half: bool,
+    quantize: Option<Quantization>,
 ) -> PreprocessResult {
     let (orig_width, orig_height) = image.dimensions();
     let orig_shape = (orig_height, orig_width);
@@ -639,7 +648,7 @@ pub fn preprocess_image_center_crop(
     let tensor = image_to_tensor(&cropped, 0.0, |v| f32::from(v) / 255.0);
 
     // Optionally compute FP16 tensor, converting u8 straight to f16 with a hoisted 1/255.
-    let tensor_f16 = half.then(|| {
+    let tensor_f16 = (quantize == Some(Quantization::Fp16)).then(|| {
         let scale = f16::from_f32(1.0 / 255.0);
         image_to_tensor(&cropped, f16::ZERO, move |v| {
             f16::from_f32(f32::from(v)) * scale
@@ -879,13 +888,13 @@ mod tests {
         // Classification path: center-crop to the model size, normalize to [0, 1], and
         // emit the FP16 tensor only when asked. A non-square source exercises the crop.
         let img = image::DynamicImage::new_rgb8(400, 300);
-        for half in [false, true] {
-            let res = preprocess_image_center_crop(&img, (224, 224), half);
+        for quantize in [None, Some(Quantization::Fp16)] {
+            let res = preprocess_image_center_crop(&img, (224, 224), quantize);
             assert_eq!(res.tensor.dim(), (1, 3, 224, 224));
             assert_eq!(res.orig_shape, (300, 400));
             assert_eq!(res.padding, (0.0, 0.0));
             assert!(res.tensor.iter().all(|v| (0.0..=1.0).contains(v)));
-            assert_eq!(res.tensor_f16.is_some(), half);
+            assert_eq!(res.tensor_f16.is_some(), quantize.is_some());
             if let Some(t16) = &res.tensor_f16 {
                 assert_eq!(t16.dim(), res.tensor.dim());
             }
@@ -897,7 +906,7 @@ mod tests {
         // 480×640 wide image, target=1024×1024, is_dynamic=false.
         // Scale = min(1024/480, 1024/640) = 1024/640 = 1.6; nh=768, nw=1024, pad_top≈128.
         let img = image::DynamicImage::new_rgb8(640, 480);
-        let res = preprocess_image_with_precision(&img, (1024, 1024), 32, false);
+        let res = preprocess_image_with_precision(&img, (1024, 1024), 32, None);
         let (_, _, h, w) = res.tensor.dim();
         assert_eq!(h, 1024);
         assert_eq!(w, 1024);
@@ -913,7 +922,7 @@ mod tests {
         let img = image::DynamicImage::new_rgb8(640, 333);
         let rect_size = calculate_rect_size(640, 333, (1024, 1024), 32);
         assert_eq!(rect_size, (544, 1024));
-        let res = preprocess_image_with_precision(&img, rect_size, 32, false);
+        let res = preprocess_image_with_precision(&img, rect_size, 32, None);
         let (_, _, h, w) = res.tensor.dim();
         assert_eq!((h, w), rect_size);
         assert_eq!(res.padding, (5.0, 0.0));
@@ -931,8 +940,8 @@ mod tests {
     #[test]
     fn test_preprocess_image_fp16_path() {
         let img = image::DynamicImage::new_rgb8(320, 240);
-        let res = preprocess_image_with_precision(&img, (640, 640), 32, true);
-        // half=true also produces the FP16 tensor mirroring the FP32 one.
+        let res = preprocess_image_with_precision(&img, (640, 640), 32, Some(Quantization::Fp16));
+        // quantize=16 also produces the FP16 tensor mirroring the FP32 one.
         let f16 = res.tensor_f16.expect("fp16 tensor present");
         assert_eq!(f16.dim(), res.tensor.dim());
     }

@@ -2430,7 +2430,7 @@ mod tests {
             results_for(1, (oh, ow), (oh as u32, ow as u32)),
         );
         let depth = result.depth.unwrap();
-        assert_eq!(depth.data.shape(), &[oh, ow]);
+        assert_eq!(depth.data.shape(), <[usize; 2]>::from((oh, ow)));
         assert!((depth.data[[0, 0]] - 1.0).abs() < 1e-6);
         assert!((depth.data[[1, 2]] - 6.0).abs() < 1e-6);
         assert!((depth.min_depth().unwrap() - 1.0).abs() < 1e-6);

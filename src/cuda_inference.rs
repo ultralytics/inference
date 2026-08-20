@@ -633,7 +633,7 @@ mod tests {
             let img = image::DynamicImage::ImageRgb8(
                 image::RgbImage::from_raw(src_w as u32, src_h as u32, frame).expect("rgb image"),
             );
-            let cpu = crate::preprocessing::preprocess_image_with_precision(&img, dst, 32, false);
+            let cpu = crate::preprocessing::preprocess_image_with_precision(&img, dst, 32, None);
             let cpu = cpu.tensor.as_slice().expect("contiguous cpu tensor");
 
             let n = 3 * dst.0 * dst.1;

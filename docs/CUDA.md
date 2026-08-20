@@ -77,12 +77,12 @@ cudarc = { version = "0.19", default-features = false, features = ["driver", "nv
 ### `tensorrt` feature
 
 ```rust,no_run
-use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+use ultralytics_inference::{Device, InferenceConfig, Quantization, YOLOModel};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = InferenceConfig::new()
         .with_device(Device::TensorRt(0))
-        .with_half(true);
+        .with_quantize(Quantization::Fp16);
     let mut model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
     let results = model.predict("image.jpg")?;
     println!("{} detections", results.len());
@@ -112,7 +112,7 @@ What to expect and how to avoid surprises:
   again: add it to `.gitignore` rather than deleting it, and leave it in place
   across clean builds.
 - **Cache is keyed to the build context.** A new engine is built whenever the
-  model file, GPU/driver/TensorRT version, precision (`--half`), or **input
+  model file, GPU/driver/TensorRT version, precision (`--quantize`), or **input
   shape** changes. **Dynamic-shape models rebuild per new input size** - feed
   consistently-sized inputs to keep it to a single cached engine. Note that rectangular
   inference (`rect`, on by default) letterboxes each image to its own aspect ratio, so a
@@ -142,12 +142,12 @@ agree to within one 8-bit quantization step (the CPU uses OpenCV's fixed-point w
 the kernel f32):
 
 ```rust,no_run
-use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+use ultralytics_inference::{Device, InferenceConfig, Quantization, YOLOModel};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = InferenceConfig::new()
         .with_device(Device::TensorRt(0))
-        .with_half(true);
+        .with_quantize(Quantization::Fp16);
     let mut model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
 
     // predict() decodes the frame and calls predict_image(), which
@@ -162,12 +162,12 @@ To force the standard CPU preprocess path (e.g. for an A/B comparison) without
 recompiling, set the flag to `false`:
 
 ```rust,no_run
-use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+use ultralytics_inference::{Device, InferenceConfig, Quantization, YOLOModel};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = InferenceConfig::new()
         .with_device(Device::TensorRt(0))
-        .with_half(true)
+        .with_quantize(Quantization::Fp16)
         .with_cuda_preprocess(false); // opt out; CPU letterbox + host→device copy
     let _model = YOLOModel::load_with_config("yolo26n.onnx", cfg)?;
     Ok(())
@@ -194,7 +194,7 @@ The CLI selects the GPU EP via `--device`:
 
 ```bash
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg \
-  --device tensorrt:0 --half
+  --device tensorrt:0 --quantize 16
 ```
 
 This uses the TensorRT EP (FP16 + engine cache). The CLI runs through the batch
@@ -204,7 +204,7 @@ calls `predict_batch` with a single image, which takes the CPU preprocess path.
 
 ```bash
 ultralytics-inference predict --model yolo26n-b16.onnx --source images/ \
-  --device tensorrt:0 --half --batch 16
+  --device tensorrt:0 --quantize 16 --batch 16
 ```
 
 The model must be exported with a matching batch size, or with a dynamic batch

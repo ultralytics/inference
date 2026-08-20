@@ -136,7 +136,7 @@ ultralytics-inference help
 # Using Ultralytics CLI (FP32, default)
 yolo export model=yolo26n.pt format=onnx
 
-# FP16 (half precision) - ~50% smaller model
+# FP16 - ~50% smaller model
 yolo export model=yolo26n.pt format=onnx quantize=16
 ```
 
@@ -146,15 +146,13 @@ from ultralytics import YOLO
 
 model = YOLO("yolo26n.pt")
 model.export(format="onnx")  # FP32 (default)
-model.export(format="onnx", quantize=16)  # FP16 (half precision)
+model.export(format="onnx", quantize=16)  # FP16
 ```
 
-> **Precision / quantization:** Ultralytics ≥8.4 uses a single `quantize`
-> argument instead of the deprecated `half=True` / `int8=True` flags. For ONNX
-> the supported values are `32`/`fp32` (FP32, the default), `16`/`fp16` (FP16),
-> and `8`/`int8` (INT8 - requires a calibration dataset via `data=`). The old
-> `half=True` (→ `quantize=16`) and `int8=True` (→ `quantize=8`) still work but
-> emit a deprecation warning. See the
+> **Precision / quantization:** Ultralytics ≥8.4 uses the `quantize` argument.
+> For ONNX the supported values are `32`/`fp32` (FP32, the default),
+> `16`/`fp16` (FP16), and `8`/`int8` (INT8 - requires a calibration dataset via
+> `data=`). See the
 > [export docs](https://docs.ultralytics.com/modes/export) and the
 > [ONNX integration guide](https://docs.ultralytics.com/integrations/onnx).
 
@@ -276,7 +274,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--imgsz`       |       | Inference image size                                                                                                                                                                                  | `Model metadata`                      |
 | `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                        | `true`                                |
 | `--batch`       |       | Batch size for inference                                                                                                                                                                              | `1`                                   |
-| `--half`        |       | Use FP16 half-precision inference                                                                                                                                                                     | `false`                               |
+| `--quantize`    |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w8a16`, or `w8a32`                                                                                                   | Model precision                       |
 | `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                       | `true`                                |
 | `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                                        | `false`                               |
 | `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                                                     | `false`                               |
@@ -727,7 +725,7 @@ ONNX Runtime threading is set to auto (`num_threads: 0`), which lets ORT choose 
 - [x] Multiple input sources (images, directories, globs, URLs)
 - [x] Video file support and webcam/RTSP streaming
 - [x] Image annotation and visualization
-- [x] FP16 half-precision inference
+- [x] FP16 inference
 - [x] Batch inference support
 - [x] Rectangular inference support and optimization
 - [x] Class filtering support

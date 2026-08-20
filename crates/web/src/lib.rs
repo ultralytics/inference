@@ -236,7 +236,7 @@ fn preprocess_image(
     let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
         .map_err(err_ctx("failed to build image array"))?;
     let pre = if task == Task::Classify {
-        preprocess_image_center_crop(dynimg, imgsz, false)
+        preprocess_image_center_crop(dynimg, imgsz, None)
     } else {
         // Rectangular inference pads only up to the stride instead of to a square, so a
         // 16:9 frame skips ~40% of its pixels. Only a model that left its height and width
@@ -246,7 +246,7 @@ fn preprocess_image(
         } else {
             imgsz
         };
-        preprocess_image_with_precision(dynimg, target, stride, false)
+        preprocess_image_with_precision(dynimg, target, stride, None)
     };
     Ok((orig_img, pre))
 }

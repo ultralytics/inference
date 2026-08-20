@@ -24,7 +24,7 @@ use rayon::slice::ParallelSliceMut;
 
 use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_download_model};
 use crate::error::{InferenceError, Result};
-use crate::inference::InferenceConfig;
+use crate::inference::{InferenceConfig, Quantization};
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
@@ -242,7 +242,7 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "tensorrt")]
                 crate::Device::TensorRt(i) => eps.push((
-                    Self::build_tensorrt_ep(path, *i as i32, config.half, cuda_pre_stream_ptr),
+                    Self::build_tensorrt_ep(path, *i as i32, config.quantize, cuda_pre_stream_ptr),
                     "TensorRTExecutionProvider",
                 )),
                 #[cfg(feature = "rocm")]
@@ -286,7 +286,7 @@ impl YOLOModel {
             // Default: Register all available providers in preference order
             #[cfg(feature = "tensorrt")]
             eps.push((
-                Self::build_tensorrt_ep(path, 0, config.half, cuda_pre_stream_ptr),
+                Self::build_tensorrt_ep(path, 0, config.quantize, cuda_pre_stream_ptr),
                 "TensorRTExecutionProvider",
             ));
 
@@ -448,9 +448,15 @@ impl YOLOModel {
             }
         };
 
+        let provider_quantize = (provider_name == "TensorRTExecutionProvider"
+            && config.quantize == Some(Quantization::Fp16))
+        .then_some(Quantization::Fp16);
         let config = InferenceConfig {
             imgsz: Some(resolved_imgsz),
-            half: config.half || metadata.half, // Use half if user requested OR model was exported with half
+            quantize: metadata
+                .quantize
+                .or_else(|| fp16_input.then_some(Quantization::Fp16))
+                .or(provider_quantize),
             ..config
         };
 
@@ -542,7 +548,7 @@ impl YOLOModel {
 
     /// Build the `TensorRT` execution provider with engine + timing caches enabled.
     ///
-    /// FP16 is enabled when `fp16` is true (driven by `config.half`). On Ada and
+    /// FP16 is enabled for `quantize=16`. On Ada and
     /// newer GPUs this is ~2x faster than FP32 with negligible accuracy delta
     /// for YOLO detection. Engine and timing caches are written under
     /// `<model_dir>/.trt_cache/<model_stem>_{fp16,fp32}/` so subsequent loads
@@ -555,7 +561,7 @@ impl YOLOModel {
     fn build_tensorrt_ep(
         model_path: &Path,
         device_id: i32,
-        fp16: bool,
+        quantize: Option<Quantization>,
         compute_stream: Option<*mut ()>,
     ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
@@ -563,6 +569,7 @@ impl YOLOModel {
             .and_then(|s| s.to_str())
             .unwrap_or("model");
         let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
+        let fp16 = quantize == Some(Quantization::Fp16);
         let suffix = if fp16 { "fp16" } else { "fp32" };
         let cache_dir = parent.join(".trt_cache").join(format!("{stem}_{suffix}"));
         let mut ep = ort::ep::TensorRT::default()
@@ -908,7 +915,7 @@ impl YOLOModel {
             "batch",
             "imgsz",
             "names",
-            "half",
+            "quantize",
             "channels",
             "args",
             "end2end",
@@ -1523,9 +1530,18 @@ impl YOLOModel {
                 };
 
                 if task == Task::Classify {
-                    preprocess_image_center_crop(image, current_target_size, fp16_input)
+                    preprocess_image_center_crop(
+                        image,
+                        current_target_size,
+                        fp16_input.then_some(Quantization::Fp16),
+                    )
                 } else {
-                    preprocess_image_with_precision(image, current_target_size, stride, fp16_input)
+                    preprocess_image_with_precision(
+                        image,
+                        current_target_size,
+                        stride,
+                        fp16_input.then_some(Quantization::Fp16),
+                    )
                 }
             })
             .collect();
@@ -1976,10 +1992,10 @@ impl YOLOModel {
         self.metadata.stride
     }
 
-    /// Check if model is using FP16 (half precision) inference.
+    /// Get the resolved model precision.
     #[must_use]
-    pub const fn is_half(&self) -> bool {
-        self.fp16_input
+    pub const fn quantize(&self) -> Option<Quantization> {
+        self.config.quantize
     }
 
     /// Get the model metadata.
@@ -2167,8 +2183,18 @@ mod tests {
         // FP16 preprocessing keeps both tensors, so one pair feeds both concat paths.
         let pair = || {
             [
-                crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true),
-                crate::preprocessing::preprocess_image_with_precision(&img, (64, 64), 32, true),
+                crate::preprocessing::preprocess_image_with_precision(
+                    &img,
+                    (64, 64),
+                    32,
+                    Some(Quantization::Fp16),
+                ),
+                crate::preprocessing::preprocess_image_with_precision(
+                    &img,
+                    (64, 64),
+                    32,
+                    Some(Quantization::Fp16),
+                ),
             ]
         };
         // two images stacked on the batch axis

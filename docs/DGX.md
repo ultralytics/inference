@@ -85,7 +85,7 @@ Python packages carry the same shared libraries and can be unpacked the same way
 
 ```bash
 export LD_LIBRARY_PATH=$HOME/ortgpu:/path/to/cudnn/lib:/path/to/tensorrt_libs:/usr/local/cuda/lib64
-ultralytics-inference predict --model yolo26n.onnx --source image.jpg --device tensorrt:0 --half
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg --device tensorrt:0 --quantize 16
 ```
 
 If the CUDA provider fails to load, check for the missing dependency directly:

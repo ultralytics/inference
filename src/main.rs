@@ -13,7 +13,7 @@
 //! ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 //! ultralytics-inference predict --model yolo26n.onnx --source video.mp4
 //! ultralytics-inference predict --model yolo26n.onnx --source 0 --conf 0.5
-//! ultralytics-inference predict -m yolo26n.onnx -s assets/ --save --half
+//! ultralytics-inference predict -m yolo26n.onnx -s assets/ --save --quantize 16
 //! ultralytics-inference predict -m yolo26n.onnx -s video.mp4 --imgsz 1280 --show
 //! ultralytics-inference version
 //! ultralytics-inference help

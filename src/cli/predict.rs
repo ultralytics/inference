@@ -14,7 +14,7 @@ use crate::visualizer::Viewer;
 #[cfg(feature = "visualize")]
 use image::GenericImageView;
 
-use crate::{DISPLAY_NAME, InferenceConfig, Results, VERSION, YOLOModel};
+use crate::{DISPLAY_NAME, InferenceConfig, Quantization, Results, VERSION, YOLOModel};
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
@@ -45,7 +45,6 @@ pub fn run_prediction(args: &PredictArgs) {
     let save = args.save;
     let save_frames = args.save_frames;
     let save_json = args.save_json;
-    let half = args.half;
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
     let device = parse_device_arg(args.device.as_deref()).unwrap_or_else(|e| {
@@ -166,8 +165,7 @@ pub fn run_prediction(args: &PredictArgs) {
         );
     }
 
-    let is_half = model.metadata().half || half;
-    let precision = precision_label(is_half);
+    let precision = precision_label(model.quantize());
     let device_str = provider_label(model.execution_provider());
     println!("{DISPLAY_NAME} {VERSION} 🚀 Rust ONNX {precision} {device_str}");
     println!("Using ONNX Runtime {}", model.execution_provider());
@@ -436,11 +434,14 @@ fn build_inference_config(
     let mut config = InferenceConfig::new()
         .with_confidence(args.conf)
         .with_iou(args.iou)
-        .with_half(args.half)
         .with_batch(args.batch as usize)
         .with_save_frames(args.save_frames)
         .with_rect(args.rect)
         .with_max_det(args.max_det);
+
+    if let Some(quantize) = args.quantize {
+        config = config.with_quantize(quantize);
+    }
 
     if let Some(sz) = args.imgsz {
         config = config.with_imgsz(sz, sz);
@@ -488,8 +489,14 @@ fn needs_results_dir(save_json: bool, task: Task) -> bool {
     save_json && task == Task::Semantic
 }
 
-const fn precision_label(is_half: bool) -> &'static str {
-    if is_half { "FP16" } else { "FP32" }
+const fn precision_label(quantize: Option<Quantization>) -> &'static str {
+    match quantize {
+        Some(Quantization::Int8) => "INT8",
+        Some(Quantization::Fp16) => "FP16",
+        Some(Quantization::Fp32) | None => "FP32",
+        Some(Quantization::W8a16) => "W8A16",
+        Some(Quantization::W8a32) => "W8A32",
+    }
 }
 
 /// Map an ONNX Runtime execution provider name to its display label, e.g. `"CoreML"`.
@@ -561,7 +568,7 @@ mod tests {
             imgsz: None,
             rect: InferenceConfig::DEFAULT_RECT,
             batch: 1,
-            half: InferenceConfig::DEFAULT_HALF,
+            quantize: InferenceConfig::DEFAULT_QUANTIZE,
             save: InferenceConfig::DEFAULT_SAVE,
             save_frames: InferenceConfig::DEFAULT_SAVE_FRAMES,
             save_json: false,
@@ -631,7 +638,7 @@ mod tests {
             imgsz: Some(512),
             rect: false,
             batch: 4,
-            half: true,
+            quantize: Some(Quantization::Fp16),
             save_frames: true,
             classes: Some("[0, 2, 5]".to_string()),
             ..predict_args()
@@ -644,7 +651,7 @@ mod tests {
         assert_eq!(config.max_det, 77);
         assert_eq!(config.imgsz, Some((512, 512)));
         assert_eq!(config.batch, Some(4));
-        assert!(config.half);
+        assert_eq!(config.quantize, Some(Quantization::Fp16));
         assert_eq!(config.device, Some(crate::Device::IntelCpu));
         assert!(config.save_frames);
         assert!(!config.rect);
@@ -709,8 +716,9 @@ mod tests {
 
     #[test]
     fn test_precision_and_provider_labels() {
-        assert_eq!(precision_label(false), "FP32");
-        assert_eq!(precision_label(true), "FP16");
+        assert_eq!(precision_label(None), "FP32");
+        assert_eq!(precision_label(Some(Quantization::Fp16)), "FP16");
+        assert_eq!(precision_label(Some(Quantization::Int8)), "INT8");
         assert_eq!(provider_label("CoreMLExecutionProvider"), "CoreML");
         assert_eq!(provider_label("CUDAExecutionProvider"), "CUDA");
         assert_eq!(provider_label("TensorrtExecutionProvider"), "TensorRT");
