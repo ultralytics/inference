@@ -140,6 +140,10 @@
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!
+//! The legacy `--half` flag remains accepted for backward compatibility, maps
+//! to `--quantize 16`, and emits the same deprecation warning as Ultralytics
+//! Python. An explicit `--quantize` value wins.
+//!
 //! \* `semantic` (semantic segmentation) and `depth` (depth estimation) are YOLO26-only.
 //!
 //! ## Task-Specific Examples

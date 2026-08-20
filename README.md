@@ -149,10 +149,11 @@ model.export(format="onnx")  # FP32 (default)
 model.export(format="onnx", quantize=16)  # FP16
 ```
 
-> **Precision / quantization:** Ultralytics ≥8.4 uses the `quantize` argument.
-> For ONNX the supported values are `32`/`fp32` (FP32, the default),
-> `16`/`fp16` (FP16), and `8`/`int8` (INT8 - requires a calibration dataset via
-> `data=`). See the
+> **Precision / quantization:** Ultralytics ≥8.4 uses a single `quantize`
+> argument instead of the deprecated `half=True` / `int8=True` flags. For ONNX
+> the supported values are `32`/`fp32` (FP32, the default), `16`/`fp16` (FP16),
+> and `8`/`int8` (INT8 - requires a calibration dataset via `data=`). The old
+> flags still work but emit a deprecation warning. See the
 > [export docs](https://docs.ultralytics.com/modes/export) and the
 > [ONNX integration guide](https://docs.ultralytics.com/integrations/onnx).
 
@@ -213,7 +214,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.35 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -233,7 +234,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.35 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -283,6 +284,8 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--verbose`     |       | Show verbose output                                                                                                                                                                                   | `true`                                |
 | `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                                           | all classes                           |
 
+The legacy `--half` flag remains accepted for backward compatibility, maps to `--quantize 16`, and emits the same deprecation warning as Ultralytics Python. An explicit `--quantize` value wins.
+
 **Task and Model Resolution:**
 
 | Invocation                                        | Model used             | Notes                                                               |
@@ -330,7 +333,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.35"
+ultralytics-inference = "0.0.36"
 ```
 
 ```toml
@@ -546,7 +549,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.35", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.36", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 

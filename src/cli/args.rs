@@ -103,6 +103,10 @@ pub struct PredictArgs {
     #[arg(long)]
     pub quantize: Option<Quantization>,
 
+    /// Legacy FP16 inference flag; use `--quantize 16`
+    #[arg(long, hide = true)]
+    pub half: bool,
+
     /// Save annotated images to runs/\<task\>/predict
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_SAVE, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub save: bool,
@@ -191,6 +195,7 @@ mod tests {
         assert!(predict_args.rect);
         assert_eq!(predict_args.max_det, 300);
         assert_eq!(predict_args.quantize, InferenceConfig::DEFAULT_QUANTIZE);
+        assert!(!predict_args.half);
         assert!(predict_args.verbose);
         assert!(predict_args.source.is_none());
     }
@@ -219,6 +224,15 @@ mod tests {
         assert!((predict_args.conf - 0.8).abs() < f32::EPSILON);
         assert_eq!(predict_args.quantize, Some(Quantization::Fp16));
         assert!(!predict_args.verbose);
+    }
+
+    #[test]
+    fn test_deprecated_half_arg() {
+        let args = Cli::parse_from(["app", "predict", "--half"]);
+        let Commands::Predict(predict_args) = args.command else {
+            panic!("expected predict command");
+        };
+        assert!(predict_args.half);
     }
 
     #[test]

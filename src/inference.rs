@@ -9,6 +9,21 @@
 use std::fmt;
 use std::str::FromStr;
 
+pub(crate) fn handle_deprecated_precision(
+    quantize: Option<Quantization>,
+    half: Option<bool>,
+) -> Option<Quantization> {
+    if quantize.is_some() {
+        return quantize;
+    }
+    half.map_or(quantize, |enabled| {
+        crate::warn!(
+            "'half' is deprecated and will be removed in the future. Use 'quantize' instead."
+        );
+        enabled.then_some(Quantization::Fp16)
+    })
+}
+
 /// Inference precision requested through the `quantize` argument.
 ///
 /// Values and aliases match the Ultralytics Python package: `8`/`int8`/`w8a8`,
@@ -115,6 +130,9 @@ pub struct InferenceConfig {
     pub num_threads: usize,
     /// Requested inference precision. `None` uses the model's native precision.
     pub quantize: Option<Quantization>,
+    /// Legacy FP16 inference flag. Use [`Self::quantize`] instead.
+    #[doc(hidden)]
+    pub half: bool,
     /// Hardware device to use for inference.
     /// If `None`, the best available device will be automatically selected.
     pub device: Option<crate::Device>,
@@ -149,6 +167,7 @@ impl Default for InferenceConfig {
             batch: None,
             num_threads: 0, // 0 = let ONNX Runtime decide (typically uses all cores efficiently)
             quantize: Self::DEFAULT_QUANTIZE,
+            half: Self::DEFAULT_HALF,
             device: None,
             save: Self::DEFAULT_SAVE,
             save_frames: Self::DEFAULT_SAVE_FRAMES,
@@ -168,6 +187,9 @@ impl InferenceConfig {
     pub const DEFAULT_MAX_DET: usize = 300;
     /// Default inference precision. `None` uses the model's native precision.
     pub const DEFAULT_QUANTIZE: Option<Quantization> = None;
+    /// Legacy default retained for source compatibility.
+    #[doc(hidden)]
+    pub const DEFAULT_HALF: bool = false;
     /// Default for saving annotated results.
     pub const DEFAULT_SAVE: bool = true;
     /// Default for saving individual frames (vs video).
@@ -306,6 +328,20 @@ impl InferenceConfig {
     pub const fn with_quantize(mut self, quantize: Quantization) -> Self {
         self.quantize = Some(quantize);
         self
+    }
+
+    /// Set FP16 inference using the legacy precision argument.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_half(mut self, half: bool) -> Self {
+        self.half = half;
+        self
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn normalize_precision(&mut self) {
+        self.quantize = handle_deprecated_precision(self.quantize, self.half.then_some(true));
+        self.half = false;
     }
 
     /// Enable or disable the CUDA preprocess fast path.
@@ -535,5 +571,20 @@ mod tests {
         }
         assert_eq!(Quantization::Int8.to_string(), "8");
         assert!("4".parse::<Quantization>().is_err());
+    }
+
+    #[test]
+    fn test_deprecated_half_mapping() {
+        let mut config = InferenceConfig::new().with_half(true);
+        config.normalize_precision();
+        assert_eq!(config.quantize, Some(Quantization::Fp16));
+        assert!(!config.half);
+
+        let mut config = InferenceConfig::new()
+            .with_half(true)
+            .with_quantize(Quantization::Fp32);
+        config.normalize_precision();
+        assert_eq!(config.quantize, Some(Quantization::Fp32));
+        assert!(!config.half);
     }
 }

@@ -435,6 +435,7 @@ fn build_inference_config(
         .with_confidence(args.conf)
         .with_iou(args.iou)
         .with_batch(args.batch as usize)
+        .with_half(args.half)
         .with_save_frames(args.save_frames)
         .with_rect(args.rect)
         .with_max_det(args.max_det);
@@ -442,6 +443,7 @@ fn build_inference_config(
     if let Some(quantize) = args.quantize {
         config = config.with_quantize(quantize);
     }
+    config.normalize_precision();
 
     if let Some(sz) = args.imgsz {
         config = config.with_imgsz(sz, sz);
@@ -569,6 +571,7 @@ mod tests {
             rect: InferenceConfig::DEFAULT_RECT,
             batch: 1,
             quantize: InferenceConfig::DEFAULT_QUANTIZE,
+            half: false,
             save: InferenceConfig::DEFAULT_SAVE,
             save_frames: InferenceConfig::DEFAULT_SAVE_FRAMES,
             save_json: false,
@@ -639,6 +642,7 @@ mod tests {
             rect: false,
             batch: 4,
             quantize: Some(Quantization::Fp16),
+            half: false,
             save_frames: true,
             classes: Some("[0, 2, 5]".to_string()),
             ..predict_args()
@@ -656,6 +660,30 @@ mod tests {
         assert!(config.save_frames);
         assert!(!config.rect);
         assert_eq!(config.classes, Some(vec![0, 2, 5]));
+    }
+
+    #[test]
+    fn test_build_inference_config_maps_deprecated_half() {
+        let config = build_inference_config(
+            &PredictArgs {
+                half: true,
+                ..predict_args()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(config.quantize, Some(Quantization::Fp16));
+
+        let config = build_inference_config(
+            &PredictArgs {
+                quantize: Some(Quantization::Fp32),
+                half: true,
+                ..predict_args()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(config.quantize, Some(Quantization::Fp32));
     }
 
     #[test]

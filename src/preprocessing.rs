@@ -31,6 +31,25 @@ use ndarray::{Array3, Array4};
 
 use crate::inference::Quantization;
 
+/// Converts current and legacy preprocessing precision arguments to `quantize`.
+#[doc(hidden)]
+pub trait IntoQuantization {
+    /// Convert to the unified precision representation.
+    fn into_quantization(self) -> Option<Quantization>;
+}
+
+impl IntoQuantization for Option<Quantization> {
+    fn into_quantization(self) -> Option<Quantization> {
+        self
+    }
+}
+
+impl IntoQuantization for bool {
+    fn into_quantization(self) -> Option<Quantization> {
+        crate::inference::handle_deprecated_precision(None, Some(self))
+    }
+}
+
 /// Default letterbox padding color (gray).
 pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
 
@@ -218,8 +237,9 @@ pub fn preprocess_image_with_precision(
     image: &DynamicImage,
     target_size: (usize, usize),
     stride: u32,
-    quantize: Option<Quantization>,
+    quantize: impl IntoQuantization,
 ) -> PreprocessResult {
+    let quantize = quantize.into_quantization();
     let (orig_width, orig_height) = image.dimensions();
     let orig_shape = (orig_height, orig_width);
 
@@ -636,8 +656,9 @@ pub const fn clip_coords(coords: &[f32; 4], shape: (u32, u32)) -> [f32; 4] {
 pub fn preprocess_image_center_crop(
     image: &DynamicImage,
     target_size: (usize, usize),
-    quantize: Option<Quantization>,
+    quantize: impl IntoQuantization,
 ) -> PreprocessResult {
+    let quantize = quantize.into_quantization();
     let (orig_width, orig_height) = image.dimensions();
     let orig_shape = (orig_height, orig_width);
 

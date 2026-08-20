@@ -192,8 +192,9 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   YOLO("yolo26n.pt").export(format="onnx", quantize=16)  # FP16（体积约小 50%）
   ```
 
-  > Ultralytics ≥8.4 使用 `quantize` 参数。对于 ONNX，支持的取值为
-  > `32`/`fp32`（默认）、`16`/`fp16` 和 `8`/`int8`。
+  > Ultralytics ≥8.4 使用 `quantize` 参数，取代已弃用的 `half=True` / `int8=True` 标志。
+  > 对于 ONNX，支持的取值为 `32`/`fp32`（默认）、`16`/`fp16` 和 `8`/`int8`；旧标志
+  > 仍可使用，但会触发弃用警告。
 
 - **运行时资源**：首次加载时，`ort-web` 会从 `cdn.pyke.io` 获取 ONNX Runtime Web 的 wasm 包
   （约 25 MB，之后由浏览器缓存）。如果你设置了 Content-Security-Policy，请在
