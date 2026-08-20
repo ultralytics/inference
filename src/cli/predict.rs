@@ -160,9 +160,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
     #[cfg(not(feature = "annotate"))]
     if save {
-        warn!(
-            "--save requires the 'annotate' feature. Compile with --features annotate to enable saving."
-        );
+        warn!("The 'annotate' feature is required to save annotated predictions.");
     }
 
     let precision = precision_label(model.quantize());
@@ -436,6 +434,7 @@ fn build_inference_config(
         .with_iou(args.iou)
         .with_batch(args.batch as usize)
         .with_half(args.half)
+        .with_save(args.save)
         .with_save_frames(args.save_frames)
         .with_rect(args.rect)
         .with_max_det(args.max_det);

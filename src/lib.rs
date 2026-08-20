@@ -132,7 +132,7 @@
 //! | `--rect` | | Enable rectangular inference (minimal padding) | `true` |
 //! | `--batch` | | Batch size for inference | `1` |
 //! | `--quantize` | | Inference precision (`8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w8a16`, or `w8a32`) | Model precision |
-//! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
+//! | `--save` | | Save generated outputs, including predictions and promoted FP32 models | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
 //! | `--show` | | Display results in a window | `false` |
@@ -143,6 +143,8 @@
 //! The legacy `--half` flag remains accepted for backward compatibility, maps
 //! to `--quantize 16`, and emits the same deprecation warning as Ultralytics
 //! Python. An explicit `--quantize` value wins.
+//! On CPU, `--quantize 32` promotes an FP16 ONNX graph before session creation.
+//! The source stays unchanged; `--save true` also writes `<model>_fp32.onnx`.
 //!
 //! \* `semantic` (semantic segmentation) and `depth` (depth estimation) are YOLO26-only.
 //!
@@ -175,6 +177,8 @@
 //!
 //! Add `quantize=16` for an FP16 ONNX, or `quantize=8` for INT8 (which also
 //! needs a calibration dataset via `data=`). Requires Ultralytics >= 8.4.
+//! Loading an FP16 ONNX with `quantize=32` promotes it to FP32 in memory and,
+//! when saving is enabled, writes a reusable `<model>_fp32.onnx` artifact.
 //!
 //! The task is auto-detected from ONNX metadata:
 //!
@@ -406,6 +410,8 @@ pub mod download;
 pub mod io;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod model;
+#[cfg(not(target_arch = "wasm32"))]
+mod onnx;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source;
 

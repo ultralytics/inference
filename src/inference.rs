@@ -136,7 +136,7 @@ pub struct InferenceConfig {
     /// Hardware device to use for inference.
     /// If `None`, the best available device will be automatically selected.
     pub device: Option<crate::Device>,
-    /// Whether to save annotated results.
+    /// Whether to save generated outputs, including annotated results and promoted models.
     /// Defaults to `true`.
     pub save: bool,
     /// Whether to save individual frames instead of a video file when input is video.
@@ -190,7 +190,7 @@ impl InferenceConfig {
     /// Legacy default retained for source compatibility.
     #[doc(hidden)]
     pub const DEFAULT_HALF: bool = false;
-    /// Default for saving annotated results.
+    /// Default for saving generated outputs.
     pub const DEFAULT_SAVE: bool = true;
     /// Default for saving individual frames (vs video).
     pub const DEFAULT_SAVE_FRAMES: bool = false;
@@ -318,8 +318,9 @@ impl InferenceConfig {
     /// Set the requested inference precision.
     ///
     /// The accepted schemes match the Python package's `quantize` argument.
-    /// For ONNX models, the exported graph determines which precisions the
-    /// execution provider can use.
+    /// Loading an FP16 ONNX model with [`Quantization::Fp32`] promotes its graph
+    /// in memory. When [`Self::save`] is enabled, the promoted graph is also saved
+    /// beside the source model with an `_fp32.onnx` suffix.
     ///
     /// # Returns
     ///
@@ -391,11 +392,11 @@ impl InferenceConfig {
         self
     }
 
-    /// Set whether to save annotated results.
+    /// Set whether to save generated outputs.
     ///
     /// # Arguments
     ///
-    /// * `save` - `true` to save results, `false` to skip saving.
+    /// * `save` - `true` to save outputs, `false` to skip saving.
     ///
     /// # Returns
     ///

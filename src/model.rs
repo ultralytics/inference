@@ -366,7 +366,7 @@ impl YOLOModel {
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
-        let session = session_builder
+        session_builder = session_builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}"))
@@ -382,9 +382,36 @@ impl YOLOModel {
             .with_memory_pattern(true)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))
-            })?
-            .commit_from_file(path)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
+            })?;
+
+        let promotion_start = Instant::now();
+        let promoted_model = if config.quantize == Some(Quantization::Fp32) {
+            crate::onnx::promote_fp16_to_fp32(&std::fs::read(path)?)?
+        } else {
+            None
+        };
+        if promoted_model.is_some() {
+            crate::info!(
+                "Promoted ONNX model to FP32 in {:.1?}",
+                promotion_start.elapsed()
+            );
+        }
+        if config.save
+            && let Some(model) = &promoted_model
+        {
+            let stem = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("model");
+            let output = path.with_file_name(format!("{stem}_fp32.onnx"));
+            std::fs::write(&output, model)?;
+            crate::info!("Promoted FP32 model saved to {}", output.display());
+        }
+        let session = match promoted_model.as_deref() {
+            Some(model) => session_builder.commit_from_memory(model),
+            None => session_builder.commit_from_file(path),
+        }
+        .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
         // Extract metadata from model
         let metadata = Self::extract_metadata(&session)?;
@@ -449,7 +476,9 @@ impl YOLOModel {
             }
         };
 
-        let quantize = if provider_name == "TensorRTExecutionProvider" {
+        let quantize = if promoted_model.is_some() {
+            Some(Quantization::Fp32)
+        } else if provider_name == "TensorRTExecutionProvider" {
             Some(if config.quantize == Some(Quantization::Fp16) {
                 Quantization::Fp16
             } else {

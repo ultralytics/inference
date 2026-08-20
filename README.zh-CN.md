@@ -213,7 +213,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -233,7 +233,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -275,7 +275,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--rect`        |      | 启用矩形推理（最小填充）                                                                                                                                          | `true`                            |
 | `--batch`       |      | 推理 batch size                                                                                                                                                   | `1`                               |
 | `--quantize`    |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w8a16` 或 `w8a32`                                                                           | 模型精度                          |
-| `--save`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                            | `true`                            |
+| `--save`        |      | 保存生成的输出，包括预测结果和提升后的 FP32 模型                                                                                                                  | `true`                            |
 | `--save-frames` |      | 为视频输入保存单帧（而不是视频文件）                                                                                                                              | `false`                           |
 | `--save-json`   |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                                              | `false`                           |
 | `--show`        |      | 在窗口中显示结果                                                                                                                                                  | `false`                           |
@@ -284,6 +284,8 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--classes`     |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                                              | 所有类别                          |
 
 旧版 `--half` 标志仍可向后兼容，会映射为 `--quantize 16`，并发出与 Ultralytics Python 相同的弃用警告。显式的 `--quantize` 值优先。
+
+在 CPU 上，`--quantize 32` 会在 ONNX Runtime 创建推理会话前，于内存中将 FP16 ONNX 图提升为 FP32。紧凑的 FP16 源文件保持不变。使用默认的 `--save true` 时，提升后的图也会以 `<model>_fp32.onnx` 写入源文件旁；使用 `--save false` 则仅在内存中转换。
 
 **任务和模型解析：**
 
@@ -332,7 +334,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.36"
+ultralytics-inference = "0.0.37"
 ```
 
 ```toml
@@ -545,7 +547,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.36", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.37", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 

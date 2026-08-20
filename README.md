@@ -214,7 +214,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -234,7 +234,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.36 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.37 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -276,7 +276,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                        | `true`                                |
 | `--batch`       |       | Batch size for inference                                                                                                                                                                              | `1`                                   |
 | `--quantize`    |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w8a16`, or `w8a32`                                                                                                   | Model precision                       |
-| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                       | `true`                                |
+| `--save`        |       | Save generated outputs, including predictions and promoted FP32 models                                                                                                                                | `true`                                |
 | `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                                        | `false`                               |
 | `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                                                     | `false`                               |
 | `--show`        |       | Display results in a window                                                                                                                                                                           | `false`                               |
@@ -285,6 +285,8 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 | `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                                           | all classes                           |
 
 The legacy `--half` flag remains accepted for backward compatibility, maps to `--quantize 16`, and emits the same deprecation warning as Ultralytics Python. An explicit `--quantize` value wins.
+
+On CPU, `--quantize 32` promotes an FP16 ONNX graph to FP32 in memory before ONNX Runtime creates the inference session. The compact FP16 source remains unchanged. With the default `--save true`, the promoted graph is also written beside it as `<model>_fp32.onnx`; use `--save false` for in-memory conversion only.
 
 **Task and Model Resolution:**
 
@@ -333,7 +335,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.36"
+ultralytics-inference = "0.0.37"
 ```
 
 ```toml
@@ -549,7 +551,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.36", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.37", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
