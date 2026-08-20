@@ -56,6 +56,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          cache-targets: false
+          prefix-key: v1-rust
           key: xcode-${{ env.XCODE_VER }}
 
       - name: Ensure toolchain
@@ -110,6 +112,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          cache-targets: false
+          prefix-key: v1-rust
           # Key on ffmpeg version so each container gets its own cache
           key: ffmpeg-${{ matrix.ffmpeg_version }}
 
@@ -152,6 +156,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          cache-targets: false
+          prefix-key: v1-rust
           key: ffmpeg-${{ env.FFMPEG_VERSION }}-xcode-${{ env.XCODE_VER }}
 
       - name: Ensure toolchain
@@ -199,6 +205,9 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-targets: false
+          prefix-key: v1-rust
 
       - name: Ensure toolchain
         run: rustup show
@@ -224,6 +233,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          cache-targets: false
+          prefix-key: v1-rust
           key: wasm
 
       - name: Ensure toolchain
@@ -277,6 +288,9 @@ jobs:
       # Nightly toolchain version in rustc -V already gives this job a unique cache key
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-targets: false
+          prefix-key: v1-rust
 
       - name: Ensure toolchain
         run: rustup show
