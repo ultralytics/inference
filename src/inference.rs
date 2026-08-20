@@ -318,8 +318,9 @@ impl InferenceConfig {
     /// Set the requested inference precision.
     ///
     /// The accepted schemes match the Python package's `quantize` argument.
-    /// Loading an Ultralytics-exported FP16 ONNX model with [`Quantization::Fp32`]
-    /// promotes its graph to FP32 in memory while leaving the source file unchanged.
+    /// With the `fp16-to-fp32` feature, loading an Ultralytics-exported FP16 ONNX
+    /// model with [`Quantization::Fp32`] promotes its graph to FP32 in memory while
+    /// leaving the source file unchanged.
     ///
     /// # Returns
     ///

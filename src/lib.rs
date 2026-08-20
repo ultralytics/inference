@@ -175,8 +175,9 @@
 //!
 //! Add `quantize=16` for an FP16 ONNX, or `quantize=8` for INT8 (which also
 //! needs a calibration dataset via `data=`). Requires Ultralytics >= 8.4.
-//! Loading an Ultralytics-exported FP16 ONNX with `quantize=32` promotes the graph
-//! to FP32 in memory without changing the compact source file.
+//! With the `fp16-to-fp32` feature, loading an Ultralytics-exported FP16 ONNX with
+//! `quantize=32` promotes the graph to FP32 in memory without changing the compact
+//! source file.
 //!
 //! The task is auto-detected from ONNX metadata:
 //!

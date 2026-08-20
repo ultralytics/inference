@@ -13,6 +13,7 @@ use std::time::Instant;
 use half::f16;
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array3;
+#[cfg(feature = "fp16-to-fp32")]
 use onnx_rs::ast::{DataType, Graph, OpType, TensorProto, TypeValue};
 // `model` is native-only, so rayon is used directly rather than via `crate::parallel`
 // (which exists to give the wasm-shared pipeline sequential shims).
@@ -55,6 +56,7 @@ macro_rules! bind_compute_stream {
     };
 }
 
+#[cfg(feature = "fp16-to-fp32")]
 fn promote_fp16_to_fp32(model_bytes: &[u8]) -> Result<Option<Vec<u8>>> {
     let mut model = onnx_rs::parse(model_bytes).map_err(|e| {
         InferenceError::ModelLoadError(format!(
@@ -71,6 +73,7 @@ fn promote_fp16_to_fp32(model_bytes: &[u8]) -> Result<Option<Vec<u8>>> {
     Ok(Some(onnx_rs::encode(&model)))
 }
 
+#[cfg(feature = "fp16-to-fp32")]
 fn promote_graph(graph: &mut Graph<'_>) -> Result<bool> {
     let mut promoted = false;
     for tensor in &mut graph.initializer {
@@ -108,6 +111,7 @@ fn promote_graph(graph: &mut Graph<'_>) -> Result<bool> {
     Ok(promoted)
 }
 
+#[cfg(feature = "fp16-to-fp32")]
 fn promote_tensor(tensor: &mut TensorProto<'_>) -> Result<bool> {
     if tensor.data_type() != DataType::Float16 {
         return Ok(false);
@@ -150,6 +154,7 @@ fn promote_tensor(tensor: &mut TensorProto<'_>) -> Result<bool> {
     Ok(true)
 }
 
+#[cfg(feature = "fp16-to-fp32")]
 const fn promote_element_type(element_type: &mut DataType) -> bool {
     if matches!(*element_type, DataType::Float16) {
         *element_type = DataType::Float;
@@ -489,11 +494,14 @@ impl YOLOModel {
                 InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))
             })?;
 
+        #[cfg(feature = "fp16-to-fp32")]
         let promoted_model = if config.quantize == Some(Quantization::Fp32) {
             promote_fp16_to_fp32(&std::fs::read(path)?)?
         } else {
             None
         };
+        #[cfg(not(feature = "fp16-to-fp32"))]
+        let promoted_model: Option<Vec<u8>> = None;
         let session = match promoted_model.as_deref() {
             Some(bytes) => session_builder.commit_from_memory(bytes),
             None => session_builder.commit_from_file(path),
@@ -502,6 +510,14 @@ impl YOLOModel {
 
         // Extract metadata from model
         let metadata = Self::extract_metadata(&session)?;
+        #[cfg(not(feature = "fp16-to-fp32"))]
+        if config.quantize == Some(Quantization::Fp32)
+            && metadata.quantize == Some(Quantization::Fp16)
+        {
+            return Err(InferenceError::FeatureNotEnabled(
+                "enable 'fp16-to-fp32' to run an FP16 ONNX model with quantize=32".to_string(),
+            ));
+        }
 
         // Get input/output names and detect input type
         let input_info = session.inputs().first();
@@ -2184,12 +2200,14 @@ fn shape_to_usize(shape: &[i64]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "fp16-to-fp32")]
     use onnx_rs::ast::{
         Attribute, AttributeType, Model, Node, TensorTypeProto, TypeProto, ValueInfo,
     };
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    #[cfg(feature = "fp16-to-fp32")]
     #[test]
     fn test_promote_fp16_onnx_graph_to_fp32() {
         let data = [f16::from_f32(1.5), f16::from_f32(-2.0)]
