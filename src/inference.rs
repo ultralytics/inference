@@ -318,9 +318,9 @@ impl InferenceConfig {
     /// Set the requested inference precision.
     ///
     /// The accepted schemes match the Python package's `quantize` argument.
-    /// Loading an FP16 ONNX model with [`Quantization::Fp32`] promotes its graph
-    /// in memory. When [`Self::save`] is enabled, the promoted graph is also saved
-    /// beside the source model with an `_fp32.onnx` suffix.
+    /// On CPU, loading an FP16 ONNX model with [`Quantization::Fp32`] promotes its
+    /// graph in memory. When [`Self::save`] is enabled, the promoted graph is also
+    /// saved beside the source model with an `_fp32.onnx` suffix.
     ///
     /// # Returns
     ///

@@ -177,8 +177,8 @@
 //!
 //! Add `quantize=16` for an FP16 ONNX, or `quantize=8` for INT8 (which also
 //! needs a calibration dataset via `data=`). Requires Ultralytics >= 8.4.
-//! Loading an FP16 ONNX with `quantize=32` promotes it to FP32 in memory and,
-//! when saving is enabled, writes a reusable `<model>_fp32.onnx` artifact.
+//! On CPU, loading an FP16 ONNX with `quantize=32` promotes it to FP32 in memory
+//! and, when saving is enabled, writes a reusable `<model>_fp32.onnx` artifact.
 //!
 //! The task is auto-detected from ONNX metadata:
 //!
