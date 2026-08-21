@@ -366,8 +366,27 @@ impl YOLOModel {
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
+        let promotion_start = Instant::now();
+        let promoted_model = if config.quantize == Some(Quantization::Fp32)
+            && provider_name == "CPUExecutionProvider"
+        {
+            crate::onnx::promote_fp16_to_fp32(&std::fs::read(path)?)?
+        } else {
+            None
+        };
+        if promoted_model.is_some() {
+            crate::info!(
+                "Promoted ONNX model to FP32 in {:.1?}",
+                promotion_start.elapsed()
+            );
+        }
+        let optimization_level = if promoted_model.is_some() {
+            ort::session::builder::GraphOptimizationLevel::Level2
+        } else {
+            ort::session::builder::GraphOptimizationLevel::Level3
+        };
         session_builder = session_builder
-            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+            .with_optimization_level(optimization_level)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}"))
             })?
@@ -384,20 +403,6 @@ impl YOLOModel {
                 InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))
             })?;
 
-        let promotion_start = Instant::now();
-        let promoted_model = if config.quantize == Some(Quantization::Fp32)
-            && provider_name == "CPUExecutionProvider"
-        {
-            crate::onnx::promote_fp16_to_fp32(&std::fs::read(path)?)?
-        } else {
-            None
-        };
-        if promoted_model.is_some() {
-            crate::info!(
-                "Promoted ONNX model to FP32 in {:.1?}",
-                promotion_start.elapsed()
-            );
-        }
         let session = match promoted_model.as_deref() {
             Some(model) => session_builder.commit_from_memory(model),
             None => session_builder.commit_from_file(path),

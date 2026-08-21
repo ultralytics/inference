@@ -1,6 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 use half::f16;
+use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSlice, ParallelSliceMut};
 
 use crate::{InferenceError, Result};
 
@@ -169,9 +170,21 @@ fn rewrite_tensor(input: &[u8], output: &mut Vec<u8>, promoted: &mut usize) -> R
                 if !data.len().is_multiple_of(2) {
                     return Err(model_error("ONNX FP16 tensor has an invalid byte length"));
                 }
-                for value in data.as_chunks::<2>().0 {
-                    let bits = u16::from_le_bytes([value[0], value[1]]);
-                    output.extend_from_slice(&f16::from_bits(bits).to_f32().to_le_bytes());
+                if data.len() >= 1 << 20 {
+                    let start = output.len();
+                    output.resize(start + data.len() * 2, 0);
+                    output[start..]
+                        .par_chunks_exact_mut(4)
+                        .zip(data.par_chunks_exact(2))
+                        .for_each(|(output, value)| {
+                            let bits = u16::from_le_bytes([value[0], value[1]]);
+                            output.copy_from_slice(&f16::from_bits(bits).to_f32().to_le_bytes());
+                        });
+                } else {
+                    for value in data.as_chunks::<2>().0 {
+                        let bits = u16::from_le_bytes([value[0], value[1]]);
+                        output.extend_from_slice(&f16::from_bits(bits).to_f32().to_le_bytes());
+                    }
                 }
                 Ok(())
             })?,
