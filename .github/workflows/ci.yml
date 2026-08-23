@@ -243,9 +243,7 @@ jobs:
         run: cargo clippy -p ultralytics-inference-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@ba47c86ac325773530516bb756137ac718732518 # v2.86.5
-        with:
-          tool: wasm-pack
+        run: cargo install wasm-pack --locked
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -290,9 +288,7 @@ jobs:
         run: rustup show
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@ba47c86ac325773530516bb756137ac718732518 # v2.86.5
-        with:
-          tool: cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
 
       - name: Coverage
         # Exclude code that host-side unit tests cannot exercise: the CUDA kernel
