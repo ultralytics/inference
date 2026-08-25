@@ -9,8 +9,6 @@ const FLOAT: u64 = 1;
 const FLOAT16: u64 = 10;
 const LENGTH_DELIMITED: u8 = 2;
 const MAX_VARINT_BYTES: usize = 10;
-/// Tensors below this widen on one thread: the rayon fan-out costs more than
-/// splitting a small tensor saves.
 const MIN_PARALLEL_BYTES: usize = 1 << 20;
 
 /// Upper bound on the bytes a promoted rewrite of `length` input bytes produces.
@@ -347,10 +345,6 @@ fn has_field(input: &[u8], number: u32) -> Result<bool> {
     Ok(find_field(input, number)?.is_some())
 }
 
-/// Write `write`'s output as field `number`, reserving room for the length prefix
-/// up front. `bound` is an upper bound on the payload length: when it predicts the
-/// same varint width as the payload actually needs, which is the common case, the
-/// payload lands in place and nothing has to be shifted.
 fn write_message(
     output: &mut Vec<u8>,
     number: u32,
