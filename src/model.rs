@@ -366,13 +366,20 @@ impl YOLOModel {
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
-        // `All` (ORT_ENABLE_ALL) rather than `Level3` (ORT_ENABLE_LAYOUT): only the
+        // `All` (ORT_ENABLE_ALL) rather than `Level3` (ORT_ENABLE_LAYOUT) on CPU: only the
         // former reaches ONNX Runtime's Level 4 transformers, where
-        // `FuseFp16InitializerToFp32NodeTransformer` folds an FP16 initializer through
-        // the Cast in front of it and materializes an FP32 one. Without it an FP16
-        // graph runs with a Cast around every node.
+        // `FuseFp16InitializerToFp32NodeTransformer` folds an FP16 initializer through the
+        // Cast in front of it and materializes an FP32 one. Without it an FP16 graph runs
+        // with a Cast around every node. The fusion only rewrites nodes assigned to the CPU
+        // EP, so every other provider is left at `Level3`, where it measured the same and
+        // where XNNPACK avoids an upstream layout-fusion bug (onnxruntime#28540).
+        let optimization_level = if provider_name == "CPUExecutionProvider" {
+            ort::session::builder::GraphOptimizationLevel::All
+        } else {
+            ort::session::builder::GraphOptimizationLevel::Level3
+        };
         session_builder = session_builder
-            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::All)
+            .with_optimization_level(optimization_level)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}"))
             })?
