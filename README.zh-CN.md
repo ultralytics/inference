@@ -285,7 +285,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 旧版 `--half` 标志仍可向后兼容，会映射为 `--quantize 16`，并发出与 Ultralytics Python 相同的弃用警告。显式的 `--quantize` 值优先。
 
-在 CPU 上，ONNX Runtime 会在创建推理会话时将 FP16 ONNX 图加宽为 FP32 权重，因此无需 `--quantize 32`，FP16 导出模型也能以 FP32 的速度运行。紧凑的 FP16 源文件保持不变。
+在 CPU 上，ONNX Runtime 会在创建推理会话时将 FP16 ONNX 图加宽为 FP32 权重，因此 FP16 导出模型也能以 FP32 的速度运行。紧凑的 FP16 源文件保持不变。
 
 **任务和模型解析：**
 

@@ -366,13 +366,11 @@ impl YOLOModel {
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
-        // `All` (ORT_ENABLE_ALL) rather than `Level3` (ORT_ENABLE_LAYOUT) on CPU: only the
-        // former reaches ONNX Runtime's Level 4 transformers, where
-        // `FuseFp16InitializerToFp32NodeTransformer` folds an FP16 initializer through the
-        // Cast in front of it and materializes an FP32 one. Without it an FP16 graph runs
-        // with a Cast around every node. The fusion only rewrites nodes assigned to the CPU
-        // EP, so every other provider is left at `Level3`, where it measured the same and
-        // where XNNPACK avoids an upstream layout-fusion bug (onnxruntime#28540).
+        // `All` (ORT_ENABLE_ALL), not `Level3` (ORT_ENABLE_LAYOUT), reaches ONNX Runtime's
+        // Level 4 pass, where `FuseFp16InitializerToFp32NodeTransformer` folds FP16
+        // initializers into FP32 ones; without it an FP16 graph runs with a Cast around
+        // every node. That pass only rewrites CPU-EP nodes, so other providers stay at
+        // `Level3`, which also avoids an XNNPACK layout-fusion bug (onnxruntime#28540).
         let optimization_level = if provider_name == "CPUExecutionProvider" {
             ort::session::builder::GraphOptimizationLevel::All
         } else {
@@ -480,9 +478,8 @@ impl YOLOModel {
         } else {
             metadata.quantize
         };
-        // `quantize` is a request, not a guarantee: an ONNX file carries its own
-        // precision and each provider supports a different subset, so say so
-        // rather than silently running at something else.
+        // `quantize` is a request, not a guarantee: the ONNX file carries its own precision
+        // and each provider supports a different subset, so say so instead of running silently.
         let effective = quantize.unwrap_or(Quantization::Fp32);
         if let Some(requested) = config.quantize
             && requested != effective

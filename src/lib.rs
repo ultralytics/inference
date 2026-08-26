@@ -177,7 +177,6 @@
 //!
 //! Add `quantize=16` for an FP16 ONNX, or `quantize=8` for INT8 (which also
 //! needs a calibration dataset via `data=`). Requires Ultralytics >= 8.4.
-//! On CPU an FP16 ONNX runs at FP32 weights, widened by ONNX Runtime at load time.
 //!
 //! The task is auto-detected from ONNX metadata:
 //!

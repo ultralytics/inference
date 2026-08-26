@@ -286,7 +286,7 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 The legacy `--half` flag remains accepted for backward compatibility, maps to `--quantize 16`, and emits the same deprecation warning as Ultralytics Python. An explicit `--quantize` value wins.
 
-On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds the inference session, so an FP16 export runs at FP32 speed without `--quantize 32`. The compact FP16 source remains unchanged.
+On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds the inference session, so an FP16 export runs at FP32 speed. The compact FP16 source file is never modified.
 
 **Task and Model Resolution:**
 
