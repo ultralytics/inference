@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{InferenceError, Result};
-use crate::inference::{Quantization, handle_deprecated_precision};
+use crate::inference::Quantization;
 use crate::task::Task;
 
 /// Metadata extracted from an Ultralytics YOLO ONNX model.
@@ -180,7 +180,9 @@ impl ModelMetadata {
         }
 
         if !quantize_set {
-            metadata.quantize = handle_deprecated_precision(None, half);
+            // `half` here is the model's own export metadata, not a user-supplied
+            // flag, so it maps straight through without the deprecation warning.
+            metadata.quantize = half.unwrap_or(false).then_some(Quantization::Fp16);
         }
         metadata.half = metadata.quantize == Some(Quantization::Fp16);
 

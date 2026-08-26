@@ -473,6 +473,18 @@ impl YOLOModel {
         } else {
             metadata.quantize
         };
+        // `quantize` is a request, not a guarantee: an ONNX file carries its own
+        // precision and each provider supports a different subset, so say so
+        // rather than silently running at something else.
+        let effective = quantize.unwrap_or(Quantization::Fp32);
+        if let Some(requested) = config.quantize
+            && requested != effective
+        {
+            crate::warn!(
+                "'quantize={requested}' is unavailable for this model on {provider_name}; \
+                 running at 'quantize={effective}'."
+            );
+        }
         let config = InferenceConfig {
             imgsz: Some(resolved_imgsz),
             quantize,
