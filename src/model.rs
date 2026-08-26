@@ -366,27 +366,13 @@ impl YOLOModel {
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
-        let promotion_start = Instant::now();
-        let promoted_model = if config.quantize == Some(Quantization::Fp32)
-            && provider_name == "CPUExecutionProvider"
-        {
-            crate::onnx::promote_fp16_to_fp32(&std::fs::read(path)?)?
-        } else {
-            None
-        };
-        if promoted_model.is_some() {
-            crate::info!(
-                "Promoted ONNX model to FP32 in {:.1?}",
-                promotion_start.elapsed()
-            );
-        }
-        let optimization_level = if promoted_model.is_some() {
-            ort::session::builder::GraphOptimizationLevel::Level2
-        } else {
-            ort::session::builder::GraphOptimizationLevel::Level3
-        };
+        // `All` (ORT_ENABLE_ALL) rather than `Level3` (ORT_ENABLE_LAYOUT): only the
+        // former reaches ONNX Runtime's Level 4 transformers, where
+        // `FuseFp16InitializerToFp32NodeTransformer` folds an FP16 initializer through
+        // the Cast in front of it and materializes an FP32 one. Without it an FP16
+        // graph runs with a Cast around every node.
         session_builder = session_builder
-            .with_optimization_level(optimization_level)
+            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::All)
             .map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to set optimization level: {e}"))
             })?
@@ -403,11 +389,9 @@ impl YOLOModel {
                 InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))
             })?;
 
-        let session = match promoted_model.as_deref() {
-            Some(model) => session_builder.commit_from_memory(model),
-            None => session_builder.commit_from_file(path),
-        }
-        .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
+        let session = session_builder
+            .commit_from_file(path)
+            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
 
         // Extract metadata from model
         let metadata = Self::extract_metadata(&session)?;
@@ -472,18 +456,22 @@ impl YOLOModel {
             }
         };
 
-        let quantize = if promoted_model.is_some() {
-            Some(Quantization::Fp32)
-        } else if provider_name == "TensorRTExecutionProvider" {
+        let quantize = if provider_name == "TensorRTExecutionProvider" {
             Some(if config.quantize == Some(Quantization::Fp16) {
                 Quantization::Fp16
             } else {
                 Quantization::Fp32
             })
+        } else if fp16_input {
+            Some(Quantization::Fp16)
+        } else if provider_name == "CPUExecutionProvider"
+            && metadata.quantize == Some(Quantization::Fp16)
+        {
+            // ONNX Runtime widens FP16 weights to FP32 on the CPU EP, so an FP16
+            // export runs at FP32 there whatever the model metadata claims.
+            Some(Quantization::Fp32)
         } else {
-            fp16_input
-                .then_some(Quantization::Fp16)
-                .or(metadata.quantize)
+            metadata.quantize
         };
         let config = InferenceConfig {
             imgsz: Some(resolved_imgsz),

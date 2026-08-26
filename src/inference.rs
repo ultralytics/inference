@@ -318,8 +318,9 @@ impl InferenceConfig {
     /// Set the requested inference precision.
     ///
     /// The accepted schemes match the Python package's `quantize` argument.
-    /// On CPU, loading an FP16 ONNX model with [`Quantization::Fp32`] promotes its
-    /// graph in memory.
+    /// On CPU this selects the requested precision where the execution provider
+    /// supports it; an FP16 ONNX model always runs at FP32 weights there, because
+    /// ONNX Runtime widens the graph while building the session.
     ///
     /// # Returns
     ///
