@@ -190,9 +190,7 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     }
 
-    // Process each image/frame. Only the count is needed, for the speed averages below; keeping
-    // the results would retain every frame's original image for the whole run, which a video or
-    // an endless webcam source cannot afford.
+    // Only the count is used below; keeping the results would pin every frame's image.
     let mut result_count = 0usize;
     let mut total_preprocess = 0.0;
     let mut total_inference = 0.0;
