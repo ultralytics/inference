@@ -190,8 +190,10 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     }
 
-    // Process each image/frame
-    let mut all_results: Vec<(String, Results)> = Vec::new();
+    // Process each image/frame. Only the count is needed, for the speed averages below; keeping
+    // the results would retain every frame's original image for the whole run, which a video or
+    // an endless webcam source cannot afford.
+    let mut result_count = 0usize;
     let mut total_preprocess = 0.0;
     let mut total_inference = 0.0;
     let mut total_postprocess = 0.0;
@@ -350,7 +352,7 @@ pub fn run_prediction(args: &PredictArgs) {
                         total_preprocess += result.speed.preprocess.unwrap_or(0.0);
                         total_inference += result.speed.inference.unwrap_or(0.0);
                         total_postprocess += result.speed.postprocess.unwrap_or(0.0);
-                        all_results.push((image_path.clone(), result));
+                        result_count += 1;
                     }
                 }
             },
@@ -383,7 +385,7 @@ pub fn run_prediction(args: &PredictArgs) {
     }
 
     // Print speed summary with inference tensor shape (after letterboxing)
-    let num_results = all_results.len().max(1) as f64;
+    let num_results = result_count.max(1) as f64;
     verbose!(
         "Speed: {:.1}ms preprocess, {:.1}ms inference, {:.1}ms postprocess per image at shape ({}, 3, {}, {})",
         total_preprocess / num_results,
