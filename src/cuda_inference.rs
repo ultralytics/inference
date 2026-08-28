@@ -132,7 +132,13 @@ impl CudaStreamHandle {
         let ctx = CudaContext::new(device_id).map_err(|e| {
             InferenceError::ModelLoadError(format!("cudarc CudaContext::new({device_id}): {e:?}"))
         })?;
-        let stream = ctx.default_stream();
+        // A real (non-blocking) stream, never `default_stream()`: that one carries a NULL
+        // `CUstream`, and ORT reads a null `user_compute_stream` as "none given" and runs
+        // the session on a stream of its own. The preprocess kernels would then be
+        // unordered against inference, which reads the input buffer before they land.
+        let stream = ctx.new_stream().map_err(|e| {
+            InferenceError::ModelLoadError(format!("cudarc new_stream({device_id}): {e:?}"))
+        })?;
         Ok(Self {
             ctx,
             stream,
