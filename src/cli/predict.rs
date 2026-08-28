@@ -52,7 +52,8 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     });
     #[cfg(feature = "visualize")]
-    let show = args.show;
+    #[cfg_attr(not(feature = "visualize"), allow(unused_mut))]
+    let mut show = args.show;
     if model_is_default && verbose {
         warn!("'model' argument is missing. Using default '--model={model_path}'.");
     }
@@ -329,9 +330,18 @@ pub fn run_prediction(args: &PredictArgs) {
                             }
 
                             if viewer.is_none() {
-                                viewer = Some(
-                                    Viewer::new(DISPLAY_NAME, view_width, view_height).unwrap(),
-                                );
+                                // No display (headless, SSH without forwarding) must not kill a
+                                // run whose inference already succeeded: warn once, then carry on
+                                // without the window, like an unreadable input is skipped.
+                                match Viewer::new(DISPLAY_NAME, view_width, view_height) {
+                                    Ok(v) => viewer = Some(v),
+                                    Err(e) => {
+                                        warn!(
+                                            "Cannot open a display window ({e}). Continuing without --show."
+                                        );
+                                        show = false;
+                                    }
+                                }
                             }
 
                             if let Some(ref mut v) = viewer {

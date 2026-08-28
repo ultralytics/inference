@@ -43,7 +43,7 @@ impl Viewer {
                 ..WindowOptions::default()
             },
         )
-        .map_err(|e| InferenceError::VisualizerError(format!("Failed to create window: {e}")))?;
+        .map_err(|e| InferenceError::VisualizerError(format!("{e:?}")))?;
 
         // Limit update rate
         window.set_target_fps(60);
