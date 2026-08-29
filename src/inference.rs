@@ -157,7 +157,7 @@ pub struct InferenceConfig {
     pub cuda_preprocess: bool,
     /// Upper bound, in bytes, on the CUDA execution provider's memory arena.
     ///
-    /// `None` (default) keeps ONNX Runtime's default behaviour, which grows the
+    /// `None` (default) keeps ONNX Runtime's default behavior, which grows the
     /// arena greedily and can reserve most of the device. Set a value to cap the
     /// allocation so other processes can share the GPU. Only consulted when the
     /// crate is built with the `cuda` feature and a CUDA device is selected.
