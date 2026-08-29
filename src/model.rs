@@ -585,7 +585,7 @@ impl YOLOModel {
             .with_device_id(device_id)
             .with_tf32(true);
 
-        if let Some(size) = mem_limit {
+        if let Some(size) = mem_limit.filter(|&size| size > 0) {
             ep = ep.with_memory_limit(size);
         }
 
