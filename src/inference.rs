@@ -157,10 +157,10 @@ pub struct InferenceConfig {
     pub cuda_preprocess: bool,
     /// Upper bound, in bytes, on the CUDA execution provider's memory arena.
     ///
-    /// `None` (default) keeps ONNX Runtime's default behavior, which grows the
-    /// arena greedily and can reserve most of the device. Set a value to cap the
-    /// allocation so other processes can share the GPU. Only consulted when the
-    /// crate is built with the `cuda` feature and a CUDA device is selected.
+    /// `None` (default) lets the arena grow as far as the device allows. Only
+    /// consulted with the `cuda` feature and a CUDA device: a `TensorRT` device
+    /// ignores it, as does a limit of `0`. The cap covers the arena alone, so
+    /// peak device memory stays well above it.
     pub cuda_memory_limit: Option<usize>,
 }
 
@@ -491,6 +491,8 @@ impl InferenceConfig {
     /// Use this to stop ONNX Runtime from reserving most of the GPU so the
     /// device can be shared with other processes. Has no effect unless the
     /// crate is built with the `cuda` feature and a CUDA device is selected.
+    /// A limit the graph cannot fit in fails the load with an ONNX Runtime arena
+    /// error; 64 MiB is already the floor for `YOLO26n` at 640x640.
     ///
     /// # Example
     ///
