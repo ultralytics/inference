@@ -492,7 +492,7 @@ impl InferenceConfig {
     /// device can be shared with other processes. Has no effect unless the
     /// crate is built with the `cuda` feature and a CUDA device is selected.
     /// A limit the graph cannot fit in fails the load with an ONNX Runtime arena
-    /// error; 64 MiB is already the floor for `YOLO26n` at 640x640.
+    /// error, so leave the model room to run.
     ///
     /// # Example
     ///

@@ -571,9 +571,9 @@ impl YOLOModel {
     /// for the `cuda-preprocess` fast path; see [`bind_compute_stream`].
     ///
     /// `mem_limit` (when `Some`) caps the EP's memory arena at that many bytes
-    /// so the GPU can be shared with other processes. The default extend strategy
-    /// stays: pairing the cap with `SameAsRequested` measured 14-33% *more* peak
-    /// device memory on the `YOLO26n` models.
+    /// so the GPU can be shared with other processes. The arena keeps ONNX
+    /// Runtime's default extend strategy, which reuses its chunks better than
+    /// an exact-size one and so peaks lower under the same cap.
     #[cfg(feature = "cuda")]
     #[allow(unsafe_code)]
     fn build_cuda_ep(
