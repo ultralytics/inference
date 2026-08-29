@@ -230,7 +230,7 @@ impl YOLOModel {
                 crate::Device::Cpu => {}
                 #[cfg(feature = "cuda")]
                 crate::Device::Cuda(i) => eps.push((
-                    Self::build_cuda_ep(*i as i32, cuda_pre_stream_ptr),
+                    Self::build_cuda_ep(*i as i32, cuda_pre_stream_ptr, config.cuda_memory_limit),
                     "CUDAExecutionProvider",
                 )),
                 #[cfg(feature = "coreml")]
@@ -293,7 +293,7 @@ impl YOLOModel {
 
             #[cfg(feature = "cuda")]
             eps.push((
-                Self::build_cuda_ep(0, cuda_pre_stream_ptr),
+                Self::build_cuda_ep(0, cuda_pre_stream_ptr, config.cuda_memory_limit),
                 "CUDAExecutionProvider",
             ));
 
@@ -569,15 +569,27 @@ impl YOLOModel {
     ///
     /// `compute_stream` (when `Some`) binds the EP to an external cudarc stream
     /// for the `cuda-preprocess` fast path; see [`bind_compute_stream`].
+    ///
+    /// `mem_limit` (when `Some`) caps the EP's memory arena at that many bytes
+    /// and switches it to a non-greedy extend strategy, so the GPU can be shared
+    /// with other processes.
     #[cfg(feature = "cuda")]
     #[allow(unsafe_code)]
     fn build_cuda_ep(
         device_id: i32,
         compute_stream: Option<*mut ()>,
+        mem_limit: Option<usize>,
     ) -> ort::ep::ExecutionProviderDispatch {
-        let ep = ort::ep::CUDA::default()
+        let mut ep = ort::ep::CUDA::default()
             .with_device_id(device_id)
             .with_tf32(true);
+
+        if let Some(size) = mem_limit {
+            ep = ep
+                .with_memory_limit(size)
+                .with_arena_extend_strategy(ort::ep::ArenaExtendStrategy::SameAsRequested);
+        }
+
         bind_compute_stream!(ep, compute_stream)
     }
 
