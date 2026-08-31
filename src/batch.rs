@@ -190,15 +190,22 @@ mod tests {
 
     /// Buffering, the per-batch callback, and the empty-flush no-op, against one session.
     ///
-    /// `YOLOModel` wraps an ORT session and cannot be mocked, so this skips when
-    /// `yolo26n.onnx` is neither present nor downloadable; the default suite then runs
+    /// `YOLOModel` wraps an ORT session and cannot be mocked, so this skips only when
+    /// `yolo26n.onnx` is both absent and not downloadable; the default suite then runs
     /// offline while CI, which has network, still exercises it. `batch_size` is 1 because
     /// the default `yolo26n.onnx` only supports batch 1.
     #[test]
     #[serial]
     fn test_batch_processor_buffers_and_flushes() {
-        let Ok(mut model) = YOLOModel::load("yolo26n.onnx") else {
-            return;
+        let path = std::path::Path::new("yolo26n.onnx");
+        let present = path.exists();
+        let mut model = match YOLOModel::load(path) {
+            Ok(model) => model,
+            // Absent and not downloadable is the offline case, so skip. A model that is
+            // already on disk must load: a corrupt file or an execution-provider
+            // regression has to fail here rather than silently skip the assertions.
+            Err(_) if !present => return,
+            Err(e) => panic!("yolo26n.onnx is present but failed to load: {e}"),
         };
 
         let calls = Rc::new(RefCell::new(0usize));
