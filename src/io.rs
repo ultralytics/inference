@@ -356,11 +356,18 @@ mod tests {
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
 
         // An existing but read-only directory reports false rather than being handed to a provider.
+        // Root ignores the permission bits, so that case cannot be observed when the suite runs
+        // as root, as it does in the FFmpeg container job; probe for it and skip instead.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-            assert!(!is_writable_dir(&dir));
+            let probe = dir.join(".permission-probe");
+            let permissions_enforced = std::fs::File::create(&probe).is_err();
+            let _ = std::fs::remove_file(&probe);
+            if permissions_enforced {
+                assert!(!is_writable_dir(&dir));
+            }
             std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
     }

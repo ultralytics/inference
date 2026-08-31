@@ -188,80 +188,24 @@ mod tests {
             .unwrap_or_else(|_| DynamicImage::new_rgb8(640, 640))
     }
 
-    /// Test that `BatchProcessor` correctly buffers images and invokes callback.
+    /// Buffering, the per-batch callback, and the empty-flush no-op, against one session.
     ///
-    /// Uses `batch_size=1` since the default yolo26n.onnx model only supports batch=1.
-    /// The model is auto-downloaded if not present.
+    /// `YOLOModel` wraps an ORT session and cannot be mocked, so this skips when
+    /// `yolo26n.onnx` is neither present nor downloadable; the default suite then runs
+    /// offline while CI, which has network, still exercises it. `batch_size` is 1 because
+    /// the default `yolo26n.onnx` only supports batch 1.
     #[test]
     #[serial]
-    fn test_batch_processor_with_model() {
-        let mut model = YOLOModel::load("yolo26n.onnx").expect("Model should load");
-
-        let callback_count = Rc::new(RefCell::new(0));
-        let callback_count_clone = Rc::clone(&callback_count);
-
-        // Use batch_size=1 since default model only supports batch=1
-        let mut processor =
-            BatchProcessor::new(&mut model, 1, move |_results, _images, _paths, _metas| {
-                *callback_count_clone.borrow_mut() += 1;
-            });
-
-        // Load real test images
-        let img1 = load_test_image();
-        let img2 = load_test_image();
-
-        let meta = SourceMeta {
-            path: "test.jpg".to_string(),
-            frame_idx: 0,
-            total_frames: Some(1),
-            fps: None,
+    fn test_batch_processor_buffers_and_flushes() {
+        let Ok(mut model) = YOLOModel::load("yolo26n.onnx") else {
+            return;
         };
 
-        // Add first image - should trigger callback immediately (batch_size=1)
-        processor.add(img1, "img1.jpg".to_string(), meta.clone());
-        assert_eq!(*callback_count.borrow(), 1);
-
-        // Add second image - should trigger another callback
-        processor.add(img2, "img2.jpg".to_string(), meta);
-        assert_eq!(*callback_count.borrow(), 2);
-
-        // Flush should not trigger callback (batch is empty)
-        processor.flush();
-        assert_eq!(*callback_count.borrow(), 2);
-    }
-
-    /// Test that flush on empty processor does nothing.
-    #[test]
-    #[serial]
-    fn test_batch_processor_empty_flush() {
-        let mut model = YOLOModel::load("yolo26n.onnx").expect("Model should load");
-
-        let callback_count = Rc::new(RefCell::new(0));
-        let callback_count_clone = Rc::clone(&callback_count);
-
+        let calls = Rc::new(RefCell::new(0usize));
+        let counter = Rc::clone(&calls);
         let mut processor =
             BatchProcessor::new(&mut model, 1, move |_results, _images, _paths, _metas| {
-                *callback_count_clone.borrow_mut() += 1;
-            });
-
-        // Flush without adding anything should not call callback
-        processor.flush();
-        assert_eq!(*callback_count.borrow(), 0);
-    }
-
-    /// Test that callback is invoked correct number of times with results.
-    #[test]
-    #[serial]
-    fn test_batch_processor_callback_count() {
-        let mut model = YOLOModel::load("yolo26n.onnx").expect("Model should load");
-
-        let count = Rc::new(RefCell::new(0));
-        let count_clone = Rc::clone(&count);
-
-        // Use `batch_size=1` to work with default model (which only supports batch=1)
-        let mut processor =
-            BatchProcessor::new(&mut model, 1, move |_results, _images, _paths, _metas| {
-                *count_clone.borrow_mut() += 1;
+                *counter.borrow_mut() += 1;
             });
 
         let meta = SourceMeta {
@@ -271,14 +215,18 @@ mod tests {
             fps: None,
         };
 
-        // Add 3 images with batch_size=1
-        for i in 0..3 {
-            let img = load_test_image();
-            processor.add(img, format!("img{i}.jpg"), meta.clone());
+        // Nothing buffered, so the flush must not reach the callback.
+        processor.flush();
+        assert_eq!(*calls.borrow(), 0);
+
+        // batch_size is 1, so every add fills the batch and fires the callback immediately.
+        for i in 1..=3usize {
+            processor.add(load_test_image(), format!("img{i}.jpg"), meta.clone());
+            assert_eq!(*calls.borrow(), i);
         }
-        processor.flush();
 
-        // Should have 3 callbacks (one per image since batch_size=1)
-        assert_eq!(*count.borrow(), 3);
+        // The last add emptied the buffer again, so this flush is another no-op.
+        processor.flush();
+        assert_eq!(*calls.borrow(), 3);
     }
 }
