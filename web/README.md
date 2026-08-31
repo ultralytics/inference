@@ -223,8 +223,8 @@ Only the inference engine changes; the preprocessing, postprocessing, drawing,
 and `Results` shape are the same shared Rust code, so output matches the `ort`
 path.
 
-The backend is picked from the file extension: a `.tflite` runs on LiteRT.js, a
-`.onnx` on ONNX Runtime Web. The LiteRT.js wasm loads from a CDN by default, so
+The backend is picked from the file extension, falling back to sniffing the `TFL3`
+magic bytes: a `.tflite` runs on LiteRT.js, a `.onnx` on ONNX Runtime Web. The LiteRT.js wasm loads from a CDN by default, so
 the only setup is making `@litertjs/core` resolve (along with its `@litertjs/wasm-utils`
 dependency, which npm installs automatically and the import map below lists explicitly).
 

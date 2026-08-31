@@ -91,7 +91,7 @@ pub(crate) struct JsResults {
     /// class-filtered pixels.
     #[serde(with = "serde_bytes")]
     semantic_mask: Vec<u8>,
-    /// Depth map as a translucent `RGBA` overlay (`width*height*4`), colorized with the
+    /// Depth map as an opaque `RGBA` overlay (`width*height*4`), colorized with the
     /// requested colormap over valid (`>0`) pixels; empty for other tasks. A
     /// `Uint8Array`, drawable straight onto a canvas to blend over the frame.
     #[serde(with = "serde_bytes")]

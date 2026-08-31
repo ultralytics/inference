@@ -41,7 +41,7 @@ High-performance YOLO inference library written in Rust. This library provides a
 ## ✨ Features
 
 - 🚀 **High Performance** - Pure Rust implementation with zero-cost abstractions
-- 🎯 **Ultralytics API Compatible** - `Results`, `Boxes`, `Masks`, `Keypoints`, `Probs`, `SemanticMask`, and `DepthMap` types matching the Python API shape
+- 🎯 **Ultralytics API Compatible** - `Results`, `Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`, `SemanticMask`, and `DepthMap` types matching the Python API shape
 - 🔧 **Multiple Backends** - CPU, XNNPACK, CUDA, TensorRT, CoreML, OpenVINO, and more via ONNX Runtime
 - 📦 **Dual Use** - Library for Rust projects + standalone CLI application
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
@@ -221,7 +221,7 @@ YOLO26n summary: 80 classes, imgsz=(640, 640)
 image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 36.4ms
 image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
 Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 384, 640)
-Results saved to runs/detect/predict1
+Results saved to runs/detect/predict
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
 
@@ -241,7 +241,7 @@ YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 48.2ms
 image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 38.1ms
 Speed: 1.6ms preprocess, 44.3ms inference, 1.2ms postprocess per image at shape (1, 3, 384, 640)
-Results saved to runs/segment/predict1
+Results saved to runs/segment/predict
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
 
@@ -264,25 +264,25 @@ ultralytics-inference predict --model <model.onnx> --source <source>
 
 **CLI Options:**
 
-| Option          | Short | Description                                                                                                                                                                                           | Default                               |
-| --------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                                                                                                         | `yolo26n.onnx`                        |
-| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*, `depth`\*); selects nano model when `--model` is omitted                                                                     | `detect`                              |
-| `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                                                                                                    | Task-dependent Ultralytics URL assets |
-| `--conf`        |       | Confidence threshold                                                                                                                                                                                  | `0.25`                                |
-| `--iou`         |       | IoU threshold for NMS                                                                                                                                                                                 | `0.7`                                 |
-| `--max-det`     |       | Maximum number of detections                                                                                                                                                                          | `300`                                 |
-| `--imgsz`       |       | Inference image size                                                                                                                                                                                  | `Model metadata`                      |
-| `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                        | `true`                                |
-| `--batch`       |       | Batch size for inference                                                                                                                                                                              | `1`                                   |
-| `--quantize`    |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w8a16`, or `w8a32`                                                                                                   | Model precision                       |
-| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                       | `true`                                |
-| `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                                        | `false`                               |
-| `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                                                     | `false`                               |
-| `--show`        |       | Display results in a window                                                                                                                                                                           | `false`                               |
-| `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | `cpu`                                 |
-| `--verbose`     |       | Show verbose output                                                                                                                                                                                   | `true`                                |
-| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                                           | all classes                           |
+| Option          | Short | Description                                                                                                                                                                                           | Default                                                                      |
+| --------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `--model`       | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                                                                                                         | `yolo26n.onnx`                                                               |
+| `--task`        |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*, `depth`\*); selects nano model when `--model` is omitted                                                                     | `detect`                                                                     |
+| `--source`      | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                                                                                                    | Task-dependent Ultralytics URL assets                                        |
+| `--conf`        |       | Confidence threshold                                                                                                                                                                                  | `0.25`                                                                       |
+| `--iou`         |       | IoU threshold for NMS                                                                                                                                                                                 | `0.7`                                                                        |
+| `--max-det`     |       | Maximum number of detections                                                                                                                                                                          | `300`                                                                        |
+| `--imgsz`       |       | Inference image size                                                                                                                                                                                  | `Model metadata`                                                             |
+| `--rect`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                        | `true`                                                                       |
+| `--batch`       |       | Batch size for inference                                                                                                                                                                              | `1`                                                                          |
+| `--quantize`    |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`                                                                                         | Model precision                                                              |
+| `--save`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                       | `true`                                                                       |
+| `--save-frames` |       | Save individual frames for video input (instead of video file)                                                                                                                                        | `false`                                                                      |
+| `--save-json`   |       | Save semantic segmentation class-map PNGs for external evaluation                                                                                                                                     | `false`                                                                      |
+| `--show`        |       | Display results in a window                                                                                                                                                                           | `false`                                                                      |
+| `--device`      |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack; additional providers selectable when their feature is enabled (see Features table) | auto (best available provider; `cpu` when no accelerator feature is enabled) |
+| `--verbose`     |       | Show verbose output                                                                                                                                                                                   | `true`                                                                       |
+| `--classes`     |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                                           | all classes                                                                  |
 
 The legacy `--half` flag remains accepted for backward compatibility, maps to `--quantize 16`, and emits the same deprecation warning as Ultralytics Python. An explicit `--quantize` value wins.
 
@@ -393,7 +393,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **Accessing Detection Data:**
 
-```rust
+```text
 if let Some(ref boxes) = result.boxes {
     // Bounding boxes in different formats
     let xyxy = boxes.xyxy();      // [x1, y1, x2, y2]
@@ -498,11 +498,12 @@ inference/
 │   │   └── predict.rs      # Predict command implementation
 │   └── visualizer/         # Real-time visualization (minifb)
 ├── tests/
-│   └── integration_test.rs # Integration tests
+│   ├── integration_test.rs # Integration tests
+│   └── README.md           # Testing guide
 ├── examples/               # Runnable library examples
 │   ├── basic.rs            # Load a model, run inference, print detections
 │   ├── config.rs           # Set confidence, IoU, image size, and device
-│   ├── tasks.rs            # Summary for detect, segment, pose, obb, classify
+│   ├── tasks.rs            # Summary for every task, plus raw arrays for segment, semantic, depth
 │   ├── annotate.rs         # Draw boxes and labels, save the annotated image
 │   └── README.md           # Examples guide
 ├── assets/                 # Test images
@@ -714,10 +715,10 @@ Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
 
 ### Threading Optimization
 
-ONNX Runtime threading is set to auto (`num_threads: 0`), which lets ORT choose the optimal thread count:
+Intra-op threading defaults to `num_threads: 0`, which the crate resolves to `available_parallelism()` when it builds the session:
 
 - Manual threading (4 threads): ~40ms inference
-- Auto threading (0 = ORT decides): ~21ms inference
+- Auto threading (0 = all available cores): ~21ms inference
 
 ## 🔮 Roadmap
 

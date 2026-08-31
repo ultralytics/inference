@@ -239,13 +239,13 @@ pub const DEPTH_ALPHA: f32 = 0.6;
 /// How depth values are normalized before colormapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DepthViz {
-    /// Metric min/max over valid pixels — near = low color, far = high color. Matches
-    /// Python's `colorize_depth`.
+    /// Metric min/max over valid pixels: near = low color, far = high color. Matches
+    /// Python's `colorize_depth(mode="metric")`.
     Metric,
     /// Inverse depth (`1/d`, disparity) with a 2–98 percentile clip — near = high color
     /// (warm). The default: inverting depth spreads the color range over nearby detail
     /// instead of the distant background, and the percentile clip keeps a few stray
-    /// pixels from washing it out.
+    /// pixels from washing it out. Matches Python's `colorize_depth` default.
     #[default]
     Disparity,
 }

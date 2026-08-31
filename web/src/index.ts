@@ -128,7 +128,9 @@ export interface LoadOptions {
    * Optional base URL to self-host the ONNX Runtime Web build instead of
    * fetching it from `cdn.pyke.io`. The directory must contain
    * `ort.webgpu.min.js`, `ort-wasm-simd-threaded.jsep.wasm`, and
-   * `ort-wasm-simd-threaded.jsep.mjs`. Use an absolute URL ending in `/`.
+   * `ort-wasm-simd-threaded.jsep.mjs` for WebGPU, plus `ort.wasm.min.js` and
+   * `ort-wasm-simd-threaded.wasm` for the CPU build, which is what a `"cpu"`
+   * device and the WebGPU fallback below load. Use an absolute URL ending in `/`.
    */
   ortBaseUrl?: string | URL;
   /**
@@ -712,7 +714,7 @@ export class YOLO {
     return this.engine.task;
   }
 
-  /** The active device that ran inference (`"webgpu"`, `"wasm"`, or `"cpu"`). */
+  /** The active device that ran inference (`"webgpu"` or `"cpu"`). */
   get device(): string {
     return this.engine.device;
   }
@@ -731,7 +733,7 @@ export class YOLO {
    * are decoded (in wasm for `ort`, via a canvas for `litert`).
    *
    * @param image The image to run on.
-   * @param options Confidence/IoU thresholds.
+   * @param options Confidence/IoU thresholds, class filter, and depth colorizing.
    */
   async predict(image: ImageInput, options?: PredictOptions): Promise<Results> {
     const conf = options?.conf ?? DEFAULT_CONF;

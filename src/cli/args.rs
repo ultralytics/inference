@@ -19,7 +19,7 @@ use clap::{Args, Parser, Subcommand};
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
     --rect                 Enable rectangular inference (minimal padding) [default: true]
     --batch <BATCH>        Batch size for inference [default: 1]
-    --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w8a16, or w8a32
+    --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w32a32, w8a16, or w8a32
     --save                 Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
@@ -99,7 +99,7 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub batch: u32,
 
-    /// Inference precision (8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w8a16, or w8a32)
+    /// Inference precision (8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w32a32, w8a16, or w8a32)
     #[arg(long)]
     pub quantize: Option<Quantization>,
 
@@ -128,7 +128,7 @@ pub struct PredictArgs {
     pub device: Option<String>,
 
     /// Show verbose output
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub verbose: bool,
 
     /// Filter by class IDs (e.g. 0 or "0,1,2" or "[0, 1, 2]")

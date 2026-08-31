@@ -1487,7 +1487,8 @@ impl YOLOModel {
         }
 
         // Same fast path (and same allowlist) as `predict_image`, filling one device slot
-        // per image. Single images keep using `predict_image`'s arm, which already ran.
+        // per image. The CLI reaches this even for a single image, because `BatchProcessor`
+        // always calls `predict_batch`.
         // `predict_batch` is public and its length is not tied to `config.batch`, so a batch
         // larger than the buffer was sized for falls back to the CPU path rather than
         // indexing past the last slot.

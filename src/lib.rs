@@ -131,12 +131,12 @@
 //! | `--imgsz` | | Inference image size | Model metadata |
 //! | `--rect` | | Enable rectangular inference (minimal padding) | `true` |
 //! | `--batch` | | Batch size for inference | `1` |
-//! | `--quantize` | | Inference precision (`8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w8a16`, or `w8a32`) | Model precision |
+//! | `--quantize` | | Inference precision (`8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`) | Model precision |
 //! | `--save` | | Save annotated results to runs/\<task\>/predict | `true` |
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
 //! | `--show` | | Display results in a window | `false` |
-//! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, xnnpack) | `cpu` |
+//! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack) | auto (best available provider; `cpu` when no accelerator feature is enabled) |
 //! | `--verbose` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
 //!

@@ -199,8 +199,8 @@ fn build_preprocess_result(
 
 /// Preprocess an image for YOLO inference.
 ///
-/// Performs letterbox resizing, BGR to RGB conversion (if needed),
-/// normalization to [0, 1], and conversion to NCHW tensor format.
+/// Performs letterbox resizing, normalization to [0, 1], and conversion to
+/// NCHW tensor format.
 ///
 /// # Arguments
 ///

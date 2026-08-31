@@ -217,7 +217,7 @@ ultralytics-inference predict --model yolo26n-b16.onnx --source images/ \
 The model must be exported with a matching batch size, or with a dynamic batch
 axis. A model whose input pins `[16, 3, 640, 640]` cannot run at `--batch 1`.
 
-[`YOLOModel::predict_image`]: crate::YOLOModel::predict_image
+[`YOLOModel::predict_image`]: https://docs.rs/ultralytics-inference/latest/ultralytics_inference/model/struct.YOLOModel.html#method.predict_image
 
 ## Troubleshooting
 

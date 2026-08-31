@@ -2,7 +2,7 @@
 
 This file provides guidance to AI coding agents (Claude Code, etc.) when working with code in this repository. CLAUDE.md is a symlink to this file.
 
-`ultralytics-inference` (crates.io, AGPL-3.0) is the official Rust package for YOLO-family vision model inference — detection, instance and semantic segmentation, classification, pose, and oriented boxes — over ONNX Runtime, with image/video/webcam sources, annotation and visualization, the `ultralytics-inference` CLI, and a WebGPU/wasm build published as `@ultralytics/yolo` on npm. The supported floor is Rust 1.89 (edition 2024).
+`ultralytics-inference` (crates.io, AGPL-3.0) is the official Rust package for YOLO-family vision model inference — detection, instance and semantic segmentation, classification, pose, oriented boxes, and depth estimation — over ONNX Runtime, with image/video/webcam sources, annotation and visualization, the `ultralytics-inference` CLI, and a WebGPU/wasm build published as `@ultralytics/yolo` on npm. The supported floor is Rust 1.89 (edition 2024).
 
 ## Core Principles (CRITICAL)
 
@@ -68,7 +68,7 @@ cargo run -- predict
 
 Rust workspace with two crates plus an npm wrapper, all versioned together from the root `Cargo.toml`:
 
-- Root crate `ultralytics-inference`: YOLO inference library (`src/lib.rs`) and CLI binary (`src/main.rs`, thin wrapper over `src/cli/`). Pipeline: `source.rs` (images/dirs/globs/video/webcam) → `preprocessing.rs` (SIMD letterbox) → `model.rs` (`YOLOModel`, the ONNX Runtime session via `ort`, configured by `inference.rs`'s `InferenceConfig`) → `postprocessing.rs` → `results.rs` (`Results`/`Boxes`/`Masks`/`Keypoints`/`Probs`/`SemanticMask`, mirroring the Ultralytics Python API). `model.rs` reads embedded ONNX metadata (`metadata.rs`) and auto-downloads known YOLOv8/YOLO11/YOLO26 models and sample images (`download.rs`).
+- Root crate `ultralytics-inference`: YOLO inference library (`src/lib.rs`) and CLI binary (`src/main.rs`, thin wrapper over `src/cli/`). Pipeline: `source.rs` (images/dirs/globs/video/webcam) → `preprocessing.rs` (SIMD letterbox) → `model.rs` (`YOLOModel`, the ONNX Runtime session via `ort`, configured by `inference.rs`'s `InferenceConfig`) → `postprocessing.rs` → `results.rs` (`Results`/`Boxes`/`Masks`/`Keypoints`/`Probs`/`Obb`/`SemanticMask`/`DepthMap`/`Speed`, mirroring the Ultralytics Python API). `model.rs` reads embedded ONNX metadata (`metadata.rs`) and auto-downloads known YOLOv8/YOLO11/YOLO26 models and sample images (`download.rs`).
 - `crates/web` (`ultralytics-inference-web`, `publish = false`): wasm32-only WebGPU bindings via `ort-web`. Excluded from `default-members`, so plain `cargo build`/`cargo test` from the root skip it; it only builds for `--target wasm32-unknown-unknown`.
 - `web/`: npm package `@ultralytics/yolo` — TypeScript wrapper (`web/src/index.ts`) over the wasm-pack output of `crates/web`, with an optional LiteRT.js backend for `.tflite` models.
 - GPU/accelerator features (`cuda`, `tensorrt`, `coreml`, …) gate no public API; docs.rs builds with `annotate,visualize,video` only (see `[package.metadata.docs.rs]`).
