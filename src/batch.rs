@@ -19,6 +19,11 @@
 //! a long video or an open-ended stream, where collecting every frame's [`Results`] would
 //! not be.
 //!
+//! The directory source below runs on the default features. A video, webcam, or RTSP source
+//! additionally needs `--features video` and FFmpeg; without it the iterator yields
+//! [`InferenceError::FeatureNotEnabled`](crate::InferenceError::FeatureNotEnabled) on the
+//! first frame.
+//!
 //! ```no_run
 //! use ultralytics_inference::{Source, SourceIterator, YOLOModel, batch::BatchProcessor};
 //!
@@ -37,7 +42,7 @@
 //!         }
 //!     });
 //!
-//!     for frame in SourceIterator::new(Source::from("video.mp4"))? {
+//!     for frame in SourceIterator::new(Source::from("images"))? {
 //!         let (image, meta) = frame?;
 //!         processor.add(image, meta.path.clone(), meta);
 //!     }
