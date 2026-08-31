@@ -90,48 +90,6 @@ impl Task {
     pub fn default_model(&self) -> String {
         format!("yolo26n{}.onnx", self.model_suffix())
     }
-
-    /// Returns `true` when the task outputs bounding boxes: Detect, Segment, Pose, and Obb.
-    #[must_use]
-    pub const fn has_boxes(&self) -> bool {
-        matches!(self, Self::Detect | Self::Segment | Self::Pose | Self::Obb)
-    }
-
-    /// Returns `true` only for the Segment task, which outputs per-instance segmentation masks.
-    #[must_use]
-    pub const fn has_masks(&self) -> bool {
-        matches!(self, Self::Segment)
-    }
-
-    /// Returns `true` only for the Pose task, which outputs skeletal keypoints.
-    #[must_use]
-    pub const fn has_keypoints(&self) -> bool {
-        matches!(self, Self::Pose)
-    }
-
-    /// Returns `true` only for the Classify task, which outputs global class probabilities.
-    #[must_use]
-    pub const fn has_probs(&self) -> bool {
-        matches!(self, Self::Classify)
-    }
-
-    /// Returns `true` only for the Obb task, which outputs oriented (rotated) bounding boxes.
-    #[must_use]
-    pub const fn has_obb(&self) -> bool {
-        matches!(self, Self::Obb)
-    }
-
-    /// Returns `true` only for the `Semantic` task, which outputs a per-pixel class label map.
-    #[must_use]
-    pub const fn has_semantic_mask(&self) -> bool {
-        matches!(self, Self::Semantic)
-    }
-
-    /// Returns `true` only for the `Depth` task, which outputs a per-pixel depth map.
-    #[must_use]
-    pub const fn has_depth(&self) -> bool {
-        matches!(self, Self::Depth)
-    }
 }
 
 impl fmt::Display for Task {
@@ -205,21 +163,6 @@ mod tests {
         assert_eq!(Task::Detect.to_string(), "detect");
         assert_eq!(Task::Segment.to_string(), "segment");
         assert_eq!(Task::Semantic.to_string(), "semantic");
-    }
-
-    #[test]
-    fn test_task_capabilities() {
-        assert!(Task::Detect.has_boxes());
-        assert!(!Task::Detect.has_masks());
-        assert!(Task::Segment.has_masks());
-        assert!(Task::Pose.has_keypoints());
-        assert!(Task::Classify.has_probs());
-        assert!(Task::Obb.has_obb());
-        assert!(Task::Semantic.has_semantic_mask());
-        assert!(!Task::Detect.has_semantic_mask());
-        assert!(Task::Depth.has_depth());
-        assert!(!Task::Semantic.has_depth());
-        assert!(!Task::Depth.has_semantic_mask());
     }
 
     #[test]

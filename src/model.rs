@@ -1734,97 +1734,6 @@ impl YOLOModel {
         )
     }
 
-    /// Run inference on a raw array.
-    ///
-    /// # Arguments
-    ///
-    /// * `image` - HWC u8 array.
-    /// * `path` - Optional identifier.
-    ///
-    /// # Returns
-    ///
-    /// Vector of Results.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn predict_array(&mut self, image: &Array3<u8>, path: String) -> Result<Vec<Results>> {
-        // Convert array to DynamicImage
-        let dynamic_img = crate::utils::array_to_image(image)?;
-        self.predict_image(&dynamic_img, path)
-    }
-
-    /// Process a source and save results if requested.
-    ///
-    /// This method is gated by the "annotate" feature.
-    /// Uses `config.save` to determine whether to save annotated results.
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - The input source.
-    /// * `save_dir` - Directory to save results (required if saving).
-    ///
-    /// # Returns
-    ///
-    /// * Vector of `SourceMeta` and Results pairs.
-    #[cfg(feature = "annotate")]
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[allow(clippy::too_many_lines)]
-    pub fn predict_source(
-        &mut self,
-        source: crate::source::Source,
-        save_dir: Option<&Path>,
-    ) -> Result<Vec<(crate::source::SourceMeta, Results)>> {
-        use crate::annotate::annotate_image;
-
-        let is_video = source.is_video();
-        #[cfg(not(feature = "video"))]
-        if is_video {
-            return Err(InferenceError::FeatureNotEnabled(
-                "Video support requires '--features video'".to_string(),
-            ));
-        }
-
-        let iterator = crate::source::SourceIterator::new(source)?;
-        let mut results_vec = Vec::new();
-
-        // Initialize ResultSaver if saving is enabled (config.save defaults to true)
-        let mut result_saver = if self.config.save {
-            if let Some(d) = save_dir {
-                Some(crate::io::SaveResults::new(
-                    d.to_path_buf(),
-                    self.config.save_frames,
-                ))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        for frame_result in iterator {
-            let (img, meta) = frame_result?;
-
-            // Run inference
-            let results = self.predict_image(&img, meta.path.clone())?;
-
-            // Take the first result (since we process one frame at a time)
-            if let Some(result) = results.into_iter().next() {
-                // Save logic
-                if let Some(saver) = &mut result_saver {
-                    let annotated = annotate_image(&img, &result, None);
-                    saver.save(is_video, &meta, &annotated)?;
-                }
-
-                results_vec.push((meta, result));
-            }
-        }
-
-        // Finish saver
-        if let Some(saver) = result_saver {
-            saver.finish()?;
-        }
-
-        Ok(results_vec)
-    }
-
     /// Run the ORT session, returning outputs and measured inference time in ms.
     ///
     /// Run a single forward pass for warmup, discarding outputs.
@@ -2032,13 +1941,6 @@ impl YOLOModel {
     #[must_use]
     pub const fn quantize(&self) -> Option<Quantization> {
         self.config.quantize
-    }
-
-    /// Check whether the resolved model precision is FP16.
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn is_half(&self) -> bool {
-        self.fp16_input
     }
 
     /// Get the model metadata.

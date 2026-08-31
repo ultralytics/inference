@@ -13,7 +13,7 @@
 ///
 /// `IoU` value between 0.0 and 1.0
 #[must_use]
-pub fn calculate_iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
+pub(crate) fn calculate_iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
     let x1 = box1[0].max(box2[0]);
     let y1 = box1[1].max(box2[1]);
     let x2 = box1[2].min(box2[2]);
@@ -202,7 +202,7 @@ pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f3
 ///
 /// Plural form of the word
 #[must_use]
-pub fn pluralize(word: &str) -> String {
+pub(crate) fn pluralize(word: &str) -> String {
     match word {
         "person" => "persons".to_string(),
         "bus" => "buses".to_string(),
