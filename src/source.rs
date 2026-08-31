@@ -407,6 +407,11 @@ pub struct SourceIterator {
     decoder: Option<BilinearVideoDecoder>,
     #[cfg(feature = "video")]
     webcam_decoder: Option<(ffmpeg::format::context::Input, ffmpeg::decoder::Video)>,
+    /// Colorspace conversion context for the webcam, kept across frames like
+    /// [`BilinearVideoDecoder::scaler`]. Rebuilding it per frame costs a full
+    /// `sws_getContext` for every captured frame.
+    #[cfg(feature = "video")]
+    webcam_scaler: Option<ffmpeg::software::scaling::context::Context>,
     #[cfg(feature = "video")]
     webcam_stream_index: usize,
     #[cfg(feature = "video")]
@@ -449,6 +454,8 @@ impl SourceIterator {
             decoder: None,
             #[cfg(feature = "video")]
             webcam_decoder: None,
+            #[cfg(feature = "video")]
+            webcam_scaler: None,
             #[cfg(feature = "video")]
             webcam_stream_index: 0,
             #[cfg(feature = "video")]
@@ -630,7 +637,12 @@ impl SourceIterator {
                 };
 
                 // Find input format by name using low-level C API
-                let c_name = std::ffi::CString::new(input_format_name).unwrap();
+                let Ok(c_name) = std::ffi::CString::new(input_format_name) else {
+                    self.webcam_init_failed = true;
+                    return Some(Err(InferenceError::VideoError(format!(
+                        "Invalid input format name '{input_format_name}'"
+                    ))));
+                };
                 #[allow(unsafe_code)]
                 let ptr = unsafe { video_rs::ffmpeg::ffi::av_find_input_format(c_name.as_ptr()) };
 
@@ -686,10 +698,19 @@ impl SourceIterator {
                                     let stream_index = stream.index();
                                     self.webcam_stream_index = stream_index;
                                     let context_decoder =
-                                        ffmpeg::codec::context::Context::from_parameters(
+                                        match ffmpeg::codec::context::Context::from_parameters(
                                             stream.parameters(),
-                                        )
-                                        .unwrap();
+                                        ) {
+                                            Ok(ctx) => ctx,
+                                            Err(e) => {
+                                                self.webcam_init_failed = true;
+                                                return Some(Err(InferenceError::VideoError(
+                                                    format!(
+                                                        "Failed to read webcam stream parameters: {e}"
+                                                    ),
+                                                )));
+                                            }
+                                        };
                                     match context_decoder.decoder().video() {
                                         Ok(decoder) => {
                                             self.webcam_decoder = Some((ictx, decoder));
@@ -733,9 +754,8 @@ impl SourceIterator {
                         && decoder.send_packet(&packet).is_ok()
                         && decoder.receive_frame(&mut decoded).is_ok()
                     {
-                        // Convert the decoded frame to RGB via the shared scaler helper.
-                        let mut scaler = None;
-                        let img = match frame_to_rgb_image(&mut scaler, &decoded) {
+                        // Convert the decoded frame to RGB, reusing the scaler across frames.
+                        let img = match frame_to_rgb_image(&mut self.webcam_scaler, &decoded) {
                             Ok(img) => img,
                             Err(e) => return Some(Err(e)),
                         };
