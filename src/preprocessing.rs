@@ -716,11 +716,18 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     #[allow(clippy::cast_possible_truncation)]
     let (target_h, target_w) = (target_size.0 as u32, target_size.1 as u32);
 
+    // Any failure below yields no usable pixels; return a blank frame rather than panicking.
+    let blank = || {
+        (
+            RgbImage::from_pixel(target_w, target_h, image::Rgb(LETTERBOX_COLOR)),
+            (1.0, 1.0),
+        )
+    };
+
     // The cover scale below divides by each source extent, so `target / 0` is infinite: the
     // resized extents come out garbage and the allocator is asked for terabytes.
     if src_w == 0 || src_h == 0 {
-        let blank = RgbImage::from_pixel(target_w, target_h, image::Rgb(LETTERBOX_COLOR));
-        return (blank, (1.0, 1.0));
+        return blank();
     }
 
     // Calculate scale to "cover" the target area
@@ -757,8 +764,9 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
             owned_rgb.as_raw()
         }
     };
-    let src_image = ImageRef::new(src_w, src_h, src_bytes, PixelType::U8x3)
-        .expect("Failed to create source image");
+    let Ok(src_image) = ImageRef::new(src_w, src_h, src_bytes, PixelType::U8x3) else {
+        return blank();
+    };
 
     // Valid dimensions check
     let safe_new_w = new_w.max(1);
@@ -770,14 +778,18 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
         fast_image_resize::FilterType::Bilinear,
     ));
-    resizer
+    if resizer
         .resize(&src_image, &mut dst_image, Some(&options))
-        .expect("Failed to resize image");
+        .is_err()
+    {
+        return blank();
+    }
 
     // Convert back to RgbImage to crop
     let resized_buffer = dst_image.into_vec();
-    let resized_rgb = RgbImage::from_raw(safe_new_w, safe_new_h, resized_buffer)
-        .expect("Failed to create resized buffer");
+    let Some(resized_rgb) = RgbImage::from_raw(safe_new_w, safe_new_h, resized_buffer) else {
+        return blank();
+    };
 
     // Calculate crop offsets using Banker's Rounding (round half to even).
     #[allow(clippy::cast_precision_loss)]
@@ -835,6 +847,15 @@ mod tests {
 
     /// A zero-dimension image underflowed `src_w - 1` in the LUT builder, which panics under
     /// the overflow checks the dev profile enables.
+    #[test]
+    fn test_center_crop_degenerate_input_does_not_panic() {
+        for (w, h) in [(0, 0), (0, 64), (64, 0)] {
+            let img = DynamicImage::ImageRgb8(image::RgbImage::new(w, h));
+            let res = preprocess_image_center_crop(&img, (224, 224), false);
+            assert_eq!(res.tensor.shape(), &[1, 3, 224, 224]);
+        }
+    }
+
     #[test]
     fn test_zero_dimension_image_does_not_panic() {
         for (w, h) in [(0, 0), (0, 64), (64, 0)] {

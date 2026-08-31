@@ -239,35 +239,37 @@ use video_rs::ffmpeg;
 /// borderline confidence predictions and lead to small detection drift.
 /// For consistency, this decoder uses `SWS_BILINEAR` explicitly.
 /// Convert a decoded video frame to a tightly-packed RGB24 [`DynamicImage`] using a BILINEAR
-/// scaler. `scaler` caches the conversion context and is initialized lazily from the frame's
-/// format and dimensions, so pass a persistent `Option` to reuse it across frames or a fresh
-/// `None` for a one-shot conversion.
+/// scaler. `scaler` caches the context and is rebuilt when the frame's format or size
+/// changes, so pass a persistent `Option` to reuse it across frames.
 #[cfg(feature = "video")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn frame_to_rgb_image(
     scaler: &mut Option<ffmpeg::software::scaling::context::Context>,
     decoded: &ffmpeg::util::frame::video::Video,
 ) -> Result<DynamicImage> {
-    // Initialize scaler on first frame (we need actual dimensions).
-    if scaler.is_none() {
-        *scaler = Some(
-            ffmpeg::software::scaling::context::Context::get(
-                decoded.format(),
-                decoded.width(),
-                decoded.height(),
-                ffmpeg::format::Pixel::RGB24,
-                decoded.width(),
-                decoded.height(),
-                ffmpeg::software::scaling::flag::Flags::BILINEAR,
-            )
-            .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
-        );
-    }
+    // Drop a cached context whose source properties no longer match: a webcam can
+    // renegotiate format or resolution mid-capture.
+    let reusable = scaler.take().filter(|s| {
+        let i = s.input();
+        i.format == decoded.format() && i.width == decoded.width() && i.height == decoded.height()
+    });
+    let context = match reusable {
+        Some(s) => s,
+        None => ffmpeg::software::scaling::context::Context::get(
+            decoded.format(),
+            decoded.width(),
+            decoded.height(),
+            ffmpeg::format::Pixel::RGB24,
+            decoded.width(),
+            decoded.height(),
+            ffmpeg::software::scaling::flag::Flags::BILINEAR,
+        )
+        .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
+    };
 
     let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
     scaler
-        .as_mut()
-        .unwrap()
+        .insert(context)
         .run(decoded, &mut rgb_frame)
         .map_err(|e| InferenceError::VideoError(format!("Scale: {e}")))?;
 
@@ -407,6 +409,9 @@ pub struct SourceIterator {
     decoder: Option<BilinearVideoDecoder>,
     #[cfg(feature = "video")]
     webcam_decoder: Option<(ffmpeg::format::context::Input, ffmpeg::decoder::Video)>,
+    /// Colorspace context reused across webcam frames, as the video path does.
+    #[cfg(feature = "video")]
+    webcam_scaler: Option<ffmpeg::software::scaling::context::Context>,
     #[cfg(feature = "video")]
     webcam_stream_index: usize,
     #[cfg(feature = "video")]
@@ -449,6 +454,8 @@ impl SourceIterator {
             decoder: None,
             #[cfg(feature = "video")]
             webcam_decoder: None,
+            #[cfg(feature = "video")]
+            webcam_scaler: None,
             #[cfg(feature = "video")]
             webcam_stream_index: 0,
             #[cfg(feature = "video")]
@@ -630,7 +637,12 @@ impl SourceIterator {
                 };
 
                 // Find input format by name using low-level C API
-                let c_name = std::ffi::CString::new(input_format_name).unwrap();
+                let Ok(c_name) = std::ffi::CString::new(input_format_name) else {
+                    self.webcam_init_failed = true;
+                    return Some(Err(InferenceError::VideoError(format!(
+                        "Invalid input format name '{input_format_name}'"
+                    ))));
+                };
                 #[allow(unsafe_code)]
                 let ptr = unsafe { video_rs::ffmpeg::ffi::av_find_input_format(c_name.as_ptr()) };
 
@@ -686,10 +698,19 @@ impl SourceIterator {
                                     let stream_index = stream.index();
                                     self.webcam_stream_index = stream_index;
                                     let context_decoder =
-                                        ffmpeg::codec::context::Context::from_parameters(
+                                        match ffmpeg::codec::context::Context::from_parameters(
                                             stream.parameters(),
-                                        )
-                                        .unwrap();
+                                        ) {
+                                            Ok(ctx) => ctx,
+                                            Err(e) => {
+                                                self.webcam_init_failed = true;
+                                                return Some(Err(InferenceError::VideoError(
+                                                    format!(
+                                                        "Failed to read webcam stream parameters: {e}"
+                                                    ),
+                                                )));
+                                            }
+                                        };
                                     match context_decoder.decoder().video() {
                                         Ok(decoder) => {
                                             self.webcam_decoder = Some((ictx, decoder));
@@ -733,9 +754,7 @@ impl SourceIterator {
                         && decoder.send_packet(&packet).is_ok()
                         && decoder.receive_frame(&mut decoded).is_ok()
                     {
-                        // Convert the decoded frame to RGB via the shared scaler helper.
-                        let mut scaler = None;
-                        let img = match frame_to_rgb_image(&mut scaler, &decoded) {
+                        let img = match frame_to_rgb_image(&mut self.webcam_scaler, &decoded) {
                             Ok(img) => img,
                             Err(e) => return Some(Err(e)),
                         };
