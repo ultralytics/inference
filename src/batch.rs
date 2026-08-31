@@ -198,13 +198,14 @@ mod tests {
     #[serial]
     fn test_batch_processor_buffers_and_flushes() {
         let path = std::path::Path::new("yolo26n.onnx");
-        let present = path.exists();
         let mut model = match YOLOModel::load(path) {
             Ok(model) => model,
-            // Absent and not downloadable is the offline case, so skip. A model that is
-            // already on disk must load: a corrupt file or an execution-provider
-            // regression has to fail here rather than silently skip the assertions.
-            Err(_) if !present => return,
+            // Still absent after the attempt means the download could not happen, which is
+            // the offline case worth skipping. `download_file` stages through a `.part` file
+            // and removes it on failure, so a present file here is a real one: a corrupt
+            // model, or a session build that failed after a successful download, must fail
+            // the test rather than silently skip every assertion below.
+            Err(_) if !path.exists() => return,
             Err(e) => panic!("yolo26n.onnx is present but failed to load: {e}"),
         };
 
