@@ -88,6 +88,15 @@ struct ProbIouBox {
 }
 
 impl ProbIouBox {
+    /// Reduce every box once, keeping each score and class alongside it so the shared
+    /// suppression loop can consume the result directly.
+    fn prepare_all(boxes: &[([f32; 5], f32, usize)]) -> Vec<(Self, f32, usize)> {
+        boxes
+            .iter()
+            .map(|(b, score, class)| (Self::new(b), *score, *class))
+            .collect()
+    }
+
     fn new(b: &[f32; 5]) -> Self {
         let (a, bb, c) = get_covariance_params(b[2], b[3], b[4]);
         Self {
@@ -130,12 +139,11 @@ fn probiou_prepared(p1: &ProbIouBox, p2: &ProbIouBox) -> f32 {
 /// `overlap` computes the IoU-like suppression score for the task-specific box type.
 /// The public wrappers keep task-specific signatures while sharing the score sorting,
 /// class filtering, and suppression loop.
-fn nms_by_class<T, P>(
+fn nms_by_class<T>(
     boxes: &[(T, f32, usize)],
     iou_threshold: f32,
     max_det: usize,
-    prepare: impl Fn(&T) -> P,
-    overlap: impl Fn(&P, &P) -> f32,
+    overlap: impl Fn(&T, &T) -> f32,
 ) -> Vec<usize> {
     // `max_det == 0` is reachable through `with_max_det(0)` and `--max-det 0`, and the cap
     // below is only checked after a box is pushed, so it has to be rejected up front.
@@ -155,9 +163,6 @@ fn nms_by_class<T, P>(
             .then_with(|| boxes[b].1.total_cmp(&boxes[a].1))
     });
 
-    // Per-box work is done once here rather than for both boxes of every pair below.
-    let prepared: Vec<P> = boxes.iter().map(|(b, _, _)| prepare(b)).collect();
-
     let mut keep = vec![];
     let mut suppressed = vec![false; boxes.len()];
 
@@ -176,7 +181,7 @@ fn nms_by_class<T, P>(
 
         for &j in &indices[pos + 1..] {
             if !suppressed[j] && boxes[j].2 == class_i {
-                let iou = overlap(&prepared[i], &prepared[j]);
+                let iou = overlap(&boxes[i].0, &boxes[j].0);
                 if iou > iou_threshold {
                     suppressed[j] = true;
                 }
@@ -201,7 +206,7 @@ fn nms_by_class<T, P>(
 /// Indices of boxes to keep
 #[must_use]
 pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Vec<usize> {
-    nms_by_class(boxes, iou_threshold, usize::MAX, |b| *b, calculate_iou)
+    nms_by_class(boxes, iou_threshold, usize::MAX, calculate_iou)
 }
 
 /// [`nms_per_class`], stopping once `max_det` boxes are kept.
@@ -214,7 +219,7 @@ pub(crate) fn nms_per_class_capped(
     iou_threshold: f32,
     max_det: usize,
 ) -> Vec<usize> {
-    nms_by_class(boxes, iou_threshold, max_det, |b| *b, calculate_iou)
+    nms_by_class(boxes, iou_threshold, max_det, calculate_iou)
 }
 
 /// Rotated Per-class Non-Maximum Suppression (NMS) using `ProbIoU`
@@ -234,10 +239,9 @@ pub(crate) fn nms_per_class_capped(
 #[must_use]
 pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f32) -> Vec<usize> {
     nms_by_class(
-        boxes,
+        &ProbIouBox::prepare_all(boxes),
         iou_threshold,
         usize::MAX,
-        ProbIouBox::new,
         probiou_prepared,
     )
 }
@@ -250,10 +254,9 @@ pub(crate) fn nms_rotated_per_class_capped(
     max_det: usize,
 ) -> Vec<usize> {
     nms_by_class(
-        boxes,
+        &ProbIouBox::prepare_all(boxes),
         iou_threshold,
         max_det,
-        ProbIouBox::new,
         probiou_prepared,
     )
 }
