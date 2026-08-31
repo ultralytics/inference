@@ -30,7 +30,7 @@ use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
 use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
-use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
+use crate::utils::{nms_per_class_capped, nms_rotated_per_class_capped, xywh_to_xyxy};
 
 /// Post-process raw model output based on task type.
 ///
@@ -366,7 +366,7 @@ fn nms_keep_indices<T>(
         .iter()
         .map(|(bbox, score, class, _)| (*bbox, *score, *class))
         .collect();
-    nms_per_class(&nms_candidates, iou_threshold, max_det)
+    nms_per_class_capped(&nms_candidates, iou_threshold, max_det)
 }
 
 /// Write one `[x1, y1, x2, y2, score, class]` detection row into a `(_, 6)` boxes array.
@@ -1257,7 +1257,8 @@ fn postprocess_obb(
     // Apply Rotated NMS for precise suppression using ProbIoU (Hellinger distance).
     // This ensures that overlapping rotated boxes are correctly filtered based on their
     // actual geometric overlap, which standard axis-aligned IoU cannot handle.
-    let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold, config.max_det);
+    let keep_indices =
+        nms_rotated_per_class_capped(&candidates, config.iou_threshold, config.max_det);
     let num_kept = keep_indices.len();
 
     // Build output array: [cx, cy, w, h, rotation, conf, cls]
