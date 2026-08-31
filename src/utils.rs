@@ -117,7 +117,9 @@ fn nms_by_class<T>(
     max_det: usize,
     overlap: impl Fn(&T, &T) -> f32,
 ) -> Vec<usize> {
-    if boxes.is_empty() {
+    // `max_det == 0` is reachable through `with_max_det(0)` and `--max-det 0`, and the cap
+    // below is only checked after a box is pushed, so it has to be rejected up front.
+    if boxes.is_empty() || max_det == 0 {
         return vec![];
     }
 
@@ -341,6 +343,14 @@ mod tests {
         let keep = nms_per_class(&boxes, 0.5, usize::MAX);
         assert_eq!(keep, vec![0]);
 
+        // A zero cap keeps nothing, matching the `truncate(max_det)` this replaced.
+        let boxes = vec![
+            ([0.0, 0.0, 10.0, 10.0], 0.9, 0),
+            ([50.0, 50.0, 60.0, 60.0], 0.8, 0),
+        ];
+        assert!(nms_per_class(&boxes, 0.5, 0).is_empty());
+        assert_eq!(nms_per_class(&boxes, 0.5, 1), vec![0]);
+
         // A NaN score used to panic in the sort comparator.
         let boxes = vec![
             ([0.0, 0.0, 10.0, 10.0], f32::NAN, 0),
@@ -371,6 +381,7 @@ mod tests {
             ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 0),
         ];
         assert_eq!(nms_rotated_per_class(&within, 0.5, usize::MAX), vec![0]);
+        assert!(nms_rotated_per_class(&within, 0.5, 0).is_empty());
     }
 
     #[test]
