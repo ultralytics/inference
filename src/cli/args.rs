@@ -17,15 +17,15 @@ use clap::{Args, Parser, Subcommand};
     --iou <IOU>            IoU threshold for NMS [default: 0.7]
     --max-det <MAX_DET>    Maximum number of detections [default: 300]
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
-    --rect                 Enable rectangular inference (minimal padding) [default: true]
+    --rect [<BOOL>]        Enable rectangular inference (minimal padding) [default: true]
     --batch <BATCH>        Batch size for inference [default: 1]
     --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w32a32, w8a16, or w8a32
-    --save                 Save annotated images to runs/<task>/predict [default: true]
+    --save [<BOOL>]        Save annotated images to runs/<task>/predict [default: true]
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
     --show                 Display results in a window [default: false]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, xnnpack)
-    --verbose              Show verbose output [default: true]
+    --verbose [<BOOL>]     Show verbose output [default: true]
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
 Examples:
