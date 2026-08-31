@@ -721,14 +721,29 @@ fn apply_mask_proto(
     let x2 = box_data[2].max(0.0).min(ow as f32);
     let y2 = box_data[3].max(0.0).min(oh as f32);
 
-    for y in 0..oh as usize {
-        for x in 0..ow as usize {
-            let val = dst_slice[y * ow as usize + x];
-            if x as f32 >= x1 && x as f32 <= x2 && y as f32 >= y1 && y as f32 <= y2 {
-                mask_out[[y, x]] = val;
-            }
-        }
+    let (ow, oh) = (ow as usize, oh as usize);
+    if ow == 0 || oh == 0 {
+        return;
     }
+
+    // Only pixels inside the box are ever written and `mask_out` arrives zeroed from the
+    // caller's `Array3::zeros`, so walk the box instead of testing every pixel in the frame.
+    // The bounds are the integer pixels satisfying the old `x >= x1 && x <= x2` test; a
+    // degenerate box gives an empty range and writes nothing, as before.
+    let x_start = x1.ceil() as usize;
+    let y_start = y1.ceil() as usize;
+    let x_end = (x2.floor() as usize).min(ow - 1);
+    let y_end = (y2.floor() as usize).min(oh - 1);
+
+    if x_start > x_end || y_start > y_end {
+        return;
+    }
+
+    // Copy the box region in one row-wise `assign` rather than element by element.
+    let src = ArrayView2::from_shape((oh, ow), dst_slice).expect("resized buffer is oh*ow");
+    mask_out
+        .slice_mut(s![y_start..=y_end, x_start..=x_end])
+        .assign(&src.slice(s![y_start..=y_end, x_start..=x_end]));
 }
 
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
@@ -1889,6 +1904,57 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], mut results: Results) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::Array1;
+
+    /// `apply_mask_proto` writes the box interior and nothing else, so the caller's zeroed
+    /// output stays zero outside it. Checks a plain box, one overhanging every edge, and a
+    /// degenerate one, against the `x1 <= x <= x2 && y1 <= y <= y2` rule it replaced.
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn test_apply_mask_proto_writes_only_inside_the_box() {
+        let (mw, mh, ow, oh) = (8usize, 8usize, 8u32, 8u32);
+        // Large logits so every resized pixel sigmoids to ~1.0 and "written" is unambiguous.
+        let mask_flat = Array1::from_elem(mw * mh, 10.0f32);
+
+        for (label, bbox) in [
+            ("interior", [2.0f32, 3.0, 5.0, 6.0]),
+            ("overhangs every edge", [-4.0f32, -4.0, 99.0, 99.0]),
+            ("degenerate", [4.0f32, 6.0, 4.0, 2.0]),
+        ] {
+            let mut out = Array2::<f32>::zeros((oh as usize, ow as usize));
+            let bbox = Array1::from_vec(bbox.to_vec());
+            apply_mask_proto(
+                out.view_mut(),
+                &mask_flat.view(),
+                &bbox.view(),
+                mw,
+                mh,
+                ow,
+                oh,
+                0.0,
+                0.0,
+                mw as f32,
+                mh as f32,
+            );
+
+            let (x1, y1) = (bbox[0].max(0.0), bbox[1].max(0.0));
+            let (x2, y2) = (bbox[2].min(ow as f32), bbox[3].min(oh as f32));
+            for y in 0..oh as usize {
+                for x in 0..ow as usize {
+                    let inside = (x as f32) >= x1
+                        && (x as f32) <= x2
+                        && (y as f32) >= y1
+                        && (y as f32) <= y2;
+                    assert_eq!(
+                        out[[y, x]] > 0.5,
+                        inside,
+                        "{label}: pixel ({x}, {y}) = {}",
+                        out[[y, x]]
+                    );
+                }
+            }
+        }
+    }
 
     /// Class names `class0..class{nc-1}`.
     fn make_names(nc: usize) -> Arc<HashMap<usize, String>> {

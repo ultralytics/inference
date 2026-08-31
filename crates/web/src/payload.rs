@@ -212,9 +212,9 @@ fn put(buf: &mut [u8], w: usize, x: usize, y: usize, c: Color, a: u8) {
 /// Build a translucent colored RGBA overlay (`width*height*4`) from the segment
 /// instance masks or the semantic class map, colored by the class palette.
 /// Empty for other tasks or if the mask resolution does not match the image.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn build_mask_overlay(r: &Results) -> Vec<u8> {
     let (h, w) = (r.orig_shape.0 as usize, r.orig_shape.1 as usize);
-    let mut buf = vec![0u8; w * h * 4];
 
     // Segment: per-instance binary masks, each colored by its detection class.
     if let (Some(masks), Some(boxes)) = (&r.masks, &r.boxes) {
@@ -222,12 +222,24 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
         if mh != h || mw != w {
             return Vec::new();
         }
+        let mut buf = vec![0u8; w * h * 4];
         let cls = boxes.cls();
+        let xyxy = boxes.xyxy();
         for i in 0..n.min(cls.len()) {
             let c = Color::from_index(cls[i] as usize);
-            for y in 0..h {
-                for x in 0..w {
-                    if masks.data[[i, y, x]] > 0.5 {
+            // `apply_mask_proto` leaves a mask zero outside its own detection box, so the
+            // rest of the frame cannot contribute and scanning it per instance is wasted
+            // work. Casting a float to an integer saturates, so a huge or non-finite
+            // coordinate clamps instead of wrapping.
+            let x0 = xyxy[[i, 0]].max(0.0) as usize;
+            let y0 = xyxy[[i, 1]].max(0.0) as usize;
+            let x1 = (xyxy[[i, 2]].max(0.0) as usize).saturating_add(1).min(w);
+            let y1 = (xyxy[[i, 3]].max(0.0) as usize).saturating_add(1).min(h);
+            let mask = masks.data.index_axis(ndarray::Axis(0), i);
+            for y in y0..y1 {
+                let row = mask.row(y);
+                for x in x0..x1 {
+                    if row[x] > 0.5 {
                         put(&mut buf, w, x, y, c, 140);
                     }
                 }
@@ -235,6 +247,8 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
         }
         return buf;
     }
+
+    let mut buf = vec![0u8; w * h * 4];
 
     // Semantic: per-pixel class map, blended 50/50 like the native renderer.
     if let Some(sem) = &r.semantic_mask {
