@@ -737,12 +737,15 @@ fn apply_mask_proto(
     let x_end = (x2.floor() as usize).min(ow - 1);
     let y_end = (y2.floor() as usize).min(oh - 1);
 
-    for y in y_start..=y_end {
-        let row = &dst_slice[y * ow..(y + 1) * ow];
-        for x in x_start..=x_end {
-            mask_out[[y, x]] = row[x];
-        }
+    if x_start > x_end || y_start > y_end {
+        return;
     }
+
+    // Copy the box region in one row-wise `assign` rather than element by element.
+    let src = ArrayView2::from_shape((oh, ow), dst_slice).expect("resized buffer is oh*ow");
+    mask_out
+        .slice_mut(s![y_start..=y_end, x_start..=x_end])
+        .assign(&src.slice(s![y_start..=y_end, x_start..=x_end]));
 }
 
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
