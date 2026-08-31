@@ -72,7 +72,7 @@ pub fn postprocess(
     match task {
         Task::Detect => {
             let (output, shape) = &outputs[0];
-            if end2end || is_end2end_detect_shape(shape) {
+            if end2end || is_end2end_shape(shape, 6) {
                 postprocess_detect_end2end(output, shape, preprocess, config, results)
             } else {
                 postprocess_detect(output, shape, preprocess, config, results)
@@ -96,7 +96,7 @@ pub fn postprocess(
             // layout from the tensor shape so non-COCO pose models still work.
             let resolved_kpt = kpt_shape.or_else(|| infer_end2end_kpt_shape(shape));
             let is_end2end = end2end
-                || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_pose_shape(shape, nk, kd));
+                || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_shape(shape, 6 + nk * kd));
             let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
             if is_end2end {
                 postprocess_pose_end2end(output, shape, preprocess, config, results, nk, kpt_dim)
@@ -110,7 +110,7 @@ pub fn postprocess(
         }
         Task::Obb => {
             let (output, shape) = &outputs[0];
-            if end2end || is_end2end_obb_shape(shape) {
+            if end2end || is_end2end_shape(shape, 7) {
                 postprocess_obb_end2end(output, shape, preprocess, config, results)
             } else {
                 postprocess_obb(output, shape, preprocess, config, results)
@@ -142,9 +142,16 @@ pub fn postprocess(
     }
 }
 
-/// Detect if a 3D shape matches YOLO26 end2end detect layout `[1, max_det, 6]`.
-const fn is_end2end_detect_shape(shape: &[usize]) -> bool {
-    shape.len() == 3 && shape[2] == 6 && shape[1] <= 4096
+/// Largest `max_det` an end2end head is assumed to emit. A wider second dimension means the
+/// tensor is a raw head being misread as end2end, so the shape is rejected.
+const MAX_END2END_DETECTIONS: usize = 4096;
+
+/// Detect if a 3D shape matches a YOLO26 end2end layout `[1, max_det, features]`.
+///
+/// Each task differs only in `features`: 6 for detect, `6 + nm` for segment,
+/// `6 + nk * kpt_dim` for pose, and 7 for OBB.
+const fn is_end2end_shape(shape: &[usize], features: usize) -> bool {
+    shape.len() == 3 && shape[2] == features && shape[1] <= MAX_END2END_DETECTIONS
 }
 
 /// Detect if a 3D shape matches YOLO26 end2end segment layout `[1, max_det, 6 + nm]`.
@@ -153,12 +160,7 @@ const fn is_end2end_detect_shape(shape: &[usize]) -> bool {
 /// it is used as the authoritative `nm`; otherwise the shape is rejected since
 /// hardcoding `nm=32` would misclassify exports with non-default prototype counts.
 fn is_end2end_segment_shape(shape: &[usize], proto_channels: Option<usize>) -> bool {
-    proto_channels.is_some_and(|nm| shape.len() == 3 && shape[2] == 6 + nm && shape[1] <= 4096)
-}
-
-/// Detect if a 3D shape matches YOLO26 end2end pose layout `[1, max_det, 6 + nk*dim]`.
-const fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bool {
-    shape.len() == 3 && shape[2] == 6 + nk * kpt_dim && shape[1] <= 4096
+    proto_channels.is_some_and(|nm| is_end2end_shape(shape, 6 + nm))
 }
 
 /// Infer `(nk, kpt_dim)` from a pose tensor shape assumed to be end-to-end
@@ -170,7 +172,7 @@ const fn is_end2end_pose_shape(shape: &[usize], nk: usize, kpt_dim: usize) -> bo
 /// tensor. Ambiguous cases fall through to the legacy pose path rather than
 /// silently guessing the wrong dimension.
 const fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
-    if shape.len() != 3 || shape[1] == 0 || shape[1] > 4096 || shape[2] <= 6 {
+    if shape.len() != 3 || shape[1] == 0 || shape[1] > MAX_END2END_DETECTIONS || shape[2] <= 6 {
         return None;
     }
     let kpt_feats = shape[2] - 6;
@@ -181,11 +183,6 @@ const fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
         (false, true) => Some((kpt_feats / 2, 2)),
         _ => None, // not divisible by either, or ambiguous (divisible by 6)
     }
-}
-
-/// Detect if a 3D shape matches YOLO26 end2end OBB layout `[1, max_det, 7]`.
-const fn is_end2end_obb_shape(shape: &[usize]) -> bool {
-    shape.len() == 3 && shape[2] == 7 && shape[1] <= 4096
 }
 
 /// Post-process detection model output.
@@ -767,7 +764,7 @@ fn build_instance_masks(
     let protos = match ArrayView2::from_shape((num_masks, mh * mw), protos_data) {
         Ok(view) => view,
         Err(e) => {
-            eprintln!("WARNING ⚠️ Failed to build protos array: {e}. Skipping mask generation.");
+            crate::warn!("Failed to build protos array: {e}. Skipping mask generation.");
             return None;
         }
     };
@@ -836,8 +833,8 @@ fn postprocess_segment(
 
     if outputs.len() < 2 {
         // Protos output missing - log warning for user visibility
-        eprintln!(
-            "WARNING ⚠️ Segmentation model missing protos output (expected 2 outputs, got {}). Returning empty masks.",
+        crate::warn!(
+            "Segmentation model missing protos output (expected 2 outputs, got {}). Returning empty masks.",
             outputs.len()
         );
         return results;
@@ -914,8 +911,8 @@ fn postprocess_segment(
     // Protos: [1, 32, 160, 160] -> [32, 25600]
     // Validate protos shape before indexing to prevent panic
     if shape1.len() < 4 {
-        eprintln!(
-            "WARNING ⚠️ Protos output has unexpected shape (expected 4 dims, got {}). Skipping mask generation.",
+        crate::warn!(
+            "Protos output has unexpected shape (expected 4 dims, got {}). Skipping mask generation.",
             shape1.len()
         );
         results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
@@ -926,9 +923,10 @@ fn postprocess_segment(
 
     // Validate expected mask dimensions match
     if shape1[1] != num_masks {
-        eprintln!(
-            "WARNING ⚠️ Protos output has {} mask channels, expected {}. Mask quality may be affected.",
-            shape1[1], num_masks
+        crate::warn!(
+            "Protos output has {} mask channels, expected {}. Mask quality may be affected.",
+            shape1[1],
+            num_masks
         );
     }
 
@@ -1029,8 +1027,8 @@ fn postprocess_pose(
     // offset 17, which looks plausible and is entirely wrong.
     let actual_features = output.len() / num_preds;
     if actual_features != expected_features {
-        eprintln!(
-            "WARNING ⚠️ Pose head width {actual_features} disagrees with the model metadata (expected {expected_features} for {num_classes} classes and kpt_shape ({num_keypoints}, {kpt_dim})). Returning empty results."
+        crate::warn!(
+            "Pose head width {actual_features} disagrees with the model metadata (expected {expected_features} for {num_classes} classes and kpt_shape ({num_keypoints}, {kpt_dim})). Returning empty results."
         );
         return results;
     }
@@ -1193,8 +1191,8 @@ fn postprocess_obb(
     // Infer actual feature count from data
     let actual_features = output.len() / num_preds;
     if actual_features < 6 {
-        eprintln!(
-            "WARNING ⚠️ OBB model has insufficient features ({actual_features}), expected at least 6"
+        crate::warn!(
+            "OBB model has insufficient features ({actual_features}), expected at least 6"
         );
         return results;
     }
@@ -1390,8 +1388,8 @@ fn postprocess_segment_end2end(
 ) -> Results {
     let inference_shape = results.inference_shape();
     if outputs.len() < 2 {
-        eprintln!(
-            "WARNING ⚠️ End2end segmentation missing protos output (got {} outputs).",
+        crate::warn!(
+            "End2end segmentation missing protos output (got {} outputs).",
             outputs.len()
         );
         return results;
@@ -1406,7 +1404,7 @@ fn postprocess_segment_end2end(
     let feats = shape0[2];
     let num_masks = shape1[1];
     if feats < 6 + num_masks {
-        eprintln!("WARNING ⚠️ End2end segment features ({feats}) < 6 + num_masks ({num_masks}).");
+        crate::warn!("End2end segment features ({feats}) < 6 + num_masks ({num_masks}).");
         return results;
     }
 
@@ -2650,13 +2648,13 @@ mod tests {
 
     #[test]
     fn test_end2end_shape_predicates() {
-        assert!(is_end2end_detect_shape(&[1, 300, 6]));
-        assert!(!is_end2end_detect_shape(&[1, 300, 7]));
-        assert!(!is_end2end_detect_shape(&[1, 8400, 6])); // > 4096 preds
-        assert!(is_end2end_obb_shape(&[1, 300, 7]));
-        assert!(!is_end2end_obb_shape(&[1, 300, 6]));
-        assert!(is_end2end_pose_shape(&[1, 300, 6 + 51], 17, 3));
-        assert!(!is_end2end_pose_shape(&[1, 300, 6 + 50], 17, 3));
+        assert!(is_end2end_shape(&[1, 300, 6], 6));
+        assert!(!is_end2end_shape(&[1, 300, 7], 6));
+        assert!(!is_end2end_shape(&[1, 8400, 6], 6)); // > MAX_END2END_DETECTIONS
+        assert!(is_end2end_shape(&[1, 300, 7], 7));
+        assert!(!is_end2end_shape(&[1, 300, 6], 7));
+        assert!(is_end2end_shape(&[1, 300, 6 + 51], 6 + 17 * 3));
+        assert!(!is_end2end_shape(&[1, 300, 6 + 50], 6 + 17 * 3));
         // Segment predicate needs proto channel count to disambiguate nm.
         assert!(is_end2end_segment_shape(&[1, 300, 6 + 32], Some(32)));
         assert!(!is_end2end_segment_shape(&[1, 300, 6 + 32], None));
@@ -3010,7 +3008,7 @@ mod tests {
             String::new(),
             Speed::default(),
             (640, 640),
-            false, // routed via is_end2end_obb_shape (shape[2]==7)
+            false, // routed via is_end2end_shape (shape[2]==7)
             None,
         );
         assert_eq!(r.obb.unwrap().len(), 1);
