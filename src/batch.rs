@@ -12,21 +12,46 @@
 //!
 //! # Usage
 //!
+//! Feed a [`Source`](crate::Source) through the processor to run over a directory, a glob,
+//! a video, or a webcam. The callback sees one batch at a time and the buffers are cleared
+//! as soon as it returns, so the processor's own memory does not grow with the length of
+//! the input; only what the callback keeps is retained. That makes it the right shape for
+//! a long video or an open-ended stream, where collecting every frame's [`Results`] would
+//! not be.
+//!
+//! The directory source below runs on the default features. A video, webcam, or RTSP source
+//! additionally needs `--features video` and `FFmpeg`; without it the iterator yields
+//! [`InferenceError::FeatureNotEnabled`](crate::InferenceError::FeatureNotEnabled) on the
+//! first frame.
+//!
 //! ```no_run
-//! use ultralytics_inference::{YOLOModel, batch::BatchProcessor};
+//! use ultralytics_inference::{Source, SourceIterator, YOLOModel, batch::BatchProcessor};
 //!
 //! let mut model = YOLOModel::load("yolo26n.onnx")?;
-//! let mut processor = BatchProcessor::new(&mut model, 4, |results, images, paths, metas| {
-//!     for (idx, result_vec) in results.iter().enumerate() {
-//!         println!("Image {}: {} detections", paths[idx], result_vec.len());
+//! let mut detections = 0usize;
+//!
+//! // The processor borrows the model, so scope it to release the borrow afterwards.
+//! {
+//!     let mut processor = BatchProcessor::new(&mut model, 4, |results, _images, paths, _metas| {
+//!         for (path, per_image) in paths.iter().zip(&results) {
+//!             for result in per_image {
+//!                 let n = result.boxes.as_ref().map_or(0, ultralytics_inference::Boxes::len);
+//!                 println!("{path}: {n} detections");
+//!                 detections += n;
+//!             }
+//!         }
+//!     });
+//!
+//!     for frame in SourceIterator::new(Source::from("images"))? {
+//!         let (image, meta) = frame?;
+//!         processor.add(image, meta.path.clone(), meta);
 //!     }
-//! });
 //!
-//! // Add images as they become available
-//! // processor.add(image, path, meta);
+//!     // Runs the last partial batch; without this its images are never inferred.
+//!     processor.flush();
+//! }
 //!
-//! // Don't forget to flush remaining images
-//! processor.flush();
+//! println!("{detections} total");
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
@@ -38,26 +63,9 @@ use image::DynamicImage;
 /// This struct manages collecting images into batches, running inference (with fallback),
 /// and invoking a callback with the results.
 ///
-/// # Example
-///
-/// ```no_run
-/// use ultralytics_inference::{YOLOModel, batch::BatchProcessor};
-///
-/// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let mut model = YOLOModel::load("yolo26n.onnx")?;
-///     let batch_size = 4;
-///     
-///     let mut processor = BatchProcessor::new(&mut model, batch_size, |results, images, paths, metas| {
-///         println!("Processed batch of {} images", results.len());
-///     });
-///     
-///     // Add images...
-///     // processor.add(image, path, meta);
-///     
-///     processor.flush();
-///     Ok(())
-/// }
-/// ```
+/// Images are dropped once their batch has been handed to the callback, so the buffers cost
+/// one batch rather than growing with the input. See the [module docs](self) for a complete
+/// source-to-callback loop.
 pub struct BatchProcessor<'a, F>
 where
     F: FnMut(Vec<Vec<Results>>, &[DynamicImage], &[String], &[SourceMeta]),
