@@ -177,8 +177,7 @@ fn nms_by_class<T>(
 /// # Returns
 ///
 /// Indices of boxes to keep, at most `max_det` of them
-#[must_use]
-pub fn nms_per_class(
+pub(crate) fn nms_per_class(
     boxes: &[([f32; 4], f32, usize)],
     iou_threshold: f32,
     max_det: usize,
@@ -201,8 +200,7 @@ pub fn nms_per_class(
 /// # Returns
 ///
 /// Indices of boxes to keep, at most `max_det` of them
-#[must_use]
-pub fn nms_rotated_per_class(
+pub(crate) fn nms_rotated_per_class(
     boxes: &[([f32; 5], f32, usize)],
     iou_threshold: f32,
     max_det: usize,
