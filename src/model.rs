@@ -2037,11 +2037,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Serialized against every other test that builds a session: execution providers cache
-    // compiled models under one shared path (`CoreML` writes into
-    // `~/Library/Caches/ultralytics-inference/coreml/...`), and two sessions compiling the
-    // same model at once collide there with "an item with the same name already exists".
-    // `#[serial]` only excludes other `#[serial]` tests, so this one has to carry it too.
+    // `#[serial]` with the other session-building test: providers compile into one shared
+    // cache, and two sessions building it at once collide there.
     #[test]
     #[serial]
     fn test_model_accessors_with_dummy() {
