@@ -20,7 +20,7 @@
 //! not be.
 //!
 //! The directory source below runs on the default features. A video, webcam, or RTSP source
-//! additionally needs `--features video` and FFmpeg; without it the iterator yields
+//! additionally needs `--features video` and `FFmpeg`; without it the iterator yields
 //! [`InferenceError::FeatureNotEnabled`](crate::InferenceError::FeatureNotEnabled) on the
 //! first frame.
 //!
