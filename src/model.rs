@@ -829,12 +829,9 @@ impl YOLOModel {
             let path_i = paths.get(i).cloned().unwrap_or_default();
             let speed = Speed::new(preprocess_time, inference_time, 0.0);
 
-            // Build the per-image slice from the batch output.
+            // `postprocess_semantic_mask` wants the batch dim dropped, not set to one.
             let (data, shape) = &outputs[0];
-            let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
-            let elems_per_img = data.len() / actual_batch;
-            let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
-            // Per-image shape view (drops the batch dim). Zero-copy slice.
+            let img_slice = batch_chunk(data, shape, i);
             let img_shape: &[usize] = &shape[1..];
 
             let tensor_shape = preprocess_res.tensor.shape();
@@ -1391,10 +1388,7 @@ impl YOLOModel {
                     let img_outputs: Vec<(&[f32], Vec<usize>)> = outs
                         .iter()
                         .map(|(data, shape)| {
-                            let per_image = data.len() / n_images;
-                            let mut img_shape = shape.clone();
-                            img_shape[0] = 1;
-                            (&data[i * per_image..(i + 1) * per_image], img_shape)
+                            (batch_chunk(data, shape, i), single_batch_shape(shape))
                         })
                         .collect();
                     let pre = crate::preprocessing::PreprocessResult {
@@ -1625,19 +1619,10 @@ impl YOLOModel {
                 let path = paths_ref.get(i).cloned().unwrap_or_default();
                 let speed = Speed::new(preprocess_time, inference_time, 0.0);
 
-                let mut img_outputs = Vec::new();
-                for (data, shape) in outputs {
-                    let batch_size = shape[0];
-                    let actual_batch_size = if batch_size > 0 { batch_size } else { 1 };
-                    let total_elements = data.len();
-                    let elements_per_img = total_elements / actual_batch_size;
-                    let start = i * elements_per_img;
-                    let end = start + elements_per_img;
-                    let img_data = &data[start..end];
-                    let mut img_shape = shape.clone();
-                    img_shape[0] = 1;
-                    img_outputs.push((img_data, img_shape));
-                }
+                let img_outputs: Vec<_> = outputs
+                    .iter()
+                    .map(|(data, shape)| (batch_chunk(data, shape, i), single_batch_shape(shape)))
+                    .collect();
 
                 let tensor_shape = preprocess_res.tensor.shape();
                 let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
@@ -2000,6 +1985,22 @@ fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
     provider == "CoreMLExecutionProvider"
         && msg.contains("GatherElements")
         && msg.contains("Out of range")
+}
+
+/// Slice image `i` out of a batched output, guarding a zero or missing batch dim.
+fn batch_chunk<'a, T>(data: &'a [T], shape: &[usize], i: usize) -> &'a [T] {
+    let batch = shape.first().copied().filter(|&b| b > 0).unwrap_or(1);
+    let per_image = data.len() / batch;
+    &data[i * per_image..(i + 1) * per_image]
+}
+
+/// The shape with a batch of one, for postprocessors wanting the full rank.
+fn single_batch_shape(shape: &[usize]) -> Vec<usize> {
+    let mut shape = shape.to_vec();
+    if let Some(batch) = shape.first_mut() {
+        *batch = 1;
+    }
+    shape
 }
 
 /// Convert an ONNX Runtime tensor shape (`i64` dims) to `usize` for indexing.
