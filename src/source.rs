@@ -239,35 +239,37 @@ use video_rs::ffmpeg;
 /// borderline confidence predictions and lead to small detection drift.
 /// For consistency, this decoder uses `SWS_BILINEAR` explicitly.
 /// Convert a decoded video frame to a tightly-packed RGB24 [`DynamicImage`] using a BILINEAR
-/// scaler. `scaler` caches the conversion context and is initialized lazily from the frame's
-/// format and dimensions, so pass a persistent `Option` to reuse it across frames or a fresh
-/// `None` for a one-shot conversion.
+/// scaler. `scaler` caches the context and is rebuilt when the frame's format or size
+/// changes, so pass a persistent `Option` to reuse it across frames.
 #[cfg(feature = "video")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn frame_to_rgb_image(
     scaler: &mut Option<ffmpeg::software::scaling::context::Context>,
     decoded: &ffmpeg::util::frame::video::Video,
 ) -> Result<DynamicImage> {
-    // Initialize scaler on first frame (we need actual dimensions).
-    if scaler.is_none() {
-        *scaler = Some(
-            ffmpeg::software::scaling::context::Context::get(
-                decoded.format(),
-                decoded.width(),
-                decoded.height(),
-                ffmpeg::format::Pixel::RGB24,
-                decoded.width(),
-                decoded.height(),
-                ffmpeg::software::scaling::flag::Flags::BILINEAR,
-            )
-            .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
-        );
-    }
+    // Drop a cached context whose source properties no longer match: a webcam can
+    // renegotiate format or resolution mid-capture.
+    let reusable = scaler.take().filter(|s| {
+        let i = s.input();
+        i.format == decoded.format() && i.width == decoded.width() && i.height == decoded.height()
+    });
+    let context = match reusable {
+        Some(s) => s,
+        None => ffmpeg::software::scaling::context::Context::get(
+            decoded.format(),
+            decoded.width(),
+            decoded.height(),
+            ffmpeg::format::Pixel::RGB24,
+            decoded.width(),
+            decoded.height(),
+            ffmpeg::software::scaling::flag::Flags::BILINEAR,
+        )
+        .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
+    };
 
     let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
     scaler
-        .as_mut()
-        .unwrap()
+        .insert(context)
         .run(decoded, &mut rgb_frame)
         .map_err(|e| InferenceError::VideoError(format!("Scale: {e}")))?;
 
@@ -407,9 +409,7 @@ pub struct SourceIterator {
     decoder: Option<BilinearVideoDecoder>,
     #[cfg(feature = "video")]
     webcam_decoder: Option<(ffmpeg::format::context::Input, ffmpeg::decoder::Video)>,
-    /// Colorspace conversion context for the webcam, kept across frames like
-    /// [`BilinearVideoDecoder::scaler`]. Rebuilding it per frame costs a full
-    /// `sws_getContext` for every captured frame.
+    /// Colorspace context reused across webcam frames, as the video path does.
     #[cfg(feature = "video")]
     webcam_scaler: Option<ffmpeg::software::scaling::context::Context>,
     #[cfg(feature = "video")]
@@ -754,7 +754,6 @@ impl SourceIterator {
                         && decoder.send_packet(&packet).is_ok()
                         && decoder.receive_frame(&mut decoded).is_ok()
                     {
-                        // Convert the decoded frame to RGB, reusing the scaler across frames.
                         let img = match frame_to_rgb_image(&mut self.webcam_scaler, &decoded) {
                             Ok(img) => img,
                             Err(e) => return Some(Err(e)),

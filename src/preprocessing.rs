@@ -716,8 +716,7 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     #[allow(clippy::cast_possible_truncation)]
     let (target_h, target_w) = (target_size.0 as u32, target_size.1 as u32);
 
-    // Every failure below leaves no usable pixels, so fall back to a blank target-size frame
-    // rather than panicking: this runs under the public `preprocess_image_center_crop`.
+    // Any failure below yields no usable pixels; return a blank frame rather than panicking.
     let blank = || {
         (
             RgbImage::from_pixel(target_w, target_h, image::Rgb(LETTERBOX_COLOR)),
@@ -848,8 +847,6 @@ mod tests {
 
     /// A zero-dimension image underflowed `src_w - 1` in the LUT builder, which panics under
     /// the overflow checks the dev profile enables.
-    /// The classify path returns a blank frame for input it cannot resize rather than
-    /// panicking, since `preprocess_image_center_crop` is public.
     #[test]
     fn test_center_crop_degenerate_input_does_not_panic() {
         for (w, h) in [(0, 0), (0, 64), (64, 0)] {
