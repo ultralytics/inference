@@ -214,12 +214,113 @@ pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Ve
 /// Callers cap the result at `max_det` anyway, so suppressing past that point only orders
 /// boxes that get discarded. On a full `8400`-prediction head that is the difference
 /// between roughly 26 ms and 2 ms.
+/// Per-class NMS with a SIMD suppression inner loop, for axis-aligned boxes.
+///
+/// Same contract and same results as [`nms_per_class_capped`]: boxes are visited in score
+/// order, only same-class pairs suppress, and the scan stops once `max_det` are kept. The
+/// difference is that each kept box is compared against eight candidates at a time.
+#[allow(clippy::missing_panics_doc)]
+pub(crate) fn nms_per_class_simd(
+    boxes: &[([f32; 4], f32, usize)],
+    iou_threshold: f32,
+    max_det: usize,
+) -> Vec<usize> {
+    if boxes.is_empty() || max_det == 0 {
+        return vec![];
+    }
+
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&a, &b| {
+        boxes[a]
+            .1
+            .is_nan()
+            .cmp(&boxes[b].1.is_nan())
+            .then_with(|| boxes[b].1.total_cmp(&boxes[a].1))
+    });
+
+    // Structure of arrays so the inner loop reads eight contiguous coordinates per lane.
+    let n = order.len();
+    let (mut x1, mut y1) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let (mut x2, mut y2) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let mut areas = Vec::with_capacity(n);
+    for &i in &order {
+        let b = boxes[i].0;
+        x1.push(b[0]);
+        y1.push(b[1]);
+        x2.push(b[2]);
+        y2.push(b[3]);
+        areas.push((b[2] - b[0]) * (b[3] - b[1]));
+    }
+
+    let iou_v = f32x8::splat(iou_threshold);
+    let mut suppressed = vec![false; n];
+    let mut keep = Vec::with_capacity(max_det.min(n));
+
+    for i in 0..n {
+        if suppressed[i] {
+            continue;
+        }
+        keep.push(order[i]);
+        if keep.len() >= max_det {
+            break;
+        }
+
+        let (ax1, ay1) = (f32x8::splat(x1[i]), f32x8::splat(y1[i]));
+        let (ax2, ay2) = (f32x8::splat(x2[i]), f32x8::splat(y2[i]));
+        let aa = f32x8::splat(areas[i]);
+        let class_i = boxes[order[i]].2;
+
+        let mut j = i + 1;
+        while j < n {
+            if n - j >= 8 {
+                if (0..8).any(|k| boxes[order[j + k]].2 == class_i && !suppressed[j + k]) {
+                    let load = |v: &[f32]| f32x8::new(v[j..j + 8].try_into().expect("8 lanes"));
+                    let (bx1, by1) = (load(&x1), load(&y1));
+                    let (bx2, by2) = (load(&x2), load(&y2));
+                    let ba = load(&areas);
+
+                    let iw = (ax2.min(bx2) - ax1.max(bx1)).max(f32x8::ZERO);
+                    let ih = (ay2.min(by2) - ay1.max(by1)).max(f32x8::ZERO);
+                    let ia = iw * ih;
+                    let iou = ia / (aa + ba - ia);
+
+                    // Eight lanes, so the bitmask fits in a u8.
+                    #[allow(clippy::cast_possible_truncation)]
+                    let mask = iou.simd_gt(iou_v).to_bitmask() as u8;
+                    if mask != 0 {
+                        for k in 0..8 {
+                            if (mask & (1 << k)) != 0 && boxes[order[j + k]].2 == class_i {
+                                suppressed[j + k] = true;
+                            }
+                        }
+                    }
+                }
+                j += 8;
+            } else {
+                for k in j..n {
+                    if !suppressed[k] && boxes[order[k]].2 == class_i {
+                        let iw = (x2[i].min(x2[k]) - x1[i].max(x1[k])).max(0.0);
+                        let ih = (y2[i].min(y2[k]) - y1[i].max(y1[k])).max(0.0);
+                        let ia = iw * ih;
+                        if ia / (areas[i] + areas[k] - ia) > iou_threshold {
+                            suppressed[k] = true;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    keep
+}
+
 pub(crate) fn nms_per_class_capped(
     boxes: &[([f32; 4], f32, usize)],
     iou_threshold: f32,
     max_det: usize,
 ) -> Vec<usize> {
-    nms_by_class(boxes, iou_threshold, max_det, calculate_iou)
+    nms_per_class_simd(boxes, iou_threshold, max_det)
 }
 
 /// Rotated Per-class Non-Maximum Suppression (NMS) using `ProbIoU`
@@ -303,6 +404,7 @@ use image::DynamicImage;
 use ndarray::Array3;
 
 use crate::error::{InferenceError, Result};
+use wide::f32x8;
 
 /// Convert an HWC u8 array to a `DynamicImage`.
 ///
