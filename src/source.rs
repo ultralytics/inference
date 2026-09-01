@@ -607,144 +607,101 @@ impl SourceIterator {
         }
     }
 
+    /// Open webcam `idx` and store its decoder, using the platform's capture backend.
+    ///
+    /// Failures are returned; the caller records them once via `webcam_init_failed`.
+    #[cfg(feature = "video")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[allow(unsafe_code)]
+    fn open_webcam(&mut self, idx: u32) -> Result<()> {
+        ffmpeg::init().ok();
+
+        let (format_name, device_name) = if cfg!(target_os = "macos") {
+            ("avfoundation", idx.to_string()) // avfoundation takes the bare index
+        } else if cfg!(target_os = "linux") {
+            ("video4linux2", format!("/dev/video{idx}"))
+        } else if cfg!(target_os = "windows") {
+            ("dshow", format!("video={idx}"))
+        } else {
+            return Err(InferenceError::VideoError(
+                "Unsupported OS for webcam".to_string(),
+            ));
+        };
+
+        // The format lookup has no safe wrapper.
+        let c_name = std::ffi::CString::new(format_name).map_err(|_| {
+            InferenceError::VideoError(format!("Invalid input format name '{format_name}'"))
+        })?;
+        let ptr = unsafe { video_rs::ffmpeg::ffi::av_find_input_format(c_name.as_ptr()) };
+        if ptr.is_null() {
+            return Err(InferenceError::VideoError(format!(
+                "Input format '{format_name}' not found"
+            )));
+        }
+        #[allow(clippy::ptr_cast_constness)]
+        let input_format = unsafe { ffmpeg::format::Input::wrap(ptr.cast_mut()) };
+
+        // Explicit framerate avoids a default NTSC mismatch.
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("framerate", "30");
+
+        let opened = ffmpeg::format::open_with(
+            &PathBuf::from(&device_name),
+            &ffmpeg::Format::Input(input_format),
+            options,
+        )
+        .map_err(|e| InferenceError::VideoError(format!("Failed to open webcam: {e}")))?;
+
+        let ffmpeg::format::context::Context::Input(ictx) = opened else {
+            return Err(InferenceError::VideoError(
+                "Opened context is not an input context".to_string(),
+            ));
+        };
+
+        let stream = ictx
+            .streams()
+            .best(ffmpeg::media::Type::Video)
+            .ok_or_else(|| {
+                InferenceError::VideoError("No video stream found in webcam".to_string())
+            })?;
+        self.webcam_stream_index = stream.index();
+
+        let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+            .map_err(|e| {
+                InferenceError::VideoError(format!("Failed to read webcam stream parameters: {e}"))
+            })?
+            .decoder()
+            .video()
+            .map_err(|e| {
+                InferenceError::VideoError(format!("Failed to create webcam decoder: {e}"))
+            })?;
+
+        self.webcam_decoder = Some((ictx, decoder));
+        Ok(())
+    }
+
     /// Get the next video frame.
     #[cfg(feature = "video")]
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[allow(unsafe_code, clippy::too_many_lines)]
     fn next_video_frame(&mut self) -> Option<Result<(DynamicImage, SourceMeta)>> {
-        // Handle Webcam separately using native ffmpeg
-        if let Source::Webcam(idx) = &self.source {
+        // Handle Webcam separately using native ffmpeg. Copy the index out so the source
+        // borrow ends before `open_webcam` takes `&mut self`.
+        let webcam_idx = match &self.source {
+            Source::Webcam(idx) => Some(*idx),
+            _ => None,
+        };
+        if let Some(idx) = webcam_idx {
             if self.webcam_init_failed {
                 return None;
             }
 
-            if self.webcam_decoder.is_none() {
-                // Initialize webcam
-                ffmpeg::init().ok();
-
-                // Get format by name (returns Option<Format>)
-                let input_format_name = if cfg!(target_os = "macos") {
-                    "avfoundation"
-                } else if cfg!(target_os = "linux") {
-                    "video4linux2"
-                } else if cfg!(target_os = "windows") {
-                    "dshow"
-                } else {
-                    self.webcam_init_failed = true;
-                    return Some(Err(InferenceError::VideoError(
-                        "Unsupported OS for webcam".to_string(),
-                    )));
-                };
-
-                // Find input format by name using low-level C API
-                let Ok(c_name) = std::ffi::CString::new(input_format_name) else {
-                    self.webcam_init_failed = true;
-                    return Some(Err(InferenceError::VideoError(format!(
-                        "Invalid input format name '{input_format_name}'"
-                    ))));
-                };
-                #[allow(unsafe_code)]
-                let ptr = unsafe { video_rs::ffmpeg::ffi::av_find_input_format(c_name.as_ptr()) };
-
-                let input_format = if ptr.is_null() {
-                    self.webcam_init_failed = true;
-                    return Some(Err(InferenceError::VideoError(format!(
-                        "Input format '{input_format_name}' not found"
-                    ))));
-                } else {
-                    #[allow(unsafe_code, clippy::ptr_cast_constness)]
-                    unsafe {
-                        ffmpeg::format::Input::wrap(ptr.cast_mut())
-                    }
-                };
-
-                // Determine device name based on OS and index
-                let device_name = if cfg!(target_os = "macos") {
-                    idx.to_string() // Just index for avfoundation
-                } else if cfg!(target_os = "linux") {
-                    format!("/dev/video{idx}")
-                } else if cfg!(target_os = "windows") {
-                    format!("video={idx}")
-                } else {
-                    self.webcam_init_failed = true;
-                    return Some(Err(InferenceError::VideoError(
-                        "Unsupported OS for webcam device name".to_string(),
-                    )));
-                };
-
-                // Set explicit framerate to avoid default NTSC mismatch
-                let mut options = ffmpeg::Dictionary::new();
-                options.set("framerate", "30");
-
-                match ffmpeg::format::open_with(
-                    &PathBuf::from(&device_name),
-                    &ffmpeg::Format::Input(input_format),
-                    options,
-                ) {
-                    #[allow(clippy::single_match_else)]
-                    Ok(ctx) => match ctx {
-                        ffmpeg::format::context::Context::Input(ictx) => {
-                            let input =
-                                ictx.streams()
-                                    .best(ffmpeg::media::Type::Video)
-                                    .ok_or_else(|| {
-                                        InferenceError::VideoError(
-                                            "No video stream found in webcam".to_string(),
-                                        )
-                                    });
-
-                            match input {
-                                Ok(stream) => {
-                                    let stream_index = stream.index();
-                                    self.webcam_stream_index = stream_index;
-                                    let context_decoder =
-                                        match ffmpeg::codec::context::Context::from_parameters(
-                                            stream.parameters(),
-                                        ) {
-                                            Ok(ctx) => ctx,
-                                            Err(e) => {
-                                                self.webcam_init_failed = true;
-                                                return Some(Err(InferenceError::VideoError(
-                                                    format!(
-                                                        "Failed to read webcam stream parameters: {e}"
-                                                    ),
-                                                )));
-                                            }
-                                        };
-                                    match context_decoder.decoder().video() {
-                                        Ok(decoder) => {
-                                            self.webcam_decoder = Some((ictx, decoder));
-                                        }
-                                        Err(e) => {
-                                            self.webcam_init_failed = true;
-                                            return Some(Err(InferenceError::VideoError(format!(
-                                                "Failed to create webcam decoder: {e}"
-                                            ))));
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    self.webcam_init_failed = true;
-                                    return Some(Err(e));
-                                }
-                            }
-                        }
-                        ffmpeg::format::context::Context::Output(_) => {
-                            self.webcam_init_failed = true;
-                            return Some(Err(InferenceError::VideoError(
-                                "Opened context is not an input context".to_string(),
-                            )));
-                        }
-                    },
-                    Err(e) => {
-                        self.webcam_init_failed = true;
-                        return Some(Err(InferenceError::VideoError(format!(
-                            "Failed to open webcam: {e}"
-                        ))));
-                    }
-                }
+            if self.webcam_decoder.is_none()
+                && let Err(e) = self.open_webcam(idx)
+            {
+                self.webcam_init_failed = true;
+                return Some(Err(e));
             }
-
             if let Some((ictx, decoder)) = &mut self.webcam_decoder {
                 let mut decoded = ffmpeg::util::frame::video::Video::empty();
 
