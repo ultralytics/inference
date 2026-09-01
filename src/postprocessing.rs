@@ -555,20 +555,101 @@ fn extract_detect_boxes(
         return Array2::zeros((0, 6));
     }
 
-    // Top-K before suppression: NMS is quadratic, and a box ranked below this cannot
-    // survive into a `max_det`-capped result. `total_cmp` gives `select_nth_unstable_by`
-    // the total order it requires and keeps a NaN score from panicking.
+    // Top-K Selection & Sort. `total_cmp` keeps a NaN score from panicking, and both of these
+    // need the total order it provides: `select_nth_unstable_by` has unspecified behavior with
+    // an inconsistent comparator.
     let nms_limit = (max_det * 10).min(candidates.len());
     if candidates.len() > nms_limit {
         candidates.select_nth_unstable_by(nms_limit, |a, b| b.score.total_cmp(&a.score));
         candidates.truncate(nms_limit);
     }
+    candidates.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
 
-    let nms_input: Vec<([f32; 4], f32, usize)> = candidates
-        .iter()
-        .map(|c| (c.bbox, c.score, c.class))
-        .collect();
-    let keep = crate::utils::nms_per_class_capped(&nms_input, iou_thresh, max_det);
+    // Population of SoA for NMS (small copy, very fast)
+    let n = candidates.len();
+    let mut x1 = Vec::with_capacity(n);
+    let mut y1 = Vec::with_capacity(n);
+    let mut x2 = Vec::with_capacity(n);
+    let mut y2 = Vec::with_capacity(n);
+    let mut areas = Vec::with_capacity(n);
+
+    for c in &candidates {
+        x1.push(c.bbox[0]);
+        y1.push(c.bbox[1]);
+        x2.push(c.bbox[2]);
+        y2.push(c.bbox[3]);
+        areas.push((c.bbox[2] - c.bbox[0]) * (c.bbox[3] - c.bbox[1]));
+    }
+
+    let mut suppressed = vec![false; n];
+    let mut keep = Vec::with_capacity(max_det);
+    let iou_v = f32x8::splat(iou_thresh);
+    for i in 0..n {
+        if suppressed[i] {
+            continue;
+        }
+        keep.push(i);
+        if keep.len() >= max_det {
+            break;
+        }
+
+        let ax1 = f32x8::splat(x1[i]);
+        let ay1 = f32x8::splat(y1[i]);
+        let ax2 = f32x8::splat(x2[i]);
+        let ay2 = f32x8::splat(y2[i]);
+        let aa = f32x8::splat(areas[i]);
+        let ac = candidates[i].class;
+
+        let mut j = i + 1;
+        while j < n {
+            if n - j >= 8 {
+                if (0..8).any(|k| candidates[j + k].class == ac && !suppressed[j + k]) {
+                    let bx1 = unsafe { (x1.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let by1 = unsafe { (y1.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let bx2 = unsafe { (x2.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let by2 = unsafe { (y2.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let ba = unsafe { (areas.as_ptr().add(j) as *const f32x8).read_unaligned() };
+
+                    let ix1 = ax1.max(bx1);
+                    let iy1 = ay1.max(by1);
+                    let ix2 = ax2.min(bx2);
+                    let iy2 = ay2.min(by2);
+
+                    let iw = (ix2 - ix1).max(f32x8::ZERO);
+                    let ih = (iy2 - iy1).max(f32x8::ZERO);
+                    let ia = iw * ih;
+                    let iou = ia / (aa + ba - ia);
+
+                    let mask = iou.simd_gt(iou_v).to_bitmask() as u8;
+                    if mask != 0 {
+                        for k in 0..8 {
+                            if (mask & (1 << k)) != 0 && candidates[j + k].class == ac {
+                                suppressed[j + k] = true;
+                            }
+                        }
+                    }
+                }
+                j += 8;
+            } else {
+                for k in j..n {
+                    if !suppressed[k] && candidates[k].class == ac {
+                        let ix1 = x1[i].max(x1[k]);
+                        let iy1 = y1[i].max(y1[k]);
+                        let ix2 = x2[i].min(x2[k]);
+                        let iy2 = y2[i].min(y2[k]);
+                        let iw = (ix2 - ix1).max(0.0);
+                        let ih = (iy2 - iy1).max(0.0);
+                        let ia = iw * ih;
+                        let iou = ia / (areas[i] + areas[k] - ia);
+                        if iou > iou_thresh {
+                            suppressed[k] = true;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
     // Result Construction
     let num_kept = keep.len();
     let mut result = Array2::zeros((num_kept, 6));
