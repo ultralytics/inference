@@ -42,9 +42,6 @@ pub struct ModelMetadata {
     pub channels: usize,
     /// Precision recorded by the model export metadata.
     pub quantize: Option<Quantization>,
-    /// Legacy FP16 metadata alias. Use [`Self::quantize`] instead.
-    #[doc(hidden)]
-    pub half: bool,
     /// Class ID to class name mapping.
     pub names: Arc<HashMap<usize, String>>,
     /// Whether the model was exported with end-to-end NMS-free output
@@ -184,7 +181,6 @@ impl ModelMetadata {
             // flag, so it maps straight through without the deprecation warning.
             metadata.quantize = half.unwrap_or(false).then_some(Quantization::Fp16);
         }
-        metadata.half = metadata.quantize == Some(Quantization::Fp16);
 
         // imgsz is a two-integer list (`[640, 640]` inline or a `- 640` block),
         // parsed with the same helper as kpt_shape.
@@ -420,7 +416,6 @@ impl Default for ModelMetadata {
             imgsz: None,
             channels: 3,
             quantize: None,
-            half: false,
             names: Arc::new(HashMap::new()),
             end2end: false,
             kpt_shape: None,
@@ -543,14 +538,12 @@ channels: 3
     fn test_precision_metadata_compatibility() {
         let metadata = ModelMetadata::from_yaml_str("args: {'half': True}").unwrap();
         assert_eq!(metadata.quantize, Some(Quantization::Fp16));
-        assert!(metadata.half);
 
         let metadata = ModelMetadata::from_yaml_str(
             "quantize: 32\nhalf: true\nargs: {'quantize': 16, 'half': True}",
         )
         .unwrap();
         assert_eq!(metadata.quantize, Some(Quantization::Fp32));
-        assert!(!metadata.half);
     }
 
     #[test]
