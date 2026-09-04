@@ -276,18 +276,17 @@ Notes:
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Export end2end-free models** (`end2end=False`): Ultralytics YOLO26 defaults to an
-  end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
-  **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.
-  Export them with `end2end=False` so the standard head is used and NMS runs in
-  this package's Rust, keeping inference on WebGPU:
+- **End2end models run on the CPU by default**: Ultralytics YOLO26 uses an
+  end-to-end, NMS-free head. Reading its outputs back from the GPU needs Asyncify,
+  which ships only in LiteRT's JSPI build, and that build excludes WASM threads.
+  Losing threads slows this package's own pre- and post-processing by more than the
+  GPU saves, so `device: "auto"` keeps these models on multithreaded wasm. Pass
+  `device: "webgpu"` to override; a browser without JSPI falls back to wasm with a
+  warning. Exporting the standard head instead keeps threads _and_ the GPU:
 
   ```bash
   yolo export model=yolo26n.pt format=litert end2end=False
   ```
-
-  If you load an end2end `.tflite` anyway, the backend auto-switches it to wasm
-  (slower) and logs a warning rather than returning empty results.
 
 - **Tasks**: detect, segment, pose, obb, classify, semantic, and depth are all supported.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,

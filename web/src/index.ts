@@ -158,10 +158,38 @@ export interface LoadOptions {
  * needs a real adapter, since `navigator.gpu` can exist while `requestAdapter()`
  * still returns `null` — so `YOLO.device` reports what actually ran.
  */
+/** Software rasterizers that expose WebGPU but run on the CPU, where wasm is faster. */
+const SOFTWARE_GPU = /swiftshader|llvmpipe|lavapipe|basic render|software/i;
+
+interface GpuAdapter {
+  isFallbackAdapter?: boolean;
+  info?: { vendor?: string; architecture?: string; description?: string };
+}
+
+/** True when the adapter is a CPU rasterizer rather than real GPU hardware.
+ *
+ * `isFallbackAdapter` is the spec answer, but Chrome leaves it `undefined` on both
+ * software and hardware adapters, so the reported vendor/architecture (which names
+ * the rasterizer outright) is what actually decides. */
+function isSoftwareAdapter({ isFallbackAdapter, info }: GpuAdapter): boolean {
+  if (isFallbackAdapter) return true;
+  return SOFTWARE_GPU.test(`${info?.vendor ?? ""} ${info?.architecture ?? ""} ${info?.description ?? ""}`);
+}
+
 async function resolveDevice(pref?: "auto" | "webgpu" | "cpu"): Promise<string> {
   if (pref === "cpu") return "cpu";
-  const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-  if (await gpu?.requestAdapter().catch(() => null)) return "webgpu";
+  const gpu = (navigator as { gpu?: { requestAdapter(): Promise<GpuAdapter | null> } }).gpu;
+  const adapter = (await gpu?.requestAdapter().catch(() => null)) ?? null;
+  if (adapter) {
+    // A software rasterizer reports a working adapter, but wasm with SIMD and threads
+    // beats it by a wide margin, so `"auto"` should not treat it as a GPU. An explicit
+    // `"webgpu"` is still honored.
+    if (pref !== "webgpu" && isSoftwareAdapter(adapter)) {
+      console.warn("[@ultralytics/yolo] WebGPU adapter is a software rasterizer; running on CPU, which is faster.");
+      return "cpu";
+    }
+    return "webgpu";
+  }
   if (pref === "webgpu") console.warn("[@ultralytics/yolo] WebGPU requested but no adapter found; running on CPU.");
   return "cpu";
 }
@@ -361,7 +389,8 @@ interface LiteRtCompiledModel {
   delete?(): void;
 }
 interface LiteRtModule {
-  loadLiteRt(wasmPath: string, opts?: { threads?: boolean }): Promise<void>;
+  loadLiteRt(wasmPath: string, opts?: { threads?: boolean; jspi?: boolean }): Promise<void>;
+  supportsFeature?(feature: string): Promise<boolean>;
   loadAndCompile(model: Uint8Array | string, opts: { accelerator: string | string[] }): Promise<LiteRtCompiledModel>;
   Tensor: new (data: Float32Array, shape: number[]) => LiteRtTensor;
 }
@@ -391,6 +420,8 @@ async function importLiteRt(): Promise<LiteRtModule> {
 // (reload to switch) rather than silently reusing the original assets.
 let litertInit: Promise<void> | null = null;
 let litertInitUrl: string | null = null;
+let litertInitJspi = false;
+
 /** Reject a cross-origin wasm URL on an isolated page before LiteRT fails on it.
  *
  * Threads need `crossOriginIsolated`, which needs `COEP: require-corp`, and that blocks
@@ -408,7 +439,7 @@ function checkWasmUrlReachable(wasmUrl: string): void {
   );
 }
 
-function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<void> {
+function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string, jspi = false): Promise<void> {
   if (litertInit) {
     if (litertInitUrl !== wasmUrl) {
       return Promise.reject(
@@ -417,18 +448,32 @@ function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<voi
         ),
       );
     }
+    if (litertInitJspi !== jspi) {
+      // Without this the mismatch surfaces from inside the runtime as
+      // "Asyncify is not defined", which says nothing about the cause.
+      return Promise.reject(
+        new Error(
+          `LiteRT.js loads one wasm build per page: it is already running the ${
+            litertInitJspi ? "JSPI" : "multithreaded"
+          } build, and this model needs the ${jspi ? "JSPI" : "multithreaded"} one. Load the end2end model on WebGPU first, keep every model on the same device, or reload the page.`,
+        ),
+      );
+    }
     return litertInit;
   }
   checkWasmUrlReachable(wasmUrl);
   litertInitUrl = wasmUrl;
-  // Enable WASM multithreading when the page is cross-origin isolated (COOP/COEP
-  // set, so SharedArrayBuffer is available); otherwise LiteRT.js runs single-
-  // threaded. SIMD is detected by LiteRT itself. Isolation is a page-global
-  // property, so this needs no per-load option.
+  litertInitJspi = jspi;
+  // `threads` and `jspi` are mutually exclusive builds. Only the JSPI build ships
+  // Asyncify, which WebGPU needs to read back an end2end model's outputs, so that
+  // case asks for JSPI and gives up multithreading. Everything else takes threads
+  // when the page is cross-origin isolated (COOP/COEP set, so SharedArrayBuffer is
+  // available); SIMD is detected by LiteRT itself.
   const threads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
-  litertInit = litert.loadLiteRt(wasmUrl, { threads }).catch((e) => {
+  litertInit = litert.loadLiteRt(wasmUrl, jspi ? { jspi: true } : { threads }).catch((e) => {
     litertInit = null; // let a later load retry if the first init failed
     litertInitUrl = null;
+    litertInitJspi = false;
     throw e;
   });
   return litertInit;
@@ -450,9 +495,14 @@ class LiteRtBackend {
 
   /** Import LiteRT.js, init its wasm, and compile the model, falling back from
    * WebGPU to wasm (CPU) if the GPU accelerator cannot compile. */
-  static async load(tflite: Uint8Array, wasmUrl: string, accelerator: "webgpu" | "wasm"): Promise<LiteRtBackend> {
+  static async load(
+    tflite: Uint8Array,
+    wasmUrl: string,
+    accelerator: "webgpu" | "wasm",
+    jspi = false,
+  ): Promise<LiteRtBackend> {
     const litert = await importLiteRt();
-    await ensureLiteRtRuntime(litert, wasmUrl);
+    await ensureLiteRtRuntime(litert, wasmUrl, jspi);
     try {
       const model = await litert.loadAndCompile(tflite, { accelerator });
       return new LiteRtBackend(litert, model, accelerator);
@@ -710,17 +760,31 @@ export class YOLO {
     // Honor `device` including `"auto"`, which feature-detects WebGPU (so a
     // browser without it goes straight to wasm instead of a failed compile).
     let accelerator: "webgpu" | "wasm" = (await resolveDevice(options?.device)) === "webgpu" ? "webgpu" : "wasm";
-    // End-to-end exports (YOLO26) do NMS/top-k with int64 + gather_nd ops the
-    // LiteRT WebGPU delegate cannot run: it fails to invoke and returns zeros.
-    // Force CPU/wasm so the model works. For WebGPU speed, re-export the model
-    // with `end2end=False` so the standard head (with NMS in Rust) is used.
+    // Reading an end2end (NMS-free) model's outputs back from the GPU needs Asyncify,
+    // which ships only in LiteRT's JSPI build. Ask for that build when the browser
+    // supports JSPI; it costs multithreading, since `threads` and `jspi` are mutually
+    // exclusive. Without JSPI the GPU path throws "Asyncify is not defined", so fall
+    // back to CPU/wasm, which is also where the threaded build is much faster.
+    let jspi = false;
     if (accelerator === "webgpu" && pipeline.end2end) {
-      accelerator = "wasm";
-      console.warn(
-        "LiteRT: this is an end2end (NMS-free) model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with `end2end=False` for WebGPU.",
-      );
+      // Only when WebGPU is asked for by name. The GPU runs an end2end model faster
+      // than wasm does (17ms against 27ms on Apple hardware), but reaching it needs
+      // the JSPI build, which excludes threads, and that leaves this package's own
+      // pre/post-processing single-threaded. End to end that is a net loss: 47ms
+      // against 32ms for multithreaded wasm. `"auto"` therefore stays on the CPU.
+      // `supportsFeature` is absent on older LiteRT builds, which then count as no JSPI.
+      const litert = await importLiteRt();
+      jspi = options?.device === "webgpu" && ((await litert.supportsFeature?.("jspi")) ?? false);
+      if (!jspi) {
+        accelerator = "wasm";
+        console.warn(
+          options?.device === "webgpu"
+            ? "LiteRT: this is an end2end (NMS-free) model and this browser has no JSPI, which its WebGPU path needs, so it runs on CPU/wasm. Re-export with `end2end=False` for WebGPU."
+            : 'LiteRT: this is an end2end (NMS-free) model, so it runs on multithreaded CPU/wasm. Pass `device: "webgpu"` to force the GPU path, or re-export with `end2end=False`.',
+        );
+      }
     }
-    const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
+    const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator, jspi);
     // The compiled model outranks the metadata: `pipeline.inputShape` is what sizes the
     // input tensor below, so a stale `imgsz` would build one the model rejects.
     // Signed on purpose: the engine reports a dynamic axis as a negative number, and wasm
