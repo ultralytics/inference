@@ -146,6 +146,9 @@ export interface LoadOptions {
    * `.tflite` (run through LiteRT.js). Defaults to the jsDelivr CDN. Self-host by
    * copying `node_modules/@litertjs/core/wasm/` and pointing here (absolute URL
    * ending in `/`). Requires the optional `@litertjs/core` peer dependency.
+   *
+   * Required on a cross-origin-isolated page: `COEP: require-corp` blocks the worker
+   * LiteRT starts from the default CDN, so the wasm has to come from your own origin.
    */
   litertWasmUrl?: string | URL;
 }
@@ -388,6 +391,23 @@ async function importLiteRt(): Promise<LiteRtModule> {
 // (reload to switch) rather than silently reusing the original assets.
 let litertInit: Promise<void> | null = null;
 let litertInitUrl: string | null = null;
+/** Reject a cross-origin wasm URL on an isolated page before LiteRT fails on it.
+ *
+ * Threads need `crossOriginIsolated`, which needs `COEP: require-corp`, and that blocks
+ * the worker LiteRT starts from another origin. The default URL is a CDN, so the two
+ * settings are mutually exclusive and the failure otherwise arrives as a bare
+ * `SecurityError: Failed to construct 'Worker'`.
+ */
+function checkWasmUrlReachable(wasmUrl: string): void {
+  if (typeof crossOriginIsolated === "undefined" || !crossOriginIsolated) return;
+  if (typeof location === "undefined") return;
+  const origin = new URL(wasmUrl, location.href).origin;
+  if (origin === location.origin) return;
+  throw new Error(
+    `LiteRT.js wasm must be served from this origin on a cross-origin-isolated page: "${wasmUrl}" is on ${origin}, and COEP blocks the worker it starts. Copy node_modules/@litertjs/core/wasm/ next to your app and pass it as litertWasmUrl, or drop COOP/COEP to give up WASM threads.`,
+  );
+}
+
 function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<void> {
   if (litertInit) {
     if (litertInitUrl !== wasmUrl) {
@@ -399,6 +419,7 @@ function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<voi
     }
     return litertInit;
   }
+  checkWasmUrlReachable(wasmUrl);
   litertInitUrl = wasmUrl;
   // Enable WASM multithreading when the page is cross-origin isolated (COOP/COEP
   // set, so SharedArrayBuffer is available); otherwise LiteRT.js runs single-
