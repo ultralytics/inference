@@ -179,8 +179,8 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   ```python
   from ultralytics import YOLO
 
-  YOLO("yolo26n.pt").export(format="onnx")  # FP32（默认）
-  YOLO("yolo26n.pt").export(format="onnx", quantize=16)  # FP16（体积约小 50%）
+  YOLO("yolo26n.pt").export(format="onnx")  # FP32 (默认)
+  YOLO("yolo26n.pt").export(format="onnx", quantize=16)  # FP16 (体积约小 50%)
   ```
 
   > Ultralytics ≥8.4 使用 `quantize` 参数，取代已弃用的 `half=True` / `int8=True` 标志。

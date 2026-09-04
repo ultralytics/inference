@@ -257,7 +257,7 @@ ultralytics-inference help
 ultralytics-inference version
 
 # Run inference
-ultralytics-inference predict --model <model.onnx> --source <source>
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ```
 
 `--help` and `--version` are also supported as standard flag aliases.

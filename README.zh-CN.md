@@ -145,8 +145,8 @@ yolo export model=yolo26n.pt format=onnx quantize=16
 from ultralytics import YOLO
 
 model = YOLO("yolo26n.pt")
-model.export(format="onnx")  # FP32（默认）
-model.export(format="onnx", quantize=16)  # FP16（半精度）
+model.export(format="onnx")  # FP32 (默认)
+model.export(format="onnx", quantize=16)  # FP16 (半精度)
 ```
 
 > **精度 / 量化：** Ultralytics ≥8.4 使用统一的 `quantize` 参数，取代已弃用的
@@ -256,7 +256,7 @@ ultralytics-inference help
 ultralytics-inference version
 
 # 运行推理
-ultralytics-inference predict --model <model.onnx> --source <source>
+ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ```
 
 `--help` 和 `--version` 也可作为标准别名使用。
