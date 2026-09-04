@@ -272,7 +272,7 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "xnnpack")]
                 crate::Device::Xnnpack => eps.push((
-                    Self::build_xnnpack_ep(num_threads),
+                    ort::ep::XNNPACK::default().build(),
                     "XNNPACKExecutionProvider",
                 )),
                 // Handle cases where feature is disabled but enum variant exists
@@ -319,7 +319,7 @@ impl YOLOModel {
 
             #[cfg(feature = "xnnpack")]
             eps.push((
-                Self::build_xnnpack_ep(num_threads),
+                ort::ep::XNNPACK::default().build(),
                 "XNNPACKExecutionProvider",
             ));
         }
@@ -327,6 +327,12 @@ impl YOLOModel {
         let provider_name = eps
             .first()
             .map_or("CPUExecutionProvider", |&(_, name)| name);
+        // XNNPACK runs its own threadpool whatever its priority, so this is a "registered
+        // at all" check rather than "is primary": in the auto path it is registered last
+        // and still executes the subgraphs the providers ahead of it decline.
+        let uses_xnnpack = eps
+            .iter()
+            .any(|&(_, name)| name == "XNNPACKExecutionProvider");
 
         if !eps.is_empty() {
             crate::info!(
@@ -377,7 +383,10 @@ impl YOLOModel {
             ort::session::builder::GraphOptimizationLevel::Level3
         };
 
-        if provider_name == "XNNPACKExecutionProvider" {
+        // The session's intra-op threads spinning between inferences only steal cores
+        // from XNNPACK's own pool. On a 4-core Cortex-A76 that cost 233.7ms against
+        // 119.4ms.
+        if uses_xnnpack {
             session_builder = session_builder.with_intra_op_spinning(false).map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to disable intra-op spinning: {e}"))
             })?;
@@ -1771,22 +1780,6 @@ impl YOLOModel {
             Self::run_timed(session, ort::inputs![input_name => tensor])?;
         }
         Ok(())
-    }
-
-    /// Build the XNNPACK execution provider with its own threadpool sized to match.
-    ///
-    /// XNNPACK does not share the session's intra-op threadpool, and leaving its pool
-    /// unsized lets the two oversubscribe the cores.
-    #[cfg(feature = "xnnpack")]
-    fn build_xnnpack_ep(num_threads: usize) -> ort::ep::ExecutionProviderDispatch {
-        core::num::NonZeroUsize::new(num_threads).map_or_else(
-            || ort::ep::XNNPACK::default().build(),
-            |n| {
-                ort::ep::XNNPACK::default()
-                    .with_intra_op_num_threads(n)
-                    .build()
-            },
-        )
     }
 
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
