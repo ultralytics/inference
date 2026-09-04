@@ -272,7 +272,7 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "xnnpack")]
                 crate::Device::Xnnpack => eps.push((
-                    ort::ep::XNNPACK::default().build(),
+                    Self::build_xnnpack_ep(num_threads),
                     "XNNPACKExecutionProvider",
                 )),
                 // Handle cases where feature is disabled but enum variant exists
@@ -319,7 +319,7 @@ impl YOLOModel {
 
             #[cfg(feature = "xnnpack")]
             eps.push((
-                ort::ep::XNNPACK::default().build(),
+                Self::build_xnnpack_ep(num_threads),
                 "XNNPACKExecutionProvider",
             ));
         }
@@ -376,6 +376,13 @@ impl YOLOModel {
         } else {
             ort::session::builder::GraphOptimizationLevel::Level3
         };
+
+        if provider_name == "XNNPACKExecutionProvider" {
+            session_builder = session_builder.with_intra_op_spinning(false).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to disable intra-op spinning: {e}"))
+            })?;
+        }
+
         session_builder = session_builder
             .with_optimization_level(optimization_level)
             .map_err(|e| {
@@ -1764,6 +1771,22 @@ impl YOLOModel {
             Self::run_timed(session, ort::inputs![input_name => tensor])?;
         }
         Ok(())
+    }
+
+    /// Build the XNNPACK execution provider with its own threadpool sized to match.
+    ///
+    /// XNNPACK does not share the session's intra-op threadpool, and leaving its pool
+    /// unsized lets the two oversubscribe the cores.
+    #[cfg(feature = "xnnpack")]
+    fn build_xnnpack_ep(num_threads: usize) -> ort::ep::ExecutionProviderDispatch {
+        core::num::NonZeroUsize::new(num_threads).map_or_else(
+            || ort::ep::XNNPACK::default().build(),
+            |n| {
+                ort::ep::XNNPACK::default()
+                    .with_intra_op_num_threads(n)
+                    .build()
+            },
+        )
     }
 
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
