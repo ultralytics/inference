@@ -383,9 +383,6 @@ impl YOLOModel {
             ort::session::builder::GraphOptimizationLevel::Level3
         };
 
-        // The session's intra-op threads spinning between inferences only steal cores
-        // from XNNPACK's own pool. On a 4-core Cortex-A76 that cost 233.7ms against
-        // 119.4ms.
         if uses_xnnpack {
             session_builder = session_builder.with_intra_op_spinning(false).map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to disable intra-op spinning: {e}"))
