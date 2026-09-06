@@ -142,11 +142,16 @@ jobs:
           xcodebuild -version
           echo "XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')" >> "$GITHUB_ENV"
 
+      # Homebrew's rolling `ffmpeg` is now FFmpeg 9, whose headers drop the
+      # deprecated AVCodec fields and codec IDs that ffmpeg-next 8 still uses.
+      # Stay on the keg-only ffmpeg@8 until video-rs moves to ffmpeg-next 9.
       - name: Install dependencies
-        run: brew install ffmpeg
+        run: |
+          brew install ffmpeg@8
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg@8)/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Capture FFmpeg version for cache key
-        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg | awk '{print $2}')" >> "$GITHUB_ENV"
+        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg@8 | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
