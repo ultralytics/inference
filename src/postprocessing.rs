@@ -1280,9 +1280,10 @@ fn postprocess_obb(
     results
 }
 
-// YOLO26 end-to-end (NMS-free) postprocessing.
+// Postprocessing for the YOLO26 NMS-free one-to-one head (`nms=False`) and
+// exports with NMS baked into the graph (`nms=True`).
 //
-// End-to-end exports bake NMS into the graph and produce a tensor of shape
+// Both produce a tensor of shape
 // `[B, max_det, 6 + extra]`, where the first 6 columns are always
 // `[x1, y1, x2, y2, conf, cls]` (OBB is the exception; see `postprocess_obb_end2end`).
 // Coordinates are in the letterboxed model-input space, so we still scale/pad-correct

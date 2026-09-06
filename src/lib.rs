@@ -153,7 +153,7 @@
 //!
 //! ## Task-Specific Examples
 //!
-//! The library supports all YOLO tasks. Export models to ONNX:
+//! The library supports all YOLO tasks. Export models to ONNX with Ultralytics >=8.4.142:
 //!
 //! ```bash
 //! # Detection (default)
@@ -178,8 +178,14 @@
 //! yolo export model=yolo26n-depth.pt format=onnx
 //! ```
 //!
+//! For detect, segment, pose, and OBB, `nms=None` (default) exports raw one-to-many
+//! outputs for NMS in Rust; `nms=False` selects the NMS-free one-to-one head when
+//! available (e.g. YOLO26); `nms=True` embeds NMS in ONNX. All three layouts are
+//! supported. Use `nms=None` for semantic, depth, and classify. Existing compatible
+//! models do not need re-exporting.
+//!
 //! Add `quantize=16` for an FP16 ONNX, or `quantize=8` for INT8 (which also
-//! needs a calibration dataset via `data=`). Requires Ultralytics >= 8.4.
+//! needs a calibration dataset via `data=`).
 //!
 //! The task is auto-detected from ONNX metadata:
 //!

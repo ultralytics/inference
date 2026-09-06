@@ -174,7 +174,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   `YOLO.load` 会自动回退到通用的 **CPU/wasm** 构建，随处可用。可通过
   `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` 指定设备（默认 `"auto"`）。若 WebGPU
   无法启用，加载会回退到 CPU；`model.device` 会报告实际使用的设备。
-- **模型格式**：请使用 Ultralytics 导出为 ONNX，以便元数据（任务、类别名称、`imgsz`）被嵌入模型：
+- **模型格式**：请使用 Ultralytics `>=8.4.142` 导出为 ONNX，以便元数据（任务、类别名称、`imgsz`）被嵌入模型：
 
   ```python
   from ultralytics import YOLO
@@ -182,6 +182,10 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   YOLO("yolo26n.pt").export(format="onnx")  # FP32 (默认)
   YOLO("yolo26n.pt").export(format="onnx", quantize=16)  # FP16 (体积约小 50%)
   ```
+
+  对于 detect、segment、pose 和 OBB，`nms=None`（默认值）导出原始输出，由 Rust 执行 NMS；
+  `nms=False` 在模型支持时选择无 NMS 检测头（例如 YOLO26）；`nms=True` 将 NMS 嵌入 ONNX 图中。
+  semantic、depth 和 classify 使用 `nms=None`。现有的兼容 ONNX 文件无需重新导出。
 
   > Ultralytics ≥8.4 使用 `quantize` 参数，取代已弃用的 `half=True` / `int8=True` 标志。
   > 对于 ONNX，支持的取值为 `32`/`fp32`（默认）、`16`/`fp16` 和 `8`/`int8`；旧标志
@@ -252,19 +256,19 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 - **模型**：使用 Ultralytics 导出为 `.tflite`（WebGPU 需要 float32）。模型从单个文件加载，
   元数据（任务、类别名称、`imgsz`、stride）直接从 `.tflite` 中读取，与 `.onnx` 路径相同，
   无需额外的附属文件。
-- **需要 Ultralytics `>= 8.4.83`**：带内嵌元数据的单文件 LiteRT 导出自
+- **现有模型兼容性**：带内嵌元数据的单文件 LiteRT 导出自
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) 起提供。更早的版本
   会导出旧版 TFLite 格式，无法在这里加载。
-- **导出非 end2end 模型**（`end2end=False`）：Ultralytics YOLO26 默认使用端到端、无 NMS 的检测头，
-  其中的 `int64` / `gather_nd` 算子无法在 LiteRT 的 **WebGPU** delegate 上运行，因此这类导出会
-  静默回退到 CPU/wasm。请使用 `end2end=False` 导出，以便使用标准检测头，并由本包的 Rust 代码执行
-  NMS，从而让推理保持在 WebGPU 上：
+- **为 WebGPU 保留一对多检测头**（`nms=None`）：以 `nms=False` 导出的 YOLO26 无 NMS 检测头包含
+  `int64` / `gather_nd` 算子，无法在 LiteRT 的 **WebGPU** delegate 上运行，因此这类导出会
+  回退到 CPU/wasm。以下命令需要 Ultralytics `>=8.4.142`，默认导出一对多检测头，NMS 由本包的 Rust 代码执行，
+  推理得以保持在 WebGPU 上：
 
   ```bash
-  yolo export model=yolo26n.pt format=litert end2end=False
+  yolo export model=yolo26n.pt format=litert nms=None
   ```
 
-  如果仍然加载了 end2end 的 `.tflite`，后端会自动切换到 wasm（较慢）并打印警告，而不是返回空结果。
+  如果加载了无 NMS 的 `.tflite`，后端会自动切换到 wasm（较慢）并打印警告，而不是返回空结果。
 
 - **支持的任务**：detect、segment、pose、obb、classify、semantic 和 depth 均已支持。
 - **跨源隔离**：LiteRT 的多线程 wasm 需要 `SharedArrayBuffer`，因此请以

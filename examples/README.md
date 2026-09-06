@@ -62,12 +62,14 @@ Found 5 detections
 The examples load `yolo26n.onnx`, downloading it on first use. To provide the model yourself, export it with the Ultralytics Python package. The command below writes `yolo26n.onnx` into the current directory, which the example then loads instead of downloading. The positional argument is still the input image:
 
 ```bash
-pip install ultralytics
+pip install -U "ultralytics[export-base]>=8.4.142"
 yolo export model=yolo26n.pt format=onnx
 
 cargo run --example basic -- image.jpg
 ```
 
+The default `nms=None` exports raw one-to-many outputs, with NMS handled by this library.
+For the other NMS modes and tasks, see [ONNX export options](../README.md#export-a-yolo-model-to-onnx).
 To run a different model, change the model path in the example.
 
 ## 🤝 Contributing

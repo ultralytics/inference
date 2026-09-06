@@ -710,14 +710,14 @@ export class YOLO {
     // Honor `device` including `"auto"`, which feature-detects WebGPU (so a
     // browser without it goes straight to wasm instead of a failed compile).
     let accelerator: "webgpu" | "wasm" = (await resolveDevice(options?.device)) === "webgpu" ? "webgpu" : "wasm";
-    // End-to-end exports (YOLO26) do NMS/top-k with int64 + gather_nd ops the
+    // NMS-free exports (YOLO26, `nms=False`) do top-k selection with int64 + gather_nd ops the
     // LiteRT WebGPU delegate cannot run: it fails to invoke and returns zeros.
     // Force CPU/wasm so the model works. For WebGPU speed, re-export the model
-    // with `end2end=False` so the standard head (with NMS in Rust) is used.
+    // with Ultralytics >=8.4.142 and `nms=None` for the one-to-many head (NMS in Rust).
     if (accelerator === "webgpu" && pipeline.end2end) {
       accelerator = "wasm";
       console.warn(
-        "LiteRT: this is an end2end (NMS-free) model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with `end2end=False` for WebGPU.",
+        "LiteRT: this is an NMS-free model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with Ultralytics >=8.4.142 and `nms=None` for WebGPU.",
       );
     }
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);

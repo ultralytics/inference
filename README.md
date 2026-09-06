@@ -132,7 +132,16 @@ ultralytics-inference help
 
 ### Export a YOLO Model to ONNX
 
+These examples use Ultralytics `>=8.4.142`. For detect, segment, pose, and OBB,
+`nms=None` (the default) exports raw one-to-many outputs and this library runs NMS;
+`nms=False` selects the NMS-free one-to-one head when available (e.g. YOLO26);
+`nms=True` embeds NMS in the ONNX graph. All three output layouts are supported.
+Use `nms=None` for semantic, depth, and classify. Existing compatible ONNX files
+continue to load without re-exporting.
+
 ```bash
+pip install -U "ultralytics[export-base]>=8.4.142"
+
 # Using Ultralytics CLI (FP32, default)
 yolo export model=yolo26n.pt format=onnx
 

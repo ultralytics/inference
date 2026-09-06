@@ -185,7 +185,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` (default `"auto"`). If
   WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
   actually ran.
-- **Model format**: export your model to ONNX with Ultralytics so the metadata
+- **Model format**: export your model to ONNX with Ultralytics `>=8.4.142` so the metadata
   (task, class names, `imgsz`) is embedded:
 
   ```python
@@ -194,6 +194,11 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   YOLO("yolo26n.pt").export(format="onnx")  # FP32 (default)
   YOLO("yolo26n.pt").export(format="onnx", quantize=16)  # FP16 (~50% smaller)
   ```
+
+  For detect, segment, pose, and OBB, `nms=None` (the default) exports raw outputs
+  for NMS in Rust; `nms=False` selects the NMS-free head when available (e.g. YOLO26);
+  `nms=True` embeds NMS in the ONNX graph. Use `nms=None` for semantic, depth, and classify.
+  Existing compatible ONNX files do not need re-exporting.
 
   > Ultralytics ≥8.4 uses the `quantize` argument instead of the deprecated
   > `half=True` / `int8=True` flags. For ONNX the supported values are
@@ -272,21 +277,21 @@ Notes:
 - **Model**: export with Ultralytics to `.tflite` (float32 for WebGPU). It loads
   from the single file. The metadata (task, class names, `imgsz`, stride) is read
   straight from the `.tflite`, the same as the `.onnx` path. No sidecar.
-- **Requires Ultralytics `>= 8.4.83`**: the single-file LiteRT export (with
+- **Existing model compatibility**: the single-file LiteRT export (with
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Export end2end-free models** (`end2end=False`): Ultralytics YOLO26 defaults to an
-  end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
-  **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.
-  Export them with `end2end=False` so the standard head is used and NMS runs in
-  this package's Rust, keeping inference on WebGPU:
+- **Keep the one-to-many head for WebGPU** (`nms=None`): the NMS-free YOLO26 head, exported
+  with `nms=False`, has `int64` / `gather_nd` ops the LiteRT **WebGPU** delegate cannot
+  run, so those exports fall back to CPU/wasm. Use Ultralytics `>=8.4.142` for this recipe; it exports
+  the one-to-many head by default, so NMS runs in this package's Rust and inference stays
+  on WebGPU:
 
   ```bash
-  yolo export model=yolo26n.pt format=litert end2end=False
+  yolo export model=yolo26n.pt format=litert nms=None
   ```
 
-  If you load an end2end `.tflite` anyway, the backend auto-switches it to wasm
+  If you load an NMS-free `.tflite`, the backend auto-switches it to wasm
   (slower) and logs a warning rather than returning empty results.
 
 - **Tasks**: detect, segment, pose, obb, classify, semantic, and depth are all supported.

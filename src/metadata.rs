@@ -44,8 +44,8 @@ pub struct ModelMetadata {
     pub quantize: Option<Quantization>,
     /// Class ID to class name mapping.
     pub names: Arc<HashMap<usize, String>>,
-    /// Whether the model was exported with end-to-end NMS-free output
-    /// (YOLO26-style post-NMS output: `[B, max_det, 6+extra]`).
+    /// Whether the graph uses the NMS-free one-to-one head, from the `end2end` metadata key
+    /// (selected with `nms=False` when available; output: `[B, max_det, 6+extra]`).
     pub end2end: bool,
     /// Pose keypoint shape as (`num_keypoints`, `dims`), e.g. (17, 3).
     pub kpt_shape: Option<(usize, usize)>,
