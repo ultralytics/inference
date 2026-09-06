@@ -713,7 +713,7 @@ export class YOLO {
     // NMS-free exports (YOLO26, `nms=False`) do NMS/top-k with int64 + gather_nd ops the
     // LiteRT WebGPU delegate cannot run: it fails to invoke and returns zeros.
     // Force CPU/wasm so the model works. For WebGPU speed, re-export the model
-    // with the default `nms=None` so the standard head (with NMS in Rust) is used.
+    // with the default `nms=None` so the one-to-many head (with NMS in Rust) is used.
     if (accelerator === "webgpu" && pipeline.end2end) {
       accelerator = "wasm";
       console.warn(

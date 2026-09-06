@@ -255,9 +255,9 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 - **需要 Ultralytics `>= 8.4.83`**：带内嵌元数据的单文件 LiteRT 导出自
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) 起提供。更早的版本
   会导出旧版 TFLite 格式，无法在这里加载。
-- **为 WebGPU 保留标准检测头**（`nms=None`）：以 `nms=False` 导出的 YOLO26 无 NMS 检测头包含
+- **为 WebGPU 保留一对多检测头**（`nms=None`）：以 `nms=False` 导出的 YOLO26 无 NMS 检测头包含
   `int64` / `gather_nd` 算子，无法在 LiteRT 的 **WebGPU** delegate 上运行，因此这类导出会静默
-  回退到 CPU/wasm。Ultralytics `>= 8.4.142` 默认导出标准检测头，NMS 由本包的 Rust 代码执行，
+  回退到 CPU/wasm。Ultralytics `>= 8.4.142` 默认导出一对多检测头，NMS 由本包的 Rust 代码执行，
   推理得以保持在 WebGPU 上：
 
   ```bash

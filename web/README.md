@@ -276,11 +276,11 @@ Notes:
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Keep the standard head for WebGPU** (`nms=None`): the NMS-free YOLO26 head, exported
+- **Keep the one-to-many head for WebGPU** (`nms=None`): the NMS-free YOLO26 head, exported
   with `nms=False`, has `int64` / `gather_nd` ops the LiteRT **WebGPU** delegate cannot
   run, so those exports silently fall back to CPU/wasm. Ultralytics `>= 8.4.142` exports
-  the standard head by default, so NMS runs in this package's Rust and inference stays on
-  WebGPU:
+  the one-to-many head by default, so NMS runs in this package's Rust and inference stays
+  on WebGPU:
 
   ```bash
   yolo export model=yolo26n.pt format=litert
