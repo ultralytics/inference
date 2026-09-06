@@ -143,10 +143,13 @@ jobs:
           echo "XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: brew install ffmpeg
+        run: |
+          brew update
+          brew install ffmpeg@8
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg@8)/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Capture FFmpeg version for cache key
-        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg | awk '{print $2}')" >> "$GITHUB_ENV"
+        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg@8 | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
