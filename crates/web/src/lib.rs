@@ -662,7 +662,7 @@ impl YoloPipeline {
     }
 
     /// Whether this is an NMS-free export, e.g. YOLO26 with `nms=False`. Its head runs
-    /// the NMS/top-k with `int64`/`gather_nd` ops that the LiteRT WebGPU delegate
+    /// top-k selection with `int64`/`gather_nd` ops that the LiteRT WebGPU delegate
     /// cannot execute, so such models must run on the CPU (wasm) accelerator.
     #[wasm_bindgen(getter)]
     #[must_use]

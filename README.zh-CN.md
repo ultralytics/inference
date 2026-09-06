@@ -132,7 +132,16 @@ ultralytics-inference help
 
 ### 将 YOLO 模型导出为 ONNX
 
+以下示例使用 Ultralytics `>=8.4.142`。对于 detect、segment、pose 和 OBB，
+`nms=None`（默认值）导出原始的一对多输出，由本库执行 NMS；
+`nms=False` 在模型支持时选择无 NMS 的一对一检测头（例如 YOLO26）；
+`nms=True` 将 NMS 嵌入 ONNX 图中。本库支持这三种输出布局。
+semantic、depth 和 classify 使用 `nms=None`。现有的兼容 ONNX 文件
+无需重新导出即可继续加载。
+
 ```bash
+pip install -U "ultralytics[export-base]>=8.4.142"
+
 # 使用 Ultralytics CLI（FP32，默认）
 yolo export model=yolo26n.pt format=onnx
 

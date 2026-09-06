@@ -1280,7 +1280,7 @@ fn postprocess_obb(
     results
 }
 
-// Post-NMS output postprocessing: the YOLO26 NMS-free one-to-one head (`nms=False`) and
+// Postprocessing for the YOLO26 NMS-free one-to-one head (`nms=False`) and
 // exports with NMS baked into the graph (`nms=True`).
 //
 // Both produce a tensor of shape
