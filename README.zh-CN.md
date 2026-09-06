@@ -36,7 +36,9 @@
 
 </div>
 
-[Ultralytics](https://www.ultralytics.com) 基于多年计算机视觉与 AI 基础研究，打造业界领先的顶尖（SOTA）[YOLO 模型](https://www.ultralytics.com/yolo)。我们的模型持续更新以提升性能与灵活性，具有**快速**、**准确**、**易用**的特点。它们在[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、[深度估计](https://docs.ultralytics.com/tasks/depth)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和[旋转边界框](https://docs.ultralytics.com/tasks/obb)等任务上表现出色。本库以 Rust 原生运行上述全部任务，底层基于 [ONNX Runtime](https://onnxruntime.ai)，支持图像、视频文件以及摄像头或 RTSP 流，API 设计与 [Ultralytics Python 包](https://github.com/ultralytics/ultralytics)保持一致，且无需 Python 或 PyTorch 运行时。
+[Ultralytics](https://www.ultralytics.com) 基于多年计算机视觉与 AI 基础研究，打造业界领先的顶尖（SOTA）[YOLO 模型](https://www.ultralytics.com/yolo)。我们的模型持续更新以提升性能与灵活性，具有**快速**、**准确**、**易用**的特点。它们在[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、[深度估计](https://docs.ultralytics.com/tasks/depth)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和[旋转边界框](https://docs.ultralytics.com/tasks/obb)等任务上表现出色。
+
+本库是用 Rust 编写的高性能 YOLO 推理库，基于 [ONNX Runtime](https://onnxruntime.ai) 为上述模型提供快速、安全、高效的接口。它可运行上述全部任务，支持图像、视频文件以及摄像头或 RTSP 流，API 设计与 [Ultralytics Python 包](https://github.com/ultralytics/ultralytics)保持一致，且无需 Python 或 PyTorch 运行时。
 
 详细文档请见 [Ultralytics 文档](https://docs.ultralytics.com/zh/inference)。如需支持，请通过 [GitHub Issues](https://github.com/ultralytics/inference/issues/new/choose) 反馈。欢迎加入 [Discord](https://discord.com/invite/ultralytics)、[Reddit](https://www.reddit.com/r/ultralytics/) 和 [Ultralytics 社区论坛](https://community.ultralytics.com)参与讨论！
 
