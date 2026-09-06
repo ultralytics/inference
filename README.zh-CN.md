@@ -569,7 +569,7 @@ ultralytics-inference = { version = "0.0.41", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
-所选版本中缺失的 provider 在运行时将不可用，推理会回退到 CPU。
+所选版本中缺失的 provider 在运行时将不可用，推理会回退到 CPU。在 `aarch64-unknown-linux-gnu` 上仅发布 CPU 版本，因此所有 GPU feature 都会遇到这种情况；如需链接 GPU 版 ONNX Runtime 而不是回退到 CPU，请见 [`docs/DGX.md`](docs/DGX.md)。
 
 > CUDA 与 TensorRT 二进制基于 CUDA 13 构建，且未发布 CUDA 12 版本。若需在 CUDA 12 上运行，请自行编译 ONNX Runtime，并通过 `ORT_LIB_PATH` 链接该构建。
 
@@ -611,10 +611,11 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 [![npm version](https://img.shields.io/npm/v/@ultralytics/yolo?logo=npm&logoColor=white&label=npm&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 [![npm downloads](https://img.shields.io/npm/dm/@ultralytics/yolo?logo=npm&logoColor=white&label=downloads&color=CB3837)](https://www.npmjs.com/package/@ultralytics/yolo)
 
-同一套引擎可编译为 WebAssembly，在浏览器中通过 **WebGPU** 运行。前向推理由官方
-ONNX Runtime Web 构建执行，并通过
-[`ort-web`](https://ort.pyke.io/backends/web) 桥接到 Rust；预处理与后处理复用
-共享的 Rust 代码，因此结果与原生路径一致。
+同一套引擎可编译为 WebAssembly，在浏览器中通过 **WebGPU** 运行。预处理与后处理复用
+共享的 Rust 代码并在 wasm 中执行，因此结果与原生路径一致；前向推理则运行在可插拔的
+后端上：`.onnx` 模型使用官方 ONNX Runtime Web 构建（通过
+[`ort-web`](https://ort.pyke.io/backends/web) 桥接），`.tflite` 模型使用
+[**LiteRT.js**](https://developers.google.com/edge/litert/web)。
 
 它以 [`@ultralytics/yolo`](web/README.md) npm 包形式发布：
 
@@ -628,6 +629,12 @@ console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 
 通过 `{ device: "webgpu" | "cpu" }` 选择加速器（默认 `"auto"`），并读取
 `model.device` 查看实际使用的设备。
+
+后端会根据模型格式自动选择（优先使用扩展名，否则读取模型字节），因此切换后端只取决于
+加载的模型。LiteRT.js（Google 的 Web 版 LiteRT）是可选项，且在 WebGPU 上常常
+**比 ONNX Runtime Web 快约 2 倍**：将 `YOLO.load` 指向 Ultralytics 导出的 `.tflite`
+模型，并在安装本包的同时执行 `npm install @litertjs/core` 即可。详见
+[LiteRT.js 章节](web/README.md#-litertjs-backend)。
 
 浏览器绑定位于 [`crates/web`](crates/web)（`ultralytics-inference-web` cdylib），
 JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的浏览器以及安全
