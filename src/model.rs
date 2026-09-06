@@ -35,6 +35,11 @@ use crate::results::{Results, Speed};
 use crate::task::Task;
 use crate::{verbose, warn};
 
+/// Serializes the tests that build an ORT session: providers compile into one shared
+/// cache, and two sessions building it at once collide there.
+#[cfg(test)]
+pub(crate) static SESSION_BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Finalize a CUDA/`TensorRT` EP builder, binding it to the `cuda-preprocess`
 /// compute stream when one is supplied.
 ///
@@ -2024,7 +2029,6 @@ fn shape_to_usize(shape: &[i64]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -2050,11 +2054,11 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // `#[serial]` with the other session-building test: providers compile into one shared
-    // cache, and two sessions building it at once collide there.
     #[test]
-    #[serial]
     fn test_model_accessors_with_dummy() {
+        let _guard = SESSION_BUILD_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // The accessors need a real instance (YOLOModel wraps an ORT session and can't be
         // mocked), so this only asserts when yolo26n.onnx is present or downloadable.
         if let Ok(model) = YOLOModel::load("yolo26n.onnx") {
