@@ -255,16 +255,17 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 - **需要 Ultralytics `>= 8.4.83`**：带内嵌元数据的单文件 LiteRT 导出自
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) 起提供。更早的版本
   会导出旧版 TFLite 格式，无法在这里加载。
-- **导出非 end2end 模型**（`end2end=False`）：Ultralytics YOLO26 默认使用端到端、无 NMS 的检测头，
-  其中的 `int64` / `gather_nd` 算子无法在 LiteRT 的 **WebGPU** delegate 上运行，因此这类导出会
-  静默回退到 CPU/wasm。请使用 `end2end=False` 导出，以便使用标准检测头，并由本包的 Rust 代码执行
-  NMS，从而让推理保持在 WebGPU 上：
+- **为 WebGPU 保留标准检测头**（`nms=None`）：以 `nms=False` 导出的 YOLO26 无 NMS 检测头包含
+  `int64` / `gather_nd` 算子，无法在 LiteRT 的 **WebGPU** delegate 上运行，因此这类导出会静默
+  回退到 CPU/wasm。Ultralytics `>= 8.4.142` 默认导出标准检测头，NMS 由本包的 Rust 代码执行，
+  推理得以保持在 WebGPU 上：
 
   ```bash
-  yolo export model=yolo26n.pt format=litert end2end=False
+  yolo export model=yolo26n.pt format=litert
   ```
 
-  如果仍然加载了 end2end 的 `.tflite`，后端会自动切换到 wasm（较慢）并打印警告，而不是返回空结果。
+  更早的版本默认使用无 NMS 检测头，在这些版本上请传入 `end2end=False` 以获得相同结果。如果仍然
+  加载了无 NMS 的 `.tflite`，后端会自动切换到 wasm（较慢）并打印警告，而不是返回空结果。
 
 - **支持的任务**：detect、segment、pose、obb、classify、semantic 和 depth 均已支持。
 - **跨源隔离**：LiteRT 的多线程 wasm 需要 `SharedArrayBuffer`，因此请以

@@ -276,17 +276,18 @@ Notes:
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Export end2end-free models** (`end2end=False`): Ultralytics YOLO26 defaults to an
-  end-to-end, NMS-free head whose `int64` / `gather_nd` ops the LiteRT
-  **WebGPU** delegate cannot run, so those exports silently fall back to CPU/wasm.
-  Export them with `end2end=False` so the standard head is used and NMS runs in
-  this package's Rust, keeping inference on WebGPU:
+- **Keep the standard head for WebGPU** (`nms=None`): the NMS-free YOLO26 head, exported
+  with `nms=False`, has `int64` / `gather_nd` ops the LiteRT **WebGPU** delegate cannot
+  run, so those exports silently fall back to CPU/wasm. Ultralytics `>= 8.4.142` exports
+  the standard head by default, so NMS runs in this package's Rust and inference stays on
+  WebGPU:
 
   ```bash
-  yolo export model=yolo26n.pt format=litert end2end=False
+  yolo export model=yolo26n.pt format=litert
   ```
 
-  If you load an end2end `.tflite` anyway, the backend auto-switches it to wasm
+  Earlier versions default to the NMS-free head; pass `end2end=False` there for the same
+  result. If you load an NMS-free `.tflite` anyway, the backend auto-switches it to wasm
   (slower) and logs a warning rather than returning empty results.
 
 - **Tasks**: detect, segment, pose, obb, classify, semantic, and depth are all supported.
