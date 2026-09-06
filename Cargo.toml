@@ -131,7 +131,7 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = [
     "num-complex",
 ] }
 ureq = "^3.3.0"
-dirs = "^6.0"
+dirs = "^7.0"
 rayon = "^1.12"
 clap = { version = "^4.6.1", features = ["derive"] }
 # rayon-backed parallelism for ndarray and fast_image_resize, native only.
