@@ -32,11 +32,7 @@
 
 </div>
 
-Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser,
-with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm
-fallback) and covers detection, segmentation, pose, classification, OBB,
-semantic segmentation, and depth estimation, behind a small TypeScript API with a built-in
-`annotate()` that draws results straight to a canvas.
+Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser, with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm fallback) and covers [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [pose estimation](https://docs.ultralytics.com/tasks/pose), [image classification](https://docs.ultralytics.com/tasks/classify), [oriented bounding boxes](https://docs.ultralytics.com/tasks/obb), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), and [depth estimation](https://docs.ultralytics.com/tasks/depth), behind a small TypeScript API with a built-in `annotate()` that draws results straight to a canvas.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
