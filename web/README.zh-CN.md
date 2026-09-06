@@ -207,7 +207,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
 **通常比 ONNX Runtime Web 快约 2 倍**。只有推理引擎发生变化，前处理、后处理、绘制和 `Results`
 结构仍是同一份共享 Rust 代码，因此输出与 `ort` 路径一致。
 
-后端根据文件扩展名选择：`.tflite` 使用 LiteRT.js，`.onnx` 使用 ONNX Runtime Web。LiteRT.js 的
+后端根据文件扩展名选择，无扩展名时回退到嗅探 `TFL3` 魔数：`.tflite` 使用 LiteRT.js，`.onnx` 使用 ONNX Runtime Web。LiteRT.js 的
 wasm 默认从 CDN 加载，因此唯一需要做的就是让 `@litertjs/core` 能被解析（连同它的
 `@litertjs/wasm-utils` 依赖，npm 会自动安装，下面的 import map 中也显式列出）。
 
