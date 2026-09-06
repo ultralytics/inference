@@ -18,8 +18,6 @@
 
 </div>
 
-High-performance YOLO inference library written in Rust. This library provides a fast, safe, and efficient interface for running YOLO models using ONNX Runtime, with an API designed to match the [Ultralytics Python package](https://github.com/ultralytics/ultralytics).
-
 <div align="center">
 
 [![Ultralytics Discord](https://img.shields.io/discord/1089800235347353640?logo=discord&logoColor=white&label=Discord&color=blue)](https://discord.com/invite/ultralytics)
@@ -37,6 +35,14 @@ High-performance YOLO inference library written in Rust. This library provides a
 [![dependency status](https://deps.rs/repo/github/ultralytics/inference/status.svg)](https://deps.rs/repo/github/ultralytics/inference)
 
 </div>
+
+[Ultralytics](https://www.ultralytics.com) creates cutting-edge, state-of-the-art (SOTA) [YOLO models](https://www.ultralytics.com/yolo) built on years of foundational research in computer vision and AI. Constantly updated for performance and flexibility, our models are **fast**, **accurate**, and **easy to use**. They excel at [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented bounding box](https://docs.ultralytics.com/tasks/obb) tasks.
+
+This is a high-performance YOLO inference library written in Rust, giving those models a fast, safe, and efficient interface on [ONNX Runtime](https://onnxruntime.ai). It runs every task above over images, video files, and webcam or RTSP streams, with an API designed to match the [Ultralytics Python package](https://github.com/ultralytics/ultralytics) and no Python or PyTorch runtime required.
+
+Find detailed documentation in the [Ultralytics Docs](https://docs.ultralytics.com/inference). Get support via [GitHub Issues](https://github.com/ultralytics/inference/issues/new/choose). Join discussions on [Discord](https://discord.com/invite/ultralytics), [Reddit](https://www.reddit.com/r/ultralytics/), and the [Ultralytics Community Forums](https://community.ultralytics.com)!
+
+Request an Enterprise License for commercial use at [Ultralytics Licensing](https://www.ultralytics.com/license).
 
 ## ✨ Features
 

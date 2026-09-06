@@ -32,9 +32,7 @@
 
 </div>
 
-直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com) YOLO 模型，无需服务器，也无需
-Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持检测、分割、姿态、分类、OBB、语义分割和
-深度估计，接口是一个小巧的 TypeScript API，内置的 `annotate()` 可直接把结果绘制到 canvas 上。
+直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com) YOLO 模型，无需服务器，也无需 Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[姿态估计](https://docs.ultralytics.com/tasks/pose)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[旋转边界框](https://docs.ultralytics.com/tasks/obb)、[语义分割](https://docs.ultralytics.com/tasks/semantic)和[深度估计](https://docs.ultralytics.com/tasks/depth)，接口是一个小巧的 TypeScript API，内置的 `annotate()` 可直接把结果绘制到 canvas 上。
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -209,7 +207,7 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
 **通常比 ONNX Runtime Web 快约 2 倍**。只有推理引擎发生变化，前处理、后处理、绘制和 `Results`
 结构仍是同一份共享 Rust 代码，因此输出与 `ort` 路径一致。
 
-后端根据文件扩展名选择：`.tflite` 使用 LiteRT.js，`.onnx` 使用 ONNX Runtime Web。LiteRT.js 的
+后端根据文件扩展名选择，无扩展名时回退到嗅探 `TFL3` 魔数：`.tflite` 使用 LiteRT.js，`.onnx` 使用 ONNX Runtime Web。LiteRT.js 的
 wasm 默认从 CDN 加载，因此唯一需要做的就是让 `@litertjs/core` 能被解析（连同它的
 `@litertjs/wasm-utils` 依赖，npm 会自动安装，下面的 import map 中也显式列出）。
 
