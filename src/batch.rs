@@ -176,7 +176,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -195,8 +194,10 @@ mod tests {
     /// offline while CI, which has network, still exercises it. `batch_size` is 1 because
     /// the default `yolo26n.onnx` only supports batch 1.
     #[test]
-    #[serial]
     fn test_batch_processor_buffers_and_flushes() {
+        let _guard = crate::model::SESSION_BUILD_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let path = std::path::Path::new("yolo26n.onnx");
         let mut model = match YOLOModel::load(path) {
             Ok(model) => model,

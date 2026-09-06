@@ -190,7 +190,6 @@ all = ["annotate", "visualize", "video"]
 
 [dev-dependencies]
 # Testing dependencies
-serial_test = "3"
 tempfile = "3"
 
 
