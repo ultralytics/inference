@@ -589,47 +589,97 @@ fn normalize_box_rows(boxes: &mut Array2<f32>, orig_shape: (u32, u32)) {
     }
 }
 
-impl Boxes {
-    /// Create a new Boxes instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - Array with shape (N, 6) or (N, 7) containing box data.
-    /// * `orig_shape` - Original image shape (height, width).
-    ///
-    /// # Returns
-    ///
-    /// * A new `Boxes` instance.
-    #[must_use]
-    pub fn new(data: Array2<f32>, orig_shape: (u32, u32)) -> Self {
-        let is_track = data.shape()[1] == 7;
-        Self {
-            data,
-            orig_shape,
-            is_track,
+/// Emit the row accessors shared by [`Boxes`] and [`Obb`]. Both store one detection per
+/// row ending in `[..., conf, cls]`, with an optional track id in the third column from
+/// the end, so only the row width that marks a tracking result differs.
+macro_rules! detection_accessors {
+    ($ty:ident, $track_cols:literal, $what:literal, $data_doc:literal) => {
+        impl $ty {
+            #[doc = concat!("Create a new `", stringify!($ty), "` instance.")]
+            ///
+            /// # Arguments
+            ///
+            #[doc = concat!("* `data` - ", $data_doc)]
+            /// * `orig_shape` - Original image shape (height, width).
+            ///
+            /// # Returns
+            ///
+            #[doc = concat!("* A new `", stringify!($ty), "` instance.")]
+            #[must_use]
+            pub fn new(data: Array2<f32>, orig_shape: (u32, u32)) -> Self {
+                let is_track = data.shape()[1] == $track_cols;
+                Self {
+                    data,
+                    orig_shape,
+                    is_track,
+                }
+            }
+
+            #[doc = concat!("Get the number of ", $what, ".")]
+            ///
+            /// # Returns
+            ///
+            #[doc = concat!("* The count of ", $what, ".")]
+            #[must_use]
+            pub fn len(&self) -> usize {
+                self.data.nrows()
+            }
+
+            #[doc = concat!("Check if there are no ", $what, ".")]
+            ///
+            /// # Returns
+            ///
+            /// * `true` if the array is empty.
+            #[must_use]
+            pub fn is_empty(&self) -> bool {
+                self.data.is_empty()
+            }
+
+            /// Get confidence scores.
+            ///
+            /// # Returns
+            ///
+            /// * A view of confidence scores (0.0 to 1.0).
+            #[must_use]
+            pub fn conf(&self) -> ArrayView1<'_, f32> {
+                self.data.slice(s![.., -2])
+            }
+
+            /// Get class IDs.
+            ///
+            /// # Returns
+            ///
+            /// * A view of class IDs.
+            #[must_use]
+            pub fn cls(&self) -> ArrayView1<'_, f32> {
+                self.data.slice(s![.., -1])
+            }
+
+            /// Get tracking IDs (if available).
+            ///
+            /// # Returns
+            ///
+            /// * `Some` view of track IDs if this is a tracking result, otherwise `None`.
+            #[must_use]
+            pub fn id(&self) -> Option<ArrayView1<'_, f32>> {
+                if self.is_track {
+                    Some(self.data.slice(s![.., -3]))
+                } else {
+                    None
+                }
+            }
         }
-    }
+    };
+}
 
-    /// Get the number of boxes.
-    ///
-    /// # Returns
-    ///
-    /// * The count of bounding boxes.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.data.nrows()
-    }
+detection_accessors!(
+    Boxes,
+    7,
+    "bounding boxes",
+    "Array with shape (N, 6) or (N, 7) containing box data."
+);
 
-    /// Check if there are no boxes.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the boxes array is empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
+impl Boxes {
     /// Get boxes in xyxy format [x1, y1, x2, y2].
     ///
     /// # Returns
@@ -638,40 +688,6 @@ impl Boxes {
     #[must_use]
     pub fn xyxy(&self) -> ArrayView2<'_, f32> {
         self.data.slice(s![.., 0..4])
-    }
-
-    /// Get confidence scores.
-    ///
-    /// # Returns
-    ///
-    /// * A view of confidence scores (0.0 to 1.0).
-    #[must_use]
-    pub fn conf(&self) -> ArrayView1<'_, f32> {
-        self.data.slice(s![.., -2])
-    }
-
-    /// Get class IDs.
-    ///
-    /// # Returns
-    ///
-    /// * A view of class IDs.
-    #[must_use]
-    pub fn cls(&self) -> ArrayView1<'_, f32> {
-        self.data.slice(s![.., -1])
-    }
-
-    /// Get tracking IDs (if available).
-    ///
-    /// # Returns
-    ///
-    /// * `Some` view of track IDs if this is a tracking result, otherwise `None`.
-    #[must_use]
-    pub fn id(&self) -> Option<ArrayView1<'_, f32>> {
-        if self.is_track {
-            Some(self.data.slice(s![.., -3]))
-        } else {
-            None
-        }
     }
 
     /// Get boxes in xywh format [`x_center`, `y_center`, width, height].
@@ -996,47 +1012,14 @@ pub struct Obb {
     is_track: bool,
 }
 
+detection_accessors!(
+    Obb,
+    8,
+    "oriented bounding boxes",
+    "Raw OBB data with shape (N, 7) or (N, 8)."
+);
+
 impl Obb {
-    /// Create a new Obb instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - Raw OBB data.
-    /// * `orig_shape` - Original image shape.
-    ///
-    /// # Returns
-    ///
-    /// * A new `Obb` instance.
-    #[must_use]
-    pub fn new(data: Array2<f32>, orig_shape: (u32, u32)) -> Self {
-        let is_track = data.shape()[1] == 8;
-        Self {
-            data,
-            orig_shape,
-            is_track,
-        }
-    }
-
-    /// Get the number of OBBs.
-    ///
-    /// # Returns
-    ///
-    /// * The count of oriented bounding boxes.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.data.nrows()
-    }
-
-    /// Check if there are no OBBs.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
     /// Get boxes in xywhr format [`x_center`, `y_center`, width, height, rotation].
     ///
     /// # Returns
@@ -1045,40 +1028,6 @@ impl Obb {
     #[must_use]
     pub fn xywhr(&self) -> ArrayView2<'_, f32> {
         self.data.slice(s![.., 0..5])
-    }
-
-    /// Get confidence scores.
-    ///
-    /// # Returns
-    ///
-    /// * A view of confidence scores.
-    #[must_use]
-    pub fn conf(&self) -> ArrayView1<'_, f32> {
-        self.data.slice(s![.., -2])
-    }
-
-    /// Get class IDs.
-    ///
-    /// # Returns
-    ///
-    /// * A view of class IDs.
-    #[must_use]
-    pub fn cls(&self) -> ArrayView1<'_, f32> {
-        self.data.slice(s![.., -1])
-    }
-
-    /// Get tracking IDs (if available).
-    ///
-    /// # Returns
-    ///
-    /// * `Some` view of track IDs if available, otherwise `None`.
-    #[must_use]
-    pub fn id(&self) -> Option<ArrayView1<'_, f32>> {
-        if self.is_track {
-            Some(self.data.slice(s![.., -3]))
-        } else {
-            None
-        }
     }
 
     /// Get corner points for each OBB as (N, 4, 2) array.
