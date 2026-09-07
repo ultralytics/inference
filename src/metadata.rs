@@ -112,7 +112,7 @@ impl ModelMetadata {
             // Handle key: value pairs
             if let Some((key, value)) = line.split_once(':') {
                 let key = key.trim();
-                let value = value.trim().trim_matches('\'').trim_matches('"');
+                let value = Self::unquote(value);
 
                 match key {
                     "description" => metadata.description = value.to_string(),
@@ -126,23 +126,9 @@ impl ModelMetadata {
                             InferenceError::ModelLoadError(format!("Invalid task in metadata: {e}"))
                         })?;
                     }
-                    "stride" => {
-                        metadata.stride = value.parse().map_err(|_| {
-                            InferenceError::ModelLoadError(format!("Invalid stride value: {value}"))
-                        })?;
-                    }
-                    "batch" => {
-                        metadata.batch = value.parse().map_err(|_| {
-                            InferenceError::ModelLoadError(format!("Invalid batch value: {value}"))
-                        })?;
-                    }
-                    "channels" => {
-                        metadata.channels = value.parse().map_err(|_| {
-                            InferenceError::ModelLoadError(format!(
-                                "Invalid channels value: {value}"
-                            ))
-                        })?;
-                    }
+                    "stride" => metadata.stride = Self::parse_field(value, "stride")?,
+                    "batch" => metadata.batch = Self::parse_field(value, "batch")?,
+                    "channels" => metadata.channels = Self::parse_field(value, "channels")?,
                     "quantize" => {
                         metadata.quantize = Self::parse_quantize(value)?;
                         quantize_set = true;
@@ -166,12 +152,8 @@ impl ModelMetadata {
                             half = Some(Self::parse_bool(value));
                         }
                     }
-                    _ => {
-                        // Check for class name entries (numeric keys)
-                        if let Ok(class_id) = key.trim().parse::<usize>() {
-                            names.insert(class_id, value.to_string());
-                        }
-                    }
+                    // Class name entries have numeric keys.
+                    _ => Self::insert_class_entry(&mut names, line),
                 }
             }
         }
@@ -199,8 +181,29 @@ impl ModelMetadata {
         Ok(metadata)
     }
 
+    /// Strip surrounding whitespace and any wrapping single or double quotes.
+    fn unquote(value: &str) -> &str {
+        value.trim().trim_matches(|c| c == '\'' || c == '"')
+    }
+
+    /// Parse a scalar metadata field, reporting the field name on failure.
+    fn parse_field<T: std::str::FromStr>(value: &str, name: &str) -> Result<T> {
+        value
+            .parse()
+            .map_err(|_| InferenceError::ModelLoadError(format!("Invalid {name} value: {value}")))
+    }
+
+    /// Insert a `class_id: name` entry into `names`, ignoring anything that is not one.
+    fn insert_class_entry(names: &mut HashMap<usize, String>, entry: &str) {
+        if let Some((key, value)) = entry.split_once(':')
+            && let Ok(class_id) = key.trim().parse::<usize>()
+        {
+            names.insert(class_id, Self::unquote(value).to_string());
+        }
+    }
+
     fn parse_quantize(value: &str) -> Result<Option<Quantization>> {
-        let value = value.trim().trim_matches(|c| c == '\'' || c == '"');
+        let value = Self::unquote(value);
         if value.eq_ignore_ascii_case("none")
             || value.eq_ignore_ascii_case("null")
             || value.is_empty()
@@ -231,11 +234,7 @@ impl ModelMetadata {
 
     fn parse_bool(value: &str) -> bool {
         !matches!(
-            value
-                .trim()
-                .trim_matches(|c| c == '\'' || c == '"')
-                .to_ascii_lowercase()
-                .as_str(),
+            Self::unquote(value).to_ascii_lowercase().as_str(),
             "none" | "false" | "0" | ""
         )
     }
@@ -331,12 +330,7 @@ impl ModelMetadata {
                 }
 
                 // Parse class entries like "0: person" or "  0: person"
-                if let Some((key, value)) = trimmed.split_once(':')
-                    && let Ok(class_id) = key.trim().parse::<usize>()
-                {
-                    let class_name = value.trim().trim_matches('\'').trim_matches('"');
-                    names.insert(class_id, class_name.to_string());
-                }
+                Self::insert_class_entry(&mut names, trimmed);
             }
         }
 
@@ -350,13 +344,7 @@ impl ModelMetadata {
         // Split by comma, but be careful with quotes
         for entry in dict_str.split(',') {
             let entry = entry.trim();
-            if let Some((key, value)) = entry.split_once(':') {
-                let key = key.trim();
-                let value = value.trim().trim_matches('\'').trim_matches('"');
-                if let Ok(class_id) = key.parse::<usize>() {
-                    names.insert(class_id, value.to_string());
-                }
-            }
+            Self::insert_class_entry(&mut names, entry);
         }
 
         names
