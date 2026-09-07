@@ -8,7 +8,7 @@
 //! graph fields are skipped without being parsed. These helpers are pure
 //! (`&[u8] -> map`) and carry no wasm/JS types.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Read a protobuf base-128 varint at `pos`, advancing it. Returns `None` on a
 /// truncated/oversized value.
@@ -62,8 +62,11 @@ fn read_field<'a>(buf: &'a [u8], pos: &mut usize) -> Option<(u64, Option<&'a [u8
 /// Extract `ModelProto.metadata_props` (field 14, repeated
 /// `StringStringEntryProto`) into a key/value map. Other fields (including the
 /// large graph) are skipped without being decoded.
-pub(crate) fn parse_metadata_props(buf: &[u8]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
+///
+/// Ordered by key, so the text built from it in `build_metadata` is stable
+/// across runs rather than following a hash order that varies per build.
+pub(crate) fn parse_metadata_props(buf: &[u8]) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
     let mut pos = 0;
     while let Some((field, payload)) = read_field(buf, &mut pos) {
         if field == 14
