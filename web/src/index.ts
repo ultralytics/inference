@@ -499,29 +499,22 @@ class LiteRtBackend {
   }
 }
 
+/** Prediction knobs passed straight through to wasm, shared by every engine call. */
+interface PredictParams {
+  conf: number;
+  iou: number;
+  classes: Uint32Array | undefined;
+  colormap: string;
+  depthViz: string;
+}
+
 /** Backend behind {@link YOLO}: returns the wasm `Results` payload either way. */
 interface Engine {
   readonly task: string;
   readonly device: string;
   readonly names: Record<number, string>;
-  predictDrawable(
-    data: Uint8Array,
-    width: number,
-    height: number,
-    conf: number,
-    iou: number,
-    classes: Uint32Array | undefined,
-    colormap: string,
-    depthViz: string,
-  ): Promise<unknown>;
-  predictEncoded(
-    bytes: Uint8Array,
-    conf: number,
-    iou: number,
-    classes: Uint32Array | undefined,
-    colormap: string,
-    depthViz: string,
-  ): Promise<unknown>;
+  predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown>;
+  predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown>;
   free(): void;
 }
 
@@ -537,27 +530,11 @@ class OrtEngine implements Engine {
   get names(): Record<number, string> {
     return this.model.names as Record<number, string>;
   }
-  predictDrawable(
-    data: Uint8Array,
-    width: number,
-    height: number,
-    conf: number,
-    iou: number,
-    classes: Uint32Array | undefined,
-    colormap: string,
-    depthViz: string,
-  ): Promise<unknown> {
-    return this.model.predict_rgba(data, width, height, conf, iou, classes, colormap, depthViz);
+  predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
+    return this.model.predict_rgba(data, width, height, p.conf, p.iou, p.classes, p.colormap, p.depthViz);
   }
-  predictEncoded(
-    bytes: Uint8Array,
-    conf: number,
-    iou: number,
-    classes: Uint32Array | undefined,
-    colormap: string,
-    depthViz: string,
-  ): Promise<unknown> {
-    return this.model.predict(bytes, conf, iou, classes, colormap, depthViz);
+  predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown> {
+    return this.model.predict(bytes, p.conf, p.iou, p.classes, p.colormap, p.depthViz);
   }
   free(): void {
     this.model.free();
@@ -587,49 +564,24 @@ class LiteRtEngine implements Engine {
     return this.pipeline.names as Record<number, string>;
   }
 
-  predictDrawable(
-    data: Uint8Array,
-    width: number,
-    height: number,
-    conf: number,
-    iou: number,
-    classes: Uint32Array | undefined,
-    colormap: string,
-    depthViz: string,
-  ): Promise<unknown> {
-    return this.serialize(() => this.runDrawable(data, width, height, conf, iou, classes, colormap, depthViz));
+  predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
+    return this.serialize(() => this.runDrawable(data, width, height, p));
   }
 
   /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
-  predictEncoded(
-    bytes: Uint8Array,
-    conf: number,
-    iou: number,
-    classes: Uint32Array | undefined,
-    colormap: string,
-    depthViz: string,
-  ): Promise<unknown> {
+  predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown> {
     return this.serialize(async () => {
       const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
       try {
         const { data, width, height } = toImageData(bitmap);
-        return await this.runDrawable(data, width, height, conf, iou, classes, colormap, depthViz);
+        return await this.runDrawable(data, width, height, p);
       } finally {
         bitmap.close();
       }
     });
   }
 
-  private async runDrawable(
-    data: Uint8Array,
-    width: number,
-    height: number,
-    conf: number,
-    iou: number,
-    classes: Uint32Array | undefined,
-    colormap: string,
-    depthViz: string,
-  ): Promise<unknown> {
+  private async runDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
     const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
     // Flatten shapes as [rank, dims..., rank, dims...] for the wasm boundary.
@@ -639,11 +591,11 @@ class LiteRtEngine implements Engine {
       outputs,
       new Uint32Array(flatShapes),
       inferenceMs,
-      conf,
-      iou,
-      classes,
-      colormap,
-      depthViz,
+      p.conf,
+      p.iou,
+      p.classes,
+      p.colormap,
+      p.depthViz,
     );
   }
 
@@ -757,21 +709,21 @@ export class YOLO {
    * @param options Confidence/IoU thresholds, class filter, and depth colorizing.
    */
   async predict(image: ImageInput, options?: PredictOptions): Promise<Results> {
-    const conf = options?.conf ?? DEFAULT_CONF;
-    const iou = options?.iou ?? DEFAULT_IOU;
-    const classes = options?.classes ? new Uint32Array(options.classes) : undefined;
-    // Empty means "unset": the wasm side falls back to the Rust `Colormap`/`DepthViz`
-    // defaults, so the default lives in exactly one place.
-    const colormap = options?.colormap ?? "";
-    const depthViz = options?.depthViz ?? "";
+    const p: PredictParams = {
+      conf: options?.conf ?? DEFAULT_CONF,
+      iou: options?.iou ?? DEFAULT_IOU,
+      classes: options?.classes ? new Uint32Array(options.classes) : undefined,
+      // Empty means "unset": the wasm side falls back to the Rust `Colormap`/`DepthViz`
+      // defaults, so the default lives in exactly one place.
+      colormap: options?.colormap ?? "",
+      depthViz: options?.depthViz ?? "",
+    };
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return decodeResults(
-        await this.engine.predictDrawable(data, width, height, conf, iou, classes, colormap, depthViz),
-      );
+      return decodeResults(await this.engine.predictDrawable(data, width, height, p));
     }
     const bytes = await toEncodedBytes(image);
-    return decodeResults(await this.engine.predictEncoded(bytes, conf, iou, classes, colormap, depthViz));
+    return decodeResults(await this.engine.predictEncoded(bytes, p));
   }
 
   /** Release the underlying wasm model/engine. Call when you are done with it. */
