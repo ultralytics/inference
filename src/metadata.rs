@@ -287,9 +287,13 @@ impl ModelMetadata {
         let mut names = HashMap::new();
 
         // First, try to find `names: {0: 'person', 1: 'bicycle', ...}` Python dict format
-        // This is how Ultralytics stores names in ONNX metadata
-        if let Some(start) = yaml_str.find("names:") {
-            let after_names = &yaml_str[start + 6..];
+        // This is how Ultralytics stores names in ONNX metadata. Match the key at the
+        // start of a line: a plain substring search also hits keys that merely end in
+        // `names:`, so a pose export would read `kpt_names` as its class names.
+        if let Some(after_names) = yaml_str
+            .lines()
+            .find_map(|line| line.trim_start().strip_prefix("names:"))
+        {
             let trimmed = after_names.trim();
 
             // Check if it's Python dict format (starts with {)
@@ -520,6 +524,16 @@ channels: 3
         let m = ModelMetadata::from_yaml_str(yaml).unwrap();
         assert_eq!(m.num_classes(), 3);
         assert_eq!(m.class_name(1), Some("bicycle"));
+    }
+
+    #[test]
+    fn test_kpt_names_does_not_shadow_names() {
+        // A pose export carries both keys, and the browser path joins ONNX metadata
+        // props in arbitrary order, so `kpt_names` can precede `names`.
+        let yaml = "task: pose\nkpt_names: {0: ['nose', 'left_eye']}\nnames: {0: 'person'}";
+        let m = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(m.class_name(0), Some("person"));
+        assert_eq!(m.num_classes(), 1);
     }
 
     #[test]
