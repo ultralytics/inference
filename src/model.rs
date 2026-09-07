@@ -874,6 +874,27 @@ impl YOLOModel {
         batch_results
     }
 
+    /// Slice image `i` out of each batched output, keeping the full rank with a batch of one
+    /// (which is what `postprocess` expects).
+    ///
+    /// The per-image stride comes from the output's own leading dimension, not the caller's
+    /// image count, so a model with a pinned batch slices correctly.
+    fn slice_batch_output<'a>(
+        outputs: &[(&'a [f32], Vec<usize>)],
+        i: usize,
+    ) -> Vec<(&'a [f32], Vec<usize>)> {
+        outputs
+            .iter()
+            .map(|(data, shape)| {
+                let batch = if shape[0] > 0 { shape[0] } else { 1 };
+                let per_image = data.len() / batch;
+                let mut img_shape = shape.clone();
+                img_shape[0] = 1;
+                (&data[i * per_image..(i + 1) * per_image], img_shape)
+            })
+            .collect()
+    }
+
     /// Returns true when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only output is
     /// a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction + CPU argmax for semantic segmentation.
     fn has_semantic_mask_output(&self) -> bool {
@@ -912,11 +933,7 @@ impl YOLOModel {
             return Ok(());
         }
 
-        let target_size = self
-            .config
-            .imgsz
-            .or(self.metadata.imgsz)
-            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+        let target_size = self.imgsz();
 
         // Sanity check to prevent huge allocations from invalid imgsz
         if target_size.0 > Self::MAX_IMGSZ || target_size.1 > Self::MAX_IMGSZ {
@@ -1167,10 +1184,7 @@ impl YOLOModel {
         // Same letterbox target the CPU path would pick, so both paths feed the model
         // identical pixels. Computed from the model input, not the (stride-rounded)
         // device buffer, and read before `cuda_preprocessor` borrows `self`.
-        let imgsz = self
-            .metadata
-            .imgsz
-            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+        let imgsz = self.imgsz();
         let target = if self.rect_enabled() {
             calculate_rect_size(w, h, imgsz, self.metadata.stride)
         } else {
@@ -1318,10 +1332,7 @@ impl YOLOModel {
         // One letterbox target for the whole batch, chosen the same way the CPU batch path
         // chooses it: `rect` applies only when the model is dynamic and every source shares
         // a shape, since a mixed batch cannot share one padded target.
-        let imgsz = self
-            .metadata
-            .imgsz
-            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+        let imgsz = self.imgsz();
         let first_dims = images[0].dimensions();
         let uniform_shape = images.iter().all(|img| img.dimensions() == first_dims);
         let target = if self.rect_enabled() && uniform_shape {
@@ -1404,17 +1415,7 @@ impl YOLOModel {
                 let mut results = Vec::with_capacity(n_images);
                 for (i, (orig_img, geom)) in origs.into_iter().zip(&geoms).enumerate() {
                     let (h, w) = (orig_img.shape()[0] as u32, orig_img.shape()[1] as u32);
-                    // Slice image `i` out of each batched output. `postprocess` wants the
-                    // full rank with a batch of one, not the batch dim stripped.
-                    let img_outputs: Vec<(&[f32], Vec<usize>)> = outs
-                        .iter()
-                        .map(|(data, shape)| {
-                            let per_image = data.len() / n_images;
-                            let mut img_shape = shape.clone();
-                            img_shape[0] = 1;
-                            (&data[i * per_image..(i + 1) * per_image], img_shape)
-                        })
-                        .collect();
+                    let img_outputs = Self::slice_batch_output(outs, i);
                     let pre = crate::preprocessing::PreprocessResult {
                         tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
                         tensor_f16: None,
@@ -1527,11 +1528,7 @@ impl YOLOModel {
         }
 
         // Get target size from config or metadata
-        let target_size = self
-            .config
-            .imgsz
-            .or(self.metadata.imgsz)
-            .unwrap_or(InferenceConfig::DEFAULT_IMGSZ);
+        let target_size = self.imgsz();
 
         // Check if target_size is divisible by stride (one-time warning logic per batch call)
         // We only warn if the configured size itself is not divisible.
@@ -1643,19 +1640,7 @@ impl YOLOModel {
                 let path = paths_ref.get(i).cloned().unwrap_or_default();
                 let speed = Speed::new(preprocess_time, inference_time, 0.0);
 
-                let mut img_outputs = Vec::new();
-                for (data, shape) in outputs {
-                    let batch_size = shape[0];
-                    let actual_batch_size = if batch_size > 0 { batch_size } else { 1 };
-                    let total_elements = data.len();
-                    let elements_per_img = total_elements / actual_batch_size;
-                    let start = i * elements_per_img;
-                    let end = start + elements_per_img;
-                    let img_data = &data[start..end];
-                    let mut img_shape = shape.clone();
-                    img_shape[0] = 1;
-                    img_outputs.push((img_data, img_shape));
-                }
+                let img_outputs = Self::slice_batch_output(outputs, i);
 
                 let tensor_shape = preprocess_res.tensor.shape();
                 let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
@@ -1696,21 +1681,21 @@ impl YOLOModel {
                 match pre {
                     [single] => {
                         let tensor = single.tensor_f16.as_ref().expect("fp16 tensor");
-                        Self::run_f16_input(&mut self.session, &self.input_name, tensor)?
+                        Self::run_input(&mut self.session, &self.input_name, tensor)?
                     }
                     batch => {
                         let batch_tensor = Self::concat_f16_batch(batch)?;
-                        Self::run_f16_input(&mut self.session, &self.input_name, &batch_tensor)?
+                        Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
                     }
                 }
             } else {
                 match pre {
                     [single] => {
-                        Self::run_f32_input(&mut self.session, &self.input_name, &single.tensor)?
+                        Self::run_input(&mut self.session, &self.input_name, &single.tensor)?
                     }
                     batch => {
                         let batch_tensor = Self::concat_f32_batch(batch)?;
-                        Self::run_f32_input(&mut self.session, &self.input_name, &batch_tensor)?
+                        Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
                     }
                 }
             }
@@ -1768,18 +1753,10 @@ impl YOLOModel {
         let (h, w) = size;
         if fp16_input {
             let dummy = ndarray::Array4::<f16>::zeros((batch, 3, h, w));
-            let cont = dummy.as_standard_layout();
-            let tensor = TensorRef::from_array_view(&cont).map_err(|e| {
-                InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
-            })?;
-            Self::run_timed(session, ort::inputs![input_name => tensor])?;
+            Self::run_input(session, input_name, &dummy)?;
         } else {
             let dummy = ndarray::Array4::<f32>::zeros((batch, 3, h, w));
-            let cont = dummy.as_standard_layout();
-            let tensor = TensorRef::from_array_view(cont.view()).map_err(|e| {
-                InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-            })?;
-            Self::run_timed(session, ort::inputs![input_name => tensor])?;
+            Self::run_input(session, input_name, &dummy)?;
         }
         Ok(())
     }
@@ -1800,31 +1777,21 @@ impl YOLOModel {
         Ok((outputs, t.elapsed().as_secs_f64() * 1000.0))
     }
 
-    /// Feed an FP32 input tensor and run timed inference, returning the ORT outputs.
+    /// Feed an input tensor of either precision and run timed inference.
     ///
     /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn run_f32_input<'s>(
+    fn run_input<
+        's,
+        T: ort::value::PrimitiveTensorElementType + std::fmt::Debug + Clone + 'static,
+    >(
         session: &'s mut Session,
         input_name: &str,
-        input: &ndarray::Array4<f32>,
+        input: &ndarray::Array4<T>,
     ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
         let input_contiguous = input.as_standard_layout();
         let input_tensor = TensorRef::from_array_view(input_contiguous.view()).map_err(|e| {
             InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
-        })?;
-        Self::run_timed(session, ort::inputs![input_name => input_tensor])
-    }
-
-    /// Feed an FP16 input tensor and run timed inference, returning the ORT outputs.
-    fn run_f16_input<'s>(
-        session: &'s mut Session,
-        input_name: &str,
-        input: &ndarray::Array4<f16>,
-    ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
-        let input_contiguous = input.as_standard_layout();
-        let input_tensor = TensorRef::from_array_view(&input_contiguous).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to create FP16 input tensor: {e}"))
         })?;
         Self::run_timed(session, ort::inputs![input_name => input_tensor])
     }
