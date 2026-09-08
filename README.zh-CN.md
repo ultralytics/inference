@@ -651,17 +651,25 @@ JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的
 
 ### 视频支持（FFmpeg）
 
-视频 features 需要系统安装 FFmpeg（6、7 或 8）：
+视频 features 需要系统安装 FFmpeg（6、7 或 8）。Homebrew 的 `ffmpeg` 现在是 FFmpeg 9，`video-rs` 尚不支持，因此 macOS 需要使用带版本的 formula：
 
 ```bash
 # macOS
-brew install ffmpeg
+brew install ffmpeg@8
+export PKG_CONFIG_PATH="$(brew --prefix ffmpeg@8)/lib/pkgconfig"
 
 # Ubuntu/Debian
 apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libclang-dev
 
 # 使用视频支持构建
 cargo build --release --features video
+```
+
+在 `video-rs` 发布支持之前，如需针对 FFmpeg 9 构建，请在 `.cargo/config.toml` 中添加以下内容，将 Cargo 指向带有该修复的 `video-rs` 分支：
+
+```toml
+[patch.crates-io]
+video-rs = { git = "https://github.com/onuralpszr/video-rs", branch = "ffmpeg9-support" }
 ```
 
 如需构建不含标注和可视化支持的更小二进制：

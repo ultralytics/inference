@@ -665,17 +665,25 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 
 ### Video Support (FFmpeg)
 
-Video features require FFmpeg (6, 7 or 8) installed on your system:
+Video features require FFmpeg (6, 7 or 8) installed on your system. Homebrew's `ffmpeg` is FFmpeg 9, which `video-rs` does not support yet, so macOS needs the versioned formula:
 
 ```bash
 # macOS
-brew install ffmpeg
+brew install ffmpeg@8
+export PKG_CONFIG_PATH="$(brew --prefix ffmpeg@8)/lib/pkgconfig"
 
 # Ubuntu/Debian
 apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libclang-dev
 
 # Build with video support
 cargo build --release --features video
+```
+
+To build against FFmpeg 9 before `video-rs` releases support, point Cargo at a `video-rs` branch that carries the fix by adding this to `.cargo/config.toml`:
+
+```toml
+[patch.crates-io]
+video-rs = { git = "https://github.com/onuralpszr/video-rs", branch = "ffmpeg9-support" }
 ```
 
 To build without annotation and visualization support (smaller binary):

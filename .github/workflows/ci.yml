@@ -124,10 +124,19 @@ jobs:
       - name: Tests (annotate + video)
         run: cargo test --all --features annotate,video
 
-  # macOS FFmpeg 8 video build test
+  # macOS FFmpeg video build test
   build-macos-video:
-    name: build / macos / ffmpeg 8 / video
+    name: build / macos / ffmpeg ${{ matrix.ffmpeg }} / video
     runs-on: macos-latest
+
+    strategy:
+      matrix:
+        include:
+          - ffmpeg: "8"
+            formula: ffmpeg@8
+          - ffmpeg: "9"
+            formula: ffmpeg
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,11 +154,11 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
-          brew install ffmpeg@8
-          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg@8)/lib/pkgconfig" >> "$GITHUB_ENV"
+          brew install ${{ matrix.formula }}
+          echo "PKG_CONFIG_PATH=$(brew --prefix ${{ matrix.formula }})/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Capture FFmpeg version for cache key
-        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg@8 | awk '{print $2}')" >> "$GITHUB_ENV"
+        run: echo "FFMPEG_VERSION=$(brew list --versions ${{ matrix.formula }} | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -162,6 +171,12 @@ jobs:
 
       - name: Ensure toolchain
         run: rustup show
+
+      - name: Patch video-rs for FFmpeg 9
+        if: matrix.ffmpeg == '9'
+        run: |
+          mkdir -p .cargo
+          printf '[patch.crates-io]\nvideo-rs = { git = "https://github.com/onuralpszr/video-rs", branch = "ffmpeg9-support" }\n' > .cargo/config.toml
 
       - name: Build (annotate + video features)
         run: cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
