@@ -9,6 +9,9 @@ use crate::error::{InferenceError, Result};
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "video")]
+use std::borrow::Cow;
+
+#[cfg(feature = "video")]
 use std::sync::Once;
 
 #[cfg(feature = "video")]
@@ -103,6 +106,8 @@ pub struct VideoWriter {
     output: ffmpeg::format::context::Output,
     encoder: ffmpeg::encoder::Video,
     scaler: ffmpeg::software::scaling::context::Context,
+    /// Reused RGB24 staging frame; the scaler reads it before `write_frame` returns.
+    rgb: ffmpeg::util::frame::video::Video,
     stream_index: usize,
     encoder_time_base: ffmpeg::Rational,
     /// Time base the muxer settled on while writing the header.
@@ -209,10 +214,17 @@ impl VideoWriter {
         )
         .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?;
 
+        let rgb = ffmpeg::util::frame::video::Video::new(
+            ffmpeg::format::Pixel::RGB24,
+            frame_width,
+            frame_height,
+        );
+
         Ok(Self {
             output,
             encoder,
             scaler,
+            rgb,
             stream_index,
             encoder_time_base,
             stream_time_base,
@@ -233,7 +245,10 @@ impl VideoWriter {
     ///
     /// Returns an error if encoding fails or frame dimensions don't match.
     pub fn write_frame(&mut self, frame: &image::DynamicImage) -> Result<()> {
-        let img_buffer = frame.to_rgb8();
+        // Annotated frames are already RGB8, so borrow them rather than converting.
+        let img_buffer = frame
+            .as_rgb8()
+            .map_or_else(|| Cow::Owned(frame.to_rgb8()), Cow::Borrowed);
         let width = img_buffer.width() as usize;
         let height = img_buffer.height() as usize;
 
@@ -244,22 +259,18 @@ impl VideoWriter {
             )));
         }
 
-        // Copy into an RGB24 frame row by row: the frame stride may be wider than width * 3.
-        let mut rgb = ffmpeg::util::frame::video::Video::new(
-            ffmpeg::format::Pixel::RGB24,
-            img_buffer.width(),
-            img_buffer.height(),
-        );
-        let stride = rgb.stride(0);
+        // Copy into the staging frame row by row: its stride may be wider than width * 3.
+        let stride = self.rgb.stride(0);
         let row_bytes = width * 3;
-        let data = rgb.data_mut(0);
+        let data = self.rgb.data_mut(0);
         for (y, row) in img_buffer.as_raw().chunks_exact(row_bytes).enumerate() {
             data[y * stride..y * stride + row_bytes].copy_from_slice(row);
         }
 
+        // The encoder keeps a reference to every frame it is given, so this one is fresh.
         let mut yuv = ffmpeg::util::frame::video::Video::empty();
         self.scaler
-            .run(&rgb, &mut yuv)
+            .run(&self.rgb, &mut yuv)
             .map_err(|e| InferenceError::VideoError(format!("Failed to convert frame: {e}")))?;
         yuv.set_pts(Some(self.frame_index));
         self.frame_index += 1;
@@ -465,6 +476,7 @@ impl SaveResults {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::source::SourceMeta;
 
     /// Truncation safety itself is guaranteed by `create_new`; what is asserted here is the
