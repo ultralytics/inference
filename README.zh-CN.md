@@ -665,11 +665,18 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
-在 `video-rs` 发布支持之前，如需针对 FFmpeg 9 构建，请在 `.cargo/config.toml` 中添加以下内容，将 Cargo 指向带有该修复的 `video-rs` 分支：
+在 `video-rs` 发布支持之前，如需针对 FFmpeg 9 构建，请安装 FFmpeg 9 并将 Cargo 指向带有该修复的 `video-rs` 修订版：
+
+```bash
+# macOS
+brew install ffmpeg
+export PKG_CONFIG_PATH="$(brew --prefix ffmpeg)/lib/pkgconfig"
+```
 
 ```toml
+# .cargo/config.toml
 [patch.crates-io]
-video-rs = { git = "https://github.com/onuralpszr/video-rs", branch = "ffmpeg9-support" }
+video-rs = { git = "https://github.com/onuralpszr/video-rs", rev = "861f6071da71f594d8b098a6d53be94ebafa0284" }
 ```
 
 如需构建不含标注和可视化支持的更小二进制：

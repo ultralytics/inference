@@ -176,7 +176,7 @@ jobs:
         if: matrix.ffmpeg == '9'
         run: |
           mkdir -p .cargo
-          printf '[patch.crates-io]\nvideo-rs = { git = "https://github.com/onuralpszr/video-rs", branch = "ffmpeg9-support" }\n' > .cargo/config.toml
+          printf '[patch.crates-io]\nvideo-rs = { git = "https://github.com/onuralpszr/video-rs", rev = "861f6071da71f594d8b098a6d53be94ebafa0284" }\n' > .cargo/config.toml
 
       - name: Build (annotate + video features)
         run: cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference

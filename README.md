@@ -679,11 +679,18 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
-To build against FFmpeg 9 before `video-rs` releases support, point Cargo at a `video-rs` branch that carries the fix by adding this to `.cargo/config.toml`:
+To build against FFmpeg 9 before `video-rs` releases support, install FFmpeg 9 and point Cargo at a `video-rs` revision that carries the fix:
+
+```bash
+# macOS
+brew install ffmpeg
+export PKG_CONFIG_PATH="$(brew --prefix ffmpeg)/lib/pkgconfig"
+```
 
 ```toml
+# .cargo/config.toml
 [patch.crates-io]
-video-rs = { git = "https://github.com/onuralpszr/video-rs", branch = "ffmpeg9-support" }
+video-rs = { git = "https://github.com/onuralpszr/video-rs", rev = "861f6071da71f594d8b098a6d53be94ebafa0284" }
 ```
 
 To build without annotation and visualization support (smaller binary):
