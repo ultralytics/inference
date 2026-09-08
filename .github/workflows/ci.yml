@@ -70,6 +70,18 @@ jobs:
         if: matrix.os != 'macos-latest'
         run: cargo test --no-default-features --features annotate
 
+      # ort/cuda and ort/tensorrt gate the execution-provider setup in model.rs
+      # and io.rs; neither needs a CUDA toolkit to compile, so lint and test
+      # them on the Linux runner. cuda-preprocess stays out - cudarc's build
+      # script shells out to nvcc, which GitHub runners do not have.
+      - name: Clippy (annotate + cuda + tensorrt)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo clippy --all-targets --no-default-features --features annotate,cuda,tensorrt -- -D warnings
+
+      - name: Tests (annotate + cuda + tensorrt)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --no-default-features --features annotate,cuda,tensorrt
+
       # CoreML is macOS-only — covers issue #148 (GatherElements warmup) and graph_input_cast_0 fix
       - name: Clippy (coreml + annotate)
         if: matrix.os == 'macos-latest'
