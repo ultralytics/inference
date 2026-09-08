@@ -3,10 +3,13 @@
 //! I/O utilities for saving results including video encoding.
 
 #[cfg(feature = "video")]
-use video_rs::{Encoder, Time, encode::Settings as EncoderSettings};
+use ffmpeg_next as ffmpeg;
 
 use crate::error::{InferenceError, Result};
 use std::path::{Path, PathBuf};
+
+#[cfg(feature = "video")]
+use std::borrow::Cow;
 
 #[cfg(feature = "video")]
 use std::sync::Once;
@@ -16,17 +19,17 @@ static INIT: Once = Once::new();
 
 /// Initialize global video logging configuration.
 ///
-/// Ensures `video-rs` is initialized and `FFmpeg` logs are silenced (only errors
-/// are shown). Safe to call multiple times.
+/// Ensures `FFmpeg` is initialized and its logs are silenced (only errors are
+/// shown). Safe to call multiple times.
 #[allow(clippy::missing_const_for_fn)]
 pub fn init_logging() {
     #[cfg(feature = "video")]
     INIT.call_once(|| {
-        if let Err(e) = video_rs::init() {
-            eprintln!("Failed to initialize video-rs: {e}");
+        if let Err(e) = ffmpeg::init() {
+            eprintln!("Failed to initialize FFmpeg: {e}");
         }
 
-        video_rs::ffmpeg::log::set_level(video_rs::ffmpeg::log::Level::Error);
+        ffmpeg::log::set_level(ffmpeg::log::Level::Error);
     });
 }
 
@@ -93,12 +96,24 @@ pub fn find_next_run_dir(base: &str, prefix: &str) -> String {
     first.to_string_lossy().into_owned()
 }
 
-/// A wrapper around `video-rs` encoder to simplify video saving.
+/// Distance between key frames, in frames.
+#[cfg(feature = "video")]
+const KEY_FRAME_INTERVAL: u32 = 12;
+
+/// An H.264 encoder that writes annotated frames to a video file.
 #[cfg(feature = "video")]
 pub struct VideoWriter {
-    encoder: Encoder,
-    frame_duration: Time,
-    position: Time,
+    output: ffmpeg::format::context::Output,
+    encoder: ffmpeg::encoder::Video,
+    scaler: ffmpeg::software::scaling::context::Context,
+    /// Reused RGB24 staging frame; the scaler reads it before `write_frame` returns.
+    rgb: ffmpeg::util::frame::video::Video,
+    stream_index: usize,
+    encoder_time_base: ffmpeg::Rational,
+    /// Time base the muxer settled on while writing the header.
+    stream_time_base: ffmpeg::Rational,
+    frame_index: i64,
+    finished: bool,
     width: usize,
     height: usize,
 }
@@ -124,20 +139,101 @@ impl VideoWriter {
             ensure_dir(parent)?;
         }
 
-        let settings = EncoderSettings::preset_h264_yuv420p(width, height, false);
-        let encoder = Encoder::new(output_path.as_path(), settings).map_err(|e| {
-            InferenceError::VideoError(format!("Failed to create video encoder: {e}"))
+        init_logging();
+
+        let frame_width = u32::try_from(width)
+            .map_err(|_| InferenceError::VideoError(format!("Invalid video width {width}")))?;
+        let frame_height = u32::try_from(height)
+            .map_err(|_| InferenceError::VideoError(format!("Invalid video height {height}")))?;
+
+        let mut output = ffmpeg::format::output(&output_path).map_err(|e| {
+            InferenceError::VideoError(format!(
+                "Failed to open {} for writing: {e}",
+                output_path.display()
+            ))
         })?;
 
-        // video-rs uses a rational time base.
-        // We can approximate by converting seconds to Time.
-        let seconds_per_frame = 1.0 / f64::from(fps);
-        let frame_duration = Time::from_secs_f64(seconds_per_frame);
+        // Prefer libx264, which the `preset` option below belongs to, over whichever
+        // H.264 encoder the build happens to register first.
+        let codec = ffmpeg::encoder::find_by_name("libx264")
+            .or_else(|| ffmpeg::encoder::find(ffmpeg::codec::Id::H264))
+            .ok_or_else(|| {
+                InferenceError::VideoError("FFmpeg build has no H.264 encoder".to_string())
+            })?;
+
+        // Rational frame rate so fractional rates such as 29.97 stay exact.
+        let frame_rate = ffmpeg::Rational::from(f64::from(fps));
+        let encoder_time_base = frame_rate.invert();
+
+        let mut encoder = ffmpeg::codec::context::Context::new_with_codec(codec)
+            .encoder()
+            .video()
+            .map_err(|e| {
+                InferenceError::VideoError(format!("Failed to create video encoder: {e}"))
+            })?;
+
+        encoder.set_width(frame_width);
+        encoder.set_height(frame_height);
+        encoder.set_format(ffmpeg::format::Pixel::YUV420P);
+        encoder.set_time_base(encoder_time_base);
+        encoder.set_frame_rate(Some(frame_rate));
+        encoder.set_gop(KEY_FRAME_INTERVAL);
+        if output
+            .format()
+            .flags()
+            .contains(ffmpeg::format::Flags::GLOBAL_HEADER)
+        {
+            encoder.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
+        }
+
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("preset", "medium");
+        let encoder = encoder.open_with(options).map_err(|e| {
+            InferenceError::VideoError(format!("Failed to open H.264 encoder: {e}"))
+        })?;
+
+        let mut stream = output
+            .add_stream(codec)
+            .map_err(|e| InferenceError::VideoError(format!("Failed to add video stream: {e}")))?;
+        stream.set_parameters(&encoder);
+        stream.set_time_base(encoder_time_base);
+        let stream_index = stream.index();
+
+        output.write_header().map_err(|e| {
+            InferenceError::VideoError(format!("Failed to write video header: {e}"))
+        })?;
+
+        let stream_time_base = output
+            .stream(stream_index)
+            .map_or(encoder_time_base, |s| s.time_base());
+
+        let scaler = ffmpeg::software::scaling::context::Context::get(
+            ffmpeg::format::Pixel::RGB24,
+            frame_width,
+            frame_height,
+            ffmpeg::format::Pixel::YUV420P,
+            frame_width,
+            frame_height,
+            ffmpeg::software::scaling::flag::Flags::BILINEAR,
+        )
+        .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?;
+
+        let rgb = ffmpeg::util::frame::video::Video::new(
+            ffmpeg::format::Pixel::RGB24,
+            frame_width,
+            frame_height,
+        );
 
         Ok(Self {
+            output,
             encoder,
-            frame_duration,
-            position: Time::zero(),
+            scaler,
+            rgb,
+            stream_index,
+            encoder_time_base,
+            stream_time_base,
+            frame_index: 0,
+            finished: false,
             width,
             height,
         })
@@ -153,7 +249,10 @@ impl VideoWriter {
     ///
     /// Returns an error if encoding fails or frame dimensions don't match.
     pub fn write_frame(&mut self, frame: &image::DynamicImage) -> Result<()> {
-        let img_buffer = frame.to_rgb8();
+        // Annotated frames are already RGB8, so borrow them rather than converting.
+        let img_buffer = frame
+            .as_rgb8()
+            .map_or_else(|| Cow::Owned(frame.to_rgb8()), Cow::Borrowed);
         let width = img_buffer.width() as usize;
         let height = img_buffer.height() as usize;
 
@@ -164,18 +263,73 @@ impl VideoWriter {
             )));
         }
 
-        let raw = img_buffer.into_raw();
+        // Copy into the staging frame row by row: its stride may be wider than width * 3.
+        let stride = self.rgb.stride(0);
+        let row_bytes = width * 3;
+        let data = self.rgb.data_mut(0);
+        for (y, row) in img_buffer.as_raw().chunks_exact(row_bytes).enumerate() {
+            data[y * stride..y * stride + row_bytes].copy_from_slice(row);
+        }
 
-        #[cfg(feature = "video")]
-        let frame_array = ndarray::Array3::from_shape_vec((height, width, 3), raw)
-            .map_err(|e| InferenceError::VideoError(e.to_string()))?;
+        // The encoder keeps a reference to every frame it is given, so this one is fresh.
+        let mut yuv = ffmpeg::util::frame::video::Video::empty();
+        self.scaler
+            .run(&self.rgb, &mut yuv)
+            .map_err(|e| InferenceError::VideoError(format!("Failed to convert frame: {e}")))?;
+        yuv.set_pts(Some(self.frame_index));
+        self.frame_index += 1;
 
         self.encoder
-            .encode(&frame_array, self.position)
+            .send_frame(&yuv)
             .map_err(|e| InferenceError::VideoError(format!("Failed to encode frame: {e}")))?;
 
-        self.position = self.position.aligned_with(self.frame_duration).add();
+        self.write_packets()
+    }
+
+    /// Interleave every packet the encoder has ready into the container.
+    fn write_packets(&mut self) -> Result<()> {
+        let mut packet = ffmpeg::codec::packet::Packet::empty();
+        loop {
+            match self.encoder.receive_packet(&mut packet) {
+                Ok(()) => {}
+                // The encoder wants more frames, or has been drained after end of stream.
+                Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::util::error::EAGAIN => {
+                    break;
+                }
+                Err(ffmpeg::Error::Eof) => break,
+                Err(e) => {
+                    return Err(InferenceError::VideoError(format!(
+                        "Failed to receive encoded packet: {e}"
+                    )));
+                }
+            }
+
+            packet.set_stream(self.stream_index);
+            // One frame lasts exactly one tick of the encoder time base.
+            packet.set_duration(1);
+            packet.rescale_ts(self.encoder_time_base, self.stream_time_base);
+            packet.write_interleaved(&mut self.output).map_err(|e| {
+                InferenceError::VideoError(format!("Failed to write video packet: {e}"))
+            })?;
+        }
+
         Ok(())
+    }
+
+    /// Flush the encoder and write the container trailer.
+    fn finalize(&mut self) -> Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+        self.finished = true;
+
+        self.encoder
+            .send_eof()
+            .map_err(|e| InferenceError::VideoError(format!("Failed to flush encoder: {e}")))?;
+        self.write_packets()?;
+        self.output.write_trailer().map_err(|e| {
+            InferenceError::VideoError(format!("Failed to finish video encoding: {e}"))
+        })
     }
 
     /// Finish writing the video.
@@ -187,9 +341,16 @@ impl VideoWriter {
     ///
     /// Returns an error if the encoder fails to finish.
     pub fn finish(mut self) -> Result<()> {
-        self.encoder.finish().map_err(|e| {
-            InferenceError::VideoError(format!("Failed to finish video encoding: {e}"))
-        })
+        self.finalize()
+    }
+}
+
+#[cfg(feature = "video")]
+impl Drop for VideoWriter {
+    fn drop(&mut self) {
+        if let Err(e) = self.finalize() {
+            eprintln!("{e}");
+        }
     }
 }
 
@@ -333,6 +494,7 @@ impl SaveResults {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::source::SourceMeta;
 
     /// Truncation safety itself is guaranteed by `create_new`; what is asserted here is the

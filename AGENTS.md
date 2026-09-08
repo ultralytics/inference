@@ -60,7 +60,7 @@ cd web && npm ci && npm run build
 cargo run -- predict
 ```
 
-- CI matrix (`ci.yml`): `test` on ubuntu/macos/windows; `test-video` in FFmpeg 7.1/8.0 Linux containers (`--features annotate,video`); video builds on macOS/Windows; `wasm`; `coverage` (nightly) uploads to Codecov.
+- CI matrix (`ci.yml`): `test` on ubuntu/macos/windows; `test-video` in FFmpeg 7.1/8.0/9.0 Linux containers (`--features annotate,video`); video builds on macOS (Homebrew FFmpeg 9) and Windows (FFmpeg 8.1/9.0); `wasm`; `coverage` (nightly) uploads to Codecov.
 - MSRV is Rust 1.89 (`rust-version` in Cargo.toml), edition 2024.
 - First native build downloads ONNX Runtime binaries (ort `download-binaries` feature), so builds need network once.
 

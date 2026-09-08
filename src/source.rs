@@ -230,14 +230,13 @@ impl Default for SourceMeta {
 }
 
 #[cfg(feature = "video")]
-use video_rs::ffmpeg;
+use ffmpeg_next as ffmpeg;
 
 /// Custom `FFmpeg` video decoder using `SWS_BILINEAR` for YUV -> RGB conversion.
 ///
-/// `video-rs` defaults to `SWS_AREA`, which can produce slightly different
-/// pixel values during colorspace conversion. Those differences can affect
-/// borderline confidence predictions and lead to small detection drift.
-/// For consistency, this decoder uses `SWS_BILINEAR` explicitly.
+/// Other scaler choices such as `SWS_AREA` produce slightly different pixel values
+/// during colorspace conversion. Those differences can affect borderline confidence
+/// predictions and lead to small detection drift, so `SWS_BILINEAR` is explicit here.
 /// Convert a decoded video frame to a tightly-packed RGB24 [`DynamicImage`] using a BILINEAR
 /// scaler. `scaler` caches the context and is rebuilt when the frame's format or size
 /// changes, so pass a persistent `Option` to reuse it across frames.
@@ -632,7 +631,7 @@ impl SourceIterator {
         let c_name = std::ffi::CString::new(format_name).map_err(|_| {
             InferenceError::VideoError(format!("Invalid input format name '{format_name}'"))
         })?;
-        let ptr = unsafe { video_rs::ffmpeg::ffi::av_find_input_format(c_name.as_ptr()) };
+        let ptr = unsafe { ffmpeg::ffi::av_find_input_format(c_name.as_ptr()) };
         if ptr.is_null() {
             return Err(InferenceError::VideoError(format!(
                 "Input format '{format_name}' not found"

@@ -83,7 +83,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: cargo test --no-default-features --features "coreml,annotate" --test integration_test test_coreml_model_loads_and_warms_up -- --ignored --exact
 
-  # Video feature tests for Linux - FFmpeg 7 and 8
+  # Video feature tests for Linux - FFmpeg 7, 8 and 9
   test-video:
     name: test / linux / ffmpeg ${{ matrix.ffmpeg_version }}
     runs-on: ubuntu-latest
@@ -91,7 +91,7 @@ jobs:
 
     strategy:
       matrix:
-        ffmpeg_version: ["8.0", "7.1"]
+        ffmpeg_version: ["9.0", "8.0", "7.1"]
       fail-fast: false
 
     steps:
@@ -124,9 +124,9 @@ jobs:
       - name: Tests (annotate + video)
         run: cargo test --all --features annotate,video
 
-  # macOS FFmpeg 8 video build test
+  # macOS FFmpeg 9 video build test
   build-macos-video:
-    name: build / macos / ffmpeg 8 / video
+    name: build / macos / ffmpeg 9 / video
     runs-on: macos-latest
 
     steps:
@@ -143,13 +143,10 @@ jobs:
           echo "XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: |
-          brew update
-          brew install ffmpeg@8
-          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg@8)/lib/pkgconfig" >> "$GITHUB_ENV"
+        run: brew install ffmpeg
 
       - name: Capture FFmpeg version for cache key
-        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg@8 | awk '{print $2}')" >> "$GITHUB_ENV"
+        run: echo "FFMPEG_VERSION=$(brew list --versions ffmpeg | awk '{print $2}')" >> "$GITHUB_ENV"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -166,14 +163,19 @@ jobs:
       - name: Build (annotate + video features)
         run: cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
 
-  # Windows FFmpeg 8 video build test
+  # Windows FFmpeg 8 and 9 video build test
   build-windows-video:
-    name: build / windows / ffmpeg 8 / video
+    name: build / windows / ffmpeg ${{ matrix.ffmpeg_version }} / video
     runs-on: windows-latest
 
+    strategy:
+      matrix:
+        ffmpeg_version: ["9.0.1", "8.1.1"]
+      fail-fast: false
+
     env:
-      FFMPEG_VERSION: "8.1.1"
-      FFMPEG_DOWNLOAD_URL: https://github.com/GyanD/codexffmpeg/releases/download/8.1.1/ffmpeg-8.1.1-full_build-shared.7z
+      FFMPEG_VERSION: ${{ matrix.ffmpeg_version }}
+      FFMPEG_DOWNLOAD_URL: https://github.com/GyanD/codexffmpeg/releases/download/${{ matrix.ffmpeg_version }}/ffmpeg-${{ matrix.ffmpeg_version }}-full_build-shared.7z
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

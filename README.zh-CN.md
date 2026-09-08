@@ -228,7 +228,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.42 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.43 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -248,7 +248,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.42 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.43 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -351,7 +351,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.42"
+ultralytics-inference = "0.0.43"
 ```
 
 ```toml
@@ -565,7 +565,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.42", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.43", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
@@ -666,14 +666,14 @@ JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的
 
 ### 可选依赖（用于视频和可视化）
 
-| Crate      | 用途                    |
-| ---------- | ----------------------- |
-| `minifb`   | 窗口创建和缓冲区显示    |
-| `video-rs` | 视频解码/编码（ffmpeg） |
+| Crate         | 用途                    |
+| ------------- | ----------------------- |
+| `minifb`      | 窗口创建和缓冲区显示    |
+| `ffmpeg-next` | 视频解码/编码（ffmpeg） |
 
 ### 视频支持（FFmpeg）
 
-视频 features 需要系统安装 FFmpeg（6、7 或 8）：
+视频 features 需要系统安装 FFmpeg（6、7、8 或 9）：
 
 ```bash
 # macOS
