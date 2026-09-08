@@ -112,7 +112,7 @@ colored = "^3.1.1"
 
 # Optional - Visualization and Video support
 minifb = { version = "^0.28.0", optional = true }
-video-rs = { version = ">=0.10.5, <0.12", features = ["ndarray"], optional = true }
+ffmpeg-next = { version = "^9.0", optional = true }
 
 # Optional - Image annotation (for --save feature)
 imageproc = { version = "^0.27", optional = true }
@@ -146,7 +146,7 @@ default = ["annotate", "visualize"]
 visualize = ["minifb", "annotate"]
 
 # Video file support (requires ffmpeg installed on system)
-video = ["video-rs"]
+video = ["dep:ffmpeg-next"]
 
 # Image annotation support (for --save feature in CLI)
 annotate = ["imageproc", "ab_glyph"]

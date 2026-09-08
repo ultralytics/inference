@@ -666,14 +666,14 @@ JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的
 
 ### 可选依赖（用于视频和可视化）
 
-| Crate      | 用途                    |
-| ---------- | ----------------------- |
-| `minifb`   | 窗口创建和缓冲区显示    |
-| `video-rs` | 视频解码/编码（ffmpeg） |
+| Crate         | 用途                    |
+| ------------- | ----------------------- |
+| `minifb`      | 窗口创建和缓冲区显示    |
+| `ffmpeg-next` | 视频解码/编码（ffmpeg） |
 
 ### 视频支持（FFmpeg）
 
-视频 features 需要系统安装 FFmpeg（6、7 或 8）：
+视频 features 需要系统安装 FFmpeg（6、7、8 或 9）：
 
 ```bash
 # macOS

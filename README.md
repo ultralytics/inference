@@ -673,14 +673,14 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 
 ### Optional Dependencies (for Video & Visualization)
 
-| Crate      | Purpose                            |
-| ---------- | ---------------------------------- |
-| `minifb`   | Window creation and buffer display |
-| `video-rs` | Video decoding/encoding (ffmpeg)   |
+| Crate         | Purpose                            |
+| ------------- | ---------------------------------- |
+| `minifb`      | Window creation and buffer display |
+| `ffmpeg-next` | Video decoding/encoding (ffmpeg)   |
 
 ### Video Support (FFmpeg)
 
-Video features require FFmpeg (6, 7 or 8) installed on your system:
+Video features require FFmpeg (6, 7, 8 or 9) installed on your system:
 
 ```bash
 # macOS
