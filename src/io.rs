@@ -153,9 +153,13 @@ impl VideoWriter {
             ))
         })?;
 
-        let codec = ffmpeg::encoder::find(ffmpeg::codec::Id::H264).ok_or_else(|| {
-            InferenceError::VideoError("FFmpeg build has no H.264 encoder".to_string())
-        })?;
+        // Prefer libx264, which the `preset` option below belongs to, over whichever
+        // H.264 encoder the build happens to register first.
+        let codec = ffmpeg::encoder::find_by_name("libx264")
+            .or_else(|| ffmpeg::encoder::find(ffmpeg::codec::Id::H264))
+            .ok_or_else(|| {
+                InferenceError::VideoError("FFmpeg build has no H.264 encoder".to_string())
+            })?;
 
         // Rational frame rate so fractional rates such as 29.97 stay exact.
         let frame_rate = ffmpeg::Rational::from(f64::from(fps));
@@ -285,7 +289,21 @@ impl VideoWriter {
     /// Interleave every packet the encoder has ready into the container.
     fn write_packets(&mut self) -> Result<()> {
         let mut packet = ffmpeg::codec::packet::Packet::empty();
-        while self.encoder.receive_packet(&mut packet).is_ok() {
+        loop {
+            match self.encoder.receive_packet(&mut packet) {
+                Ok(()) => {}
+                // The encoder wants more frames, or has been drained after end of stream.
+                Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::util::error::EAGAIN => {
+                    break;
+                }
+                Err(ffmpeg::Error::Eof) => break,
+                Err(e) => {
+                    return Err(InferenceError::VideoError(format!(
+                        "Failed to receive encoded packet: {e}"
+                    )));
+                }
+            }
+
             packet.set_stream(self.stream_index);
             // One frame lasts exactly one tick of the encoder time base.
             packet.set_duration(1);
