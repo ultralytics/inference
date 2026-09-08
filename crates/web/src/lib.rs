@@ -362,7 +362,7 @@ impl YoloModel {
     /// Returns a JS error only if serialization fails (not expected).
     #[wasm_bindgen(getter)]
     pub fn names(&self) -> Result<JsValue, JsError> {
-        to_js(&*self.metadata.names, "names")
+        names_to_js(&self.metadata.names)
     }
 
     /// Run inference on a single encoded image (JPEG or PNG bytes).
@@ -549,12 +549,13 @@ impl YoloModel {
         // `build_instance_masks` turns this into prototype-space crop coordinates.
         let tensor_shape = pre.tensor.shape();
         let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
-        // Postprocess time runs from output extraction to the postprocess call.
-        let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, now_ms() - t_post);
+        // Postprocess is timed after it returns (below), the same as the `YoloPipeline`
+        // path: building the `Speed` here would only measure the setup above it.
+        let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, 0.0);
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
-        let results = if semantic_baked {
+        let mut results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
                 .try_extract_tensor::<u8>()
@@ -602,6 +603,7 @@ impl YoloModel {
                 self.metadata.kpt_shape,
             )
         };
+        results.speed.postprocess = Some(now_ms() - t_post);
         let payload = JsResults::from_results(&results, self.metadata.task, colormap, viz);
         to_js(&payload, "results")
     }
@@ -676,7 +678,7 @@ impl YoloPipeline {
     /// Returns a JS error only if serialization fails (not expected).
     #[wasm_bindgen(getter)]
     pub fn names(&self) -> Result<JsValue, JsError> {
-        to_js(&*self.metadata.names, "names")
+        names_to_js(&self.metadata.names)
     }
 
     /// The model input shape as `[1, 3, H, W]` (NCHW), for sizing the engine's
@@ -959,6 +961,19 @@ fn err_ctx<E: std::fmt::Display>(context: &'static str) -> impl FnOnce(E) -> JsE
 fn to_js<T: Serialize>(value: &T, what: &str) -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(value)
         .map_err(|e| JsError::new(&format!("failed to serialize {what}: {e}")))
+}
+
+/// The class id -> name map as a plain JS object (`{"0": "person", ...}`), which is
+/// the documented `Record<number, string>` and indexes as `names[0]`. Serializing the
+/// map as-is would hand JS a `Map`, whose entries are unreachable by property access.
+fn names_to_js(names: &HashMap<usize, String>) -> Result<JsValue, JsError> {
+    let by_id: HashMap<String, &str> = names
+        .iter()
+        .map(|(id, name)| (id.to_string(), name.as_str()))
+        .collect();
+    by_id
+        .serialize(&serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true))
+        .map_err(|e| JsError::new(&format!("failed to serialize names: {e}")))
 }
 
 /// The Ultralytics pose drawing scheme: skeleton connectivity plus the per-limb
