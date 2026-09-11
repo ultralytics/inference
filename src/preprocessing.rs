@@ -1044,6 +1044,12 @@ mod tests {
         assert_eq!(res.scale, (640.0 / 1080.0, 640.0 / 810.0));
         let full = scale_coords(&[0.0, 0.0, 640.0, 640.0], res.scale, res.padding);
         assert!((full[2] - 810.0).abs() < 1e-3 && (full[3] - 1080.0).abs() < 1e-3);
+
+        // A zero-extent source has no gain to report: 1.0 keeps the back-projection finite
+        // instead of dividing coordinates by infinity.
+        let (geom, scale) = LetterboxGeometry::stretch(0, 0, (640, 640));
+        assert_eq!(scale, (1.0, 1.0));
+        assert_eq!((geom.new_w, geom.new_h), (640, 640));
     }
 
     #[test]
