@@ -1353,6 +1353,14 @@ fn decode_end2end(
     normalized_to: Option<(u32, u32)>,
     mut on_kept: impl FnMut(usize, [f32; 4], f32, usize),
 ) {
+    // Stopping at the first sub-threshold row is only sound because every head feeding this
+    // walk emits confidence-descending rows: the YOLO end-to-end and RT-DETR graphs both end
+    // in `TopK(sorted=1)`. Assert it in debug so a head that ever stops sorting trips here
+    // instead of silently dropping the detections behind the first low-scoring row.
+    debug_assert!(
+        (1..num_preds).all(|i| output[i * feats + 4] <= output[(i - 1) * feats + 4]),
+        "decode_end2end expects confidence-descending rows"
+    );
     let mut kept = 0;
     for i in 0..num_preds {
         let base = i * feats;
