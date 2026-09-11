@@ -540,7 +540,13 @@ impl YOLOModel {
                 .or(config.batch)
                 .unwrap_or(1)
                 .max(1);
-            match crate::cuda_inference::CudaPreprocessor::finalize(handle, dst_h, dst_w, slots) {
+            match crate::cuda_inference::CudaPreprocessor::finalize(
+                handle,
+                dst_h,
+                dst_w,
+                slots,
+                metadata.is_rtdetr(),
+            ) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     return Err(InferenceError::ModelLoadError(format!(
@@ -1285,7 +1291,7 @@ impl YOLOModel {
             tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
             tensor_f16: None,
             orig_shape: (h, w),
-            scale: (geom.scale, geom.scale),
+            scale: geom.scale,
             padding: (geom.pad_y as f32, geom.pad_x as f32),
         };
         // Reuse the shared zero-copy extraction helper (it handles the f16→f32
@@ -1423,7 +1429,7 @@ impl YOLOModel {
                         tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
                         tensor_f16: None,
                         orig_shape: (h, w),
-                        scale: (geom.scale, geom.scale),
+                        scale: geom.scale,
                         padding: (geom.pad_y as f32, geom.pad_x as f32),
                     };
                     results.push(vec![postprocess(

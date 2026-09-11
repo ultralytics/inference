@@ -111,7 +111,7 @@ extern "C" __global__ void preprocess(
 /// pixel offsets applied along each axis. These values are needed by
 /// post-processing to map model-space coordinates back to source pixels.
 pub(crate) struct PreGeom {
-    pub scale: f32,
+    pub scale: (f32, f32),
     pub pad_x: i32,
     pub pad_y: i32,
 }
@@ -183,6 +183,8 @@ pub(crate) struct CudaPreprocessor {
     /// Model input height/width (letterbox target). May be non-square.
     dst_h: usize,
     dst_w: usize,
+    /// Fill the input by stretching each axis instead of letterboxing, for RT-DETR.
+    stretch: bool,
     /// Number of `3 * dst_h * dst_w` slots the input buffer holds.
     batch: usize,
     /// CUDA device the context, stream and buffers live on.
@@ -199,6 +201,7 @@ impl CudaPreprocessor {
         dst_h: usize,
         dst_w: usize,
         batch: usize,
+        stretch: bool,
     ) -> Result<Self> {
         let CudaStreamHandle {
             ctx,
@@ -238,6 +241,7 @@ impl CudaPreprocessor {
             input_dev_ptr,
             dst_h,
             dst_w,
+            stretch,
             batch,
             device_id,
         })
@@ -322,11 +326,17 @@ impl CudaPreprocessor {
             .memcpy_htod(frame_hwc, &mut self.frame_dev)
             .map_err(|e| InferenceError::InferenceError(format!("htod: {e:?}")))?;
 
-        // Letterbox geometry from the shared CPU helper, so the kernel and the CPU path
-        // can never disagree on scale/rounding/padding. `scale` is the uniform gain
-        // post-processing back-projects with.
-        let (geom, scale) =
-            crate::preprocessing::LetterboxGeometry::compute(src_w, src_h, (dst_h, dst_w));
+        // Geometry from the shared CPU helper, so the kernel and the CPU path can never
+        // disagree on scale/rounding/padding. `scale` is the `(y, x)` gain post-processing
+        // back-projects with: one uniform value when letterboxing, one per axis when
+        // scale-filling for RT-DETR.
+        let (geom, scale) = if self.stretch {
+            crate::preprocessing::LetterboxGeometry::stretch(src_w, src_h, (dst_h, dst_w))
+        } else {
+            let (geom, scale) =
+                crate::preprocessing::LetterboxGeometry::compute(src_w, src_h, (dst_h, dst_w));
+            (geom, (scale, scale))
+        };
         let (resized_w, resized_h) = (geom.new_w as i32, geom.new_h as i32);
         let (pad_x, pad_y) = (geom.pad_left as i32, geom.pad_top as i32);
         // Resampling ratios are src-per-dst on each axis, matching the CPU letterbox
@@ -400,10 +410,16 @@ mod tests {
     /// Tolerance for GPU-computed float comparisons.
     const EPS: f32 = 1e-4;
 
-    /// Open device 0 and build a preprocessor targeting `dst_h` x `dst_w`.
+    /// Open device 0 and build a letterboxing preprocessor targeting `dst_h` x `dst_w`.
     fn preprocessor(dst_h: usize, dst_w: usize) -> CudaPreprocessor {
+        preprocessor_with(dst_h, dst_w, false)
+    }
+
+    /// Open device 0 and build a preprocessor targeting `dst_h` x `dst_w`, scale-filling
+    /// the target when `stretch` is set.
+    fn preprocessor_with(dst_h: usize, dst_w: usize, stretch: bool) -> CudaPreprocessor {
         let handle = CudaStreamHandle::open(0).expect("open CUDA device 0");
-        CudaPreprocessor::finalize(handle, dst_h, dst_w, 1).expect("finalize preprocessor")
+        CudaPreprocessor::finalize(handle, dst_h, dst_w, 1, stretch).expect("finalize preprocessor")
     }
 
     /// Build an HWC RGB buffer filled with a single solid color.
@@ -457,7 +473,11 @@ mod tests {
             .expect("preprocess");
 
         // 640/640 = 1.0 is the binding axis; the 480-tall image is centered.
-        assert!((geom.scale - 1.0).abs() < EPS, "scale = {}", geom.scale);
+        assert!(
+            (geom.scale.0 - 1.0).abs() < EPS && (geom.scale.1 - 1.0).abs() < EPS,
+            "scale = {:?}",
+            geom.scale
+        );
         assert_eq!(geom.pad_x, 0);
         assert_eq!(geom.pad_y, 80);
 
@@ -484,6 +504,32 @@ mod tests {
             geom.pad_x > 0,
             "expected horizontal padding, got {}",
             geom.pad_x
+        );
+    }
+
+    #[test]
+    fn preprocess_stretch_fills_target() {
+        // RT-DETR scale-fill: a 480x640 source covers the whole 640x640 target, so there
+        // is no padding and each axis reports its own gain.
+        let mut pre = preprocessor_with(640, 640, true);
+        let frame = solid(480, 640, 200, 100, 50);
+
+        let geom = pre
+            .preprocess(&frame, 480, 640, false, (pre.dst_h, pre.dst_w), 0)
+            .expect("preprocess");
+
+        assert_eq!((geom.pad_x, geom.pad_y), (0, 0));
+        assert!(
+            (geom.scale.0 - 640.0 / 480.0).abs() < EPS && (geom.scale.1 - 1.0).abs() < EPS,
+            "scale = {:?}",
+            geom.scale
+        );
+
+        // No padding means no pixel keeps the letterbox fill value.
+        let host = readback(&pre);
+        assert!(
+            host.iter().all(|&v| (v - PAD).abs() > EPS),
+            "a scale-filled tensor must not contain letterbox padding"
         );
     }
 
