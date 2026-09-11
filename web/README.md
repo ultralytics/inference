@@ -181,6 +181,10 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` (default `"auto"`). If
   WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
   actually ran.
+- **RT-DETR**: supported for detection. An RT-DETR `.onnx` runs on WebGPU like any other
+  model. An RT-DETR `.tflite` always runs on CPU/wasm: its deformable-attention decoder
+  reshapes to rank 5 and indexes with `int64`, neither of which the LiteRT WebGPU delegate
+  supports. Export one yourself, since no RT-DETR ONNX or LiteRT model is published.
 - **Model format**: export your model to ONNX with Ultralytics `>=8.4.142` so the metadata
   (task, class names, `imgsz`) is embedded:
 

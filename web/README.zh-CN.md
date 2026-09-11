@@ -172,6 +172,10 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   `YOLO.load` 会自动回退到通用的 **CPU/wasm** 构建，随处可用。可通过
   `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` 指定设备（默认 `"auto"`）。若 WebGPU
   无法启用，加载会回退到 CPU；`model.device` 会报告实际使用的设备。
+- **RT-DETR**：支持检测任务。RT-DETR 的 `.onnx` 可以像其他模型一样在 WebGPU 上运行；而
+  RT-DETR 的 `.tflite` 始终在 CPU/wasm 上运行，因为它的可变形注意力解码器会 reshape 到 5 维
+  并使用 `int64` 索引，这两点 LiteRT 的 WebGPU delegate 都不支持。官方没有发布 RT-DETR 的
+  ONNX 或 LiteRT 模型，需要自行导出。
 - **模型格式**：请使用 Ultralytics `>=8.4.142` 导出为 ONNX，以便元数据（任务、类别名称、`imgsz`）被嵌入模型：
 
   ```python
