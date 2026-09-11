@@ -1580,7 +1580,7 @@ impl YOLOModel {
         // instead of paying the per-image resize serially.
         let (stride, task, fp16_input) =
             (self.metadata.stride, self.metadata.task, self.fp16_input);
-        let rtdetr_input = self.metadata.is_rtdetr();
+        let rtdetr = self.metadata.is_rtdetr();
         let preprocessed_results: Vec<_> = images
             .par_iter()
             .map(|image| {
@@ -1595,7 +1595,7 @@ impl YOLOModel {
                 let quantize = fp16_input.then_some(Quantization::Fp16);
                 if task == Task::Classify {
                     preprocess_image_center_crop(image, current_target_size, quantize)
-                } else if rtdetr_input {
+                } else if rtdetr {
                     preprocess_image_stretch(image, current_target_size, quantize)
                 } else {
                     preprocess_image_with_precision(image, current_target_size, stride, quantize)
@@ -1616,7 +1616,6 @@ impl YOLOModel {
         let cfg = &self.config;
         let end2end = self.metadata.end2end;
         let kpt_shape = self.metadata.kpt_shape;
-        let rtdetr = self.metadata.is_rtdetr();
 
         // Compute orig_img arrays now. `image_to_array` copies the full frame, so run the
         // batch across cores like the preprocess fan-out above.
