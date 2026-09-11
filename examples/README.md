@@ -7,13 +7,13 @@
 Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ultralytics-inference) library. Each example is a single file you run with `cargo run --example`. They show how to load and run [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8) models from Rust.
 
 > [!NOTE]
-> Model metadata (classes, task, image size) is read from the ONNX file, so Ultralytics YOLOv8, Ultralytics YOLO11, Ultralytics YOLO26, and RT-DETR models all work without extra configuration. Pass a model path as the second argument to `basic` to run one of your own. Each example takes an optional image path and downloads a sample image when none is given.
+> Model metadata (classes, task, image size) is read from the ONNX file, so Ultralytics YOLOv8, Ultralytics YOLO11, Ultralytics YOLO26, and RT-DETR models all work without extra configuration. Pass a model path as the second argument to `basic` to run one of these instead of the default `yolo26n.onnx`. Each example takes an optional image path and downloads a sample image when none is given.
 
 ## 📂 Examples
 
 | Example                 | Feature    | Description                                                          | Run                                                |
 | ----------------------- | ---------- | -------------------------------------------------------------------- | -------------------------------------------------- |
-| [basic](basic.rs)       | none       | Load any model, run inference, print detections                      | `cargo run --example basic`                        |
+| [basic](basic.rs)       | none       | Load a YOLO or RT-DETR model, run inference, print detections        | `cargo run --example basic`                        |
 | [config](config.rs)     | none       | Set confidence, IoU, image size, and device                          | `cargo run --example config`                       |
 | [tasks](tasks.rs)       | none       | Summary for every task, plus raw arrays for segment, semantic, depth | `cargo run --example tasks`                        |
 | [annotate](annotate.rs) | `annotate` | Draw boxes and labels, save the annotated image                      | `cargo run --example annotate --features annotate` |
@@ -29,7 +29,7 @@ cargo run --example basic
 # Use your own image
 cargo run --example basic -- path/to/image.jpg
 
-# Use your own model, e.g. RT-DETR, which has no prebuilt ONNX so export it first:
+# Use a different supported model, e.g. RT-DETR, which has no prebuilt ONNX so export it first:
 #   yolo export model=rtdetr-l.pt format=onnx
 cargo run --example basic -- path/to/image.jpg rtdetr-l.onnx
 

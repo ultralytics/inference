@@ -9,7 +9,7 @@
 //! cargo run --example basic
 //! cargo run --example basic -- path/to/image.jpg
 //!
-//! # any exported model, e.g. RT-DETR after `yolo export model=rtdetr-l.pt format=onnx`
+//! # a supported model, e.g. RT-DETR after `yolo export model=rtdetr-l.pt format=onnx`
 //! cargo run --example basic -- path/to/image.jpg rtdetr-l.onnx
 //! ```
 
@@ -17,8 +17,8 @@ use ultralytics_inference::YOLOModel;
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load the model named by the second argument, else a known Ultralytics YOLO26 name
-    // that is auto-downloaded when not already on disk. Model metadata (classes, task,
+    // Load the model named by the second argument, else the default `yolo26n.onnx`, a known
+    // Ultralytics name that is auto-downloaded when not already on disk. Model metadata (classes, task,
     // image size) is read from the file either way, so an RT-DETR export needs no extra
     // handling here.
     let mut args = std::env::args().skip(1);
