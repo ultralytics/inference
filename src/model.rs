@@ -28,7 +28,7 @@ use crate::inference::{InferenceConfig, Quantization};
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess;
 use crate::preprocessing::{
-    calculate_rect_size, image_to_array, preprocess_image_center_crop,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_stretch,
     preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
@@ -1109,9 +1109,10 @@ impl YOLOModel {
     }
 
     /// Whether rectangular inference applies: requested in the config and supported by
-    /// the model. Fixed-shape models must letterbox to their own input size.
-    const fn rect_enabled(&self) -> bool {
-        self.config.rect && self.is_dynamic
+    /// the model. Fixed-shape models must letterbox to their own input size, and RT-DETR
+    /// scale-fills its square input, so neither leaves a rectangle to trim.
+    fn rect_enabled(&self) -> bool {
+        self.config.rect && self.is_dynamic && !self.metadata.is_rtdetr()
     }
 
     /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
@@ -1573,6 +1574,7 @@ impl YOLOModel {
         // instead of paying the per-image resize serially.
         let (stride, task, fp16_input) =
             (self.metadata.stride, self.metadata.task, self.fp16_input);
+        let rtdetr_input = self.metadata.is_rtdetr();
         let preprocessed_results: Vec<_> = images
             .par_iter()
             .map(|image| {
@@ -1584,19 +1586,13 @@ impl YOLOModel {
                     target_size
                 };
 
+                let quantize = fp16_input.then_some(Quantization::Fp16);
                 if task == Task::Classify {
-                    preprocess_image_center_crop(
-                        image,
-                        current_target_size,
-                        fp16_input.then_some(Quantization::Fp16),
-                    )
+                    preprocess_image_center_crop(image, current_target_size, quantize)
+                } else if rtdetr_input {
+                    preprocess_image_stretch(image, current_target_size, quantize)
                 } else {
-                    preprocess_image_with_precision(
-                        image,
-                        current_target_size,
-                        stride,
-                        fp16_input.then_some(Quantization::Fp16),
-                    )
+                    preprocess_image_with_precision(image, current_target_size, stride, quantize)
                 }
             })
             .collect();

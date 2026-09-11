@@ -33,7 +33,7 @@ use wasm_bindgen::prelude::*;
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{postprocess, postprocess_semantic_mask};
 use ultralytics_inference::preprocessing::{
-    PreprocessResult, calculate_rect_size, preprocess_image_center_crop,
+    PreprocessResult, calculate_rect_size, preprocess_image_center_crop, preprocess_image_stretch,
     preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
@@ -222,14 +222,15 @@ fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
 }
 
 /// Build the original RGB image (HWC u8, for postprocess coordinate scaling) and
-/// the NCHW f32 input tensor. Classification center-crops, every other task
-/// letterboxes. Shared by the ONNX and LiteRT paths.
+/// the NCHW f32 input tensor. Classification center-crops, RT-DETR scale-fills, every
+/// other task letterboxes. Shared by the ONNX and LiteRT paths.
 fn preprocess_image(
     dynimg: &image::DynamicImage,
     imgsz: (usize, usize),
     stride: u32,
     task: Task,
     rect: bool,
+    rtdetr: bool,
 ) -> Result<(Array3<u8>, PreprocessResult), JsError> {
     let rgb = dynimg.to_rgb8();
     let (w, h) = rgb.dimensions();
@@ -237,6 +238,9 @@ fn preprocess_image(
         .map_err(err_ctx("failed to build image array"))?;
     let pre = if task == Task::Classify {
         preprocess_image_center_crop(dynimg, imgsz, None)
+    } else if rtdetr {
+        // RT-DETR is trained on a stretched square input, so it never letterboxes.
+        preprocess_image_stretch(dynimg, imgsz, None)
     } else {
         // Rectangular inference pads only up to the stride instead of to a square, so a
         // 16:9 frame skips ~40% of its pixels. Only a model that left its height and width
@@ -470,7 +474,7 @@ impl YoloModel {
             .unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
         // A pinned height/width can only ever take `imgsz`, so rect applies exactly when
         // the export left them dynamic - the same invariant as the native `rect_enabled`.
-        let rect = fixed_imgsz.is_none();
+        let rect = fixed_imgsz.is_none() && !metadata.is_rtdetr();
         let output_names = session
             .outputs()
             .iter()
@@ -523,6 +527,7 @@ impl YoloModel {
             self.metadata.stride,
             self.metadata.task,
             self.rect,
+            self.metadata.is_rtdetr(),
         )?;
 
         // Resolve the output dtype path before borrowing the session for inference.
@@ -740,6 +745,7 @@ impl YoloPipeline {
             self.metadata.stride,
             self.metadata.task,
             false,
+            self.metadata.is_rtdetr(),
         )?;
         let data = pre
             .tensor
