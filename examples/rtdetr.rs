@@ -2,24 +2,17 @@
 
 //! Run an RT-DETR model.
 //!
-//! RT-DETR has no prebuilt ONNX to download, so export one first:
-//!
-//! ```bash
-//! pip install -U "ultralytics[export-base]"
-//! yolo export model=rtdetr-l.pt format=onnx
-//! ```
-//!
-//! Then point this example at the exported file. The model path defaults to
-//! `rtdetr-l.onnx` and the image to an auto-downloaded sample:
+//! RT-DETR has no prebuilt ONNX to download, so export one first with
+//! `yolo export model=rtdetr-l.pt format=onnx`, then point this example at it. The
+//! model defaults to `rtdetr-l.onnx` and the image to an auto-downloaded sample:
 //!
 //! ```bash
 //! cargo run --example rtdetr
 //! cargo run --example rtdetr -- rtdetr-x.onnx path/to/image.jpg
 //! ```
 //!
-//! Nothing here is RT-DETR specific: the scale-fill input and the normalized
-//! decoder output are picked up from the model's own metadata, so the code is
-//! the same as for a YOLO model.
+//! Nothing here is RT-DETR specific: the scale-fill input and normalized decoder
+//! output come from the model's own metadata, so the code matches any YOLO model.
 
 use ultralytics_inference::YOLOModel;
 

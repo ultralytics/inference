@@ -50,11 +50,7 @@ use crate::utils::{nms_per_class_capped, nms_rotated_per_class_capped, xywh_to_x
 ///
 /// Processed Results object.
 #[must_use]
-#[allow(
-    clippy::too_many_arguments,
-    clippy::similar_names,
-    clippy::implicit_hasher
-)]
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub fn postprocess(
     outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,
@@ -113,9 +109,7 @@ pub fn postprocess_with_head(
     match task {
         Task::Detect => {
             let (output, shape) = &outputs[0];
-            // RT-DETR shares the `[1, max_det, 6]` layout of the NMS-free YOLO head but
-            // reports `[cx, cy, w, h]` normalized to the input, so it decodes through the
-            // same walk, handing it the inference size to denormalize against.
+            // RT-DETR decodes through the same walk, given the size to denormalize against.
             if rtdetr || end2end || is_end2end_shape(shape, 6) {
                 postprocess_detect_end2end(
                     output,
