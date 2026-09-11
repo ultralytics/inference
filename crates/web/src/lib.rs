@@ -783,7 +783,7 @@ impl YoloPipeline {
     /// Returns a JS error if called before `preprocess_rgba`, if `shapes` is
     /// malformed, or on serialization failure.
     #[allow(clippy::too_many_arguments)]
-    pub fn postprocess_with_head(
+    pub fn postprocess(
         &mut self,
         outputs: Vec<Float32Array>,
         shapes: Vec<u32>,
