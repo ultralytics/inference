@@ -2786,7 +2786,7 @@ mod tests {
     #[test]
     fn test_postprocess_detect_rtdetr_normalized_boxes() {
         // RT-DETR row: [cx, cy, w, h] normalized to the 640x640 input, then scaled back
-        // onto a 200x400 source by the scale-fill gains. A centred box half the input wide
+        // onto a 200x400 source by the scale-fill gains. A centered box half the input wide
         // and a quarter tall covers 200x50 of the source, so it lands at [100, 75, 300, 125].
         let output = [0.5, 0.5, 0.5, 0.25, 0.9, 0.0];
         let pre = PreprocessResult {

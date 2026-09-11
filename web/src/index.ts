@@ -681,7 +681,7 @@ export class YOLO {
     if (accelerator === "webgpu" && pipeline.rtdetr && options?.device !== "webgpu") {
       accelerator = "wasm";
       console.warn(
-        "LiteRT: RT-DETR's decoder uses rank-5 reshapes and int64 indices that the WebGPU delegate could not run on the drivers tested, so it runs on CPU/wasm. Pass device: \"webgpu\" to try it anyway.",
+        'LiteRT: RT-DETR\'s decoder uses rank-5 reshapes and int64 indices that the WebGPU delegate could not run on the drivers tested, so it runs on CPU/wasm. Pass device: "webgpu" to try it anyway.',
       );
     }
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
