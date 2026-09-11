@@ -31,7 +31,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
-use ultralytics_inference::postprocessing::{postprocess, postprocess_semantic_mask};
+use ultralytics_inference::postprocessing::{postprocess_semantic_mask, postprocess_with_head};
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_image_center_crop, preprocess_image_stretch,
     preprocess_image_with_precision,
@@ -594,7 +594,7 @@ impl YoloModel {
                         })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
-            postprocess(
+            postprocess_with_head(
                 views,
                 self.metadata.task,
                 &pre,
@@ -783,7 +783,7 @@ impl YoloPipeline {
     /// Returns a JS error if called before `preprocess_rgba`, if `shapes` is
     /// malformed, or on serialization failure.
     #[allow(clippy::too_many_arguments)]
-    pub fn postprocess(
+    pub fn postprocess_with_head(
         &mut self,
         outputs: Vec<Float32Array>,
         shapes: Vec<u32>,
@@ -846,7 +846,7 @@ impl YoloPipeline {
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        let mut results = postprocess(
+        let mut results = postprocess_with_head(
             views,
             self.metadata.task,
             &pending.pre,

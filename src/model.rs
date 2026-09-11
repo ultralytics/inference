@@ -26,7 +26,7 @@ use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_dow
 use crate::error::{InferenceError, Result};
 use crate::inference::{InferenceConfig, Quantization};
 use crate::metadata::ModelMetadata;
-use crate::postprocessing::postprocess;
+use crate::postprocessing::postprocess_with_head;
 use crate::preprocessing::{
     calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_stretch,
     preprocess_image_with_precision,
@@ -1300,7 +1300,7 @@ impl YOLOModel {
             Self::extract_and_invoke(&outputs, &self.output_names, inference_time, |outs, _ms| {
                 let img_outputs: Vec<(&[f32], Vec<usize>)> =
                     outs.iter().map(|(d, s)| (*d, s.clone())).collect();
-                Ok(postprocess(
+                Ok(postprocess_with_head(
                     img_outputs,
                     self.metadata.task,
                     &pre,
@@ -1432,7 +1432,7 @@ impl YOLOModel {
                         scale: geom.scale,
                         padding: (geom.pad_y as f32, geom.pad_x as f32),
                     };
-                    results.push(vec![postprocess(
+                    results.push(vec![postprocess_with_head(
                         img_outputs,
                         self.metadata.task,
                         &pre,
@@ -1650,7 +1650,7 @@ impl YOLOModel {
                 let tensor_shape = preprocess_res.tensor.shape();
                 let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
-                let result = postprocess(
+                let result = postprocess_with_head(
                     img_outputs,
                     task,
                     &preprocess_res,

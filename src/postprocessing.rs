@@ -67,6 +67,46 @@ pub fn postprocess(
     inference_shape: (u32, u32),
     end2end: bool,
     kpt_shape: Option<(usize, usize)>,
+) -> Results {
+    postprocess_with_head(
+        outputs,
+        task,
+        preprocess,
+        config,
+        names,
+        orig_img,
+        path,
+        speed,
+        inference_shape,
+        end2end,
+        kpt_shape,
+        false,
+    )
+}
+
+/// Post-process raw model output, selecting the RT-DETR decode when `rtdetr` is set.
+///
+/// Same as [`postprocess`], plus `rtdetr`: RT-DETR shares the `[1, max_det, 6]` tensor shape
+/// of the NMS-free YOLO head but reports `[cx, cy, w, h]` normalized to the input, so the two
+/// cannot be told apart from the tensors alone and the caller has to say which it holds.
+#[must_use]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::similar_names,
+    clippy::implicit_hasher
+)]
+pub fn postprocess_with_head(
+    outputs: Vec<(&[f32], Vec<usize>)>,
+    task: Task,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+    end2end: bool,
+    kpt_shape: Option<(usize, usize)>,
     rtdetr: bool,
 ) -> Results {
     let results = Results::new(orig_img, path, names, speed, inference_shape);
@@ -2328,7 +2368,7 @@ mod tests {
             }
         }
 
-        let results = postprocess(
+        let results = postprocess_with_head(
             vec![(out.as_slice(), vec![1, max_det, feats])],
             Task::Pose,
             &unit_preprocess((640, 640)),
@@ -2793,7 +2833,7 @@ mod tests {
             scale: (640.0 / 200.0, 640.0 / 400.0),
             ..unit_preprocess((200, 400))
         };
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(output.as_slice(), vec![1, 1, 6])],
             Task::Detect,
             &pre,
@@ -2866,7 +2906,7 @@ mod tests {
         let config = InferenceConfig::default();
         // [1, 5, 1]: [cx, cy, w, h, class_score]
         let output = vec![50.0f32, 50.0, 20.0, 20.0, 0.9];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&output, vec![1, 5, 1])],
             Task::Detect,
             &pre,
@@ -2890,7 +2930,7 @@ mod tests {
         let img = ndarray::Array3::zeros((100, 100, 3));
 
         let probs = vec![0.1f32, 0.2, 0.7];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&probs, vec![1, 3])],
             Task::Classify,
             &pre,
@@ -2908,7 +2948,7 @@ mod tests {
 
         // OBB standard route: [1, 6, 1] = [cx, cy, w, h, class_score, angle]
         let obb_out = vec![50.0f32, 50.0, 20.0, 10.0, 0.9, 0.0];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&obb_out, vec![1, 6, 1])],
             Task::Obb,
             &pre,
@@ -2936,7 +2976,7 @@ mod tests {
         // protos [1, 2, 4, 4]
         let protos = vec![0.5f32; 2 * 4 * 4];
 
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&det, vec![1, 7, 1]), (&protos, vec![1, 2, 4, 4])],
             Task::Segment,
             &pre,
@@ -2963,7 +3003,7 @@ mod tests {
         // output0 [1, 1, 8]: [x1, y1, x2, y2, conf, cls, coeff0, coeff1]
         let det = vec![2.0f32, 2.0, 12.0, 12.0, 0.9, 0.0, 0.3, 0.7];
         let protos = vec![0.5f32; 2 * 4 * 4];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&det, vec![1, 1, 8]), (&protos, vec![1, 2, 4, 4])],
             Task::Segment,
             &pre,
@@ -2984,7 +3024,7 @@ mod tests {
     #[test]
     fn test_dispatch_segment_missing_protos_is_empty() {
         let det = vec![8.0f32, 8.0, 6.0, 6.0, 0.9, 0.3, 0.7];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&det, vec![1, 7, 1])], // only one output, no protos
             Task::Segment,
             &unit_preprocess((16, 16)),
@@ -3011,7 +3051,7 @@ mod tests {
         let num_preds = 40;
         let det = vec![0.5f32; 116 * num_preds];
         let protos = vec![0.0f32; 32 * 8 * 8];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![
                 (&det, vec![1, 116, num_preds]),
                 (&protos, vec![1, 32, 8, 8]),
@@ -3047,7 +3087,7 @@ mod tests {
             row.push(30.0 + k as f32); // ky
             row.push(0.8); // kconf
         }
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&row, vec![1, 1, feats])],
             Task::Pose,
             &pre,
@@ -3073,7 +3113,7 @@ mod tests {
         let config = InferenceConfig::default();
         // [1, 1, 7] layout: [cx, cy, w, h, conf, cls, angle]
         let row = vec![50.0f32, 50.0, 20.0, 10.0, 0.9, 0.0, 0.3];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&row, vec![1, 1, 7])],
             Task::Obb,
             &pre,
@@ -3102,7 +3142,7 @@ mod tests {
             logits[h * w + px] = 5.0; // class-1 channel high
         }
         let config = InferenceConfig::new().with_classes(vec![0]);
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&logits, vec![1, nc, h, w])],
             Task::Semantic,
             &unit_preprocess((h as u32, w as u32)),
