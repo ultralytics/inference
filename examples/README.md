@@ -17,6 +17,7 @@ Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ult
 | [config](config.rs)     | none       | Set confidence, IoU, image size, and device                          | `cargo run --example config`                       |
 | [tasks](tasks.rs)       | none       | Summary for every task, plus raw arrays for segment, semantic, depth | `cargo run --example tasks`                        |
 | [annotate](annotate.rs) | `annotate` | Draw boxes and labels, save the annotated image                      | `cargo run --example annotate --features annotate` |
+| [rtdetr](rtdetr.rs)     | none       | Run an RT-DETR model you exported yourself                           | `cargo run --example rtdetr -- rtdetr-l.onnx`      |
 
 ## ✅ How to Run
 
