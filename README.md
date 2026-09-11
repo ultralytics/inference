@@ -65,6 +65,8 @@ Request an Enterprise License for commercial use at [Ultralytics Licensing](http
 
 This crate runs [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](https://docs.ultralytics.com/models/yolo11), and [YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX models. They are pretrained on [COCO](https://docs.ultralytics.com/datasets/detect/coco) for [Detection](https://docs.ultralytics.com/tasks/detect), [Segmentation](https://docs.ultralytics.com/tasks/segment), and [Pose Estimation](https://docs.ultralytics.com/tasks/pose); on [DOTA](https://docs.ultralytics.com/datasets/obb/dota-v2) for [OBB](https://docs.ultralytics.com/tasks/obb); on [Cityscapes](https://docs.ultralytics.com/datasets/semantic/cityscapes) for [Semantic Segmentation](https://docs.ultralytics.com/tasks/semantic); on [ImageNet](https://docs.ultralytics.com/datasets/classify/imagenet) for [Classification](https://docs.ultralytics.com/tasks/classify); and for monocular [Depth Estimation](https://docs.ultralytics.com/tasks/depth) (YOLO26 only). All [models](https://docs.ultralytics.com/models) download automatically from the latest Ultralytics [release](https://github.com/ultralytics/assets/releases) on first use.
 
+[RT-DETR](https://docs.ultralytics.com/models/rtdetr) detection models also run. There is no prebuilt RT-DETR ONNX to download, so export one yourself first (see below). After that it loads and runs like any other model here, on every device this crate supports.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -153,6 +155,9 @@ yolo export model=yolo26n.pt format=onnx
 
 # FP16 - ~50% smaller model
 yolo export model=yolo26n.pt format=onnx quantize=16
+
+# RT-DETR (detection only)
+yolo export model=rtdetr-l.pt format=onnx
 ```
 
 ```python
@@ -162,6 +167,13 @@ from ultralytics import YOLO
 model = YOLO("yolo26n.pt")
 model.export(format="onnx")  # FP32 (default)
 model.export(format="onnx", quantize=16)  # FP16
+```
+
+```python
+# RT-DETR uses its own class
+from ultralytics import RTDETR
+
+RTDETR("rtdetr-l.pt").export(format="onnx")
 ```
 
 > **Precision / quantization:** Ultralytics ≥8.4 uses a single `quantize`
@@ -193,6 +205,9 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ultralytics-inference predict --model yolo26l.onnx --source image.jpg
 ultralytics-inference predict --model yolo11x-seg.onnx --source image.jpg
 ultralytics-inference predict --model yolov8n.onnx --source image.jpg
+
+# RT-DETR, using the ONNX file you exported above
+ultralytics-inference predict --model rtdetr-l.onnx --source image.jpg
 
 # On a directory of images
 ultralytics-inference predict --model yolo26n.onnx --source assets/
@@ -229,7 +244,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.43 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -249,7 +264,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.43 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -352,7 +367,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.43"
+ultralytics-inference = "0.0.44"
 ```
 
 ```toml
@@ -569,7 +584,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.43", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.44", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 

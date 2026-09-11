@@ -65,6 +65,8 @@
 
 本库可运行 [YOLOv8](https://docs.ultralytics.com/models/yolov8)、[YOLO11](https://docs.ultralytics.com/models/yolo11) 和 [YOLO26](https://docs.ultralytics.com/models/yolo26) 的 ONNX 模型。这些模型在 [COCO](https://docs.ultralytics.com/datasets/detect/coco) 上预训练用于[检测](https://docs.ultralytics.com/tasks/detect)、[分割](https://docs.ultralytics.com/tasks/segment)和[姿态估计](https://docs.ultralytics.com/tasks/pose)；在 [DOTA](https://docs.ultralytics.com/datasets/obb/dota-v2) 上预训练用于 [OBB](https://docs.ultralytics.com/tasks/obb)；在 [Cityscapes](https://docs.ultralytics.com/datasets/semantic/cityscapes) 上预训练用于[语义分割](https://docs.ultralytics.com/tasks/semantic)；在 [ImageNet](https://docs.ultralytics.com/datasets/classify/imagenet) 上预训练用于[分类](https://docs.ultralytics.com/tasks/classify)；以及用于单目[深度估计](https://docs.ultralytics.com/tasks/depth)（仅 YOLO26）。所有[模型](https://docs.ultralytics.com/models)在首次使用时自动从最新的 Ultralytics [发布](https://github.com/ultralytics/assets/releases)下载。
 
+[RT-DETR](https://docs.ultralytics.com/models/rtdetr) 检测模型也可以运行。没有可直接下载的 RT-DETR ONNX 文件，需要先自行导出（见下文）。导出之后，它与本库的其他模型一样加载和运行，并支持全部设备。
+
 ## 🚀 快速开始
 
 ### 前置条件
@@ -153,6 +155,9 @@ yolo export model=yolo26n.pt format=onnx
 
 # FP16（半精度）——模型体积约小 50%
 yolo export model=yolo26n.pt format=onnx quantize=16
+
+# RT-DETR（仅检测）
+yolo export model=rtdetr-l.pt format=onnx
 ```
 
 ```python
@@ -162,6 +167,13 @@ from ultralytics import YOLO
 model = YOLO("yolo26n.pt")
 model.export(format="onnx")  # FP32 (默认)
 model.export(format="onnx", quantize=16)  # FP16 (半精度)
+```
+
+```python
+# RT-DETR 使用独立的类
+from ultralytics import RTDETR
+
+RTDETR("rtdetr-l.pt").export(format="onnx")
 ```
 
 > **精度 / 量化：** Ultralytics ≥8.4 使用统一的 `quantize` 参数，取代已弃用的
@@ -192,6 +204,9 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ultralytics-inference predict --model yolo26l.onnx --source image.jpg
 ultralytics-inference predict --model yolo11x-seg.onnx --source image.jpg
 ultralytics-inference predict --model yolov8n.onnx --source image.jpg
+
+# RT-DETR，使用上面导出的 ONNX 文件
+ultralytics-inference predict --model rtdetr-l.onnx --source image.jpg
 
 # 对图片目录运行推理
 ultralytics-inference predict --model yolo26n.onnx --source assets/
@@ -228,7 +243,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.43 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -248,7 +263,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.43 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -351,7 +366,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.43"
+ultralytics-inference = "0.0.44"
 ```
 
 ```toml
@@ -565,7 +580,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.43", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.44", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 

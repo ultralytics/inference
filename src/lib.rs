@@ -23,7 +23,7 @@
 //!
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
-//! - **Supported YOLO Versions** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports)
+//! - **Supported Models** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports), plus `RT-DETR` for detection
 //! - **All Tasks** - [Detection](https://docs.ultralytics.com/tasks/detect), [segmentation](https://docs.ultralytics.com/tasks/segment), [pose estimation](https://docs.ultralytics.com/tasks/pose), [classification](https://docs.ultralytics.com/tasks/classify), [OBB](https://docs.ultralytics.com/tasks/obb), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), and [depth estimation](https://docs.ultralytics.com/tasks/depth) (last two YOLO26 only)
 //! - **Ultralytics API** - Results API for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
@@ -176,6 +176,9 @@
 //!
 //! # Depth Estimation (YOLO26 only)
 //! yolo export model=yolo26n-depth.pt format=onnx
+//!
+//! # RT-DETR (detection only; no prebuilt ONNX to download, so export it yourself)
+//! yolo export model=rtdetr-l.pt format=onnx
 //! ```
 //!
 //! For detect, segment, pose, and OBB, `nms=None` (default) exports raw one-to-many

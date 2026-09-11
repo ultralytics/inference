@@ -32,6 +32,9 @@ pub struct ModelMetadata {
     pub docs: String,
     /// The task this model performs.
     pub task: Task,
+    /// Detection head class recorded by the export (e.g. `"Detect"`, `"RTDETRDecoder"`),
+    /// empty for exports that predate the `head` metadata key.
+    pub head: String,
     /// Model stride (typically 32 for YOLO).
     pub stride: u32,
     /// Batch size the model was exported with.
@@ -116,6 +119,7 @@ impl ModelMetadata {
 
                 match key {
                     "description" => metadata.description = value.to_string(),
+                    "head" => metadata.head = value.to_string(),
                     "author" => metadata.author = value.to_string(),
                     "date" => metadata.date = value.to_string(),
                     "version" => metadata.version = value.to_string(),
@@ -378,6 +382,16 @@ impl ModelMetadata {
         self.names.get(&class_id).map(String::as_str)
     }
 
+    /// Whether the export uses the RT-DETR transformer decoder head.
+    ///
+    /// RT-DETR runs on a scale-filled input and emits normalized `[cx, cy, w, h, score, class]`
+    /// queries instead of the dense grid a YOLO detect head produces, so both ends of the
+    /// pipeline branch on this.
+    #[must_use]
+    pub fn is_rtdetr(&self) -> bool {
+        self.head == "RTDETRDecoder"
+    }
+
     /// Extract the model name from the description.
     ///
     /// E.g. "Ultralytics `YOLO11n` model..." -> "`YOLO11n`"
@@ -387,7 +401,12 @@ impl ModelMetadata {
         // Description format: "Ultralytics <MODEL> model..."
         self.description
             .split_whitespace()
-            .find(|&word| word.to_lowercase().starts_with("yolo"))
+            .find(|&word| {
+                let word = word.to_lowercase();
+                word.starts_with("yolo")
+                    || word.starts_with("rtdetr")
+                    || word.starts_with("rt-detr")
+            })
             .unwrap_or("YOLO")
             .to_string()
     }
@@ -403,6 +422,7 @@ impl Default for ModelMetadata {
             license: "AGPL-3.0".to_string(),
             docs: "https://docs.ultralytics.com".to_string(),
             task: Task::Detect,
+            head: String::new(),
             stride: 32,
             batch: 1,
             imgsz: None,
@@ -623,5 +643,17 @@ channels: 3
         // Falls back to "YOLO" when the description has no yolo token.
         let plain = ModelMetadata::default();
         assert_eq!(plain.model_name(), "YOLO");
+    }
+
+    #[test]
+    fn test_rtdetr_head_detection() {
+        let yaml = "description: Ultralytics rt-detr-l model\ntask: detect\nhead: RTDETRDecoder";
+        let m = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert!(m.is_rtdetr());
+        assert_eq!(m.model_name(), "rt-detr-l");
+        // A YOLO detect head, and an export without the key, are both not RT-DETR.
+        let yolo = ModelMetadata::from_yaml_str("task: detect\nhead: Detect").unwrap();
+        assert!(!yolo.is_rtdetr());
+        assert!(!ModelMetadata::default().is_rtdetr());
     }
 }

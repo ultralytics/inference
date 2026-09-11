@@ -50,11 +50,7 @@ use crate::utils::{nms_per_class_capped, nms_rotated_per_class_capped, xywh_to_x
 ///
 /// Processed Results object.
 #[must_use]
-#[allow(
-    clippy::too_many_arguments,
-    clippy::similar_names,
-    clippy::implicit_hasher
-)]
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub fn postprocess(
     outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,
@@ -68,12 +64,61 @@ pub fn postprocess(
     end2end: bool,
     kpt_shape: Option<(usize, usize)>,
 ) -> Results {
+    postprocess_with_head(
+        outputs,
+        task,
+        preprocess,
+        config,
+        names,
+        orig_img,
+        path,
+        speed,
+        inference_shape,
+        end2end,
+        kpt_shape,
+        false,
+    )
+}
+
+/// Post-process raw model output, selecting the RT-DETR decode when `rtdetr` is set.
+///
+/// Same as [`postprocess`], plus `rtdetr`: RT-DETR shares the `[1, max_det, 6]` tensor shape
+/// of the NMS-free YOLO head but reports `[cx, cy, w, h]` normalized to the input, so the two
+/// cannot be told apart from the tensors alone and the caller has to say which it holds.
+#[must_use]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::similar_names,
+    clippy::implicit_hasher
+)]
+pub fn postprocess_with_head(
+    outputs: Vec<(&[f32], Vec<usize>)>,
+    task: Task,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+    end2end: bool,
+    kpt_shape: Option<(usize, usize)>,
+    rtdetr: bool,
+) -> Results {
     let results = Results::new(orig_img, path, names, speed, inference_shape);
     match task {
         Task::Detect => {
             let (output, shape) = &outputs[0];
-            if end2end || is_end2end_shape(shape, 6) {
-                postprocess_detect_end2end(output, shape, preprocess, config, results)
+            // RT-DETR decodes through the same walk, given the size to denormalize against.
+            if rtdetr || end2end || is_end2end_shape(shape, 6) {
+                postprocess_detect_end2end(
+                    output,
+                    shape,
+                    preprocess,
+                    config,
+                    results,
+                    rtdetr.then_some(inference_shape),
+                )
             } else {
                 postprocess_detect(output, shape, preprocess, config, results)
             }
@@ -1293,6 +1338,11 @@ fn postprocess_obb(
 /// passes the class filter, scale/clip its box and invoke `on_kept(base, [x1,y1,x2,y2],
 /// conf, cls)`. Rows are confidence-descending, so it stops at the first sub-threshold row
 /// and after `cap` kept detections — the shared box-decode of the detect/segment/pose paths.
+///
+/// `normalized_to` names the inference `(height, width)` for heads whose first four columns
+/// are `[cx, cy, w, h]` normalized to the input, as RT-DETR's are; `None` reads them as the
+/// absolute `[x1, y1, x2, y2]` the YOLO end-to-end heads emit.
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn decode_end2end(
     output: &[f32],
     num_preds: usize,
@@ -1300,8 +1350,17 @@ fn decode_end2end(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     cap: usize,
+    normalized_to: Option<(u32, u32)>,
     mut on_kept: impl FnMut(usize, [f32; 4], f32, usize),
 ) {
+    // Stopping at the first sub-threshold row is only sound because every head feeding this
+    // walk emits confidence-descending rows: the YOLO end-to-end and RT-DETR graphs both end
+    // in `TopK(sorted=1)`. Assert it in debug so a head that ever stops sorting trips here
+    // instead of silently dropping the detections behind the first low-scoring row.
+    debug_assert!(
+        (1..num_preds).all(|i| output[i * feats + 4] <= output[(i - 1) * feats + 4]),
+        "decode_end2end expects confidence-descending rows"
+    );
     let mut kept = 0;
     for i in 0..num_preds {
         let base = i * feats;
@@ -1313,15 +1372,21 @@ fn decode_end2end(
         if !config.keep_class(cls) {
             continue;
         }
-        let bbox = scale_and_clip_box(
-            &[
+        let corners = match normalized_to {
+            Some((h, w)) => xywh_to_xyxy(
+                output[base] * w as f32,
+                output[base + 1] * h as f32,
+                output[base + 2] * w as f32,
+                output[base + 3] * h as f32,
+            ),
+            None => [
                 output[base],
                 output[base + 1],
                 output[base + 2],
                 output[base + 3],
             ],
-            preprocess,
-        );
+        };
+        let bbox = scale_and_clip_box(&corners, preprocess);
         on_kept(base, bbox, conf, cls);
         kept += 1;
         if kept >= cap {
@@ -1338,6 +1403,7 @@ fn postprocess_detect_end2end(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     mut results: Results,
+    normalized_to: Option<(u32, u32)>,
 ) -> Results {
     if output_shape.len() != 3 || output.is_empty() {
         return results;
@@ -1358,6 +1424,7 @@ fn postprocess_detect_end2end(
         preprocess,
         config,
         user_cap,
+        normalized_to,
         |_base, bbox, conf, cls| {
             flat.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
         },
@@ -1421,6 +1488,7 @@ fn postprocess_segment_end2end(
         preprocess,
         config,
         user_cap,
+        None,
         |base, bbox, conf, cls| {
             flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
             let coeff_start = base + 6;
@@ -1490,6 +1558,7 @@ fn postprocess_pose_end2end(
         preprocess,
         config,
         user_cap,
+        None,
         |base, bbox, conf, cls| {
             flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
             let kstart = base + 6;
@@ -1547,6 +1616,7 @@ fn postprocess_obb_end2end(
                 preprocess,
                 config,
                 user_cap,
+                None,
                 |base, _bbox, conf, cls| {
                     let cx = (output[base] - pad_left) / scale_x;
                     let cy = (output[base + 1] - pad_top) / scale_y;
@@ -2300,7 +2370,7 @@ mod tests {
             }
         }
 
-        let results = postprocess(
+        let results = postprocess_with_head(
             vec![(out.as_slice(), vec![1, max_det, feats])],
             Task::Pose,
             &unit_preprocess((640, 640)),
@@ -2312,6 +2382,7 @@ mod tests {
             (640, 640),
             true,          // end2end (yolo26)
             Some((17, 3)), // kpt_shape
+            false,
         );
 
         let boxes = results.boxes.expect("end2end pose should produce boxes");
@@ -2749,8 +2820,45 @@ mod tests {
             &unit_preprocess((100, 100)),
             &InferenceConfig::default(), // conf threshold 0.25
             results_for(1, (100, 100), (640, 640)),
+            None,
         );
         assert_eq!(r.boxes.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_postprocess_detect_rtdetr_normalized_boxes() {
+        // RT-DETR row: [cx, cy, w, h] normalized to the 640x640 input, then scaled back
+        // onto a 200x400 source by the scale-fill gains. A centered box half the input wide
+        // and a quarter tall covers 200x50 of the source, so it lands at [100, 75, 300, 125].
+        let output = [0.5, 0.5, 0.5, 0.25, 0.9, 0.0];
+        let pre = PreprocessResult {
+            scale: (640.0 / 200.0, 640.0 / 400.0),
+            ..unit_preprocess((200, 400))
+        };
+        let r = postprocess_with_head(
+            vec![(output.as_slice(), vec![1, 1, 6])],
+            Task::Detect,
+            &pre,
+            &InferenceConfig::default(),
+            make_names(1),
+            ndarray::Array3::zeros((200, 400, 3)),
+            String::new(),
+            Speed::default(),
+            (640, 640),
+            false,
+            None,
+            true,
+        );
+        let boxes = r.boxes.expect("rtdetr row above threshold");
+        let xyxy = boxes.xyxy();
+        let row = xyxy.row(0);
+        assert!(
+            (row[0] - 100.0).abs() < 1e-3
+                && (row[1] - 75.0).abs() < 1e-3
+                && (row[2] - 300.0).abs() < 1e-3
+                && (row[3] - 125.0).abs() < 1e-3,
+            "got {row:?}"
+        );
     }
 
     #[test]
@@ -2800,7 +2908,7 @@ mod tests {
         let config = InferenceConfig::default();
         // [1, 5, 1]: [cx, cy, w, h, class_score]
         let output = vec![50.0f32, 50.0, 20.0, 20.0, 0.9];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&output, vec![1, 5, 1])],
             Task::Detect,
             &pre,
@@ -2812,6 +2920,7 @@ mod tests {
             (640, 640),
             false,
             None,
+            false,
         );
         assert_eq!(r.boxes.unwrap().len(), 1);
     }
@@ -2823,7 +2932,7 @@ mod tests {
         let img = ndarray::Array3::zeros((100, 100, 3));
 
         let probs = vec![0.1f32, 0.2, 0.7];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&probs, vec![1, 3])],
             Task::Classify,
             &pre,
@@ -2835,12 +2944,13 @@ mod tests {
             (640, 640),
             false,
             None,
+            false,
         );
         assert_eq!(r.probs.unwrap().top1(), 2);
 
         // OBB standard route: [1, 6, 1] = [cx, cy, w, h, class_score, angle]
         let obb_out = vec![50.0f32, 50.0, 20.0, 10.0, 0.9, 0.0];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&obb_out, vec![1, 6, 1])],
             Task::Obb,
             &pre,
@@ -2852,6 +2962,7 @@ mod tests {
             (640, 640),
             false,
             None,
+            false,
         );
         assert_eq!(r.obb.unwrap().len(), 1);
     }
@@ -2867,7 +2978,7 @@ mod tests {
         // protos [1, 2, 4, 4]
         let protos = vec![0.5f32; 2 * 4 * 4];
 
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&det, vec![1, 7, 1]), (&protos, vec![1, 2, 4, 4])],
             Task::Segment,
             &pre,
@@ -2879,6 +2990,7 @@ mod tests {
             (640, 640),
             false,
             None,
+            false,
         );
         let boxes = r.boxes.expect("segment yields detection boxes");
         assert_eq!(boxes.len(), 1);
@@ -2893,7 +3005,7 @@ mod tests {
         // output0 [1, 1, 8]: [x1, y1, x2, y2, conf, cls, coeff0, coeff1]
         let det = vec![2.0f32, 2.0, 12.0, 12.0, 0.9, 0.0, 0.3, 0.7];
         let protos = vec![0.5f32; 2 * 4 * 4];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&det, vec![1, 1, 8]), (&protos, vec![1, 2, 4, 4])],
             Task::Segment,
             &pre,
@@ -2905,6 +3017,7 @@ mod tests {
             (640, 640),
             true, // force end2end segment path
             None,
+            false,
         );
         assert_eq!(r.boxes.unwrap().len(), 1);
         assert!(r.masks.is_some());
@@ -2913,7 +3026,7 @@ mod tests {
     #[test]
     fn test_dispatch_segment_missing_protos_is_empty() {
         let det = vec![8.0f32, 8.0, 6.0, 6.0, 0.9, 0.3, 0.7];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&det, vec![1, 7, 1])], // only one output, no protos
             Task::Segment,
             &unit_preprocess((16, 16)),
@@ -2925,6 +3038,7 @@ mod tests {
             (640, 640),
             false,
             None,
+            false,
         );
         assert!(r.masks.is_none());
     }
@@ -2939,7 +3053,7 @@ mod tests {
         let num_preds = 40;
         let det = vec![0.5f32; 116 * num_preds];
         let protos = vec![0.0f32; 32 * 8 * 8];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![
                 (&det, vec![1, 116, num_preds]),
                 (&protos, vec![1, 32, 8, 8]),
@@ -2954,6 +3068,7 @@ mod tests {
             (640, 640),
             false,
             None,
+            false,
         );
         assert!(r.masks.is_none());
         assert!(r.boxes.is_none());
@@ -2974,7 +3089,7 @@ mod tests {
             row.push(30.0 + k as f32); // ky
             row.push(0.8); // kconf
         }
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&row, vec![1, 1, feats])],
             Task::Pose,
             &pre,
@@ -2986,6 +3101,7 @@ mod tests {
             (640, 640),
             true, // force end2end
             Some((nk, kd)),
+            false,
         );
         assert_eq!(r.boxes.unwrap().len(), 1);
         let kpts = r.keypoints.unwrap();
@@ -2999,7 +3115,7 @@ mod tests {
         let config = InferenceConfig::default();
         // [1, 1, 7] layout: [cx, cy, w, h, conf, cls, angle]
         let row = vec![50.0f32, 50.0, 20.0, 10.0, 0.9, 0.0, 0.3];
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&row, vec![1, 1, 7])],
             Task::Obb,
             &pre,
@@ -3011,6 +3127,7 @@ mod tests {
             (640, 640),
             false, // routed via is_end2end_shape (shape[2]==7)
             None,
+            false,
         );
         assert_eq!(r.obb.unwrap().len(), 1);
     }
@@ -3027,7 +3144,7 @@ mod tests {
             logits[h * w + px] = 5.0; // class-1 channel high
         }
         let config = InferenceConfig::new().with_classes(vec![0]);
-        let r = postprocess(
+        let r = postprocess_with_head(
             vec![(&logits, vec![1, nc, h, w])],
             Task::Semantic,
             &unit_preprocess((h as u32, w as u32)),
@@ -3039,6 +3156,7 @@ mod tests {
             (h as u32, w as u32),
             false,
             None,
+            false,
         );
         let sm = r.semantic_mask.unwrap();
         // All originally class-1 pixels are filtered out to IGNORE.

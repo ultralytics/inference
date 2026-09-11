@@ -31,9 +31,9 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
-use ultralytics_inference::postprocessing::{postprocess, postprocess_semantic_mask};
+use ultralytics_inference::postprocessing::{postprocess_semantic_mask, postprocess_with_head};
 use ultralytics_inference::preprocessing::{
-    PreprocessResult, calculate_rect_size, preprocess_image_center_crop,
+    PreprocessResult, calculate_rect_size, preprocess_image_center_crop, preprocess_image_stretch,
     preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
@@ -222,14 +222,15 @@ fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
 }
 
 /// Build the original RGB image (HWC u8, for postprocess coordinate scaling) and
-/// the NCHW f32 input tensor. Classification center-crops, every other task
-/// letterboxes. Shared by the ONNX and LiteRT paths.
+/// the NCHW f32 input tensor. Classification center-crops, RT-DETR scale-fills, every
+/// other task letterboxes. Shared by the ONNX and LiteRT paths.
 fn preprocess_image(
     dynimg: &image::DynamicImage,
     imgsz: (usize, usize),
     stride: u32,
     task: Task,
     rect: bool,
+    rtdetr: bool,
 ) -> Result<(Array3<u8>, PreprocessResult), JsError> {
     let rgb = dynimg.to_rgb8();
     let (w, h) = rgb.dimensions();
@@ -237,6 +238,9 @@ fn preprocess_image(
         .map_err(err_ctx("failed to build image array"))?;
     let pre = if task == Task::Classify {
         preprocess_image_center_crop(dynimg, imgsz, None)
+    } else if rtdetr {
+        // RT-DETR is trained on a stretched square input, so it never letterboxes.
+        preprocess_image_stretch(dynimg, imgsz, None)
     } else {
         // Rectangular inference pads only up to the stride instead of to a square, so a
         // 16:9 frame skips ~40% of its pixels. Only a model that left its height and width
@@ -470,7 +474,7 @@ impl YoloModel {
             .unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
         // A pinned height/width can only ever take `imgsz`, so rect applies exactly when
         // the export left them dynamic - the same invariant as the native `rect_enabled`.
-        let rect = fixed_imgsz.is_none();
+        let rect = fixed_imgsz.is_none() && !metadata.is_rtdetr();
         let output_names = session
             .outputs()
             .iter()
@@ -523,6 +527,7 @@ impl YoloModel {
             self.metadata.stride,
             self.metadata.task,
             self.rect,
+            self.metadata.is_rtdetr(),
         )?;
 
         // Resolve the output dtype path before borrowing the session for inference.
@@ -589,7 +594,7 @@ impl YoloModel {
                         })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
-            postprocess(
+            postprocess_with_head(
                 views,
                 self.metadata.task,
                 &pre,
@@ -601,6 +606,7 @@ impl YoloModel {
                 inference_shape,
                 self.metadata.end2end,
                 self.metadata.kpt_shape,
+                self.metadata.is_rtdetr(),
             )
         };
         results.speed.postprocess = Some(now_ms() - t_post);
@@ -672,6 +678,15 @@ impl YoloPipeline {
         self.metadata.end2end
     }
 
+    /// Whether this is an RT-DETR export. Its deformable-attention decoder reshapes to
+    /// rank 5 and indexes with `int64`, neither of which the LiteRT WebGPU delegate
+    /// supports, so such models must run on the CPU (wasm) accelerator.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn rtdetr(&self) -> bool {
+        self.metadata.is_rtdetr()
+    }
+
     /// Class id -> name map (like `model.names`), as a JS object.
     ///
     /// # Errors
@@ -739,6 +754,7 @@ impl YoloPipeline {
             self.metadata.stride,
             self.metadata.task,
             false,
+            self.metadata.is_rtdetr(),
         )?;
         let data = pre
             .tensor
@@ -803,13 +819,19 @@ impl YoloPipeline {
         // Ultralytics LiteRT exports (`ai_edge_torch`) emit box (and pose keypoint)
         // coordinates normalized to [0, 1]; the shared postprocess expects
         // model-input pixels. Scale them on the detection head in place.
-        denormalize_head(
-            &mut bufs[0],
-            &shape_vecs[0],
-            self.imgsz,
-            self.metadata.task,
-            self.metadata.kpt_shape,
-        );
+        //
+        // RT-DETR is the exception: its decoder already emits normalized boxes on every
+        // backend, and the shared postprocess denormalizes them itself, so scaling here
+        // would apply the input size twice and collapse every box onto the image bounds.
+        if !self.metadata.is_rtdetr() {
+            denormalize_head(
+                &mut bufs[0],
+                &shape_vecs[0],
+                self.imgsz,
+                self.metadata.task,
+                self.metadata.kpt_shape,
+            );
+        }
 
         let views: Vec<(&[f32], Vec<usize>)> = bufs
             .iter()
@@ -824,7 +846,7 @@ impl YoloPipeline {
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        let mut results = postprocess(
+        let mut results = postprocess_with_head(
             views,
             self.metadata.task,
             &pending.pre,
@@ -836,6 +858,7 @@ impl YoloPipeline {
             inference_shape,
             self.metadata.end2end,
             self.metadata.kpt_shape,
+            self.metadata.is_rtdetr(),
         );
         results.speed.postprocess = Some(now_ms() - t_post);
         let payload = JsResults::from_results(

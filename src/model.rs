@@ -26,9 +26,9 @@ use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_dow
 use crate::error::{InferenceError, Result};
 use crate::inference::{InferenceConfig, Quantization};
 use crate::metadata::ModelMetadata;
-use crate::postprocessing::postprocess;
+use crate::postprocessing::postprocess_with_head;
 use crate::preprocessing::{
-    calculate_rect_size, image_to_array, preprocess_image_center_crop,
+    calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_stretch,
     preprocess_image_with_precision,
 };
 use crate::results::{Results, Speed};
@@ -540,7 +540,13 @@ impl YOLOModel {
                 .or(config.batch)
                 .unwrap_or(1)
                 .max(1);
-            match crate::cuda_inference::CudaPreprocessor::finalize(handle, dst_h, dst_w, slots) {
+            match crate::cuda_inference::CudaPreprocessor::finalize(
+                handle,
+                dst_h,
+                dst_w,
+                slots,
+                metadata.is_rtdetr(),
+            ) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     return Err(InferenceError::ModelLoadError(format!(
@@ -991,6 +997,7 @@ impl YOLOModel {
             "docs",
             "stride",
             "task",
+            "head",
             "batch",
             "imgsz",
             "names",
@@ -1108,9 +1115,10 @@ impl YOLOModel {
     }
 
     /// Whether rectangular inference applies: requested in the config and supported by
-    /// the model. Fixed-shape models must letterbox to their own input size.
-    const fn rect_enabled(&self) -> bool {
-        self.config.rect && self.is_dynamic
+    /// the model. Fixed-shape models must letterbox to their own input size, and RT-DETR
+    /// scale-fills its square input, so neither leaves a rectangle to trim.
+    fn rect_enabled(&self) -> bool {
+        self.config.rect && self.is_dynamic && !self.metadata.is_rtdetr()
     }
 
     /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
@@ -1283,7 +1291,7 @@ impl YOLOModel {
             tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
             tensor_f16: None,
             orig_shape: (h, w),
-            scale: (geom.scale, geom.scale),
+            scale: geom.scale,
             padding: (geom.pad_y as f32, geom.pad_x as f32),
         };
         // Reuse the shared zero-copy extraction helper (it handles the f16→f32
@@ -1292,7 +1300,7 @@ impl YOLOModel {
             Self::extract_and_invoke(&outputs, &self.output_names, inference_time, |outs, _ms| {
                 let img_outputs: Vec<(&[f32], Vec<usize>)> =
                     outs.iter().map(|(d, s)| (*d, s.clone())).collect();
-                Ok(postprocess(
+                Ok(postprocess_with_head(
                     img_outputs,
                     self.metadata.task,
                     &pre,
@@ -1304,6 +1312,7 @@ impl YOLOModel {
                     (dst_h as u32, dst_w as u32),
                     self.metadata.end2end,
                     self.metadata.kpt_shape,
+                    self.metadata.is_rtdetr(),
                 ))
             })?;
         #[allow(clippy::cast_precision_loss)]
@@ -1420,10 +1429,10 @@ impl YOLOModel {
                         tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
                         tensor_f16: None,
                         orig_shape: (h, w),
-                        scale: (geom.scale, geom.scale),
+                        scale: geom.scale,
                         padding: (geom.pad_y as f32, geom.pad_x as f32),
                     };
-                    results.push(vec![postprocess(
+                    results.push(vec![postprocess_with_head(
                         img_outputs,
                         self.metadata.task,
                         &pre,
@@ -1435,6 +1444,7 @@ impl YOLOModel {
                         (dst_h as u32, dst_w as u32),
                         self.metadata.end2end,
                         self.metadata.kpt_shape,
+                        self.metadata.is_rtdetr(),
                     )]);
                 }
                 Ok(results)
@@ -1570,6 +1580,7 @@ impl YOLOModel {
         // instead of paying the per-image resize serially.
         let (stride, task, fp16_input) =
             (self.metadata.stride, self.metadata.task, self.fp16_input);
+        let rtdetr = self.metadata.is_rtdetr();
         let preprocessed_results: Vec<_> = images
             .par_iter()
             .map(|image| {
@@ -1581,19 +1592,13 @@ impl YOLOModel {
                     target_size
                 };
 
+                let quantize = fp16_input.then_some(Quantization::Fp16);
                 if task == Task::Classify {
-                    preprocess_image_center_crop(
-                        image,
-                        current_target_size,
-                        fp16_input.then_some(Quantization::Fp16),
-                    )
+                    preprocess_image_center_crop(image, current_target_size, quantize)
+                } else if rtdetr {
+                    preprocess_image_stretch(image, current_target_size, quantize)
                 } else {
-                    preprocess_image_with_precision(
-                        image,
-                        current_target_size,
-                        stride,
-                        fp16_input.then_some(Quantization::Fp16),
-                    )
+                    preprocess_image_with_precision(image, current_target_size, stride, quantize)
                 }
             })
             .collect();
@@ -1645,7 +1650,7 @@ impl YOLOModel {
                 let tensor_shape = preprocess_res.tensor.shape();
                 let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
-                let result = postprocess(
+                let result = postprocess_with_head(
                     img_outputs,
                     task,
                     &preprocess_res,
@@ -1657,6 +1662,7 @@ impl YOLOModel {
                     inference_shape,
                     end2end,
                     kpt_shape,
+                    rtdetr,
                 );
 
                 batch_results.push(vec![result]);
