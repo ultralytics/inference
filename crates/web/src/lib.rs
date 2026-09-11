@@ -678,6 +678,15 @@ impl YoloPipeline {
         self.metadata.end2end
     }
 
+    /// Whether this is an RT-DETR export. Its deformable-attention decoder reshapes to
+    /// rank 5 and indexes with `int64`, neither of which the LiteRT WebGPU delegate
+    /// supports, so such models must run on the CPU (wasm) accelerator.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn rtdetr(&self) -> bool {
+        self.metadata.is_rtdetr()
+    }
+
     /// Class id -> name map (like `model.names`), as a JS object.
     ///
     /// # Errors

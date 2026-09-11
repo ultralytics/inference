@@ -672,6 +672,16 @@ export class YOLO {
         "LiteRT: this is an NMS-free model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with Ultralytics >=8.4.142 and `nms=None` for WebGPU.",
       );
     }
+    // RT-DETR's deformable-attention decoder reshapes to rank 5 and indexes with int64.
+    // The WebGPU delegate supports neither, so it logs a RESHAPE error per offending node
+    // and falls back per-op anyway; going straight to wasm skips the noise and the wasted
+    // GPU compile.
+    if (accelerator === "webgpu" && pipeline.rtdetr) {
+      accelerator = "wasm";
+      console.warn(
+        "LiteRT: RT-DETR's decoder uses rank-5 reshapes and int64 indices that the WebGPU delegate can't run, so it runs on CPU/wasm.",
+      );
+    }
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
     // The compiled model outranks the metadata: `pipeline.inputShape` is what sizes the
     // input tensor below, so a stale `imgsz` would build one the model rejects.
