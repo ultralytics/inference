@@ -672,14 +672,16 @@ export class YOLO {
         "LiteRT: this is an NMS-free model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with Ultralytics >=8.4.142 and `nms=None` for WebGPU.",
       );
     }
-    // RT-DETR's deformable-attention decoder reshapes to rank 5 and indexes with int64.
-    // The WebGPU delegate supports neither, so it logs a RESHAPE error per offending node
-    // and falls back per-op anyway; going straight to wasm skips the noise and the wasted
-    // GPU compile.
-    if (accelerator === "webgpu" && pipeline.rtdetr) {
+    // RT-DETR's deformable-attention decoder reshapes to rank 5 and indexes with int64,
+    // which the LiteRT WebGPU delegate rejects: Vulkan logs a RESHAPE error per offending
+    // node and falls back per-op, Metal-3 fails the compile outright. `"auto"` therefore
+    // goes straight to wasm and skips the noise and the wasted GPU compile. An explicit
+    // `device: "webgpu"` is still honored, so this can be re-tested when the delegate
+    // grows the missing ops, without patching the library.
+    if (accelerator === "webgpu" && pipeline.rtdetr && options?.device !== "webgpu") {
       accelerator = "wasm";
       console.warn(
-        "LiteRT: RT-DETR's decoder uses rank-5 reshapes and int64 indices that the WebGPU delegate can't run, so it runs on CPU/wasm.",
+        "LiteRT: RT-DETR's decoder uses rank-5 reshapes and int64 indices that the WebGPU delegate could not run on the drivers tested, so it runs on CPU/wasm. Pass device: \"webgpu\" to try it anyway.",
       );
     }
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
