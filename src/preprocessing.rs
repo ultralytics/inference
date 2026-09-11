@@ -121,7 +121,31 @@ impl LetterboxGeometry {
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss
     )]
-    pub(crate) fn compute(orig_w: u32, orig_h: u32, target: (usize, usize)) -> (Self, f32) {
+    pub(crate) fn compute(
+        orig_w: u32,
+        orig_h: u32,
+        target: (usize, usize),
+        stretch: bool,
+    ) -> (Self, (f32, f32)) {
+        // Scale-fill: the source covers the target exactly, so each axis keeps its own gain
+        // and there is no padding. A zero-extent axis has no gain to report and yields 1.0,
+        // keeping back-projection finite instead of dividing coordinates by infinity.
+        if stretch {
+            let gain = |extent: usize, orig: u32| {
+                if orig == 0 {
+                    1.0
+                } else {
+                    extent as f32 / orig as f32
+                }
+            };
+            let geom = Self {
+                new_w: target.1 as u32,
+                new_h: target.0 as u32,
+                pad_left: 0,
+                pad_top: 0,
+            };
+            return (geom, (gain(target.0, orig_h), gain(target.1, orig_w)));
+        }
         let (target_h, target_w) = (target.0 as f32, target.1 as f32);
         let (orig_hf, orig_wf) = (orig_h as f32, orig_w as f32);
         let scale = (target_h / orig_hf).min(target_w / orig_wf);
@@ -146,35 +170,7 @@ impl LetterboxGeometry {
                 pad_left,
                 pad_top,
             },
-            scale,
-        )
-    }
-
-    /// Scale-fill geometry for stretching `(orig_w, orig_h)` onto `target` = `(height, width)`:
-    /// each axis gets its own gain, so the source fills the tensor exactly and there is no
-    /// padding. This is the layout RT-DETR was trained and is evaluated with, mirroring
-    /// Ultralytics' `LetterBox(..., scale_fill=True)`.
-    ///
-    /// The returned gains are `(scale_y, scale_x)`, matching [`PreprocessResult::scale`].
-    /// A zero-extent source has no gain to report and yields 1.0 on that axis, which keeps
-    /// the back-projection finite instead of dividing coordinates by infinity.
-    #[allow(clippy::cast_precision_loss)]
-    pub(crate) fn stretch(orig_w: u32, orig_h: u32, target: (usize, usize)) -> (Self, (f32, f32)) {
-        let gain = |target_extent: usize, orig: u32| {
-            if orig == 0 {
-                1.0
-            } else {
-                target_extent as f32 / orig as f32
-            }
-        };
-        (
-            Self {
-                new_w: target.1 as u32,
-                new_h: target.0 as u32,
-                pad_left: 0,
-                pad_top: 0,
-            },
-            (gain(target.0, orig_h), gain(target.1, orig_w)),
+            (scale, scale),
         )
     }
 }
@@ -305,7 +301,7 @@ pub fn preprocess_image_stretch(
 ) -> PreprocessResult {
     let quantize = quantize.into_quantization();
     let (orig_width, orig_height) = image.dimensions();
-    let (geom, scale) = LetterboxGeometry::stretch(orig_width, orig_height, target_size);
+    let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size, true);
     build_preprocess_result(
         image,
         target_size,
@@ -602,8 +598,7 @@ fn calculate_letterbox_params(
 ) -> (LetterboxGeometry, (f32, f32)) {
     // A single uniform `gain` on both axes for coordinate back-projection; per-axis gains
     // from the rounded extents can diverge slightly, shifting boxes and changing NMS.
-    let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size);
-    (geom, (scale, scale))
+    LetterboxGeometry::compute(orig_width, orig_height, target_size, false)
 }
 
 /// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.
@@ -1047,7 +1042,7 @@ mod tests {
 
         // A zero-extent source has no gain to report: 1.0 keeps the back-projection finite
         // instead of dividing coordinates by infinity.
-        let (geom, scale) = LetterboxGeometry::stretch(0, 0, (640, 640));
+        let (geom, scale) = LetterboxGeometry::compute(0, 0, (640, 640), true);
         assert_eq!(scale, (1.0, 1.0));
         assert_eq!((geom.new_w, geom.new_h), (640, 640));
     }

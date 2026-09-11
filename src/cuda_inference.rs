@@ -328,15 +328,13 @@ impl CudaPreprocessor {
 
         // Geometry from the shared CPU helper, so the kernel and the CPU path can never
         // disagree on scale/rounding/padding. `scale` is the `(y, x)` gain post-processing
-        // back-projects with: one uniform value when letterboxing, one per axis when
-        // scale-filling for RT-DETR.
-        let (geom, scale) = if self.stretch {
-            crate::preprocessing::LetterboxGeometry::stretch(src_w, src_h, (dst_h, dst_w))
-        } else {
-            let (geom, scale) =
-                crate::preprocessing::LetterboxGeometry::compute(src_w, src_h, (dst_h, dst_w));
-            (geom, (scale, scale))
-        };
+        // back-projects with.
+        let (geom, scale) = crate::preprocessing::LetterboxGeometry::compute(
+            src_w,
+            src_h,
+            (dst_h, dst_w),
+            self.stretch,
+        );
         let (resized_w, resized_h) = (geom.new_w as i32, geom.new_h as i32);
         let (pad_x, pad_y) = (geom.pad_left as i32, geom.pad_top as i32);
         // Resampling ratios are src-per-dst on each axis, matching the CPU letterbox
