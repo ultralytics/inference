@@ -991,6 +991,7 @@ impl YOLOModel {
             "docs",
             "stride",
             "task",
+            "head",
             "batch",
             "imgsz",
             "names",
