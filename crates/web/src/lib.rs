@@ -601,6 +601,7 @@ impl YoloModel {
                 inference_shape,
                 self.metadata.end2end,
                 self.metadata.kpt_shape,
+                self.metadata.is_rtdetr(),
             )
         };
         results.speed.postprocess = Some(now_ms() - t_post);
@@ -803,13 +804,19 @@ impl YoloPipeline {
         // Ultralytics LiteRT exports (`ai_edge_torch`) emit box (and pose keypoint)
         // coordinates normalized to [0, 1]; the shared postprocess expects
         // model-input pixels. Scale them on the detection head in place.
-        denormalize_head(
-            &mut bufs[0],
-            &shape_vecs[0],
-            self.imgsz,
-            self.metadata.task,
-            self.metadata.kpt_shape,
-        );
+        //
+        // RT-DETR is the exception: its decoder already emits normalized boxes on every
+        // backend, and the shared postprocess denormalizes them itself, so scaling here
+        // would apply the input size twice and collapse every box onto the image bounds.
+        if !self.metadata.is_rtdetr() {
+            denormalize_head(
+                &mut bufs[0],
+                &shape_vecs[0],
+                self.imgsz,
+                self.metadata.task,
+                self.metadata.kpt_shape,
+            );
+        }
 
         let views: Vec<(&[f32], Vec<usize>)> = bufs
             .iter()
@@ -836,6 +843,7 @@ impl YoloPipeline {
             inference_shape,
             self.metadata.end2end,
             self.metadata.kpt_shape,
+            self.metadata.is_rtdetr(),
         );
         results.speed.postprocess = Some(now_ms() - t_post);
         let payload = JsResults::from_results(

@@ -1305,6 +1305,7 @@ impl YOLOModel {
                     (dst_h as u32, dst_w as u32),
                     self.metadata.end2end,
                     self.metadata.kpt_shape,
+                    self.metadata.is_rtdetr(),
                 ))
             })?;
         #[allow(clippy::cast_precision_loss)]
@@ -1436,6 +1437,7 @@ impl YOLOModel {
                         (dst_h as u32, dst_w as u32),
                         self.metadata.end2end,
                         self.metadata.kpt_shape,
+                        self.metadata.is_rtdetr(),
                     )]);
                 }
                 Ok(results)
@@ -1612,6 +1614,7 @@ impl YOLOModel {
         let cfg = &self.config;
         let end2end = self.metadata.end2end;
         let kpt_shape = self.metadata.kpt_shape;
+        let rtdetr = self.metadata.is_rtdetr();
 
         // Compute orig_img arrays now. `image_to_array` copies the full frame, so run the
         // batch across cores like the preprocess fan-out above.
@@ -1658,6 +1661,7 @@ impl YOLOModel {
                     inference_shape,
                     end2end,
                     kpt_shape,
+                    rtdetr,
                 );
 
                 batch_results.push(vec![result]);
