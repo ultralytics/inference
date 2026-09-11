@@ -182,9 +182,13 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
   actually ran.
 - **RT-DETR**: supported for detection. An RT-DETR `.onnx` runs on WebGPU like any other
-  model. An RT-DETR `.tflite` always runs on CPU/wasm: its deformable-attention decoder
-  reshapes to rank 5 and indexes with `int64`, neither of which the LiteRT WebGPU delegate
-  supports. Export one yourself, since no RT-DETR ONNX or LiteRT model is published.
+  model. An RT-DETR `.tflite` is routed to CPU/wasm under the default `device: "auto"`: its
+  deformable-attention decoder reshapes to rank 5 and indexes with `int64`, which the LiteRT
+  WebGPU delegate rejected on every driver tested (Linux/Vulkan and Apple Metal-3). An
+  explicit `device: "webgpu"` is still attempted rather than overridden, so the delegate can
+  be re-tested as it gains ops; on current drivers that attempt fails and LiteRT falls back
+  to CPU/wasm, and `model.device` reports what ran. Export one yourself, since no RT-DETR
+  ONNX or LiteRT model is published.
 - **Model format**: export your model to ONNX with Ultralytics `>=8.4.142` so the metadata
   (task, class names, `imgsz`) is embedded:
 
