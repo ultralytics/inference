@@ -149,6 +149,34 @@ impl LetterboxGeometry {
             scale,
         )
     }
+
+    /// Scale-fill geometry for stretching `(orig_w, orig_h)` onto `target` = `(height, width)`:
+    /// each axis gets its own gain, so the source fills the tensor exactly and there is no
+    /// padding. This is the layout RT-DETR was trained and is evaluated with, mirroring
+    /// Ultralytics' `LetterBox(..., scale_fill=True)`.
+    ///
+    /// The returned gains are `(scale_y, scale_x)`, matching [`PreprocessResult::scale`].
+    /// A zero-extent source has no gain to report and yields 1.0 on that axis, which keeps
+    /// the back-projection finite instead of dividing coordinates by infinity.
+    #[allow(clippy::cast_precision_loss)]
+    pub(crate) fn stretch(orig_w: u32, orig_h: u32, target: (usize, usize)) -> (Self, (f32, f32)) {
+        let gain = |target_extent: usize, orig: u32| {
+            if orig == 0 {
+                1.0
+            } else {
+                target_extent as f32 / orig as f32
+            }
+        };
+        (
+            Self {
+                new_w: target.1 as u32,
+                new_h: target.0 as u32,
+                pad_left: 0,
+                pad_top: 0,
+            },
+            (gain(target.0, orig_h), gain(target.1, orig_w)),
+        )
+    }
 }
 
 /// Build a `PreprocessResult` from a resolved letterbox geometry.
@@ -250,6 +278,40 @@ pub fn preprocess_image_with_precision(
         geom,
         scale,
         orig_shape,
+        quantize == Some(Quantization::Fp16),
+    )
+}
+
+/// Preprocess an image for RT-DETR inference.
+///
+/// Stretches the image onto `target_size` so it fills the tensor exactly, with no
+/// aspect-ratio preservation and no padding. RT-DETR expects this layout; feeding it a
+/// padded letterbox shifts every prediction.
+///
+/// # Arguments
+///
+/// * `image` - Input image.
+/// * `target_size` - Target size as (height, width).
+/// * `quantize` - Requested precision. FP16 also generates an FP16 tensor.
+///
+/// # Returns
+///
+/// Preprocessed tensor and transform information for post-processing.
+#[must_use]
+pub fn preprocess_image_stretch(
+    image: &DynamicImage,
+    target_size: (usize, usize),
+    quantize: impl IntoQuantization,
+) -> PreprocessResult {
+    let quantize = quantize.into_quantization();
+    let (orig_width, orig_height) = image.dimensions();
+    let (geom, scale) = LetterboxGeometry::stretch(orig_width, orig_height, target_size);
+    build_preprocess_result(
+        image,
+        target_size,
+        geom,
+        scale,
+        (orig_height, orig_width),
         quantize == Some(Quantization::Fp16),
     )
 }
@@ -968,6 +1030,20 @@ mod tests {
         let (_, _, h, w) = res.tensor.dim();
         assert_eq!((h, w), rect_size);
         assert_eq!(res.padding, (5.0, 0.0));
+    }
+
+    #[test]
+    fn test_preprocess_image_stretch_fills_target() {
+        // RT-DETR scale-fill: a 810x1080 source stretches onto 640x640 with no padding and
+        // a separate gain per axis, so back-projection returns the original extents.
+        let img = image::DynamicImage::new_rgb8(810, 1080);
+        let res = preprocess_image_stretch(&img, (640, 640), None);
+        let (_, c, h, w) = res.tensor.dim();
+        assert_eq!((c, h, w), (3, 640, 640));
+        assert_eq!(res.padding, (0.0, 0.0));
+        assert_eq!(res.scale, (640.0 / 1080.0, 640.0 / 810.0));
+        let full = scale_coords(&[0.0, 0.0, 640.0, 640.0], res.scale, res.padding);
+        assert!((full[2] - 810.0).abs() < 1e-3 && (full[3] - 1080.0).abs() < 1e-3);
     }
 
     #[test]
