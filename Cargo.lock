@@ -2443,6 +2443,7 @@ dependencies = [
  "dirs",
  "fast_image_resize",
  "ffmpeg-next",
+ "flate2",
  "half",
  "hmac-sha256",
  "image",

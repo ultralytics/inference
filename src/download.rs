@@ -416,8 +416,8 @@ const ORT_OPENVINO_URL: &str = "https://github.com/ultralytics/inference/release
 
 /// Path of the ONNX Runtime `OpenVINO` provider plugin for the `openvino` feature.
 ///
-/// This platform's bundle is downloaded once, checked against its pinned SHA-256, extracted
-/// with the system `tar` into the user cache directory, and reused afterwards. ONNX Runtime
+/// This platform's bundle is downloaded once, checked against its pinned SHA-256, unpacked
+/// into the user cache directory, and reused afterwards. ONNX Runtime
 /// loads the plugin's provider bridge from the executable's folder, so the bridge is copied
 /// there when it is missing.
 ///
@@ -456,18 +456,21 @@ pub(crate) fn openvino_plugin() -> Result<PathBuf> {
         .join("ultralytics-inference");
     let dir = cache.join(&name);
     let plugin_path = dir.join(plugin);
+    // Unique to this call, so concurrent first loads in other processes or other threads never
+    // share a staging folder or a temporary bridge file.
+    let nonce = format!(
+        "{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+    );
 
     if !plugin_path.exists() {
-        // Stage in a folder unique to this call and rename it into place, so an interrupted run
-        // never leaves a bundle that looks complete and concurrent first loads never share files.
-        let part = cache.join(format!(
-            "{name}.part.{}.{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_nanos()
-        ));
+        // Stage in a folder and rename it into place, so an interrupted run never leaves a
+        // bundle that looks complete.
+        let part = cache.join(format!("{name}.part.{nonce}"));
         let staged = (|| -> Result<()> {
             fs::create_dir_all(&part).map_err(|e| {
                 InferenceError::ModelLoadError(format!("Failed to create {}: {e}", part.display()))
@@ -492,17 +495,14 @@ pub(crate) fn openvino_plugin() -> Result<PathBuf> {
                 )));
             }
 
-            let extracted = std::process::Command::new("tar")
-                .arg("-xzf")
-                .arg(&archive)
-                .arg("-C")
-                .arg(&part)
-                .status()
-                .is_ok_and(|s| s.success());
+            // Unpack in process from the verified bytes, so no system `tar` is needed.
             let _ = fs::remove_file(&archive);
-            if !extracted || !part.join(plugin).exists() {
+            unpack_tgz(&bytes, &part).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to unpack {name}.tgz: {e}"))
+            })?;
+            if !part.join(plugin).exists() {
                 return Err(InferenceError::ModelLoadError(format!(
-                    "Failed to extract {name}.tgz with tar"
+                    "{name}.tgz does not contain {plugin}"
                 )));
             }
             Ok(())
@@ -535,7 +535,7 @@ pub(crate) fn openvino_plugin() -> Result<PathBuf> {
         })?;
     let bridge_path = exe_dir.join(bridge);
     if !bridge_path.exists() {
-        let tmp = exe_dir.join(format!("{bridge}.{}.part", std::process::id()));
+        let tmp = exe_dir.join(format!("{bridge}.{nonce}.part"));
         if let Err(e) =
             fs::copy(dir.join(bridge), &tmp).and_then(|_| fs::rename(&tmp, &bridge_path))
         {
@@ -563,6 +563,67 @@ pub(crate) fn openvino_plugin() -> Result<PathBuf> {
         })?;
     }
     Ok(plugin_path)
+}
+
+/// Unpack a gzipped tar archive into `dest`, streaming each entry to disk.
+///
+/// The bundles only hold directories, regular files and (on Linux) symlinks with short names, so
+/// this reads plain ustar headers and rejects any other entry type, or any path or link target
+/// that would leave `dest`.
+#[cfg(feature = "openvino")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn unpack_tgz(archive: &[u8], dest: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    use std::path::Component;
+
+    // Header fields are NUL-terminated or NUL-padded.
+    fn field(bytes: &[u8]) -> std::io::Result<&str> {
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        std::str::from_utf8(&bytes[..end]).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "entry name is not UTF-8")
+        })
+    }
+
+    let invalid = |msg: &str| Error::new(ErrorKind::InvalidData, msg.to_owned());
+    let inside = |path: &Path| {
+        path.components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+    };
+
+    let mut gz = flate2::read::GzDecoder::new(archive);
+    let mut header = [0u8; 512];
+    loop {
+        gz.read_exact(&mut header)?;
+        if header.iter().all(|&b| b == 0) {
+            return Ok(());
+        }
+        let rel = Path::new(field(&header[..100])?);
+        if !inside(rel) {
+            return Err(invalid("entry path leaves the bundle folder"));
+        }
+        let size = u64::from_str_radix(field(&header[124..136])?.trim(), 8)
+            .map_err(|_| invalid("entry size is not octal"))?;
+        let path = dest.join(rel);
+
+        // Entry data is padded to the next 512-byte block.
+        let mut entry = (&mut gz).take(size.div_ceil(512) * 512);
+        match header[156] {
+            b'0' | 0 => {
+                std::io::copy(&mut (&mut entry).take(size), &mut File::create(&path)?)?;
+            }
+            b'5' => fs::create_dir_all(&path)?,
+            #[cfg(unix)]
+            b'2' => {
+                let target = field(&header[157..257])?;
+                if Path::new(target).components().count() != 1 || !inside(Path::new(target)) {
+                    return Err(invalid("symlink target leaves the bundle folder"));
+                }
+                std::os::unix::fs::symlink(target, &path)?;
+            }
+            _ => return Err(invalid("unsupported entry type")),
+        }
+        std::io::copy(&mut entry, &mut std::io::sink())?;
+    }
 }
 
 #[cfg(test)]
