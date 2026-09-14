@@ -406,6 +406,83 @@ pub fn download_images(urls: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// ONNX Runtime version of the `OpenVINO` bundle; must match the ONNX Runtime `ort` targets.
+#[cfg(feature = "openvino")]
+const ORT_OPENVINO_VERSION: &str = "1.28.0";
+
+/// Release holding the ONNX Runtime + `OpenVINO` bundles, one `.tgz` per platform.
+#[cfg(feature = "openvino")]
+const ORT_OPENVINO_URL: &str = "https://github.com/ultralytics/inference/releases/download/v0.0.11";
+
+/// Path of the ONNX Runtime library to load for the `openvino` feature.
+///
+/// `ORT_DYLIB_PATH` wins when set. Otherwise this platform's bundle is downloaded once,
+/// extracted with the system `tar` into the user cache directory, and reused afterwards.
+///
+/// # Errors
+///
+/// Returns an error if no bundle exists for this platform, or the download or extraction fails.
+#[cfg(feature = "openvino")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) fn ort_openvino_lib() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH").filter(|p| !p.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
+
+    let (target, lib) = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => ("linux-x64", "libonnxruntime.so"),
+        ("linux", "aarch64") => ("linux-arm64", "libonnxruntime.so"),
+        ("windows", "x86_64") => ("windows-x64", "onnxruntime.dll"),
+        (os, arch) => {
+            return Err(InferenceError::ModelLoadError(format!(
+                "No ONNX Runtime OpenVINO bundle is published for {os}-{arch}. \
+                 Set ORT_DYLIB_PATH to your own ONNX Runtime {ORT_OPENVINO_VERSION} build."
+            )));
+        }
+    };
+
+    let name = format!("ort-openvino-{ORT_OPENVINO_VERSION}-{target}");
+    let cache = dirs::cache_dir()
+        .ok_or_else(|| InferenceError::ModelLoadError("No user cache directory".into()))?
+        .join("ultralytics-inference");
+    let dir = cache.join(&name);
+    let lib_path = dir.join(lib);
+    if lib_path.exists() {
+        return Ok(lib_path);
+    }
+
+    // Extract beside the final folder and rename it into place, so an interrupted
+    // download or extraction never leaves a half-filled bundle that looks complete.
+    let part = cache.join(format!("{name}.part"));
+    let _ = fs::remove_dir_all(&part);
+    fs::create_dir_all(&part).map_err(|e| {
+        InferenceError::ModelLoadError(format!("Failed to create {}: {e}", part.display()))
+    })?;
+    let archive = part.join(format!("{name}.tgz"));
+    download_file(&format!("{ORT_OPENVINO_URL}/{name}.tgz"), &archive)?;
+
+    let extracted = std::process::Command::new("tar")
+        .arg("-xzf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(&part)
+        .status()
+        .is_ok_and(|s| s.success());
+    let _ = fs::remove_file(&archive);
+    if !extracted || !part.join(lib).exists() {
+        let _ = fs::remove_dir_all(&part);
+        return Err(InferenceError::ModelLoadError(format!(
+            "Failed to extract {name}.tgz with tar"
+        )));
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+    fs::rename(&part, &dir).map_err(|e| {
+        InferenceError::ModelLoadError(format!("Failed to move bundle to {}: {e}", dir.display()))
+    })?;
+    Ok(lib_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

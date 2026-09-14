@@ -78,6 +78,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo test --no-default-features --features annotate,cuda,tensorrt
 
+      # `openvino` loads ONNX Runtime at runtime, so its tests would need the downloaded bundle; lint only.
+      - name: Clippy (annotate + openvino)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo clippy --all-targets --no-default-features --features annotate,openvino -- -D warnings
+
       # CoreML is macOS-only — covers issue #148 (GatherElements warmup) and graph_input_cast_0 fix
       - name: Clippy (coreml + annotate)
         if: matrix.os == 'macos-latest'

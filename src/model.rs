@@ -164,6 +164,22 @@ impl YOLOModel {
         };
         let path = path.as_ref();
 
+        // `openvino` loads ONNX Runtime at runtime rather than linking it, so point `ort` at
+        // the library before the first session. `ort` keeps the first library it loads, so
+        // later calls change nothing.
+        #[cfg(feature = "openvino")]
+        {
+            let lib = crate::download::ort_openvino_lib()?;
+            let _ = ort::init_from(&lib)
+                .map_err(|e| {
+                    InferenceError::ModelLoadError(format!(
+                        "Failed to load ONNX Runtime from {}: {e}",
+                        lib.display()
+                    ))
+                })?
+                .commit();
+        }
+
         // Establish a shared cudarc stream up-front when the cuda-preprocess
         // fast path is eligible. The TRT/CUDA EPs below bind to this stream
         // via `with_compute_stream`, so the preprocess kernel and ORT see
