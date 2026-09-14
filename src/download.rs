@@ -406,144 +406,163 @@ pub fn download_images(urls: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// ONNX Runtime version of the `OpenVINO` bundle; must match the ONNX Runtime `ort` targets.
+/// ONNX Runtime version the `OpenVINO` provider plugin is built for; must match the one `ort` links.
 #[cfg(feature = "openvino")]
 const ORT_OPENVINO_VERSION: &str = "1.28.0";
 
-/// Release holding the ONNX Runtime + `OpenVINO` bundles, one `.tgz` per platform.
+/// Release holding the `OpenVINO` provider plugin bundles, one `.tgz` per platform.
 #[cfg(feature = "openvino")]
 const ORT_OPENVINO_URL: &str = "https://github.com/ultralytics/inference/releases/download/v0.0.11";
 
-/// Path of the ONNX Runtime library to load for the `openvino` feature.
+/// Path of the ONNX Runtime `OpenVINO` provider plugin for the `openvino` feature.
 ///
-/// `ORT_DYLIB_PATH` wins when set. Otherwise this platform's bundle is downloaded once,
-/// checked against its pinned SHA-256, extracted with the system `tar` into the user cache
-/// directory, and reused afterwards.
+/// This platform's bundle is downloaded once, checked against its pinned SHA-256, extracted
+/// with the system `tar` into the user cache directory, and reused afterwards. ONNX Runtime
+/// loads the plugin's provider bridge from the executable's folder, so the bridge is copied
+/// there when it is missing.
 ///
 /// # Errors
 ///
 /// Returns an error if no bundle exists for this platform, the download fails, the archive
-/// does not match its pinned SHA-256, or extraction fails.
+/// does not match its pinned SHA-256, extraction fails, or the bridge cannot be copied.
 #[cfg(feature = "openvino")]
 #[allow(clippy::too_many_lines)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(crate) fn ort_openvino_lib() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH").filter(|p| !p.is_empty()) {
-        return Ok(PathBuf::from(path));
-    }
-
+pub(crate) fn openvino_plugin() -> Result<PathBuf> {
     // The bundles hold native code, so each archive is pinned to the SHA-256 of its release asset.
-    let (target, lib, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
+    let (target, plugin, bridge, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => (
             "linux-x64",
-            "libonnxruntime.so",
-            "06f00aabbc57a5ed6bafecbb6b9e39ca21b0db23756f0639366de94cd738b1d2",
-        ),
-        ("linux", "aarch64") => (
-            "linux-arm64",
-            "libonnxruntime.so",
-            "db6bec670faa7726f7fa34efc2191b51ed3a7d7f6844e9e5ab5bfa744b1deb4b",
+            "libonnxruntime_providers_openvino.so",
+            "libonnxruntime_providers_shared.so",
+            "dafeb17cbab258b8c9087d417763a1aafea6d789015b91a85564b5a97713d82d",
         ),
         ("windows", "x86_64") => (
             "windows-x64",
-            "onnxruntime.dll",
-            "63e93fba587d143df9ab844293cd6235832b1996ceef2ca373f4f28ac83dc05b",
+            "onnxruntime_providers_openvino.dll",
+            "onnxruntime_providers_shared.dll",
+            "f57f68b921eb2925d95ee78c524290f5e72b3ef82687b5f44ab953f99c350bde",
         ),
         (os, arch) => {
             return Err(InferenceError::ModelLoadError(format!(
-                "No ONNX Runtime OpenVINO bundle is published for {os}-{arch}. \
-                 Set ORT_DYLIB_PATH to your own ONNX Runtime {ORT_OPENVINO_VERSION} build."
+                "No OpenVINO provider bundle is published for {os}-{arch}"
             )));
         }
     };
 
-    let name = format!("ort-openvino-{ORT_OPENVINO_VERSION}-{target}");
+    let name = format!("openvino-ep-{ORT_OPENVINO_VERSION}-{target}");
     let cache = dirs::cache_dir()
         .ok_or_else(|| InferenceError::ModelLoadError("No user cache directory".into()))?
         .join("ultralytics-inference");
     let dir = cache.join(&name);
-    let lib_path = dir.join(lib);
-    if lib_path.exists() {
-        return Ok(lib_path);
-    }
+    let plugin_path = dir.join(plugin);
 
-    // Stage in a folder unique to this call and rename it into place, so an interrupted run
-    // never leaves a bundle that looks complete and concurrent first loads never share files.
-    let part = cache.join(format!(
-        "{name}.part.{}.{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos()
-    ));
-    let staged = (|| -> Result<()> {
-        fs::create_dir_all(&part).map_err(|e| {
-            InferenceError::ModelLoadError(format!("Failed to create {}: {e}", part.display()))
-        })?;
-        let archive = part.join(format!("{name}.tgz"));
-        download_file(&format!("{ORT_OPENVINO_URL}/{name}.tgz"), &archive)?;
+    if !plugin_path.exists() {
+        // Stage in a folder unique to this call and rename it into place, so an interrupted run
+        // never leaves a bundle that looks complete and concurrent first loads never share files.
+        let part = cache.join(format!(
+            "{name}.part.{}.{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        let staged = (|| -> Result<()> {
+            fs::create_dir_all(&part).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to create {}: {e}", part.display()))
+            })?;
+            let archive = part.join(format!("{name}.tgz"));
+            download_file(&format!("{ORT_OPENVINO_URL}/{name}.tgz"), &archive)?;
 
-        let read_err =
-            |e| InferenceError::ModelLoadError(format!("Failed to read {name}.tgz: {e}"));
-        let mut file = File::open(&archive).map_err(read_err)?;
-        let mut hash = hmac_sha256::Hash::new();
-        let mut buffer = vec![0u8; 65536];
-        loop {
-            let n = file.read(&mut buffer).map_err(read_err)?;
-            if n == 0 {
-                break;
+            let bytes = fs::read(&archive).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to read {name}.tgz: {e}"))
+            })?;
+            let digest = hmac_sha256::Hash::hash(&bytes).iter().fold(
+                String::with_capacity(64),
+                |mut hex, b| {
+                    use std::fmt::Write as _;
+                    let _ = write!(hex, "{b:02x}");
+                    hex
+                },
+            );
+            if digest != sha256 {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "{name}.tgz does not match its pinned SHA-256 (got {digest}), so it was not loaded"
+                )));
             }
-            hash.update(&buffer[..n]);
-        }
-        let digest = hash
-            .finalize()
-            .iter()
-            .fold(String::with_capacity(64), |mut hex, b| {
-                use std::fmt::Write as _;
-                let _ = write!(hex, "{b:02x}");
-                hex
-            });
-        if digest != sha256 {
-            return Err(InferenceError::ModelLoadError(format!(
-                "{name}.tgz does not match its pinned SHA-256 (got {digest}), so it was not loaded"
-            )));
+
+            let extracted = std::process::Command::new("tar")
+                .arg("-xzf")
+                .arg(&archive)
+                .arg("-C")
+                .arg(&part)
+                .status()
+                .is_ok_and(|s| s.success());
+            let _ = fs::remove_file(&archive);
+            if !extracted || !part.join(plugin).exists() {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "Failed to extract {name}.tgz with tar"
+                )));
+            }
+            Ok(())
+        })();
+        if let Err(e) = staged {
+            let _ = fs::remove_dir_all(&part);
+            return Err(e);
         }
 
-        let extracted = std::process::Command::new("tar")
-            .arg("-xzf")
-            .arg(&archive)
-            .arg("-C")
-            .arg(&part)
-            .status()
-            .is_ok_and(|s| s.success());
-        let _ = fs::remove_file(&archive);
-        if !extracted || !part.join(lib).exists() {
-            return Err(InferenceError::ModelLoadError(format!(
-                "Failed to extract {name}.tgz with tar"
-            )));
-        }
-        Ok(())
-    })();
-    if let Err(e) = staged {
-        let _ = fs::remove_dir_all(&part);
-        return Err(e);
-    }
-
-    // A rename onto a finished bundle fails, so a caller that lost the race keeps the winner's
-    // copy. Only a leftover folder without the library is replaced.
-    if fs::rename(&part, &dir).is_err() && !lib_path.exists() {
-        let _ = fs::remove_dir_all(&dir);
+        // A rename onto a finished bundle fails, so a caller that lost the race drops its own
+        // copy and uses the winner's bundle.
         if let Err(e) = fs::rename(&part, &dir) {
             let _ = fs::remove_dir_all(&part);
-            return Err(InferenceError::ModelLoadError(format!(
-                "Failed to move bundle to {}: {e}",
-                dir.display()
-            )));
+            if !plugin_path.exists() {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "Failed to move bundle to {}: {e}",
+                    dir.display()
+                )));
+            }
         }
     }
-    let _ = fs::remove_dir_all(&part);
-    Ok(lib_path)
+
+    // ONNX Runtime loads the provider bridge from the executable's folder, not the plugin's.
+    // Copy under a unique name and rename, so a concurrent load never sees a partial file.
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .ok_or_else(|| {
+            InferenceError::ModelLoadError("Cannot find the executable's folder".into())
+        })?;
+    let bridge_path = exe_dir.join(bridge);
+    if !bridge_path.exists() {
+        let tmp = exe_dir.join(format!("{bridge}.{}.part", std::process::id()));
+        if let Err(e) =
+            fs::copy(dir.join(bridge), &tmp).and_then(|_| fs::rename(&tmp, &bridge_path))
+        {
+            let _ = fs::remove_file(&tmp);
+            if !bridge_path.exists() {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "OpenVINO needs {bridge} next to the executable, but copying it into {} failed: {e}. \
+                     Copy {} there yourself.",
+                    exe_dir.display(),
+                    dir.join(bridge).display()
+                )));
+            }
+        }
+    }
+
+    // Windows does not search the plugin's folder for its DLLs, so load OpenVINO and the TBB it
+    // links from the bundle first; the plugin then reuses those loaded modules.
+    #[cfg(windows)]
+    for dll in ["tbb12.dll", "openvino.dll"] {
+        ort::util::preload_dylib(dir.join(dll)).map_err(|e| {
+            InferenceError::ModelLoadError(format!(
+                "Failed to load {dll} from {}: {e}",
+                dir.display()
+            ))
+        })?;
+    }
+    Ok(plugin_path)
 }
 
 #[cfg(test)]

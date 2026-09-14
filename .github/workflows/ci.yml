@@ -78,7 +78,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo test --no-default-features --features annotate,cuda,tensorrt
 
-      # `openvino` loads ONNX Runtime at runtime, so its tests would need the downloaded bundle; lint only.
+      # `openvino` downloads its provider plugin when a model loads, so its tests would need that download; lint only.
       - name: Clippy (annotate + openvino)
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --all-targets --no-default-features --features annotate,openvino -- -D warnings

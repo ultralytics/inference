@@ -588,7 +588,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 
 > CUDA 与 TensorRT 二进制基于 CUDA 13 构建，且未发布 CUDA 12 版本。若需在 CUDA 12 上运行，请自行编译 ONNX Runtime，并通过 `ORT_LIB_PATH` 链接该构建。
 
-> `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此该 feature 在运行时加载 ONNX Runtime，而不是在构建时链接，构建无需任何额外准备。首次使用时，它会将适用于 Linux x64、Linux arm64 或 Windows x64 的 ONNX Runtime + OpenVINO 包下载到用户缓存目录，之后直接复用。若要使用自己的构建，请将 `ORT_DYLIB_PATH` 设置为其 `onnxruntime` 库的路径。
+> `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此该 feature 首次使用时会将适用于 Linux x64 或 Windows x64 的 OpenVINO provider 插件下载到用户缓存目录，之后直接复用，并将其注册到其他 feature 使用的同一个预编译 ONNX Runtime 中。ONNX Runtime 需要插件的 `onnxruntime_providers_shared` 库位于可执行文件旁边，缺失时会自动复制过去。
 
 **可用 Features：**
 
@@ -619,7 +619,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 | `azure`           | Azure                                                                                    |
 | `nvidia`          | 便捷组合：CUDA + TensorRT                                                                |
 | `amd`             | 便捷组合：ROCm + MIGraphX                                                                |
-| `intel`           | 便捷组合：OpenVINO                                                                       |
+| `intel`           | 便捷组合：OpenVINO + oneDNN                                                              |
 | `mobile`          | 便捷组合：NNAPI + CoreML + QNN                                                           |
 | `all`             | 便捷组合：annotate + visualize + video                                                   |
 

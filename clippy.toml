@@ -3,8 +3,7 @@
 # Configuration for https://doc.rust-lang.org/clippy/
 
 # Clippy lint configuration
-# Use `cargo clippy --all-targets --no-default-features --features annotate -- -D warnings` to check,
-# as CI does (`openvino` cannot be combined with other accelerator features, so `--all-features` fails)
+# Use `cargo clippy --all-targets --all-features -- -D warnings` to check
 
 # Enforce documentation
 # This encourages documenting public APIs

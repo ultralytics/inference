@@ -592,7 +592,7 @@ Providers missing from the chosen build are then absent at runtime and inference
 
 > The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
 
-> `openvino` is the exception: no prebuilt ONNX Runtime ships the OpenVINO provider, so this feature loads ONNX Runtime at runtime instead of linking it, and the build needs nothing extra. On first use it downloads an ONNX Runtime + OpenVINO bundle for Linux x64, Linux arm64, or Windows x64 into the user cache folder and reuses it after that. To use your own build instead, set `ORT_DYLIB_PATH` to its `onnxruntime` library.
+> `openvino` is the exception: no prebuilt ONNX Runtime ships the OpenVINO provider, so on first use this feature downloads the provider as a plugin for Linux x64 or Windows x64 into the user cache folder, reuses it after that, and registers it into the same prebuilt ONNX Runtime the other features use. ONNX Runtime needs the plugin's `onnxruntime_providers_shared` library next to the executable, so it is copied there when missing.
 
 **Available Features:**
 
@@ -623,7 +623,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `azure`           | Azure                                                                                                 |
 | `nvidia`          | Convenience: CUDA + TensorRT                                                                          |
 | `amd`             | Convenience: ROCm + MIGraphX                                                                          |
-| `intel`           | Convenience: OpenVINO                                                                                 |
+| `intel`           | Convenience: OpenVINO + oneDNN                                                                        |
 | `mobile`          | Convenience: NNAPI + CoreML + QNN                                                                     |
 | `all`             | Convenience: annotate + visualize + video                                                             |
 
