@@ -741,8 +741,13 @@ impl YOLOModel {
         let is_openvino =
             |d: &ort::device::Device<'_>| d.ep().is_ok_and(|ep| ep == "OpenVINOExecutionProvider");
         if !env.devices().any(|d| is_openvino(&d)) {
-            env.register_ep_library("OpenVINO", crate::download::openvino_plugin()?)
-                .map_err(|e| ov_err(&e))?;
+            // A concurrent first load may register the plugin between the check and this call,
+            // and ONNX Runtime rejects the duplicate; that is fine as long as its devices exist.
+            if let Err(e) = env.register_ep_library("OpenVINO", crate::download::openvino_plugin()?)
+                && !env.devices().any(|d| is_openvino(&d))
+            {
+                return Err(ov_err(&e));
+            }
         }
         let devices: Vec<_> = env
             .devices()
