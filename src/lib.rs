@@ -310,11 +310,6 @@
 //! cargo build --release --features openvino
 //! ```
 //!
-//! `openvino` does not link ONNX Runtime at build time: no prebuilt ONNX Runtime ships the
-//! `OpenVINO` provider, so the library is loaded at runtime. On first use an ONNX Runtime +
-//! `OpenVINO` bundle for Linux x64, Linux arm64, or Windows x64 is downloaded into the user cache
-//! folder and reused afterwards. Set `ORT_DYLIB_PATH` to load your own build instead.
-//!
 //! ## Results API
 //!
 //! The [`Results`] struct provides access to inference outputs:
