@@ -243,7 +243,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.45 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -263,7 +263,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.45 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -366,7 +366,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.44"
+ultralytics-inference = "0.0.45"
 ```
 
 ```toml
@@ -580,13 +580,15 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.44", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.45", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
 所选版本中缺失的 provider 在运行时将不可用，推理会回退到 CPU。在 `aarch64-unknown-linux-gnu` 上仅发布 CPU 版本，因此所有 GPU feature 都会遇到这种情况；如需链接 GPU 版 ONNX Runtime 而不是回退到 CPU，请见 [`docs/DGX.md`](docs/DGX.md)。
 
 > CUDA 与 TensorRT 二进制基于 CUDA 13 构建，且未发布 CUDA 12 版本。若需在 CUDA 12 上运行，请自行编译 ONNX Runtime，并通过 `ORT_LIB_PATH` 链接该构建。
+
+> `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此首次使用时会以插件形式（Linux x64 或 Windows x64）下载到用户缓存目录。缺失时会把其 `onnxruntime_providers_shared` 库复制到可执行文件旁边。
 
 **可用 Features：**
 

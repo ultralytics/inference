@@ -406,6 +406,216 @@ pub fn download_images(urls: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// ONNX Runtime version the `OpenVINO` provider plugin is built for; must match the one `ort` links.
+#[cfg(feature = "openvino")]
+const ORT_OPENVINO_VERSION: &str = "1.28.0";
+
+/// Release holding the `OpenVINO` provider plugin bundles, one `.tgz` per platform.
+#[cfg(feature = "openvino")]
+const ORT_OPENVINO_URL: &str = "https://github.com/ultralytics/inference/releases/download/v0.0.11";
+
+#[cfg(feature = "openvino")]
+static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Download once, check against its pinned SHA-256 and unpack this platform's `OpenVINO`
+/// provider plugin bundle into the user cache, and return the plugin's path.
+///
+/// # Errors
+///
+/// Returns an error if the bundle cannot be downloaded, verified, unpacked, or installed.
+#[cfg(feature = "openvino")]
+#[allow(clippy::too_many_lines)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) fn openvino_plugin() -> Result<PathBuf> {
+    let (target, plugin, bridge, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => (
+            "linux-x64",
+            "libonnxruntime_providers_openvino.so",
+            "libonnxruntime_providers_shared.so",
+            "dafeb17cbab258b8c9087d417763a1aafea6d789015b91a85564b5a97713d82d",
+        ),
+        ("windows", "x86_64") => (
+            "windows-x64",
+            "onnxruntime_providers_openvino.dll",
+            "onnxruntime_providers_shared.dll",
+            "f57f68b921eb2925d95ee78c524290f5e72b3ef82687b5f44ab953f99c350bde",
+        ),
+        (os, arch) => {
+            return Err(InferenceError::ModelLoadError(format!(
+                "No OpenVINO provider bundle is published for {os}-{arch}"
+            )));
+        }
+    };
+
+    let name = format!("openvino-ep-{ORT_OPENVINO_VERSION}-{target}");
+    let cache = dirs::cache_dir()
+        .ok_or_else(|| InferenceError::ModelLoadError("No user cache directory".into()))?
+        .join("ultralytics-inference");
+    let dir = cache.join(&name);
+    let plugin_path = dir.join(plugin);
+    // Unique per call, so concurrent first loads never share temporary names.
+    let nonce = format!(
+        "{}.{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+
+    if !plugin_path.exists() {
+        // Stage in a folder and rename it into place, so an interrupted run never leaves a
+        // bundle that looks complete.
+        let part = cache.join(format!("{name}.part.{nonce}"));
+        let staged = (|| -> Result<()> {
+            fs::create_dir_all(&part).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to create {}: {e}", part.display()))
+            })?;
+            let archive = part.join(format!("{name}.tgz"));
+            download_file(&format!("{ORT_OPENVINO_URL}/{name}.tgz"), &archive)?;
+
+            let bytes = fs::read(&archive).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to read {name}.tgz: {e}"))
+            })?;
+            let digest = hmac_sha256::Hash::hash(&bytes).iter().fold(
+                String::with_capacity(64),
+                |mut hex, b| {
+                    use std::fmt::Write as _;
+                    let _ = write!(hex, "{b:02x}");
+                    hex
+                },
+            );
+            if digest != sha256 {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "{name}.tgz does not match its pinned SHA-256 (got {digest}), so it was not loaded"
+                )));
+            }
+
+            // Unpack in process from the verified bytes, so no system `tar` is needed.
+            let _ = fs::remove_file(&archive);
+            unpack_tgz(&bytes, &part).map_err(|e| {
+                InferenceError::ModelLoadError(format!("Failed to unpack {name}.tgz: {e}"))
+            })?;
+            if !part.join(plugin).exists() {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "{name}.tgz does not contain {plugin}"
+                )));
+            }
+            Ok(())
+        })();
+        if let Err(e) = staged {
+            let _ = fs::remove_dir_all(&part);
+            return Err(e);
+        }
+
+        // A rename onto a finished bundle fails, so a caller that lost the race drops its own
+        // copy and uses the winner's bundle.
+        if let Err(e) = fs::rename(&part, &dir) {
+            let _ = fs::remove_dir_all(&part);
+            if !plugin_path.exists() {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "Failed to move bundle to {}: {e}",
+                    dir.display()
+                )));
+            }
+        }
+    }
+
+    // ONNX Runtime loads the provider bridge from the executable's folder, not the plugin's.
+    // Copy under a unique name and rename, so a concurrent load never sees a partial file.
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .ok_or_else(|| {
+            InferenceError::ModelLoadError("Cannot find the executable's folder".into())
+        })?;
+    let bridge_path = exe_dir.join(bridge);
+    if !bridge_path.exists() {
+        let tmp = exe_dir.join(format!("{bridge}.{nonce}.part"));
+        if let Err(e) =
+            fs::copy(dir.join(bridge), &tmp).and_then(|_| fs::rename(&tmp, &bridge_path))
+        {
+            let _ = fs::remove_file(&tmp);
+            if !bridge_path.exists() {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "OpenVINO needs {bridge} next to the executable, but copying it into {} failed: {e}. \
+                     Copy {} there yourself.",
+                    exe_dir.display(),
+                    dir.join(bridge).display()
+                )));
+            }
+        }
+    }
+
+    // Windows does not search the plugin's folder for its DLLs, so load OpenVINO and the TBB it
+    // links from the bundle first; the plugin then reuses those loaded modules.
+    #[cfg(windows)]
+    for dll in ["tbb12.dll", "openvino.dll"] {
+        ort::util::preload_dylib(dir.join(dll)).map_err(|e| {
+            InferenceError::ModelLoadError(format!(
+                "Failed to load {dll} from {}: {e}",
+                dir.display()
+            ))
+        })?;
+    }
+    Ok(plugin_path)
+}
+
+/// Unpack a gzipped tar into `dest`, streaming entries to disk. Only directories, regular files
+/// and symlinks are accepted, and nothing may point outside `dest`.
+#[cfg(feature = "openvino")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn unpack_tgz(archive: &[u8], dest: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    use std::path::Component;
+
+    // Header fields are NUL-terminated or NUL-padded.
+    fn field(bytes: &[u8]) -> std::io::Result<&str> {
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        std::str::from_utf8(&bytes[..end]).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "entry name is not UTF-8")
+        })
+    }
+
+    let invalid = |msg: &str| Error::new(ErrorKind::InvalidData, msg.to_owned());
+    let inside = |path: &Path| {
+        path.components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+    };
+
+    let mut gz = flate2::read::GzDecoder::new(archive);
+    let mut header = [0u8; 512];
+    loop {
+        gz.read_exact(&mut header)?;
+        if header.iter().all(|&b| b == 0) {
+            return Ok(());
+        }
+        let rel = Path::new(field(&header[..100])?);
+        if !inside(rel) {
+            return Err(invalid("entry path leaves the bundle folder"));
+        }
+        let size = u64::from_str_radix(field(&header[124..136])?.trim(), 8)
+            .map_err(|_| invalid("entry size is not octal"))?;
+        let path = dest.join(rel);
+
+        // Entry data is padded to the next 512-byte block.
+        let mut entry = (&mut gz).take(size.div_ceil(512) * 512);
+        match header[156] {
+            b'0' | 0 => {
+                std::io::copy(&mut (&mut entry).take(size), &mut File::create(&path)?)?;
+            }
+            b'5' => fs::create_dir_all(&path)?,
+            #[cfg(unix)]
+            b'2' => {
+                let target = field(&header[157..257])?;
+                if Path::new(target).components().count() != 1 || !inside(Path::new(target)) {
+                    return Err(invalid("symlink target leaves the bundle folder"));
+                }
+                std::os::unix::fs::symlink(target, &path)?;
+            }
+            _ => return Err(invalid("unsupported entry type")),
+        }
+        std::io::copy(&mut entry, &mut std::io::sink())?;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

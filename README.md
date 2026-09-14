@@ -244,7 +244,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.45 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -264,7 +264,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.44 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.45 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -367,7 +367,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.44"
+ultralytics-inference = "0.0.45"
 ```
 
 ```toml
@@ -584,13 +584,15 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.44", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.45", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
 Providers missing from the chosen build are then absent at runtime and inference falls back to CPU. On `aarch64-unknown-linux-gnu` only a CPU distribution is published, so every GPU feature hits this; see [`docs/DGX.md`](docs/DGX.md) for linking a GPU ONNX Runtime instead of falling back.
 
 > The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
+
+> `openvino` is the exception: no prebuilt ONNX Runtime ships the OpenVINO provider, so on first use it is downloaded as a plugin (Linux x64 or Windows x64) into the user cache folder. Its `onnxruntime_providers_shared` library is copied next to the executable when missing.
 
 **Available Features:**
 
