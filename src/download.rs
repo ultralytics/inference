@@ -414,6 +414,9 @@ const ORT_OPENVINO_VERSION: &str = "1.28.0";
 #[cfg(feature = "openvino")]
 const ORT_OPENVINO_URL: &str = "https://github.com/ultralytics/inference/releases/download/v0.0.11";
 
+#[cfg(feature = "openvino")]
+static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Download once, check against its pinned SHA-256 and unpack this platform's `OpenVINO`
 /// provider plugin bundle into the user cache, and return the plugin's path.
 ///
@@ -454,10 +457,7 @@ pub(crate) fn openvino_plugin() -> Result<PathBuf> {
     let nonce = format!(
         "{}.{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos()
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
 
     if !plugin_path.exists() {
