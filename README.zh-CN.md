@@ -2,8 +2,8 @@
 
 <div align="center">
   <p>
-    <a href="https://www.ultralytics.com/events/yolovision?utm_source=github&utm_medium=social&utm_campaign=yolovision26&utm_content=banner" target="_blank">
-      <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/yolov8/banner-yolov8.png" alt="Ultralytics YOLO 横幅"></a>
+    <a href="https://www.ultralytics.com/yolo/yolo27?utm_source=github&utm_medium=social&utm_campaign=yolo27-launch-2026&utm_content=banner" target="_blank">
+      <img width="100%" src="https://cdn.ul.run/i/ffd8c9fc5b34d01128380e5dd3ad1fa3.avif" alt="Ultralytics YOLO 横幅"></a>
   </p>
 
 [中文](https://docs.ultralytics.com/zh/inference) | [한국어](https://docs.ultralytics.com/ko/inference) | [日本語](https://docs.ultralytics.com/ja/inference) | [Русский](https://docs.ultralytics.com/ru/inference) | [Deutsch](https://docs.ultralytics.com/de/inference) | [Français](https://docs.ultralytics.com/fr/inference) | [Español](https://docs.ultralytics.com/es/inference) | [Português](https://docs.ultralytics.com/pt/inference) | [Türkçe](https://docs.ultralytics.com/tr/inference) | [Tiếng Việt](https://docs.ultralytics.com/vi/inference) | [العربية](https://docs.ultralytics.com/ar/inference) <br>
