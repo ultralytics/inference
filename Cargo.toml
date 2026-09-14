@@ -132,6 +132,8 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = [
 ] }
 ureq = "^3.3.0"
 dirs = "^7.0"
+# Verifies the downloaded ONNX Runtime + OpenVINO bundle (openvino feature).
+hmac-sha256 = { version = "^1.1", optional = true }
 rayon = "^1.12"
 clap = { version = "^4.6.1", features = ["derive"] }
 # rayon-backed parallelism for ndarray and fast_image_resize, native only.
@@ -162,7 +164,9 @@ rocm = ["ort/rocm"]
 # Intel acceleration. No prebuilt ONNX Runtime ships the OpenVINO provider, so
 # `openvino` loads ONNX Runtime at runtime instead of linking it: a bundle with the
 # provider is downloaded on first use, or `ORT_DYLIB_PATH` names your own.
-openvino = ["ort/openvino", "ort/load-dynamic"]
+# The bundle only has the OpenVINO provider, so this cannot be combined with other
+# execution provider features (checked with `compile_error!` in `src/lib.rs`).
+openvino = ["ort/openvino", "ort/load-dynamic", "dep:hmac-sha256"]
 onednn = ["ort/onednn"]
 
 # DirectML (Windows)
@@ -186,7 +190,7 @@ azure = ["ort/azure"]       # Azure
 # Convenience feature groups
 nvidia = ["cuda", "tensorrt"]
 amd = ["rocm", "migraphx"]
-intel = ["openvino", "onednn"]
+intel = ["openvino"]
 mobile = ["nnapi", "coreml", "qnn"]
 all = ["annotate", "visualize", "video"]
 

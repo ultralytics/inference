@@ -623,7 +623,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `azure`           | Azure                                                                                                 |
 | `nvidia`          | Convenience: CUDA + TensorRT                                                                          |
 | `amd`             | Convenience: ROCm + MIGraphX                                                                          |
-| `intel`           | Convenience: OpenVINO + oneDNN                                                                        |
+| `intel`           | Convenience: OpenVINO                                                                                 |
 | `mobile`          | Convenience: NNAPI + CoreML + QNN                                                                     |
 | `all`             | Convenience: annotate + visualize + video                                                             |
 

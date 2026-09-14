@@ -2444,6 +2444,7 @@ dependencies = [
  "fast_image_resize",
  "ffmpeg-next",
  "half",
+ "hmac-sha256",
  "image",
  "imageproc",
  "jpeg-decoder",

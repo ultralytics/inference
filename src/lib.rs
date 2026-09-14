@@ -366,7 +366,7 @@
 //! | `azure` | Azure |
 //! | `nvidia` | Convenience: `cuda` + `tensorrt` |
 //! | `amd` | Convenience: `rocm` + `migraphx` |
-//! | `intel` | Convenience: `openvino` + `onednn` |
+//! | `intel` | Convenience: `openvino` |
 //! | `mobile` | Convenience: `nnapi` + `coreml` + `qnn` |
 //! | `all` | Convenience: `annotate` + `visualize` + `video` |
 //!
@@ -375,6 +375,33 @@
 //! This project is dual-licensed under [AGPL-3.0](https://github.com/ultralytics/inference/blob/main/LICENSE)
 //! for open-source use or [Ultralytics Enterprise License](https://www.ultralytics.com/license)
 //! for commercial applications.
+
+// `openvino` switches `ort` to loading ONNX Runtime at runtime from a bundle that only has the
+// OpenVINO provider, so any other execution provider feature would silently be unavailable.
+#[cfg(all(
+    feature = "openvino",
+    any(
+        feature = "cuda",
+        feature = "tensorrt",
+        feature = "rocm",
+        feature = "onednn",
+        feature = "directml",
+        feature = "nnapi",
+        feature = "coreml",
+        feature = "qnn",
+        feature = "xnnpack",
+        feature = "acl",
+        feature = "tvm",
+        feature = "migraphx",
+        feature = "rknpu",
+        feature = "cann",
+        feature = "webgpu",
+        feature = "azure"
+    )
+))]
+compile_error!(
+    "the `openvino` feature cannot be combined with other execution provider features: it loads an ONNX Runtime that only has the OpenVINO provider"
+);
 
 /// DGX Spark (aarch64) setup guide rendered from `docs/DGX.md`.
 #[allow(clippy::doc_markdown)]

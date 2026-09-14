@@ -619,7 +619,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 | `azure`           | Azure                                                                                    |
 | `nvidia`          | 便捷组合：CUDA + TensorRT                                                                |
 | `amd`             | 便捷组合：ROCm + MIGraphX                                                                |
-| `intel`           | 便捷组合：OpenVINO + oneDNN                                                              |
+| `intel`           | 便捷组合：OpenVINO                                                                       |
 | `mobile`          | 便捷组合：NNAPI + CoreML + QNN                                                           |
 | `all`             | 便捷组合：annotate + visualize + video                                                   |
 

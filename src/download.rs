@@ -417,22 +417,38 @@ const ORT_OPENVINO_URL: &str = "https://github.com/ultralytics/inference/release
 /// Path of the ONNX Runtime library to load for the `openvino` feature.
 ///
 /// `ORT_DYLIB_PATH` wins when set. Otherwise this platform's bundle is downloaded once,
-/// extracted with the system `tar` into the user cache directory, and reused afterwards.
+/// checked against its pinned SHA-256, extracted with the system `tar` into the user cache
+/// directory, and reused afterwards.
 ///
 /// # Errors
 ///
-/// Returns an error if no bundle exists for this platform, or the download or extraction fails.
+/// Returns an error if no bundle exists for this platform, the download fails, the archive
+/// does not match its pinned SHA-256, or extraction fails.
 #[cfg(feature = "openvino")]
+#[allow(clippy::too_many_lines)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn ort_openvino_lib() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("ORT_DYLIB_PATH").filter(|p| !p.is_empty()) {
         return Ok(PathBuf::from(path));
     }
 
-    let (target, lib) = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => ("linux-x64", "libonnxruntime.so"),
-        ("linux", "aarch64") => ("linux-arm64", "libonnxruntime.so"),
-        ("windows", "x86_64") => ("windows-x64", "onnxruntime.dll"),
+    // The bundles hold native code, so each archive is pinned to the SHA-256 of its release asset.
+    let (target, lib, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => (
+            "linux-x64",
+            "libonnxruntime.so",
+            "06f00aabbc57a5ed6bafecbb6b9e39ca21b0db23756f0639366de94cd738b1d2",
+        ),
+        ("linux", "aarch64") => (
+            "linux-arm64",
+            "libonnxruntime.so",
+            "db6bec670faa7726f7fa34efc2191b51ed3a7d7f6844e9e5ab5bfa744b1deb4b",
+        ),
+        ("windows", "x86_64") => (
+            "windows-x64",
+            "onnxruntime.dll",
+            "63e93fba587d143df9ab844293cd6235832b1996ceef2ca373f4f28ac83dc05b",
+        ),
         (os, arch) => {
             return Err(InferenceError::ModelLoadError(format!(
                 "No ONNX Runtime OpenVINO bundle is published for {os}-{arch}. \
@@ -451,35 +467,82 @@ pub(crate) fn ort_openvino_lib() -> Result<PathBuf> {
         return Ok(lib_path);
     }
 
-    // Extract beside the final folder and rename it into place, so an interrupted
-    // download or extraction never leaves a half-filled bundle that looks complete.
-    let part = cache.join(format!("{name}.part"));
-    let _ = fs::remove_dir_all(&part);
-    fs::create_dir_all(&part).map_err(|e| {
-        InferenceError::ModelLoadError(format!("Failed to create {}: {e}", part.display()))
-    })?;
-    let archive = part.join(format!("{name}.tgz"));
-    download_file(&format!("{ORT_OPENVINO_URL}/{name}.tgz"), &archive)?;
+    // Stage in a folder unique to this call and rename it into place, so an interrupted run
+    // never leaves a bundle that looks complete and concurrent first loads never share files.
+    let part = cache.join(format!(
+        "{name}.part.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+    ));
+    let staged = (|| -> Result<()> {
+        fs::create_dir_all(&part).map_err(|e| {
+            InferenceError::ModelLoadError(format!("Failed to create {}: {e}", part.display()))
+        })?;
+        let archive = part.join(format!("{name}.tgz"));
+        download_file(&format!("{ORT_OPENVINO_URL}/{name}.tgz"), &archive)?;
 
-    let extracted = std::process::Command::new("tar")
-        .arg("-xzf")
-        .arg(&archive)
-        .arg("-C")
-        .arg(&part)
-        .status()
-        .is_ok_and(|s| s.success());
-    let _ = fs::remove_file(&archive);
-    if !extracted || !part.join(lib).exists() {
+        let read_err =
+            |e| InferenceError::ModelLoadError(format!("Failed to read {name}.tgz: {e}"));
+        let mut file = File::open(&archive).map_err(read_err)?;
+        let mut hash = hmac_sha256::Hash::new();
+        let mut buffer = vec![0u8; 65536];
+        loop {
+            let n = file.read(&mut buffer).map_err(read_err)?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buffer[..n]);
+        }
+        let digest = hash
+            .finalize()
+            .iter()
+            .fold(String::with_capacity(64), |mut hex, b| {
+                use std::fmt::Write as _;
+                let _ = write!(hex, "{b:02x}");
+                hex
+            });
+        if digest != sha256 {
+            return Err(InferenceError::ModelLoadError(format!(
+                "{name}.tgz does not match its pinned SHA-256 (got {digest}), so it was not loaded"
+            )));
+        }
+
+        let extracted = std::process::Command::new("tar")
+            .arg("-xzf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&part)
+            .status()
+            .is_ok_and(|s| s.success());
+        let _ = fs::remove_file(&archive);
+        if !extracted || !part.join(lib).exists() {
+            return Err(InferenceError::ModelLoadError(format!(
+                "Failed to extract {name}.tgz with tar"
+            )));
+        }
+        Ok(())
+    })();
+    if let Err(e) = staged {
         let _ = fs::remove_dir_all(&part);
-        return Err(InferenceError::ModelLoadError(format!(
-            "Failed to extract {name}.tgz with tar"
-        )));
+        return Err(e);
     }
 
-    let _ = fs::remove_dir_all(&dir);
-    fs::rename(&part, &dir).map_err(|e| {
-        InferenceError::ModelLoadError(format!("Failed to move bundle to {}: {e}", dir.display()))
-    })?;
+    // A rename onto a finished bundle fails, so a caller that lost the race keeps the winner's
+    // copy. Only a leftover folder without the library is replaced.
+    if fs::rename(&part, &dir).is_err() && !lib_path.exists() {
+        let _ = fs::remove_dir_all(&dir);
+        if let Err(e) = fs::rename(&part, &dir) {
+            let _ = fs::remove_dir_all(&part);
+            return Err(InferenceError::ModelLoadError(format!(
+                "Failed to move bundle to {}: {e}",
+                dir.display()
+            )));
+        }
+    }
+    let _ = fs::remove_dir_all(&part);
     Ok(lib_path)
 }
 
