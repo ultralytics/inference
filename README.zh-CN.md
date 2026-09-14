@@ -588,7 +588,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 
 > CUDA 与 TensorRT 二进制基于 CUDA 13 构建，且未发布 CUDA 12 版本。若需在 CUDA 12 上运行，请自行编译 ONNX Runtime，并通过 `ORT_LIB_PATH` 链接该构建。
 
-> `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此该 feature 首次使用时会将适用于 Linux x64 或 Windows x64 的 OpenVINO provider 插件下载到用户缓存目录，之后直接复用，并将其注册到其他 feature 使用的同一个预编译 ONNX Runtime 中。ONNX Runtime 需要插件的 `onnxruntime_providers_shared` 库位于可执行文件旁边，缺失时会自动复制过去。
+> `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此首次使用时会以插件形式（Linux x64 或 Windows x64）下载到用户缓存目录。缺失时会把其 `onnxruntime_providers_shared` 库复制到可执行文件旁边。
 
 **可用 Features：**
 

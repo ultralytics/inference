@@ -162,8 +162,7 @@ cuda-preprocess = ["cuda", "tensorrt", "dep:cudarc"]
 # AMD GPU acceleration
 rocm = ["ort/rocm"]
 
-# Intel acceleration. No prebuilt ONNX Runtime ships the OpenVINO provider, so `openvino`
-# downloads it as a plugin on first use and registers it into the prebuilt ONNX Runtime.
+# Intel acceleration (OpenVINO provider downloaded as a plugin on first use)
 openvino = ["ort/api-22", "ort/preload-dylibs", "dep:hmac-sha256", "dep:flate2"]
 onednn = ["ort/onednn"]
 

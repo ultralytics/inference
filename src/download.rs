@@ -414,22 +414,16 @@ const ORT_OPENVINO_VERSION: &str = "1.28.0";
 #[cfg(feature = "openvino")]
 const ORT_OPENVINO_URL: &str = "https://github.com/ultralytics/inference/releases/download/v0.0.11";
 
-/// Path of the ONNX Runtime `OpenVINO` provider plugin for the `openvino` feature.
-///
-/// This platform's bundle is downloaded once, checked against its pinned SHA-256, unpacked
-/// into the user cache directory, and reused afterwards. ONNX Runtime
-/// loads the plugin's provider bridge from the executable's folder, so the bridge is copied
-/// there when it is missing.
+/// Download once, check against its pinned SHA-256 and unpack this platform's `OpenVINO`
+/// provider plugin bundle into the user cache, and return the plugin's path.
 ///
 /// # Errors
 ///
-/// Returns an error if no bundle exists for this platform, the download fails, the archive
-/// does not match its pinned SHA-256, extraction fails, or the bridge cannot be copied.
+/// Returns an error if the bundle cannot be downloaded, verified, unpacked, or installed.
 #[cfg(feature = "openvino")]
 #[allow(clippy::too_many_lines)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn openvino_plugin() -> Result<PathBuf> {
-    // The bundles hold native code, so each archive is pinned to the SHA-256 of its release asset.
     let (target, plugin, bridge, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => (
             "linux-x64",
@@ -456,8 +450,7 @@ pub(crate) fn openvino_plugin() -> Result<PathBuf> {
         .join("ultralytics-inference");
     let dir = cache.join(&name);
     let plugin_path = dir.join(plugin);
-    // Unique to this call, so concurrent first loads in other processes or other threads never
-    // share a staging folder or a temporary bridge file.
+    // Unique per call, so concurrent first loads never share temporary names.
     let nonce = format!(
         "{}.{}",
         std::process::id(),
@@ -565,11 +558,8 @@ pub(crate) fn openvino_plugin() -> Result<PathBuf> {
     Ok(plugin_path)
 }
 
-/// Unpack a gzipped tar archive into `dest`, streaming each entry to disk.
-///
-/// The bundles only hold directories, regular files and (on Linux) symlinks with short names, so
-/// this reads plain ustar headers and rejects any other entry type, or any path or link target
-/// that would leave `dest`.
+/// Unpack a gzipped tar into `dest`, streaming entries to disk. Only directories, regular files
+/// and symlinks are accepted, and nothing may point outside `dest`.
 #[cfg(feature = "openvino")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn unpack_tgz(archive: &[u8], dest: &Path) -> std::io::Result<()> {
