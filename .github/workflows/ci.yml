@@ -96,6 +96,73 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: cargo test --no-default-features --features "coreml,annotate" --test integration_test test_coreml_model_loads_and_warms_up -- --ignored --exact
 
+  # GPU tests on the self-hosted NVIDIA runner. Hosted runners have no GPU, so the CUDA
+  # execution provider and the `cuda-preprocess` kernel are only built and run here.
+  cuda:
+    name: test / cuda
+    # Forks have no GPU runner, and a pull request from one must not run on ours.
+    if: github.repository == 'ultralytics/inference' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: gpu-latest
+    timeout-minutes: 60
+    # One GPU, one job at a time.
+    concurrency:
+      group: cuda-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      # The runner image has no nvcc, so tell cudarc which toolkit it builds against
+      # (CUDA 13.2 -> 13020).
+      CUDARC_CUDA_VERSION: "13020"
+
+    steps:
+      # The ort provider libraries link TensorRT 10, not the runner image's 11, and
+      # `cuda-preprocess` selects the TensorRT provider by default. NVIDIA's apt repo
+      # carries the 10.x libraries, which install alongside the image's own TensorRT.
+      - name: Install dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          curl -fsSLo /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          dpkg -i /tmp/cuda-keyring.deb
+          apt-get update
+          apt-get install -y pkg-config libssl-dev libnvinfer10 libnvonnxparsers10
+
+      # The runner image's CUDA, cuDNN and cuBLAS are pip wheels that nothing puts on
+      # the loader path, so ONNX Runtime cannot find them without this.
+      - name: Set CUDA library path
+        run: |
+          nvidia_libs=$(ls -d /usr/local/lib/python3*/dist-packages/nvidia/*/lib | paste -sd:)
+          echo "LD_LIBRARY_PATH=$nvidia_libs:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-targets: false
+          key: cuda
+
+      - name: Ensure toolchain
+        run: rustup show
+
+      - name: Show GPU
+        run: nvidia-smi
+
+      # `cuda-preprocess` needs a CUDA toolkit to build, so no hosted runner lints it.
+      - name: Clippy (annotate + cuda-preprocess)
+        run: cargo clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
+
+      # Includes the src/cuda_inference.rs kernel tests, which need a real device.
+      - name: Tests (annotate + cuda-preprocess)
+        run: cargo test --no-default-features --features annotate,cuda-preprocess
+
+      # The GPU inference tests are #[ignore]d so hosted runners skip them.
+      - name: GPU integration tests
+        run: cargo test --no-default-features --features annotate,cuda-preprocess --test integration_test -- --include-ignored
+
   # Video feature tests for Linux - FFmpeg 7, 8 and 9
   test-video:
     name: test / linux / ffmpeg ${{ matrix.ffmpeg_version }}
