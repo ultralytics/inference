@@ -112,6 +112,10 @@ jobs:
       # The runner image has no nvcc, so tell cudarc which toolkit it builds against
       # (CUDA 13.2 -> 13020).
       CUDARC_CUDA_VERSION: "13020"
+      # Build and run against the ONNX Runtime installed below rather than the one
+      # `ort` downloads. Dynamic linking is required; a static link fails here.
+      ORT_LIB_PATH: /opt/ortgpu/onnxruntime/capi
+      ORT_PREFER_DYNAMIC_LINK: "1"
 
     steps:
       # The ort provider libraries link TensorRT 10, not the runner image's 11, and
@@ -125,12 +129,25 @@ jobs:
           apt-get update
           apt-get install -y pkg-config libssl-dev libnvinfer10 libnvonnxparsers10
 
+      # The ONNX Runtime that `ort` downloads holds kernels for sm_75, sm_80 and sm_90
+      # only, so nothing in it can run on the runner's Blackwell cards (sm_120). The
+      # onnxruntime-gpu wheel carries sm_120 and is built against CUDA 13.
+      - name: Install ONNX Runtime with Blackwell kernels
+        run: |
+          pip install --no-deps --target /opt/ortgpu onnxruntime-gpu==1.30.0
+          cd "$ORT_LIB_PATH"
+          # `ort` links -lonnxruntime while the loader asks for the SONAME, so both
+          # names have to point at the versioned library.
+          lib=$(basename "$(ls libonnxruntime.so.*.*.*)")
+          ln -sf "$lib" libonnxruntime.so
+          ln -sf "$lib" libonnxruntime.so.1
+
       # The runner image's CUDA, cuDNN and cuBLAS are pip wheels that nothing puts on
       # the loader path, so ONNX Runtime cannot find them without this.
-      - name: Set CUDA library path
+      - name: Set library paths
         run: |
           nvidia_libs=$(ls -d /usr/local/lib/python3*/dist-packages/nvidia/*/lib | paste -sd:)
-          echo "LD_LIBRARY_PATH=$nvidia_libs:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$ORT_LIB_PATH:$nvidia_libs:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
