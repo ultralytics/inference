@@ -20,6 +20,9 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
   # Incremental compilation adds overhead and never hits on cold CI runners.
   CARGO_INCREMENTAL: "0"
+  # Coverage needs nightly. Pinned to a known-good one to dodge latest-nightly rustc
+  # ICEs; bump forward periodically.
+  NIGHTLY: nightly-2026-07-13
 
 jobs:
   # Cross-platform tests (default features only - no video/ffmpeg required)
@@ -95,6 +98,114 @@ jobs:
       - name: Integration tests (CoreML regression, including ignored)
         if: matrix.os == 'macos-latest'
         run: cargo test --no-default-features --features "coreml,annotate" --test integration_test test_coreml_model_loads_and_warms_up -- --ignored --exact
+
+  # GPU tests on the self-hosted NVIDIA runner. Hosted runners have no GPU, so the CUDA
+  # execution provider and the `cuda-preprocess` kernel are only built and run here.
+  cuda:
+    name: test / cuda
+    # Forks have no GPU runner, and a pull request from one must not run on ours.
+    if: github.repository == 'ultralytics/inference' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: gpu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    # Give up GPU time on a commit that a newer push has already superseded.
+    concurrency:
+      group: cuda-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      # The runner image has no nvcc, so tell cudarc which toolkit it builds against
+      # (CUDA 13.2 -> 13020).
+      CUDARC_CUDA_VERSION: "13020"
+      # Build and run against the ONNX Runtime installed below rather than the one
+      # `ort` downloads. Dynamic linking is required; a static link fails here.
+      ORT_LIB_PATH: /opt/ortgpu/onnxruntime/capi
+      ORT_PREFER_DYNAMIC_LINK: "1"
+
+    steps:
+      # The ort provider libraries link TensorRT 10, not the runner image's 11, and
+      # `cuda-preprocess` selects the TensorRT provider by default. NVIDIA's apt repo
+      # carries the 10.x libraries, which install alongside the image's own TensorRT.
+      - name: Install dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          curl -fsSLo /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          dpkg -i /tmp/cuda-keyring.deb
+          apt-get update
+          apt-get install -y pkg-config libssl-dev libnvinfer10 libnvonnxparsers10
+
+      # The ONNX Runtime that `ort` downloads holds kernels for sm_75, sm_80 and sm_90
+      # only, so nothing in it can run on the runner's Blackwell cards (sm_120). The
+      # onnxruntime-gpu wheel carries sm_120 and is built against CUDA 13.
+      - name: Install ONNX Runtime with Blackwell kernels
+        run: |
+          pip install --no-deps --target /opt/ortgpu onnxruntime-gpu==1.30.0
+          cd "$ORT_LIB_PATH"
+          # `ort` links -lonnxruntime while the loader asks for the SONAME, so both
+          # names have to point at the versioned library.
+          lib=$(basename "$(ls libonnxruntime.so.*.*.*)")
+          ln -sf "$lib" libonnxruntime.so
+          ln -sf "$lib" libonnxruntime.so.1
+
+      # The runner image's CUDA, cuDNN and cuBLAS are pip wheels that nothing puts on
+      # the loader path, so ONNX Runtime cannot find them without this.
+      - name: Set library paths
+        run: |
+          nvidia_libs=$(ls -d /usr/local/lib/python3*/dist-packages/nvidia/*/lib | paste -sd:)
+          echo "LD_LIBRARY_PATH=$ORT_LIB_PATH:$nvidia_libs:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # llvm-cov needs nightly. It lands second, so it becomes the default toolchain.
+      - name: Set up Rust nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-targets: false
+          key: cuda
+
+      - name: Ensure toolchain
+        run: rustup show
+
+      - name: Show GPU
+        run: nvidia-smi
+
+      # `cuda-preprocess` needs a CUDA toolkit to build, so no hosted runner lints it.
+      # Both toolchains are installed above, so each command names the one it wants.
+      - name: Clippy (annotate + cuda-preprocess)
+        run: cargo +stable clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked --force
+
+      # One run covers the src/cuda_inference.rs kernel tests, which need a real
+      # device, and the GPU inference tests, which are #[ignore]d so that hosted
+      # runners skip them. Only the thin CLI entry point is left out.
+      - name: Coverage (annotate + cuda-preprocess, including ignored)
+        run: |
+          cargo +${{ env.NIGHTLY }} llvm-cov --no-default-features --features annotate,cuda-preprocess \
+            --lcov --output-path lcov.info --ignore-filename-regex 'src/main\.rs' -- --include-ignored
+
+      - name: Upload coverage to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4 # v7.1.0
+        with:
+          files: ./lcov.info
+          disable_search: true
+          fail_ci_if_error: false
+          plugins: noop
+          flags: gpu_coverage
+          use_oidc: true
 
   # Video feature tests for Linux - FFmpeg 7, 8 and 9
   test-video:
@@ -291,10 +402,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavdevice-dev libswscale-dev libswresample-dev libpostproc-dev clang
 
       - name: Set up Rust
-        # Pinned to a known-good nightly to dodge latest-nightly rustc ICEs; bump forward periodically.
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-07-13
+          toolchain: ${{ env.NIGHTLY }}
 
       # Nightly toolchain version in rustc -V already gives this job a unique cache key
       - name: Cache Rust dependencies
@@ -309,10 +419,10 @@ jobs:
         run: cargo install cargo-llvm-cov --locked --force
 
       - name: Coverage
-        # Exclude code that host-side unit tests cannot exercise: the CUDA kernel
-        # (needs an NVIDIA GPU), the minifb viewer window (GUI), the thin CLI
-        # entry point, and the wasm32-only web crate.
-        run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/cuda_inference\.rs|src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
+        # Exclude code that host-side unit tests cannot exercise: the minifb viewer
+        # window (GUI), the thin CLI entry point, and the wasm32-only web crate. The
+        # CUDA kernel is reported by the GPU job instead.
+        run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
 
       - name: Upload coverage to Codecov
         continue-on-error: true
