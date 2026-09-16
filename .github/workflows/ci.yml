@@ -20,6 +20,9 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
   # Incremental compilation adds overhead and never hits on cold CI runners.
   CARGO_INCREMENTAL: "0"
+  # Coverage needs nightly. Pinned to a known-good one to dodge latest-nightly rustc
+  # ICEs; bump forward periodically.
+  NIGHTLY: nightly-2026-07-13
 
 jobs:
   # Cross-platform tests (default features only - no video/ffmpeg required)
@@ -104,6 +107,9 @@ jobs:
     if: github.repository == 'ultralytics/inference' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: gpu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     # One GPU, one job at a time.
     concurrency:
       group: cuda-${{ github.ref }}
@@ -156,6 +162,12 @@ jobs:
         with:
           components: clippy
 
+      # llvm-cov needs nightly. It lands second, so it becomes the default toolchain.
+      - name: Set up Rust nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -169,16 +181,31 @@ jobs:
         run: nvidia-smi
 
       # `cuda-preprocess` needs a CUDA toolkit to build, so no hosted runner lints it.
+      # Both toolchains are installed above, so each command names the one it wants.
       - name: Clippy (annotate + cuda-preprocess)
-        run: cargo clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
+        run: cargo +stable clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
 
-      # Includes the src/cuda_inference.rs kernel tests, which need a real device.
-      - name: Tests (annotate + cuda-preprocess)
-        run: cargo test --no-default-features --features annotate,cuda-preprocess
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked --force
 
-      # The GPU inference tests are #[ignore]d so hosted runners skip them.
-      - name: GPU integration tests
-        run: cargo test --no-default-features --features annotate,cuda-preprocess --test integration_test -- --include-ignored
+      # One run covers the src/cuda_inference.rs kernel tests, which need a real
+      # device, and the GPU inference tests, which are #[ignore]d so that hosted
+      # runners skip them. Only the thin CLI entry point is left out.
+      - name: Coverage (annotate + cuda-preprocess, including ignored)
+        run: |
+          cargo +${{ env.NIGHTLY }} llvm-cov --no-default-features --features annotate,cuda-preprocess \
+            --lcov --output-path lcov.info --ignore-filename-regex 'src/main\.rs' -- --include-ignored
+
+      - name: Upload coverage to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4 # v7.1.0
+        with:
+          files: ./lcov.info
+          disable_search: true
+          fail_ci_if_error: false
+          plugins: noop
+          flags: gpu_coverage
+          use_oidc: true
 
   # Video feature tests for Linux - FFmpeg 7, 8 and 9
   test-video:
@@ -375,10 +402,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavdevice-dev libswscale-dev libswresample-dev libpostproc-dev clang
 
       - name: Set up Rust
-        # Pinned to a known-good nightly to dodge latest-nightly rustc ICEs; bump forward periodically.
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-07-13
+          toolchain: ${{ env.NIGHTLY }}
 
       # Nightly toolchain version in rustc -V already gives this job a unique cache key
       - name: Cache Rust dependencies
@@ -393,10 +419,10 @@ jobs:
         run: cargo install cargo-llvm-cov --locked --force
 
       - name: Coverage
-        # Exclude code that host-side unit tests cannot exercise: the CUDA kernel
-        # (needs an NVIDIA GPU), the minifb viewer window (GUI), the thin CLI
-        # entry point, and the wasm32-only web crate.
-        run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/cuda_inference\.rs|src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
+        # Exclude code that host-side unit tests cannot exercise: the minifb viewer
+        # window (GUI), the thin CLI entry point, and the wasm32-only web crate. The
+        # CUDA kernel is reported by the GPU job instead.
+        run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
 
       - name: Upload coverage to Codecov
         continue-on-error: true
