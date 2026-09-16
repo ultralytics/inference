@@ -110,7 +110,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    # One GPU, one job at a time.
+    # Give up GPU time on a commit that a newer push has already superseded.
     concurrency:
       group: cuda-${{ github.ref }}
       cancel-in-progress: true
