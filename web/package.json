@@ -1,6 +1,6 @@
 {
   "name": "@ultralytics/yolo",
-  "version": "0.0.45",
+  "version": "0.0.46",
   "description": "Run Ultralytics YOLO models in the browser on WebGPU (WebAssembly, ONNX Runtime Web via ort-web).",
   "type": "module",
   "main": "./dist/index.js",
