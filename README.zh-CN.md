@@ -739,7 +739,7 @@ Apple M4 MacBook Pro（10 核 CPU，ONNX Runtime 1.28，release 构建，100 张
 
 - **FP16 模型体积约小 50%**（5.0 MB vs 9.9 MB）。
 - **FP32 在 CPU 上略快**（~17.7ms vs ~19.3ms）：CPU 执行提供程序会把 FP16 权重扩展为 FP32，因此 FP16 只节省磁盘空间，不节省计算。
-- **CoreML 在 FP32 下比 CPU 快约 4 倍，在 FP16 下快约 12 倍**；在 Apple Silicon 上，FP16 导出配合 CoreML 是最快的选择。
+- **CoreML 推理在 FP32 下比 CPU 快约 4 倍，在 FP16 下快约 13 倍**（端到端约 3.5 倍和 9.5 倍）；在 Apple Silicon 上，FP16 导出配合 CoreML 是最快的选择。
 - CPU 推理建议使用 **FP32**，CoreML 和 GPU 推理建议使用 **FP16**（通常能带来速度提升）。
 
 ### 线程优化

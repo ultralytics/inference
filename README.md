@@ -746,7 +746,7 @@ Benchmarks on Apple M4 MacBook Pro (10-core CPU, ONNX Runtime 1.28, release buil
 
 - **FP16 models are ~50% smaller** (5.0 MB vs 9.9 MB)
 - **FP32 is slightly faster on CPU** (~17.7ms vs ~19.3ms): the CPU execution provider widens FP16 weights to FP32, so FP16 saves disk space but not compute
-- **CoreML is ~4x faster than CPU at FP32 and ~12x at FP16**; an FP16 export on CoreML is the fastest option on Apple Silicon
+- **CoreML inference is ~4x faster than CPU at FP32 and ~13x at FP16** (~3.5x and ~9.5x end to end); an FP16 export on CoreML is the fastest option on Apple Silicon
 - Use **FP32 for CPU** inference, **FP16 for CoreML and GPU** (where it provides speedup)
 
 ### Threading Optimization
