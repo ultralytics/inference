@@ -731,28 +731,30 @@ cargo test test_boxes_creation
 
 ## 📊 Performance
 
-Benchmarks on Apple M4 MacBook Pro (CPU, ONNX Runtime):
+Benchmarks on Apple M4 MacBook Pro (10-core CPU, ONNX Runtime CPU execution provider, release build, averaged over 100 images):
 
 ### YOLO26n Detection Model (640x640)
 
-| Precision | Model Size | Preprocess | Inference | Postprocess | Total |
-| --------- | ---------- | ---------- | --------- | ----------- | ----- |
-| FP32      | 10.2 MB    | ~9ms       | ~21ms     | <1ms        | ~31ms |
-| FP16      | 5.2 MB     | ~9ms       | ~24ms     | <1ms        | ~34ms |
+| Precision | Model Size | Preprocess | Inference | Postprocess | Total   |
+| --------- | ---------- | ---------- | --------- | ----------- | ------- |
+| FP32      | 9.9 MB     | ~0.3ms     | ~17.7ms   | ~0.3ms      | ~18.3ms |
+| FP16      | 5.0 MB     | ~0.3ms     | ~19.3ms   | ~0.3ms      | ~19.9ms |
 
 **Key findings:**
 
-- **FP16 models are ~50% smaller** (5.2 MB vs 10.2 MB)
-- **FP32 is slightly faster on CPU** (~21ms vs ~24ms) due to the CPU's native FP32 support
-- FP16 requires upcasting to FP32 for computation on most CPUs, adding overhead
+- **FP16 models are ~50% smaller** (5.0 MB vs 9.9 MB)
+- **FP32 is slightly faster on CPU** (~17.7ms vs ~19.3ms): the CPU execution provider widens FP16 weights to FP32, so FP16 saves disk space but not compute
 - Use **FP32 for CPU** inference, **FP16 for GPU** (where it provides speedup)
 
 ### Threading Optimization
 
-Intra-op threading defaults to `num_threads: 0`, which the crate resolves to `available_parallelism()` when it builds the session:
+Intra-op threading defaults to `num_threads: 0`, which the crate resolves to `available_parallelism()` when it builds the session. YOLO26n FP32 inference by thread count:
 
-- Manual threading (4 threads): ~40ms inference
-- Auto threading (0 = all available cores): ~21ms inference
+| Threads        | 1       | 2       | 4       | 6       | 8       | 0 (auto, 10 cores) |
+| -------------- | ------- | ------- | ------- | ------- | ------- | ------------------ |
+| Inference (M4) | ~20.8ms | ~16.7ms | ~15.3ms | ~16.6ms | ~17.2ms | ~17.7ms            |
+
+On Apple M4 the fastest setting is 4 threads, one per performance core; adding the slower efficiency cores makes it slower again for a model this small. Set it with `InferenceConfig::new().with_threads(4)`.
 
 ## 🔮 Roadmap
 
