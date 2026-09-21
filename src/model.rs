@@ -1154,20 +1154,23 @@ impl YOLOModel {
         }
     }
 
-    /// Memory descriptors for a device-resident input and host-readable outputs.
+    /// Bind the preprocessor's device buffer, shaped `shape`, as the session input and every
+    /// output to host memory, for the `cuda-preprocess` paths to run.
     ///
-    /// `device_id` must name the GPU the input buffer lives on. Naming device 0 for a
+    /// The input is described on the GPU the preprocessor opened. Naming device 0 for a
     /// session running on another GPU hands ORT a pointer it cannot read.
     #[cfg(feature = "cuda-preprocess")]
-    fn device_memory_info(
-        device_id: usize,
-    ) -> Result<(
-        ort::memory::MemoryInfo<'static>,
-        ort::memory::MemoryInfo<'static>,
-    )> {
+    #[allow(unsafe_code)]
+    fn device_binding(&self, shape: &[i64]) -> Result<ort::session::IoBinding> {
         use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
 
-        let build = |device: AllocationDevice, id: usize, what: &str| {
+        let err =
+            |what: &str, e: ort::Error| InferenceError::InferenceError(format!("{what}: {e}"));
+        let pre = self
+            .cuda_preprocessor
+            .as_ref()
+            .expect("device_binding invariant: cuda_preprocessor.is_some()");
+        let memory = |device: AllocationDevice, id: usize, what: &str| {
             #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             MemoryInfo::new(
                 device,
@@ -1175,12 +1178,26 @@ impl YOLOModel {
                 AllocatorType::Device,
                 MemoryType::Default,
             )
-            .map_err(|e| InferenceError::InferenceError(format!("{what} meminfo: {e}")))
+            .map_err(|e| err(what, e))
         };
-        Ok((
-            build(AllocationDevice::CUDA, device_id, "cuda")?,
-            build(AllocationDevice::CPU, 0, "cpu")?,
-        ))
+        let cuda_mem = memory(AllocationDevice::CUDA, pre.device_id(), "cuda meminfo")?;
+        let cpu_mem = memory(AllocationDevice::CPU, 0, "cpu meminfo")?;
+        // The preprocessor owns the buffer for the model's lifetime, and the binding keeps
+        // the tensor alive until it drops.
+        let input = unsafe { Self::device_input(&cuda_mem, pre.input_dev_ptr(), shape)? };
+        let mut binding = self
+            .session
+            .create_binding()
+            .map_err(|e| err("create_binding", e))?;
+        binding
+            .bind_input(&self.input_name, &input)
+            .map_err(|e| err("bind_input", e))?;
+        for n in &self.output_names {
+            binding
+                .bind_output_to_device(n, &cpu_mem)
+                .map_err(|e| err("bind_output", e))?;
+        }
+        Ok(binding)
     }
 
     /// Wrap the preprocessor's device buffer as an f32 input tensor ONNX Runtime reads in place.
@@ -1220,10 +1237,9 @@ impl YOLOModel {
 
     /// CUDA-preprocess fast path used by [`Self::predict_image`] when
     /// `cuda_preprocessor` is populated. Runs the fused letterbox+normalize kernel,
-    /// hands the resulting device buffer to ORT via [`Self::device_input`],
+    /// binds the resulting device buffer with [`Self::device_binding`],
     /// then post-processes with the standard pipeline.
     #[cfg(feature = "cuda-preprocess")]
-    #[allow(unsafe_code)]
     fn predict_image_cuda_pre(
         &mut self,
         image: &DynamicImage,
@@ -1254,31 +1270,11 @@ impl YOLOModel {
             .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
         let geom = pre.preprocess(&rgb_bytes, h, w, false, target, 0)?;
         let (dst_h, dst_w) = target;
-        let dev_ptr = pre.input_dev_ptr();
-        let device_id = pre.device_id();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
 
-        let (cuda_mem, cpu_mem) = Self::device_memory_info(device_id)?;
-        let shape: Vec<i64> = vec![1, 3, dst_h as i64, dst_w as i64];
-        // SAFETY: dev_ptr is owned by `cuda_preprocessor` (stored on `self`) and remains
-        // valid for the duration of this call. ORT consumes it during `run_binding`, which
-        // is synchronized via the shared cuda stream.
-        let in_tensor = unsafe { Self::device_input(&cuda_mem, dev_ptr, &shape)? };
-
         let start_inference = Instant::now();
-        let mut binding = self
-            .session
-            .create_binding()
-            .map_err(|e| InferenceError::InferenceError(format!("create_binding: {e}")))?;
-        binding
-            .bind_input(&self.input_name, &in_tensor)
-            .map_err(|e| InferenceError::InferenceError(format!("bind_input: {e}")))?;
-        for n in &self.output_names {
-            binding
-                .bind_output_to_device(n, &cpu_mem)
-                .map_err(|e| InferenceError::InferenceError(format!("bind_output: {e}")))?;
-        }
+        let binding = self.device_binding(&[1, 3, dst_h as i64, dst_w as i64])?;
         let outputs = self
             .session
             .run_binding(&binding)
@@ -1373,7 +1369,7 @@ impl YOLOModel {
     /// into its slot of the device-side `[N, 3, H, W]` input, so a batch costs no host
     /// tensor allocation and no concatenation - which otherwise dominate a batched GPU run.
     #[cfg(feature = "cuda-preprocess")]
-    #[allow(unsafe_code, clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss)]
     fn predict_batch_cuda_pre(
         &mut self,
         images: &[&DynamicImage],
@@ -1418,30 +1414,9 @@ impl YOLOModel {
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
 
         let (dst_h, dst_w) = target;
-        let pre = self.cuda_preprocessor.as_ref().expect("cuda_preprocessor");
-        let dev_ptr = pre.input_dev_ptr();
-        let device_id = pre.device_id();
-
-        let (cuda_mem, cpu_mem) = Self::device_memory_info(device_id)?;
-        // The buffer was sized for `slots >= n_images` at load, checked before dispatch.
-        let shape: Vec<i64> = vec![n_images as i64, 3, dst_h as i64, dst_w as i64];
-        // SAFETY: as in `predict_image_cuda_pre`; the pointer is owned by
-        // `cuda_preprocessor` and outlives this call.
-        let in_tensor = unsafe { Self::device_input(&cuda_mem, dev_ptr, &shape)? };
-
         let start_inference = Instant::now();
-        let mut binding = self
-            .session
-            .create_binding()
-            .map_err(|e| InferenceError::InferenceError(format!("create_binding: {e}")))?;
-        binding
-            .bind_input(&self.input_name, &in_tensor)
-            .map_err(|e| InferenceError::InferenceError(format!("bind_input: {e}")))?;
-        for n in &self.output_names {
-            binding
-                .bind_output_to_device(n, &cpu_mem)
-                .map_err(|e| InferenceError::InferenceError(format!("bind_output: {e}")))?;
-        }
+        // The buffer was sized for `slots >= n_images` at load, checked before dispatch.
+        let binding = self.device_binding(&[n_images as i64, 3, dst_h as i64, dst_w as i64])?;
         let outputs = self
             .session
             .run_binding(&binding)
