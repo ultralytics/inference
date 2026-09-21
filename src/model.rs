@@ -1123,33 +1123,6 @@ impl YOLOModel {
     /// Vector of Results.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        // Fast path: GPU preprocess + zero-copy device input.
-        //
-        // Allowlisted to the tasks whose preprocessing is a letterbox (square or
-        // non-square) + f32 input. Classify uses center-crop (not letterbox), so
-        // it's excluded. Semantic is included: `predict_image_cuda_pre` handles
-        // both its f32-logits and baked-in ArgMax (u8) output forms. Depth is
-        // included too: it is a plain letterbox + f32 input with a single f32
-        // output, post-processed through the shared pipeline like every other
-        // task. The only requirement is f32 input (the kernel writes f32, not f16).
-        #[cfg(feature = "cuda-preprocess")]
-        if self.cuda_preprocessor.is_some()
-            && !self.fp16_input
-            && matches!(
-                self.metadata.task,
-                Task::Detect
-                    | Task::Segment
-                    | Task::Pose
-                    | Task::Obb
-                    | Task::Semantic
-                    | Task::Depth
-            )
-        {
-            let results = self.predict_image_cuda_pre(image, path)?;
-            Self::log_first_result(&results);
-            return Ok(results);
-        }
-
         let images = [image];
         let paths = [path];
         let mut results = self.predict_internal(&images, &paths)?;
@@ -1584,9 +1557,35 @@ impl YOLOModel {
             return Ok(Vec::new());
         }
 
-        // Same fast path (and same allowlist) as `predict_image`, filling one device slot
-        // per image. The CLI reaches this even for a single image, because `BatchProcessor`
-        // always calls `predict_batch`.
+        // Fast path for one image: GPU preprocess + zero-copy device input. The CLI takes
+        // it too, because `BatchProcessor` always calls `predict_batch`.
+        //
+        // Allowlisted to the tasks whose preprocessing is a letterbox (square or
+        // non-square) + f32 input. Classify uses center-crop (not letterbox), so
+        // it's excluded. Semantic is included: `predict_image_cuda_pre` handles
+        // both its f32-logits and baked-in ArgMax (u8) output forms. Depth is
+        // included too: it is a plain letterbox + f32 input with a single f32
+        // output, post-processed through the shared pipeline like every other
+        // task. The only requirement is f32 input (the kernel writes f32, not f16).
+        #[cfg(feature = "cuda-preprocess")]
+        if images.len() == 1
+            && self.cuda_preprocessor.is_some()
+            && !self.fp16_input
+            && matches!(
+                self.metadata.task,
+                Task::Detect
+                    | Task::Segment
+                    | Task::Pose
+                    | Task::Obb
+                    | Task::Semantic
+                    | Task::Depth
+            )
+        {
+            let path = paths.first().cloned().unwrap_or_default();
+            return Ok(vec![self.predict_image_cuda_pre(images[0], path)?]);
+        }
+
+        // The same fast path for a batch, filling one device slot per image.
         // `predict_batch` is public and its length is not tied to `config.batch`, so a batch
         // larger than the buffer was sized for falls back to the CPU path rather than
         // indexing past the last slot.
