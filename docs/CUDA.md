@@ -205,9 +205,8 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg \
 ```
 
 This uses the TensorRT EP (FP16 + engine cache). The CLI runs through the batch
-processor, which calls `predict_batch`, so the `cuda-preprocess` kernel is used
-only when `--batch` is greater than 1. At `--batch 1` the batch processor still
-calls `predict_batch` with a single image, which takes the CPU preprocess path.
+processor, which calls `predict_batch`; a single image there takes the same
+`cuda-preprocess` kernel as `predict_image`, so every `--batch` size uses it.
 
 ```bash
 ultralytics-inference predict --model yolo26n-b16.onnx --source images/ \
