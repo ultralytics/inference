@@ -724,20 +724,23 @@ cargo test test_boxes_creation
 
 ## 📊 性能
 
-Apple M4 MacBook Pro（10 核 CPU，ONNX Runtime CPU 执行提供程序，release 构建，100 张图像取平均）上的基准：
+Apple M4 MacBook Pro（10 核 CPU，ONNX Runtime 1.28，release 构建，100 张图像取平均）上的基准：
 
 ### YOLO26n 检测模型（640x640）
 
-| 精度 | 模型大小 | 预处理 | 推理    | 后处理 | 总耗时  |
-| ---- | -------- | ------ | ------- | ------ | ------- |
-| FP32 | 9.9 MB   | ~0.3ms | ~17.7ms | ~0.3ms | ~18.3ms |
-| FP16 | 5.0 MB   | ~0.3ms | ~19.3ms | ~0.3ms | ~19.9ms |
+| 设备                          | 精度 | 模型大小 | 预处理 | 推理    | 后处理 | 总耗时  |
+| ----------------------------- | ---- | -------- | ------ | ------- | ------ | ------- |
+| CPU                           | FP32 | 9.9 MB   | ~0.3ms | ~17.7ms | ~0.3ms | ~18.3ms |
+| CPU                           | FP16 | 5.0 MB   | ~0.3ms | ~19.3ms | ~0.3ms | ~19.9ms |
+| CoreML（`--features coreml`） | FP32 | 9.9 MB   | ~0.3ms | ~4.7ms  | ~0.3ms | ~5.3ms  |
+| CoreML（`--features coreml`） | FP16 | 5.0 MB   | ~0.3ms | ~1.5ms  | ~0.3ms | ~2.1ms  |
 
 **关键结论：**
 
 - **FP16 模型体积约小 50%**（5.0 MB vs 9.9 MB）。
 - **FP32 在 CPU 上略快**（~17.7ms vs ~19.3ms）：CPU 执行提供程序会把 FP16 权重扩展为 FP32，因此 FP16 只节省磁盘空间，不节省计算。
-- CPU 推理建议使用 **FP32**，GPU 推理建议使用 **FP16**（通常能带来速度提升）。
+- **CoreML 在 FP32 下比 CPU 快约 4 倍，在 FP16 下快约 12 倍**；在 Apple Silicon 上，FP16 导出配合 CoreML 是最快的选择。
+- CPU 推理建议使用 **FP32**，CoreML 和 GPU 推理建议使用 **FP16**（通常能带来速度提升）。
 
 ### 线程优化
 

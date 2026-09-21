@@ -731,20 +731,23 @@ cargo test test_boxes_creation
 
 ## 📊 Performance
 
-Benchmarks on Apple M4 MacBook Pro (10-core CPU, ONNX Runtime CPU execution provider, release build, averaged over 100 images):
+Benchmarks on Apple M4 MacBook Pro (10-core CPU, ONNX Runtime 1.28, release build, averaged over 100 images):
 
 ### YOLO26n Detection Model (640x640)
 
-| Precision | Model Size | Preprocess | Inference | Postprocess | Total   |
-| --------- | ---------- | ---------- | --------- | ----------- | ------- |
-| FP32      | 9.9 MB     | ~0.3ms     | ~17.7ms   | ~0.3ms      | ~18.3ms |
-| FP16      | 5.0 MB     | ~0.3ms     | ~19.3ms   | ~0.3ms      | ~19.9ms |
+| Device                       | Precision | Model Size | Preprocess | Inference | Postprocess | Total   |
+| ---------------------------- | --------- | ---------- | ---------- | --------- | ----------- | ------- |
+| CPU                          | FP32      | 9.9 MB     | ~0.3ms     | ~17.7ms   | ~0.3ms      | ~18.3ms |
+| CPU                          | FP16      | 5.0 MB     | ~0.3ms     | ~19.3ms   | ~0.3ms      | ~19.9ms |
+| CoreML (`--features coreml`) | FP32      | 9.9 MB     | ~0.3ms     | ~4.7ms    | ~0.3ms      | ~5.3ms  |
+| CoreML (`--features coreml`) | FP16      | 5.0 MB     | ~0.3ms     | ~1.5ms    | ~0.3ms      | ~2.1ms  |
 
 **Key findings:**
 
 - **FP16 models are ~50% smaller** (5.0 MB vs 9.9 MB)
 - **FP32 is slightly faster on CPU** (~17.7ms vs ~19.3ms): the CPU execution provider widens FP16 weights to FP32, so FP16 saves disk space but not compute
-- Use **FP32 for CPU** inference, **FP16 for GPU** (where it provides speedup)
+- **CoreML is ~4x faster than CPU at FP32 and ~12x at FP16**; an FP16 export on CoreML is the fastest option on Apple Silicon
+- Use **FP32 for CPU** inference, **FP16 for CoreML and GPU** (where it provides speedup)
 
 ### Threading Optimization
 
