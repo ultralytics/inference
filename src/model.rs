@@ -1214,12 +1214,8 @@ impl YOLOModel {
     ///
     /// Stands in for `TensorRefMut::from_raw`, which in `ort` 2.0.0-rc.13 swaps the given
     /// `MemoryInfo` for a CPU one, so ONNX Runtime took the device buffer for host memory and
-    /// copied it on every run.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must hold `shape`'s element count of f32 on the device `cuda_mem` names, and stay
-    /// valid while the returned value is in use.
+    /// copied it on every run. `ptr` must hold `shape`'s element count of f32 on the device
+    /// `cuda_mem` names, and stay valid while the returned value is in use.
     #[cfg(feature = "cuda-preprocess")]
     #[allow(unsafe_code)]
     unsafe fn device_input(
@@ -1230,8 +1226,7 @@ impl YOLOModel {
         use ort::AsPointer;
 
         let bytes = shape.iter().product::<i64>() as usize * size_of::<f32>();
-        let mut value = std::ptr::null_mut();
-        // SAFETY: the caller guarantees `ptr` and `shape`; ONNX Runtime only records them.
+        let mut value = std::mem::MaybeUninit::uninit();
         let status = unsafe {
             (ort::api().CreateTensorWithDataAsOrtValue)(
                 cuda_mem.ptr(),
@@ -1240,14 +1235,13 @@ impl YOLOModel {
                 shape.as_ptr(),
                 shape.len(),
                 ort::sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-                &raw mut value,
+                value.as_mut_ptr(),
             )
         };
         let err = |e: String| InferenceError::InferenceError(format!("device input: {e}"));
-        // SAFETY: `status` comes straight from the call above.
         unsafe { ort::Error::result_from_status(status) }.map_err(|e| err(e.to_string()))?;
-        let value = std::ptr::NonNull::new(value).ok_or_else(|| err("null value".into()))?;
-        // SAFETY: a live OrtValue this function now owns; it does not own the device buffer.
+        let value = std::ptr::NonNull::new(unsafe { value.assume_init() })
+            .ok_or_else(|| err("null value".into()))?;
         Ok(unsafe { ort::value::DynValue::from_ptr(value, None) })
     }
 
