@@ -110,10 +110,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    # Give up GPU time on a commit that a newer push has already superseded.
-    concurrency:
-      group: cuda-${{ github.ref }}
-      cancel-in-progress: true
     env:
       # The runner image has no nvcc, so tell cudarc which toolkit it builds against
       # (CUDA 13.2 -> 13020).
