@@ -1210,9 +1210,50 @@ impl YOLOModel {
         ))
     }
 
+    /// Wrap the preprocessor's device buffer as an f32 input tensor ONNX Runtime reads in place.
+    ///
+    /// Stands in for `TensorRefMut::from_raw`, which in `ort` 2.0.0-rc.13 swaps the given
+    /// `MemoryInfo` for a CPU one, so ONNX Runtime took the device buffer for host memory and
+    /// copied it on every run.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must hold `shape`'s element count of f32 on the device `cuda_mem` names, and stay
+    /// valid while the returned value is in use.
+    #[cfg(feature = "cuda-preprocess")]
+    #[allow(unsafe_code)]
+    unsafe fn device_input(
+        cuda_mem: &ort::memory::MemoryInfo,
+        ptr: u64,
+        shape: &[i64],
+    ) -> Result<ort::value::DynValue> {
+        use ort::AsPointer;
+
+        let bytes = shape.iter().product::<i64>() as usize * size_of::<f32>();
+        let mut value = std::ptr::null_mut();
+        // SAFETY: the caller guarantees `ptr` and `shape`; ONNX Runtime only records them.
+        let status = unsafe {
+            (ort::api().CreateTensorWithDataAsOrtValue)(
+                cuda_mem.ptr(),
+                ptr as *mut core::ffi::c_void,
+                bytes,
+                shape.as_ptr(),
+                shape.len(),
+                ort::sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+                &raw mut value,
+            )
+        };
+        let err = |e: String| InferenceError::InferenceError(format!("device input: {e}"));
+        // SAFETY: `status` comes straight from the call above.
+        unsafe { ort::Error::result_from_status(status) }.map_err(|e| err(e.to_string()))?;
+        let value = std::ptr::NonNull::new(value).ok_or_else(|| err("null value".into()))?;
+        // SAFETY: a live OrtValue this function now owns; it does not own the device buffer.
+        Ok(unsafe { ort::value::DynValue::from_ptr(value, None) })
+    }
+
     /// CUDA-preprocess fast path used by [`Self::predict_image`] when
     /// `cuda_preprocessor` is populated. Runs the fused letterbox+normalize kernel,
-    /// hands the resulting device buffer to ORT via `TensorRefMut::from_raw`,
+    /// hands the resulting device buffer to ORT via [`Self::device_input`],
     /// then post-processes with the standard pipeline.
     #[cfg(feature = "cuda-preprocess")]
     #[allow(unsafe_code)]
@@ -1221,8 +1262,6 @@ impl YOLOModel {
         image: &DynamicImage,
         path: String,
     ) -> Result<Vec<Results>> {
-        use ort::value::TensorRefMut;
-
         // Computed before `run_binding` borrows the session: true when the
         // ONNX bakes in ArgMax+Cast(u8) so the single output is a uint8 class
         // map (semantic segmentation fast form).
@@ -1258,10 +1297,7 @@ impl YOLOModel {
         // SAFETY: dev_ptr is owned by `cuda_preprocessor` (stored on `self`) and remains
         // valid for the duration of this call. ORT consumes it during `run_binding`, which
         // is synchronized via the shared cuda stream.
-        let in_tensor = unsafe {
-            TensorRefMut::<f32>::from_raw(cuda_mem, dev_ptr as *mut core::ffi::c_void, shape.into())
-                .map_err(|e| InferenceError::InferenceError(format!("from_raw: {e}")))?
-        };
+        let in_tensor = unsafe { Self::device_input(&cuda_mem, dev_ptr, &shape)? };
 
         let start_inference = Instant::now();
         let mut binding = self
@@ -1376,8 +1412,6 @@ impl YOLOModel {
         images: &[&DynamicImage],
         paths: &[String],
     ) -> Result<Vec<Vec<Results>>> {
-        use ort::value::TensorRefMut;
-
         let n_images = images.len();
         let n_images_f = n_images as f64;
         let start_preprocess = Instant::now();
@@ -1426,10 +1460,7 @@ impl YOLOModel {
         let shape: Vec<i64> = vec![n_images as i64, 3, dst_h as i64, dst_w as i64];
         // SAFETY: as in `predict_image_cuda_pre`; the pointer is owned by
         // `cuda_preprocessor` and outlives this call.
-        let in_tensor = unsafe {
-            TensorRefMut::<f32>::from_raw(cuda_mem, dev_ptr as *mut core::ffi::c_void, shape.into())
-                .map_err(|e| InferenceError::InferenceError(format!("from_raw: {e}")))?
-        };
+        let in_tensor = unsafe { Self::device_input(&cuda_mem, dev_ptr, &shape)? };
 
         let start_inference = Instant::now();
         let mut binding = self
