@@ -1273,8 +1273,8 @@ impl YOLOModel {
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
 
-        let start_inference = Instant::now();
         let binding = self.device_binding(&[1, 3, dst_h as i64, dst_w as i64])?;
+        let start_inference = Instant::now();
         let outputs = self
             .session
             .run_binding(&binding)
@@ -1414,9 +1414,9 @@ impl YOLOModel {
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
 
         let (dst_h, dst_w) = target;
-        let start_inference = Instant::now();
         // The buffer was sized for `slots >= n_images` at load, checked before dispatch.
         let binding = self.device_binding(&[n_images as i64, 3, dst_h as i64, dst_w as i64])?;
+        let start_inference = Instant::now();
         let outputs = self
             .session
             .run_binding(&binding)
