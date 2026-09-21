@@ -210,6 +210,18 @@ impl YOLOModel {
             }
         };
 
+        // TensorRT's FP16 engine gives wrong RT-DETR detections, so an RT-DETR model builds at
+        // FP32 there. The provider is set up before the session exists, so the head is read
+        // straight from the file, and only when an FP16 TensorRT engine was requested.
+        let trt_fp16 = cfg!(feature = "tensorrt")
+            && config.quantize == Some(Quantization::Fp16)
+            && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
+            && !std::fs::read(path)
+                .ok()
+                .and_then(|model| crate::metadata::onnx_metadata_text(&model))
+                .and_then(|text| ModelMetadata::from_yaml_str(&text).ok())
+                .is_some_and(|metadata| metadata.is_rtdetr());
+
         // Determine optimal thread count based on available parallelism
         let num_threads = if config.num_threads > 0 {
             config.num_threads
@@ -251,7 +263,7 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "tensorrt")]
                 crate::Device::TensorRt(i) => eps.push((
-                    Self::build_tensorrt_ep(path, *i as i32, config.quantize, cuda_pre_stream_ptr),
+                    Self::build_tensorrt_ep(path, *i as i32, trt_fp16, cuda_pre_stream_ptr),
                     "TensorRTExecutionProvider",
                 )),
                 #[cfg(feature = "rocm")]
@@ -291,7 +303,7 @@ impl YOLOModel {
             // Default: Register all available providers in preference order
             #[cfg(feature = "tensorrt")]
             eps.push((
-                Self::build_tensorrt_ep(path, 0, config.quantize, cuda_pre_stream_ptr),
+                Self::build_tensorrt_ep(path, 0, trt_fp16, cuda_pre_stream_ptr),
                 "TensorRTExecutionProvider",
             ));
 
@@ -484,7 +496,7 @@ impl YOLOModel {
         };
 
         let quantize = if provider_name == "TensorRTExecutionProvider" {
-            Some(if config.quantize == Some(Quantization::Fp16) {
+            Some(if trt_fp16 {
                 Quantization::Fp16
             } else {
                 Quantization::Fp32
@@ -622,7 +634,7 @@ impl YOLOModel {
 
     /// Build the `TensorRT` execution provider with engine + timing caches enabled.
     ///
-    /// FP16 is enabled for `quantize=16`. On Ada and
+    /// FP16 is enabled when `fp16` is set (`quantize=16`, except for RT-DETR). On Ada and
     /// newer GPUs this is ~2x faster than FP32 with negligible accuracy delta
     /// for YOLO detection. Engine and timing caches are written under
     /// `<model_dir>/.trt_cache/<model_stem>_{fp16,fp32}/` so subsequent loads
@@ -635,7 +647,7 @@ impl YOLOModel {
     fn build_tensorrt_ep(
         model_path: &Path,
         device_id: i32,
-        quantize: Option<Quantization>,
+        fp16: bool,
         compute_stream: Option<*mut ()>,
     ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
@@ -643,7 +655,6 @@ impl YOLOModel {
             .and_then(|s| s.to_str())
             .unwrap_or("model");
         let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
-        let fp16 = quantize == Some(Quantization::Fp16);
         let suffix = if fp16 { "fp16" } else { "fp32" };
         let cache_dir = parent.join(".trt_cache").join(format!("{stem}_{suffix}"));
         let mut ep = ort::ep::TensorRT::default()

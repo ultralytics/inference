@@ -92,6 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The first run builds and caches a TensorRT engine at `<model_dir>/.trt_cache/<model_stem>_fp16/` (one-time cost, ~1–3 minutes for medium models). Subsequent runs are instant.
 
+RT-DETR models run at FP32 on TensorRT even with `quantize=16`, because the FP16 engine gives wrong detections for them; a warning says so and the engine is cached under `_fp32/`.
+
 ### ⏳ First-run engine build (warm-up) time
 
 The TensorRT EP compiles a hardware-specific engine the **first time a given

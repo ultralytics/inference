@@ -4,7 +4,8 @@
 //!
 //! A LiteRT export appends a small zip (one `metadata.json` entry) after the
 //! TFLite flatbuffer; the runtime reads the flatbuffer by offset and ignores the
-//! trailing zip. Mirrors the ONNX [`onnx_meta`](crate::onnx_meta) path. Pure
+//! trailing zip. Mirrors the ONNX
+//! [`onnx_metadata_text`](ultralytics_inference::metadata::onnx_metadata_text) path. Pure
 //! `&[u8]` helpers with no wasm/JS types.
 
 use serde_json::Value;

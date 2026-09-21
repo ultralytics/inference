@@ -5,7 +5,7 @@
 //! This module handles parsing metadata from Ultralytics YOLO ONNX models.
 //! The metadata is stored as YAML in the ONNX model's custom metadata properties.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use crate::error::{InferenceError, Result};
@@ -435,6 +435,100 @@ impl Default for ModelMetadata {
     }
 }
 
+/// Read a protobuf base-128 varint at `pos`, advancing it. Returns `None` on a
+/// truncated/oversized value.
+fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
+    let mut result = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let byte = *buf.get(*pos)?;
+        *pos += 1;
+        result |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(result);
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
+        }
+    }
+}
+
+/// Read the next protobuf field at `pos`, advancing it. Returns the field number
+/// and, for length-delimited fields (wire type 2), the payload bytes; varint and
+/// fixed-width fields are skipped and yield `None` payload. Returns `None` at the
+/// end of the buffer or on a malformed field.
+fn read_field<'a>(buf: &'a [u8], pos: &mut usize) -> Option<(u64, Option<&'a [u8]>)> {
+    let tag = read_varint(buf, pos)?;
+    let payload = match tag & 7 {
+        0 => {
+            read_varint(buf, pos)?;
+            None
+        }
+        1 => {
+            *pos += 8;
+            None
+        }
+        5 => {
+            *pos += 4;
+            None
+        }
+        2 => {
+            let len = usize::try_from(read_varint(buf, pos)?).ok()?;
+            let sub = buf.get(*pos..*pos + len)?;
+            *pos += len;
+            Some(sub)
+        }
+        _ => return None,
+    };
+    Some((tag >> 3, payload))
+}
+
+/// Read the Ultralytics metadata embedded in an ONNX model's bytes as the `key: value` text
+/// [`ModelMetadata::from_yaml_str`] parses, without building a session.
+///
+/// Only `ModelProto.metadata_props` (field 14, repeated `StringStringEntryProto`) is
+/// decoded; other fields (including the large graph) are skipped. Keys are sorted, so the
+/// text is stable across runs. Returns `None` when the model carries no metadata.
+#[must_use]
+pub fn onnx_metadata_text(buf: &[u8]) -> Option<String> {
+    let mut props = BTreeMap::new();
+    let mut pos = 0;
+    while let Some((field, payload)) = read_field(buf, &mut pos) {
+        if field == 14
+            && let Some(sub) = payload
+            && let Some((key, value)) = parse_string_string_entry(sub)
+        {
+            props.insert(key, value);
+        }
+    }
+    (!props.is_empty()).then(|| {
+        props
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+/// Parse a `StringStringEntryProto` (field 1 = key, field 2 = value).
+fn parse_string_string_entry(buf: &[u8]) -> Option<(String, String)> {
+    let mut pos = 0;
+    let mut key = None;
+    let mut value = None;
+    while let Some((field, payload)) = read_field(buf, &mut pos) {
+        if let Some(sub) = payload {
+            let text = String::from_utf8_lossy(sub).into_owned();
+            match field {
+                1 => key = Some(text),
+                2 => value = Some(text),
+                _ => {}
+            }
+        }
+    }
+    Some((key?, value.unwrap_or_default()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,6 +728,29 @@ channels: 3
         // No usable metadata -> error.
         let map = HashMap::from([("unrelated".to_string(), "no yaml here".to_string())]);
         assert!(ModelMetadata::from_onnx_metadata(&map).is_err());
+    }
+
+    #[test]
+    fn test_onnx_metadata_text_reads_props_and_skips_other_fields() {
+        // One `metadata_props` entry (field 14) holding `key` = `value`.
+        let prop = |key: &str, value: &str| {
+            let mut entry = vec![0x0a, u8::try_from(key.len()).unwrap()];
+            entry.extend_from_slice(key.as_bytes());
+            entry.extend([0x12, u8::try_from(value.len()).unwrap()]);
+            entry.extend_from_slice(value.as_bytes());
+            let mut field = vec![0x72, u8::try_from(entry.len()).unwrap()];
+            field.extend(entry);
+            field
+        };
+        // `ir_version` (varint field 1) and a stand-in graph (bytes field 7) come first.
+        let mut model = vec![0x08, 0x08, 0x3a, 0x03, 1, 2, 3];
+        model.extend(prop("task", "detect"));
+        model.extend(prop("head", "RTDETRDecoder"));
+
+        let text = onnx_metadata_text(&model).unwrap();
+        assert_eq!(text, "head: RTDETRDecoder\ntask: detect");
+        assert!(ModelMetadata::from_yaml_str(&text).unwrap().is_rtdetr());
+        assert_eq!(onnx_metadata_text(&model[..7]), None);
     }
 
     #[test]

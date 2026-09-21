@@ -30,7 +30,7 @@ use ort_web::sync_outputs;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use ultralytics_inference::metadata::ModelMetadata;
+use ultralytics_inference::metadata::{ModelMetadata, onnx_metadata_text};
 use ultralytics_inference::postprocessing::{postprocess_semantic_mask, postprocess_with_head};
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_image_center_crop, preprocess_image_stretch,
@@ -45,7 +45,6 @@ use ultralytics_inference::{InferenceConfig, Task};
 
 use payload::JsResults;
 
-mod onnx_meta;
 mod payload;
 mod tflite_meta;
 
@@ -193,16 +192,8 @@ fn metadata_from_text(text: Option<String>, missing: &str) -> Result<ModelMetada
 /// from the model protobuf and rebuild the `key: value` text the shared parser
 /// consumes.
 fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
-    let props = onnx_meta::parse_metadata_props(model_bytes);
-    let text = (!props.is_empty()).then(|| {
-        props
-            .iter()
-            .map(|(k, v)| format!("{k}: {v}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
     metadata_from_text(
-        text,
+        onnx_metadata_text(model_bytes),
         "no metadata found in ONNX model. Export it with Ultralytics \
          (`model.export(format='onnx')`) so the task, class names, and imgsz are embedded.",
     )
