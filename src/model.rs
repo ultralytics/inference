@@ -1225,7 +1225,7 @@ impl YOLOModel {
     ) -> Result<ort::value::DynValue> {
         use ort::AsPointer;
 
-        let bytes = shape.iter().product::<i64>() as usize * size_of::<f32>();
+        let bytes = shape.iter().product::<i64>() as usize * std::mem::size_of::<f32>();
         let mut value = std::mem::MaybeUninit::uninit();
         let status = unsafe {
             (ort::api().CreateTensorWithDataAsOrtValue)(
