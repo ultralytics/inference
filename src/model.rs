@@ -65,12 +65,23 @@ struct GraphIo {
     binding: ort::session::IoBinding,
     /// Device address, host copy and shape of each output, in `output_names` order.
     outputs: Vec<(u64, Vec<f32>, Vec<usize>)>,
+    /// Thread that captured the graph; ONNX Runtime keeps one per thread.
+    thread: std::thread::ThreadId,
     _allocator: ort::memory::Allocator,
 }
 
 /// Written during a CUDA graph capture (CUDA's global mode), read around every other GPU call.
 #[cfg(feature = "cuda-preprocess")]
 static GPU_WORK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// The model's [`GraphIo`], if it replays a CUDA graph.
+#[cfg(feature = "cuda-preprocess")]
+fn graph_mut(graph: &mut Option<std::sync::Mutex<GraphIo>>) -> Option<&mut GraphIo> {
+    graph.as_mut().map(|g| {
+        g.get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    })
+}
 
 /// Share [`GPU_WORK`] with every GPU call but a graph capture.
 #[cfg(feature = "cuda-preprocess")]
@@ -121,9 +132,10 @@ pub struct YOLOModel {
     /// standard CPU preprocess path runs.
     #[cfg(feature = "cuda-preprocess")]
     cuda_preprocessor: Option<crate::cuda_inference::CudaPreprocessor>,
-    /// CUDA graph I/O for the single-image `TensorRT` path; see [`GraphIo`].
+    /// CUDA graph I/O for the single-image `TensorRT` path; see [`GraphIo`]. The `Mutex`
+    /// keeps the model `Sync`; it is only reached through `&mut self`, so it never blocks.
     #[cfg(feature = "cuda-preprocess")]
-    graph_io: Option<GraphIo>,
+    graph_io: Option<std::sync::Mutex<GraphIo>>,
 }
 
 #[allow(
@@ -175,11 +187,18 @@ impl YOLOModel {
     ///
     /// Returns an error if the model file doesn't exist or can't be loaded.
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn load_with_config<P: AsRef<Path>>(path: P, mut config: InferenceConfig) -> Result<Self> {
+    pub fn load_with_config<P: AsRef<Path>>(path: P, config: InferenceConfig) -> Result<Self> {
+        Self::load_session(path.as_ref(), config, true)
+    }
+
+    /// [`Self::load_with_config`], trying a CUDA graph when `graph` allows one.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn load_session(path: &Path, mut config: InferenceConfig, graph: bool) -> Result<Self> {
         #[cfg(feature = "cuda-preprocess")]
         let gpu = gpu_work();
+        #[cfg(not(feature = "cuda-preprocess"))]
+        let _ = graph;
         config.normalize_precision();
-        let path = path.as_ref();
 
         // Check if file exists, attempt auto-download if not
         let path = if path.exists() {
@@ -238,9 +257,10 @@ impl YOLOModel {
 
         // A captured CUDA graph replays every run, so only fully static models use it.
         #[cfg(feature = "cuda-preprocess")]
-        let cuda_graph = cuda_pre_stream.is_some()
+        let cuda_graph = graph
+            && cuda_pre_stream.is_some()
             && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
-            && Self::graph_capturable(path)?;
+            && Self::graph_capturable(path);
         #[cfg(all(feature = "tensorrt", not(feature = "cuda-preprocess")))]
         let cuda_graph = false;
 
@@ -478,9 +498,21 @@ impl YOLOModel {
                 InferenceError::ModelLoadError(format!("Failed to enable memory pattern: {e}"))
             })?;
 
-        let session = session_builder
-            .commit_from_file(path)
-            .map_err(|e| InferenceError::ModelLoadError(format!("Failed to load model: {e}")))?;
+        let session = match session_builder.commit_from_file(path) {
+            Ok(session) => session,
+            // ONNX Runtime refuses a CUDA graph unless TensorRT runs the whole model.
+            #[cfg(feature = "cuda-preprocess")]
+            Err(e) if cuda_graph => {
+                crate::info!("Loading without a CUDA graph: {e}");
+                drop(gpu);
+                return Self::load_session(path, config, false);
+            }
+            Err(e) => {
+                return Err(InferenceError::ModelLoadError(format!(
+                    "Failed to load model: {e}"
+                )));
+            }
+        };
 
         // Extract metadata from model
         let metadata = Self::extract_metadata(&session)?;
@@ -643,7 +675,7 @@ impl YOLOModel {
         };
         #[cfg(feature = "cuda-preprocess")]
         if cuda_graph {
-            model.graph_io = Some(model.build_graph_io()?);
+            model.graph_io = Some(std::sync::Mutex::new(model.build_graph_io()?));
         }
 
         // Warmup inference to trigger JIT compilation and memory allocation (and graph capture).
@@ -1072,17 +1104,9 @@ impl YOLOModel {
             )));
         }
 
-        // The first run is a regular one and the second captures the graph later calls replay.
         #[cfg(feature = "cuda-preprocess")]
-        if let Some(graph) = &self.graph_io {
-            let _capture = GPU_WORK
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for _ in 0..2 {
-                self.session
-                    .run_binding(&graph.binding)
-                    .map_err(|e| InferenceError::InferenceError(format!("graph warmup: {e}")))?;
-            }
+        if let Some(graph) = graph_mut(&mut self.graph_io) {
+            Self::capture_graph(&mut self.session, graph)?;
             self.warmed_up = true;
             return Ok(());
         }
@@ -1342,26 +1366,44 @@ impl YOLOModel {
 
     /// Whether the model can replay one CUDA graph: a GPU-path task with static f32 batch-1 I/O.
     #[cfg(feature = "cuda-preprocess")]
-    fn graph_capturable(path: &Path) -> Result<bool> {
+    fn graph_capturable(path: &Path) -> bool {
         use ort::session::builder::GraphOptimizationLevel;
         use ort::value::{TensorElementType, ValueType};
 
-        let err = |e: String| InferenceError::ModelLoadError(format!("Failed to read model: {e}"));
-        let session = Session::builder()
-            .map_err(|e| err(e.to_string()))?
-            .with_optimization_level(GraphOptimizationLevel::Disable)
-            .map_err(|e| err(e.to_string()))?
-            .commit_from_file(path)
-            .map_err(|e| err(e.to_string()))?;
         let static_f32 = |dtype: &ValueType| {
             matches!(dtype, ValueType::Tensor { ty: TensorElementType::Float32, shape, .. }
                 if shape.iter().all(|&d| d > 0))
         };
-        Ok(Self::cuda_pre_task(Self::extract_metadata(&session)?.task)
-            && session.inputs().iter().all(|i| {
-                static_f32(i.dtype()) && i.dtype().tensor_shape().is_some_and(|s| s[0] == 1)
+        Session::builder()
+            .ok()
+            .and_then(|b| {
+                b.with_optimization_level(GraphOptimizationLevel::Disable)
+                    .ok()
             })
-            && session.outputs().iter().all(|o| static_f32(o.dtype())))
+            .and_then(|mut b| b.commit_from_file(path).ok())
+            .is_some_and(|session| {
+                Self::extract_metadata(&session).is_ok_and(|m| Self::cuda_pre_task(m.task))
+                    && session.inputs().iter().all(|i| {
+                        static_f32(i.dtype()) && i.dtype().tensor_shape().is_some_and(|s| s[0] == 1)
+                    })
+                    && session.outputs().iter().all(|o| static_f32(o.dtype()))
+            })
+    }
+
+    /// Capture the CUDA graph on this thread: the first run is a regular one and the second
+    /// captures the graph later calls replay.
+    #[cfg(feature = "cuda-preprocess")]
+    fn capture_graph(session: &mut Session, graph: &mut GraphIo) -> Result<()> {
+        let _capture = GPU_WORK
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for _ in 0..2 {
+            session
+                .run_binding(&graph.binding)
+                .map_err(|e| InferenceError::InferenceError(format!("graph capture: {e}")))?;
+        }
+        graph.thread = std::thread::current().id();
+        Ok(())
     }
 
     /// Bind the fixed device I/O every graph replay uses; see [`GraphIo`].
@@ -1404,6 +1446,7 @@ impl YOLOModel {
         Ok(GraphIo {
             binding,
             outputs,
+            thread: std::thread::current().id(),
             _allocator: allocator,
         })
     }
@@ -1418,6 +1461,12 @@ impl YOLOModel {
         image: &DynamicImage,
         path: String,
     ) -> Result<Vec<Results>> {
+        // A thread other than the capturing one has no graph yet, so it captures its own.
+        if let Some(graph) = graph_mut(&mut self.graph_io)
+            && graph.thread != std::thread::current().id()
+        {
+            Self::capture_graph(&mut self.session, graph)?;
+        }
         let _gpu = gpu_work();
         // Computed before `run_binding` borrows the session: true when the
         // ONNX bakes in ArgMax+Cast(u8) so the single output is a uint8 class
@@ -1450,7 +1499,7 @@ impl YOLOModel {
         let binding;
         let start_inference;
         // A graph model replays over its fixed device I/O and copies the outputs back itself.
-        let outputs = if let Some(graph) = self.graph_io.as_mut() {
+        let outputs = if let Some(graph) = graph_mut(&mut self.graph_io) {
             start_inference = Instant::now();
             self.session
                 .run_binding(&graph.binding)
@@ -1560,8 +1609,8 @@ impl YOLOModel {
         } else {
             // The graph run left every output in `graph_io`'s host copies.
             postprocess(
-                self.graph_io
-                    .iter()
+                graph_mut(&mut self.graph_io)
+                    .into_iter()
                     .flat_map(|g| &g.outputs)
                     .map(|(_, d, s)| (d.as_slice(), s.clone()))
                     .collect(),
