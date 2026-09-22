@@ -35,9 +35,9 @@ Add the feature you need in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.47", features = ["tensorrt"] }
+ultralytics-inference = { version = "0.0.48", features = ["tensorrt"] }
 # or, for the fastest path:
-ultralytics-inference = { version = "0.0.47", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.48", features = ["cuda-preprocess"] }
 ```
 
 Then `cargo build --release` - no extra flags needed.
@@ -67,7 +67,7 @@ If you need to pin a specific version at compile time instead, override the cuda
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.47", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.48", features = ["cuda-preprocess"] }
 # Replace the default feature with a pinned one (e.g. CUDA 12.8):
 cudarc = { version = "0.19", default-features = false, features = ["driver", "nvrtc", "dynamic-loading", "cuda-12080"] }
 ```
@@ -194,6 +194,10 @@ the CPU path runs and the flag is silently ignored:
 into its own slot of one `[N, 3, H, W]` device buffer, so a batch is uploaded
 without a host-side concatenation. The batch path additionally excludes
 `Semantic`, whose baked-in `ArgMax` output is handled by the CPU path.
+
+On `TensorRt`, a model with static f32 batch-1 input and outputs (the default export) also replays its engine as one
+CUDA graph, which cut inference by up to about a quarter on an RTX 4000 Ada (yolo26n 0.95 to 0.7 ms). The graph is
+captured while the model loads, so CUDA work of your own on another thread during a load can fail.
 
 ## CLI
 
