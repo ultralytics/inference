@@ -199,6 +199,9 @@ impl YOLOModel {
         #[cfg(not(feature = "cuda-preprocess"))]
         let _ = graph;
         config.normalize_precision();
+        // A CUDA graph load that turns out not to fit reloads with this, without the graph.
+        #[cfg(feature = "cuda-preprocess")]
+        let retry_config = config.clone();
 
         // Check if file exists, attempt auto-download if not
         let path = if path.exists() {
@@ -255,12 +258,11 @@ impl YOLOModel {
             }
         };
 
-        // A captured CUDA graph replays every run, so only fully static models use it.
+        // Tried on TensorRT with the GPU preprocess; `graph_capturable` confirms it below.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_graph = graph
             && cuda_pre_stream.is_some()
-            && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
-            && Self::graph_capturable(path);
+            && matches!(config.device, None | Some(crate::Device::TensorRt(_)));
         #[cfg(all(feature = "tensorrt", not(feature = "cuda-preprocess")))]
         let cuda_graph = false;
 
@@ -505,7 +507,7 @@ impl YOLOModel {
             Err(e) if cuda_graph => {
                 crate::info!("Loading without a CUDA graph: {e}");
                 drop(gpu);
-                return Self::load_session(path, config, false);
+                return Self::load_session(path, retry_config, false);
             }
             Err(e) => {
                 return Err(InferenceError::ModelLoadError(format!(
@@ -516,6 +518,13 @@ impl YOLOModel {
 
         // Extract metadata from model
         let metadata = Self::extract_metadata(&session)?;
+
+        // A captured CUDA graph replays every run, so any other model reloads without one.
+        #[cfg(feature = "cuda-preprocess")]
+        if cuda_graph && !Self::graph_capturable(&session, metadata.task) {
+            drop((session, gpu));
+            return Self::load_session(path, retry_config, false);
+        }
 
         // Get input/output names and detect input type
         let input_info = session.inputs().first();
@@ -673,14 +682,22 @@ impl YOLOModel {
             #[cfg(feature = "cuda-preprocess")]
             graph_io: None,
         };
+        // Warmup inference to trigger JIT compilation and memory allocation. A graph model
+        // captures here, and reloads without the graph if that fails.
         #[cfg(feature = "cuda-preprocess")]
-        if cuda_graph {
-            model.graph_io = Some(std::sync::Mutex::new(model.build_graph_io()?));
+        {
+            drop(gpu);
+            if cuda_graph
+                && let Err(e) = model.build_graph_io().and_then(|graph| {
+                    model.graph_io = Some(std::sync::Mutex::new(graph));
+                    model.warmup()
+                })
+            {
+                crate::info!("Loading without a CUDA graph: {e}");
+                drop(model);
+                return Self::load_session(path, retry_config, false);
+            }
         }
-
-        // Warmup inference to trigger JIT compilation and memory allocation (and graph capture).
-        #[cfg(feature = "cuda-preprocess")]
-        drop(gpu);
         model.warmup()?;
 
         Ok(model)
@@ -1366,28 +1383,18 @@ impl YOLOModel {
 
     /// Whether the model can replay one CUDA graph: a GPU-path task with static f32 batch-1 I/O.
     #[cfg(feature = "cuda-preprocess")]
-    fn graph_capturable(path: &Path) -> bool {
-        use ort::session::builder::GraphOptimizationLevel;
+    fn graph_capturable(session: &Session, task: Task) -> bool {
         use ort::value::{TensorElementType, ValueType};
 
         let static_f32 = |dtype: &ValueType| {
             matches!(dtype, ValueType::Tensor { ty: TensorElementType::Float32, shape, .. }
                 if shape.iter().all(|&d| d > 0))
         };
-        Session::builder()
-            .ok()
-            .and_then(|b| {
-                b.with_optimization_level(GraphOptimizationLevel::Disable)
-                    .ok()
+        Self::cuda_pre_task(task)
+            && session.inputs().iter().all(|i| {
+                static_f32(i.dtype()) && i.dtype().tensor_shape().is_some_and(|s| s[0] == 1)
             })
-            .and_then(|mut b| b.commit_from_file(path).ok())
-            .is_some_and(|session| {
-                Self::extract_metadata(&session).is_ok_and(|m| Self::cuda_pre_task(m.task))
-                    && session.inputs().iter().all(|i| {
-                        static_f32(i.dtype()) && i.dtype().tensor_shape().is_some_and(|s| s[0] == 1)
-                    })
-                    && session.outputs().iter().all(|o| static_f32(o.dtype()))
-            })
+            && session.outputs().iter().all(|o| static_f32(o.dtype()))
     }
 
     /// Capture the CUDA graph on this thread: the first run is a regular one and the second
