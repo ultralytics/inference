@@ -210,6 +210,12 @@ impl YOLOModel {
             }
         };
 
+        // TensorRT optimization level 5 breaks RT-DETR FP16, so RT-DETR builds at level 3.
+        #[cfg(feature = "tensorrt")]
+        let rtdetr = config.quantize == Some(Quantization::Fp16)
+            && std::fs::read(path)
+                .is_ok_and(|m| m.windows(13).rev().any(|w| w == b"RTDETRDecoder"));
+
         // Determine optimal thread count based on available parallelism
         let num_threads = if config.num_threads > 0 {
             config.num_threads
@@ -251,7 +257,13 @@ impl YOLOModel {
                 }
                 #[cfg(feature = "tensorrt")]
                 crate::Device::TensorRt(i) => eps.push((
-                    Self::build_tensorrt_ep(path, *i as i32, config.quantize, cuda_pre_stream_ptr),
+                    Self::build_tensorrt_ep(
+                        path,
+                        *i as i32,
+                        config.quantize,
+                        rtdetr,
+                        cuda_pre_stream_ptr,
+                    ),
                     "TensorRTExecutionProvider",
                 )),
                 #[cfg(feature = "rocm")]
@@ -291,7 +303,7 @@ impl YOLOModel {
             // Default: Register all available providers in preference order
             #[cfg(feature = "tensorrt")]
             eps.push((
-                Self::build_tensorrt_ep(path, 0, config.quantize, cuda_pre_stream_ptr),
+                Self::build_tensorrt_ep(path, 0, config.quantize, rtdetr, cuda_pre_stream_ptr),
                 "TensorRTExecutionProvider",
             ));
 
@@ -636,6 +648,7 @@ impl YOLOModel {
         model_path: &Path,
         device_id: i32,
         quantize: Option<Quantization>,
+        rtdetr: bool,
         compute_stream: Option<*mut ()>,
     ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
@@ -645,12 +658,15 @@ impl YOLOModel {
         let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
         let fp16 = quantize == Some(Quantization::Fp16);
         let suffix = if fp16 { "fp16" } else { "fp32" };
-        let cache_dir = parent.join(".trt_cache").join(format!("{stem}_{suffix}"));
+        let level = if rtdetr { "_o3" } else { "" };
+        let cache_dir = parent
+            .join(".trt_cache")
+            .join(format!("{stem}_{suffix}{level}"));
         let mut ep = ort::ep::TensorRT::default()
             .with_device_id(device_id)
             .with_fp16(fp16)
             .with_max_workspace_size(4 * 1024 * 1024 * 1024)
-            .with_builder_optimization_level(5);
+            .with_builder_optimization_level(if rtdetr { 3 } else { 5 });
         if crate::io::is_writable_dir(&cache_dir) {
             let cache_str = cache_dir.to_string_lossy().into_owned();
             ep = ep
