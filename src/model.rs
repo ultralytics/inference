@@ -258,15 +258,6 @@ impl YOLOModel {
             }
         };
 
-        // Tried on TensorRT with the GPU preprocess; `graph_capturable` confirms it below.
-        #[cfg(feature = "cuda-preprocess")]
-        let cuda_graph = graph
-            && cuda_pre_stream.is_some()
-            && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
-            && !Self::no_graph_marker(path).exists();
-        #[cfg(all(feature = "tensorrt", not(feature = "cuda-preprocess")))]
-        let cuda_graph = false;
-
         // TensorRT optimization level 5 breaks RT-DETR FP16, so RT-DETR builds at level 3. The
         // metadata sits at the end of an ONNX file, so only its last MiB is searched.
         #[cfg(feature = "tensorrt")]
@@ -280,6 +271,18 @@ impl YOLOModel {
                     .and_then(|_| file.read_to_end(&mut tail))
                     .is_ok_and(|_| tail.windows(13).any(|w| w == b"RTDETRDecoder"))
             });
+
+        // Tried on TensorRT with the GPU preprocess; `graph_capturable` confirms it below. A
+        // model found unfit is marked in its engine cache, so later loads skip the attempt.
+        #[cfg(feature = "cuda-preprocess")]
+        let graph_marker = Self::trt_cache_dir(path, config.quantize, rtdetr).join("no_cuda_graph");
+        #[cfg(feature = "cuda-preprocess")]
+        let cuda_graph = graph
+            && cuda_pre_stream.is_some()
+            && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
+            && !graph_marker.exists();
+        #[cfg(all(feature = "tensorrt", not(feature = "cuda-preprocess")))]
+        let cuda_graph = false;
 
         // Determine optimal thread count based on available parallelism
         let num_threads = if config.num_threads > 0 {
@@ -508,7 +511,7 @@ impl YOLOModel {
             Err(e) if cuda_graph => {
                 crate::info!("Loading without a CUDA graph: {e}");
                 drop(gpu);
-                return Self::load_without_graph(path, retry_config);
+                return Self::load_without_graph(path, retry_config, &graph_marker);
             }
             Err(e) => {
                 return Err(InferenceError::ModelLoadError(format!(
@@ -524,7 +527,7 @@ impl YOLOModel {
         #[cfg(feature = "cuda-preprocess")]
         if cuda_graph && !Self::graph_capturable(&session, metadata.task) {
             drop((session, gpu));
-            return Self::load_without_graph(path, retry_config);
+            return Self::load_without_graph(path, retry_config, &graph_marker);
         }
 
         // Get input/output names and detect input type
@@ -696,7 +699,7 @@ impl YOLOModel {
             {
                 crate::info!("Loading without a CUDA graph: {e}");
                 drop(model);
-                return Self::load_without_graph(path, retry_config);
+                return Self::load_without_graph(path, retry_config, &graph_marker);
             }
         }
         model.warmup()?;
@@ -740,6 +743,30 @@ impl YOLOModel {
         bind_compute_stream!(ep, compute_stream)
     }
 
+    /// `<model_dir>/.trt_cache/<model_stem>_{fp16,fp32}/` (`_fp16_o3/` for RT-DETR), where the
+    /// `TensorRT` engine and timing caches live.
+    #[cfg(feature = "tensorrt")]
+    fn trt_cache_dir(
+        model_path: &Path,
+        quantize: Option<Quantization>,
+        rtdetr: bool,
+    ) -> std::path::PathBuf {
+        let stem = model_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("model");
+        let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
+        let suffix = if quantize == Some(Quantization::Fp16) {
+            "fp16"
+        } else {
+            "fp32"
+        };
+        let level = if rtdetr { "_o3" } else { "" };
+        parent
+            .join(".trt_cache")
+            .join(format!("{stem}_{suffix}{level}"))
+    }
+
     /// Build the `TensorRT` execution provider with engine + timing caches enabled.
     ///
     /// FP16 is enabled for `quantize=16`. On Ada and
@@ -760,17 +787,8 @@ impl YOLOModel {
         cuda_graph: bool,
         compute_stream: Option<*mut ()>,
     ) -> ort::ep::ExecutionProviderDispatch {
-        let stem = model_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("model");
-        let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
         let fp16 = quantize == Some(Quantization::Fp16);
-        let suffix = if fp16 { "fp16" } else { "fp32" };
-        let level = if rtdetr { "_o3" } else { "" };
-        let cache_dir = parent
-            .join(".trt_cache")
-            .join(format!("{stem}_{suffix}{level}"));
+        let cache_dir = Self::trt_cache_dir(model_path, quantize, rtdetr);
         let mut ep = ort::ep::TensorRT::default()
             .with_device_id(device_id)
             .with_fp16(fp16)
@@ -1398,20 +1416,10 @@ impl YOLOModel {
             && session.outputs().iter().all(|o| static_f32(o.dtype()))
     }
 
-    /// File next to the `TensorRT` engine cache marking a model that can't use a CUDA graph.
+    /// Reload without a CUDA graph, and write `marker` so later loads skip the attempt.
     #[cfg(feature = "cuda-preprocess")]
-    fn no_graph_marker(path: &Path) -> std::path::PathBuf {
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        parent
-            .join(".trt_cache")
-            .join(format!("{stem}.no_cuda_graph"))
-    }
-
-    /// Reload without a CUDA graph, and mark the model so later loads skip the attempt.
-    #[cfg(feature = "cuda-preprocess")]
-    fn load_without_graph(path: &Path, config: InferenceConfig) -> Result<Self> {
-        let _ = std::fs::write(Self::no_graph_marker(path), "");
+    fn load_without_graph(path: &Path, config: InferenceConfig, marker: &Path) -> Result<Self> {
+        let _ = std::fs::write(marker, "");
         Self::load_session(path, config, false)
     }
 
