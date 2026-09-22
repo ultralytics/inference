@@ -1556,15 +1556,20 @@ impl YOLOModel {
             return Ok(Vec::new());
         }
 
-        // A model pinned to a smaller batch runs a larger one in chunks of its own size.
+        // A model pinned to one batch size runs exactly that many images at a time: a larger
+        // request goes in chunks, and a short chunk is padded with its last image.
         if let Some(fixed) = Self::fixed_batch(&self.session)
-            && images.len() > fixed
+            && images.len() != fixed
         {
             let mut results = Vec::with_capacity(images.len());
             for start in (0..images.len()).step_by(fixed) {
                 let end = (start + fixed).min(images.len());
+                let mut chunk = images[start..end].to_vec();
+                chunk.resize(fixed, images[end - 1]);
                 let chunk_paths = &paths[start.min(paths.len())..end.min(paths.len())];
-                results.extend(self.predict_internal(&images[start..end], chunk_paths)?);
+                let mut chunk_results = self.predict_internal(&chunk, chunk_paths)?;
+                chunk_results.truncate(end - start);
+                results.extend(chunk_results);
             }
             return Ok(results);
         }
