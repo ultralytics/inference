@@ -262,7 +262,8 @@ impl YOLOModel {
         #[cfg(feature = "cuda-preprocess")]
         let cuda_graph = graph
             && cuda_pre_stream.is_some()
-            && matches!(config.device, None | Some(crate::Device::TensorRt(_)));
+            && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
+            && !Self::no_graph_marker(path).exists();
         #[cfg(all(feature = "tensorrt", not(feature = "cuda-preprocess")))]
         let cuda_graph = false;
 
@@ -507,7 +508,7 @@ impl YOLOModel {
             Err(e) if cuda_graph => {
                 crate::info!("Loading without a CUDA graph: {e}");
                 drop(gpu);
-                return Self::load_session(path, retry_config, false);
+                return Self::load_without_graph(path, retry_config);
             }
             Err(e) => {
                 return Err(InferenceError::ModelLoadError(format!(
@@ -523,7 +524,7 @@ impl YOLOModel {
         #[cfg(feature = "cuda-preprocess")]
         if cuda_graph && !Self::graph_capturable(&session, metadata.task) {
             drop((session, gpu));
-            return Self::load_session(path, retry_config, false);
+            return Self::load_without_graph(path, retry_config);
         }
 
         // Get input/output names and detect input type
@@ -695,7 +696,7 @@ impl YOLOModel {
             {
                 crate::info!("Loading without a CUDA graph: {e}");
                 drop(model);
-                return Self::load_session(path, retry_config, false);
+                return Self::load_without_graph(path, retry_config);
             }
         }
         model.warmup()?;
@@ -1397,6 +1398,23 @@ impl YOLOModel {
             && session.outputs().iter().all(|o| static_f32(o.dtype()))
     }
 
+    /// File next to the `TensorRT` engine cache marking a model that can't use a CUDA graph.
+    #[cfg(feature = "cuda-preprocess")]
+    fn no_graph_marker(path: &Path) -> std::path::PathBuf {
+        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        parent
+            .join(".trt_cache")
+            .join(format!("{stem}.no_cuda_graph"))
+    }
+
+    /// Reload without a CUDA graph, and mark the model so later loads skip the attempt.
+    #[cfg(feature = "cuda-preprocess")]
+    fn load_without_graph(path: &Path, config: InferenceConfig) -> Result<Self> {
+        let _ = std::fs::write(Self::no_graph_marker(path), "");
+        Self::load_session(path, config, false)
+    }
+
     /// Capture the CUDA graph on this thread: the first run is a regular one and the second
     /// captures the graph later calls replay.
     #[cfg(feature = "cuda-preprocess")]
@@ -1515,9 +1533,12 @@ impl YOLOModel {
                 .cuda_preprocessor
                 .as_ref()
                 .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
-            for (ptr, host, _) in &mut graph.outputs {
-                pre.read_back(*ptr, host)?;
-            }
+            pre.read_back(
+                graph
+                    .outputs
+                    .iter_mut()
+                    .map(|(ptr, host, _)| (*ptr, host.as_mut_slice())),
+            )?;
             None
         } else {
             binding = self.device_binding(&[1, 3, dst_h as i64, dst_w as i64])?;

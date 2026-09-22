@@ -266,12 +266,21 @@ impl CudaPreprocessor {
         self.batch
     }
 
-    /// Copy `host.len()` f32 from device address `src` into `host` and wait for it.
+    /// Queue a copy from each device address into its host buffer, then wait once.
     #[allow(unsafe_code)]
-    pub(crate) fn read_back(&self, src: u64, host: &mut [f32]) -> Result<()> {
-        unsafe { cudarc::driver::result::memcpy_dtoh_async(host, src, self.stream.cu_stream()) }
-            .and_then(|()| self.stream.synchronize())
-            .map_err(|e| InferenceError::InferenceError(format!("dtoh: {e:?}")))
+    pub(crate) fn read_back<'a>(
+        &self,
+        outputs: impl IntoIterator<Item = (u64, &'a mut [f32])>,
+    ) -> Result<()> {
+        let err =
+            |e: cudarc::driver::DriverError| InferenceError::InferenceError(format!("dtoh: {e:?}"));
+        for (src, host) in outputs {
+            unsafe {
+                cudarc::driver::result::memcpy_dtoh_async(host, src, self.stream.cu_stream())
+            }
+            .map_err(err)?;
+        }
+        self.stream.synchronize().map_err(err)
     }
 
     /// H2D-copy the source frame, launch the fused preprocess kernel writing
