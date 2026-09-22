@@ -266,6 +266,14 @@ impl CudaPreprocessor {
         self.batch
     }
 
+    /// Copy `host.len()` f32 from device address `src` into `host` and wait for it.
+    #[allow(unsafe_code)]
+    pub(crate) fn read_back(&self, src: u64, host: &mut [f32]) -> Result<()> {
+        unsafe { cudarc::driver::result::memcpy_dtoh_async(host, src, self.stream.cu_stream()) }
+            .and_then(|()| self.stream.synchronize())
+            .map_err(|e| InferenceError::InferenceError(format!("dtoh: {e:?}")))
+    }
+
     /// H2D-copy the source frame, launch the fused preprocess kernel writing
     /// into the input buffer, and return the letterbox geometry needed by
     /// post-processing.

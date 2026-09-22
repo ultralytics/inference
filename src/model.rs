@@ -59,6 +59,27 @@ macro_rules! bind_compute_stream {
     };
 }
 
+/// Fixed device I/O the `TensorRT` CUDA graph replays; `binding` drops before its allocator.
+#[cfg(feature = "cuda-preprocess")]
+struct GraphIo {
+    binding: ort::session::IoBinding,
+    /// Device address, host copy and shape of each output, in `output_names` order.
+    outputs: Vec<(u64, Vec<f32>, Vec<usize>)>,
+    _allocator: ort::memory::Allocator,
+}
+
+/// Written during a CUDA graph capture (CUDA's global mode), read around every other GPU call.
+#[cfg(feature = "cuda-preprocess")]
+static GPU_WORK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Share [`GPU_WORK`] with every GPU call but a graph capture.
+#[cfg(feature = "cuda-preprocess")]
+fn gpu_work() -> std::sync::RwLockReadGuard<'static, ()> {
+    GPU_WORK
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// YOLO model for inference.
 ///
 /// This struct wraps an ONNX Runtime session and provides methods for
@@ -100,6 +121,9 @@ pub struct YOLOModel {
     /// standard CPU preprocess path runs.
     #[cfg(feature = "cuda-preprocess")]
     cuda_preprocessor: Option<crate::cuda_inference::CudaPreprocessor>,
+    /// CUDA graph I/O for the single-image `TensorRT` path; see [`GraphIo`].
+    #[cfg(feature = "cuda-preprocess")]
+    graph_io: Option<GraphIo>,
 }
 
 #[allow(
@@ -152,6 +176,8 @@ impl YOLOModel {
     /// Returns an error if the model file doesn't exist or can't be loaded.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn load_with_config<P: AsRef<Path>>(path: P, mut config: InferenceConfig) -> Result<Self> {
+        #[cfg(feature = "cuda-preprocess")]
+        let gpu = gpu_work();
         config.normalize_precision();
         let path = path.as_ref();
 
@@ -209,6 +235,14 @@ impl YOLOModel {
                 None
             }
         };
+
+        // A captured CUDA graph replays every run, so only fully static models use it.
+        #[cfg(feature = "cuda-preprocess")]
+        let cuda_graph = cuda_pre_stream.is_some()
+            && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
+            && Self::graph_capturable(path)?;
+        #[cfg(all(feature = "tensorrt", not(feature = "cuda-preprocess")))]
+        let cuda_graph = false;
 
         // TensorRT optimization level 5 breaks RT-DETR FP16, so RT-DETR builds at level 3. The
         // metadata sits at the end of an ONNX file, so only its last MiB is searched.
@@ -270,6 +304,7 @@ impl YOLOModel {
                         *i as i32,
                         config.quantize,
                         rtdetr,
+                        cuda_graph,
                         cuda_pre_stream_ptr,
                     ),
                     "TensorRTExecutionProvider",
@@ -311,7 +346,14 @@ impl YOLOModel {
             // Default: Register all available providers in preference order
             #[cfg(feature = "tensorrt")]
             eps.push((
-                Self::build_tensorrt_ep(path, 0, config.quantize, rtdetr, cuda_pre_stream_ptr),
+                Self::build_tensorrt_ep(
+                    path,
+                    0,
+                    config.quantize,
+                    rtdetr,
+                    cuda_graph,
+                    cuda_pre_stream_ptr,
+                ),
                 "TensorRTExecutionProvider",
             ));
 
@@ -596,9 +638,17 @@ impl YOLOModel {
             is_dynamic,
             #[cfg(feature = "cuda-preprocess")]
             cuda_preprocessor,
+            #[cfg(feature = "cuda-preprocess")]
+            graph_io: None,
         };
+        #[cfg(feature = "cuda-preprocess")]
+        if cuda_graph {
+            model.graph_io = Some(model.build_graph_io()?);
+        }
 
-        // Warmup inference to trigger JIT compilation and memory allocation
+        // Warmup inference to trigger JIT compilation and memory allocation (and graph capture).
+        #[cfg(feature = "cuda-preprocess")]
+        drop(gpu);
         model.warmup()?;
 
         Ok(model)
@@ -657,6 +707,7 @@ impl YOLOModel {
         device_id: i32,
         quantize: Option<Quantization>,
         rtdetr: bool,
+        cuda_graph: bool,
         compute_stream: Option<*mut ()>,
     ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
@@ -673,6 +724,7 @@ impl YOLOModel {
         let mut ep = ort::ep::TensorRT::default()
             .with_device_id(device_id)
             .with_fp16(fp16)
+            .with_cuda_graph(cuda_graph)
             .with_max_workspace_size(4 * 1024 * 1024 * 1024)
             .with_builder_optimization_level(if rtdetr { 3 } else { 5 });
         if crate::io::is_writable_dir(&cache_dir) {
@@ -1020,6 +1072,21 @@ impl YOLOModel {
             )));
         }
 
+        // The first run is a regular one and the second captures the graph later calls replay.
+        #[cfg(feature = "cuda-preprocess")]
+        if let Some(graph) = &self.graph_io {
+            let _capture = GPU_WORK
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for _ in 0..2 {
+                self.session
+                    .run_binding(&graph.binding)
+                    .map_err(|e| InferenceError::InferenceError(format!("graph warmup: {e}")))?;
+            }
+            self.warmed_up = true;
+            return Ok(());
+        }
+
         // Match whatever the export pinned on the batch axis, exactly as the height and
         // width are matched above: a `[8, 3, 640, 640]` model rejects a batch-1 warmup and
         // would fail the whole `load`. A dynamic batch takes the configured size.
@@ -1259,6 +1326,88 @@ impl YOLOModel {
         Ok(unsafe { ort::value::DynValue::from_ptr(value, None) })
     }
 
+    /// Whether a task's preprocessing is a letterbox, so [`Self::predict_image_cuda_pre`]
+    /// can run it. Classify uses center-crop (not letterbox), so it's excluded. Semantic
+    /// is included: `predict_image_cuda_pre` handles both its f32-logits and baked-in
+    /// `ArgMax` (u8) output forms. Depth is included too: it is a plain letterbox + f32
+    /// input with a single f32 output, post-processed through the shared pipeline like
+    /// every other task.
+    #[cfg(feature = "cuda-preprocess")]
+    const fn cuda_pre_task(task: Task) -> bool {
+        matches!(
+            task,
+            Task::Detect | Task::Segment | Task::Pose | Task::Obb | Task::Semantic | Task::Depth
+        )
+    }
+
+    /// Whether the model can replay one CUDA graph: a GPU-path task with static f32 batch-1 I/O.
+    #[cfg(feature = "cuda-preprocess")]
+    fn graph_capturable(path: &Path) -> Result<bool> {
+        use ort::session::builder::GraphOptimizationLevel;
+        use ort::value::{TensorElementType, ValueType};
+
+        let err = |e: String| InferenceError::ModelLoadError(format!("Failed to read model: {e}"));
+        let session = Session::builder()
+            .map_err(|e| err(e.to_string()))?
+            .with_optimization_level(GraphOptimizationLevel::Disable)
+            .map_err(|e| err(e.to_string()))?
+            .commit_from_file(path)
+            .map_err(|e| err(e.to_string()))?;
+        let static_f32 = |dtype: &ValueType| {
+            matches!(dtype, ValueType::Tensor { ty: TensorElementType::Float32, shape, .. }
+                if shape.iter().all(|&d| d > 0))
+        };
+        Ok(Self::cuda_pre_task(Self::extract_metadata(&session)?.task)
+            && session.inputs().iter().all(|i| {
+                static_f32(i.dtype()) && i.dtype().tensor_shape().is_some_and(|s| s[0] == 1)
+            })
+            && session.outputs().iter().all(|o| static_f32(o.dtype())))
+    }
+
+    /// Bind the fixed device I/O every graph replay uses; see [`GraphIo`].
+    #[cfg(feature = "cuda-preprocess")]
+    fn build_graph_io(&self) -> Result<GraphIo> {
+        use ort::memory::{AllocationDevice, Allocator, AllocatorType, MemoryInfo, MemoryType};
+        use ort::value::Tensor;
+
+        let err =
+            |what: &str, e: ort::Error| InferenceError::ModelLoadError(format!("{what}: {e}"));
+        let shape = |dtype: &ort::value::ValueType| {
+            dtype.tensor_shape().map(|s| s.to_vec()).unwrap_or_default()
+        };
+        // Outputs are rebound to device tensors, since a replay skips the copy to host.
+        let mut binding = self.device_binding(&shape(self.session.inputs()[0].dtype()))?;
+        let device_id = self
+            .cuda_preprocessor
+            .as_ref()
+            .map_or(0, crate::cuda_inference::CudaPreprocessor::device_id);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        let cuda_mem = MemoryInfo::new(
+            AllocationDevice::CUDA,
+            device_id as i32,
+            AllocatorType::Device,
+            MemoryType::Default,
+        )
+        .map_err(|e| err("cuda meminfo", e))?;
+        let allocator = Allocator::new(&self.session, cuda_mem).map_err(|e| err("allocator", e))?;
+        let mut outputs = Vec::with_capacity(self.output_names.len());
+        for (name, output) in self.output_names.iter().zip(self.session.outputs()) {
+            let dims = shape_to_usize(&shape(output.dtype()));
+            let tensor =
+                Tensor::<f32>::new(&allocator, dims.clone()).map_err(|e| err("graph output", e))?;
+            let ptr = tensor.data_ptr() as u64;
+            binding
+                .bind_output(name, tensor)
+                .map_err(|e| err("bind_output", e))?;
+            outputs.push((ptr, vec![0.0; dims.iter().product()], dims));
+        }
+        Ok(GraphIo {
+            binding,
+            outputs,
+            _allocator: allocator,
+        })
+    }
+
     /// CUDA-preprocess fast path used by [`Self::predict_image`] when
     /// `cuda_preprocessor` is populated. Runs the fused letterbox+normalize kernel,
     /// binds the resulting device buffer with [`Self::device_binding`],
@@ -1269,6 +1418,7 @@ impl YOLOModel {
         image: &DynamicImage,
         path: String,
     ) -> Result<Vec<Results>> {
+        let _gpu = gpu_work();
         // Computed before `run_binding` borrows the session: true when the
         // ONNX bakes in ArgMax+Cast(u8) so the single output is a uint8 class
         // map (semantic segmentation fast form).
@@ -1297,15 +1447,34 @@ impl YOLOModel {
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
 
-        let binding = self.device_binding(&[1, 3, dst_h as i64, dst_w as i64])?;
-        let start_inference = Instant::now();
-        let outputs = self
-            .session
-            .run_binding(&binding)
-            .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
-        binding
-            .synchronize_outputs()
-            .map_err(|e| InferenceError::InferenceError(format!("sync_outputs: {e}")))?;
+        let binding;
+        let start_inference;
+        // A graph model replays over its fixed device I/O and copies the outputs back itself.
+        let outputs = if let Some(graph) = self.graph_io.as_mut() {
+            start_inference = Instant::now();
+            self.session
+                .run_binding(&graph.binding)
+                .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
+            let pre = self
+                .cuda_preprocessor
+                .as_ref()
+                .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
+            for (ptr, host, _) in &mut graph.outputs {
+                pre.read_back(*ptr, host)?;
+            }
+            None
+        } else {
+            binding = self.device_binding(&[1, 3, dst_h as i64, dst_w as i64])?;
+            start_inference = Instant::now();
+            let outputs = self
+                .session
+                .run_binding(&binding)
+                .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
+            binding
+                .synchronize_outputs()
+                .map_err(|e| InferenceError::InferenceError(format!("sync_outputs: {e}")))?;
+            Some(outputs)
+        };
         #[allow(clippy::cast_precision_loss)]
         let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0;
 
@@ -1324,9 +1493,12 @@ impl YOLOModel {
             let name = self.output_names.first().ok_or_else(|| {
                 InferenceError::InferenceError("semantic model has no output".into())
             })?;
-            let output = outputs.get(name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{name}' not found"))
-            })?;
+            let output = outputs
+                .as_ref()
+                .and_then(|o| o.get(name.as_str()))
+                .ok_or_else(|| {
+                    InferenceError::InferenceError(format!("Output '{name}' not found"))
+                })?;
             let (oshape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
                 InferenceError::InferenceError(format!("extract uint8 semantic output: {e}"))
             })?;
@@ -1361,27 +1533,40 @@ impl YOLOModel {
             scale: geom.scale,
             padding: (geom.pad_y as f32, geom.pad_x as f32),
         };
-        // Reuse the shared zero-copy extraction helper (it handles the f16→f32
-        // fallback) rather than duplicating the borrow-or-own here.
-        let mut result =
-            Self::extract_and_invoke(&outputs, &self.output_names, inference_time, |outs, _ms| {
-                let img_outputs: Vec<(&[f32], Vec<usize>)> =
-                    outs.iter().map(|(d, s)| (*d, s.clone())).collect();
-                Ok(postprocess_with_head(
-                    img_outputs,
-                    self.metadata.task,
-                    &pre,
-                    &self.config,
-                    Arc::clone(&self.metadata.names),
-                    orig_img,
-                    path,
-                    speed,
-                    (dst_h as u32, dst_w as u32),
-                    self.metadata.end2end,
-                    self.metadata.kpt_shape,
-                    self.metadata.is_rtdetr(),
+        let postprocess = |img_outputs: Vec<(&[f32], Vec<usize>)>| {
+            postprocess_with_head(
+                img_outputs,
+                self.metadata.task,
+                &pre,
+                &self.config,
+                Arc::clone(&self.metadata.names),
+                orig_img,
+                path,
+                speed,
+                (dst_h as u32, dst_w as u32),
+                self.metadata.end2end,
+                self.metadata.kpt_shape,
+                self.metadata.is_rtdetr(),
+            )
+        };
+        let mut result = if let Some(outputs) = &outputs {
+            // Reuse the shared zero-copy extraction helper (it handles the f16→f32
+            // fallback) rather than duplicating the borrow-or-own here.
+            Self::extract_and_invoke(outputs, &self.output_names, inference_time, |outs, _ms| {
+                Ok(postprocess(
+                    outs.iter().map(|(d, s)| (*d, s.clone())).collect(),
                 ))
-            })?;
+            })?
+        } else {
+            // The graph run left every output in `graph_io`'s host copies.
+            postprocess(
+                self.graph_io
+                    .iter()
+                    .flat_map(|g| &g.outputs)
+                    .map(|(_, d, s)| (d.as_slice(), s.clone()))
+                    .collect(),
+            )
+        };
         #[allow(clippy::cast_precision_loss)]
         let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
         result.speed.postprocess = Some(postprocess_time);
@@ -1399,6 +1584,7 @@ impl YOLOModel {
         images: &[&DynamicImage],
         paths: &[String],
     ) -> Result<Vec<Vec<Results>>> {
+        let _gpu = gpu_work();
         let n_images = images.len();
         let n_images_f = n_images as f64;
         let start_preprocess = Instant::now();
@@ -1574,29 +1760,15 @@ impl YOLOModel {
             return Ok(results);
         }
 
-        // Fast path for one image: GPU preprocess + zero-copy device input. The CLI takes
-        // it too, because `BatchProcessor` always calls `predict_batch`.
-        //
-        // Allowlisted to the tasks whose preprocessing is a letterbox (square or
-        // non-square) + f32 input. Classify uses center-crop (not letterbox), so
-        // it's excluded. Semantic is included: `predict_image_cuda_pre` handles
-        // both its f32-logits and baked-in ArgMax (u8) output forms. Depth is
-        // included too: it is a plain letterbox + f32 input with a single f32
-        // output, post-processed through the shared pipeline like every other
-        // task. The only requirement is f32 input (the kernel writes f32, not f16).
+        // Fast path for one image: GPU preprocess + zero-copy device input, for the tasks in
+        // `cuda_pre_task` with f32 input (the kernel writes f32, not f16). The CLI takes it
+        // too, because `BatchProcessor` always calls `predict_batch`, and so does every
+        // image of a CUDA graph model, which is pinned to batch 1 and chunked above.
         #[cfg(feature = "cuda-preprocess")]
         if images.len() == 1
             && self.cuda_preprocessor.is_some()
             && !self.fp16_input
-            && matches!(
-                self.metadata.task,
-                Task::Detect
-                    | Task::Segment
-                    | Task::Pose
-                    | Task::Obb
-                    | Task::Semantic
-                    | Task::Depth
-            )
+            && Self::cuda_pre_task(self.metadata.task)
         {
             let path = paths.first().cloned().unwrap_or_default();
             return Ok(vec![self.predict_image_cuda_pre(images[0], path)?]);
@@ -1861,6 +2033,8 @@ impl YOLOModel {
             ort::session::SessionInputValue<'_>,
         )>,
     ) -> Result<(ort::session::SessionOutputs<'s>, f64)> {
+        #[cfg(feature = "cuda-preprocess")]
+        let _gpu = gpu_work();
         let t = Instant::now();
         let outputs = session
             .run(inputs)

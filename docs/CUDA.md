@@ -195,6 +195,10 @@ into its own slot of one `[N, 3, H, W]` device buffer, so a batch is uploaded
 without a host-side concatenation. The batch path additionally excludes
 `Semantic`, whose baked-in `ArgMax` output is handled by the CPU path.
 
+On `TensorRt`, a model with static f32 batch-1 input and outputs (the default export) also replays its engine as one
+CUDA graph, which cut inference by up to about a quarter on an RTX 4000 Ada (yolo26n 0.95 to 0.7 ms). The graph is
+captured while the model loads, so CUDA work of your own on another thread during a load can fail.
+
 ## CLI
 
 The CLI selects the GPU EP via `--device`:
