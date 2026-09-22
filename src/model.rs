@@ -1556,6 +1556,19 @@ impl YOLOModel {
             return Ok(Vec::new());
         }
 
+        // A model pinned to a smaller batch runs a larger one in chunks of its own size.
+        if let Some(fixed) = Self::fixed_batch(&self.session)
+            && images.len() > fixed
+        {
+            let mut results = Vec::with_capacity(images.len());
+            for start in (0..images.len()).step_by(fixed) {
+                let end = (start + fixed).min(images.len());
+                let chunk_paths = &paths[start.min(paths.len())..end.min(paths.len())];
+                results.extend(self.predict_internal(&images[start..end], chunk_paths)?);
+            }
+            return Ok(results);
+        }
+
         // Fast path for one image: GPU preprocess + zero-copy device input. The CLI takes
         // it too, because `BatchProcessor` always calls `predict_batch`.
         //
