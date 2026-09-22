@@ -697,9 +697,10 @@ impl YOLOModel {
                     model.warmup()
                 })
             {
+                // A capture can fail for a passing reason, so this reload leaves no marker.
                 crate::info!("Loading without a CUDA graph: {e}");
                 drop(model);
-                return Self::load_without_graph(path, retry_config, &graph_marker);
+                return Self::load_session(path, retry_config, false);
             }
         }
         model.warmup()?;
