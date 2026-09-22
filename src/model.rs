@@ -1309,6 +1309,25 @@ impl YOLOModel {
         }
     }
 
+    /// Memory descriptor for the GPU the preprocessor runs on.
+    #[cfg(feature = "cuda-preprocess")]
+    fn cuda_memory(&self) -> Result<ort::memory::MemoryInfo<'static>> {
+        use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
+
+        let device_id = self
+            .cuda_preprocessor
+            .as_ref()
+            .map_or(0, crate::cuda_inference::CudaPreprocessor::device_id);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        MemoryInfo::new(
+            AllocationDevice::CUDA,
+            device_id as i32,
+            AllocatorType::Device,
+            MemoryType::Default,
+        )
+        .map_err(|e| InferenceError::InferenceError(format!("cuda meminfo: {e}")))
+    }
+
     /// Bind the preprocessor's device buffer, shaped `shape`, as the session input and every
     /// output to host memory, for the `cuda-preprocess` paths to run.
     ///
@@ -1325,18 +1344,14 @@ impl YOLOModel {
             .cuda_preprocessor
             .as_ref()
             .expect("device_binding invariant: cuda_preprocessor.is_some()");
-        let memory = |device: AllocationDevice, id: usize, what: &str| {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-            MemoryInfo::new(
-                device,
-                id as i32,
-                AllocatorType::Device,
-                MemoryType::Default,
-            )
-            .map_err(|e| err(what, e))
-        };
-        let cuda_mem = memory(AllocationDevice::CUDA, pre.device_id(), "cuda meminfo")?;
-        let cpu_mem = memory(AllocationDevice::CPU, 0, "cpu meminfo")?;
+        let cuda_mem = self.cuda_memory()?;
+        let cpu_mem = MemoryInfo::new(
+            AllocationDevice::CPU,
+            0,
+            AllocatorType::Device,
+            MemoryType::Default,
+        )
+        .map_err(|e| err("cpu meminfo", e))?;
         // The preprocessor owns the buffer for the model's lifetime, and the binding keeps
         // the tensor alive until it drops.
         let input = unsafe { Self::device_input(&cuda_mem, pre.input_dev_ptr(), shape)? };
@@ -1439,7 +1454,7 @@ impl YOLOModel {
     /// Bind the fixed device I/O every graph replay uses; see [`GraphIo`].
     #[cfg(feature = "cuda-preprocess")]
     fn build_graph_io(&self) -> Result<GraphIo> {
-        use ort::memory::{AllocationDevice, Allocator, AllocatorType, MemoryInfo, MemoryType};
+        use ort::memory::Allocator;
         use ort::value::Tensor;
 
         let err =
@@ -1449,19 +1464,8 @@ impl YOLOModel {
         };
         // Outputs are rebound to device tensors, since a replay skips the copy to host.
         let mut binding = self.device_binding(&shape(self.session.inputs()[0].dtype()))?;
-        let device_id = self
-            .cuda_preprocessor
-            .as_ref()
-            .map_or(0, crate::cuda_inference::CudaPreprocessor::device_id);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-        let cuda_mem = MemoryInfo::new(
-            AllocationDevice::CUDA,
-            device_id as i32,
-            AllocatorType::Device,
-            MemoryType::Default,
-        )
-        .map_err(|e| err("cuda meminfo", e))?;
-        let allocator = Allocator::new(&self.session, cuda_mem).map_err(|e| err("allocator", e))?;
+        let allocator =
+            Allocator::new(&self.session, self.cuda_memory()?).map_err(|e| err("allocator", e))?;
         let mut outputs = Vec::with_capacity(self.output_names.len());
         for (name, output) in self.output_names.iter().zip(self.session.outputs()) {
             let dims = shape_to_usize(&shape(output.dtype()));
