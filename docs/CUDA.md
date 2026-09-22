@@ -106,7 +106,7 @@ minutes; it is **not** a hang.
 
 What to expect and how to avoid surprises:
 
-- **It's cached.** Builds are written to `<model_dir>/.trt_cache/<stem>_{fp16,fp32}/`
+- **It's cached.** Builds are written to `<model_dir>/.trt_cache/<stem>_{fp16,fp32}/` (`_fp16_o3/` for RT-DETR)
   (engine **and** timing cache). Later loads of the same model reuse them and
   start in seconds. **Keep `.trt_cache/` between runs** to avoid paying the cost
   again: add it to `.gitignore` rather than deleting it, and leave it in place

@@ -210,11 +210,19 @@ impl YOLOModel {
             }
         };
 
-        // TensorRT optimization level 5 breaks RT-DETR FP16, so RT-DETR builds at level 3.
+        // TensorRT optimization level 5 breaks RT-DETR FP16, so RT-DETR builds at level 3. The
+        // metadata sits at the end of an ONNX file, so only its last MiB is searched.
         #[cfg(feature = "tensorrt")]
         let rtdetr = config.quantize == Some(Quantization::Fp16)
-            && std::fs::read(path)
-                .is_ok_and(|m| m.windows(13).rev().any(|w| w == b"RTDETRDecoder"));
+            && matches!(config.device, None | Some(crate::Device::TensorRt(_)))
+            && std::fs::File::open(path).is_ok_and(|mut file| {
+                use std::io::{Read, Seek, SeekFrom};
+                let mut tail = Vec::new();
+                file.seek(SeekFrom::End(0))
+                    .and_then(|len| file.seek(SeekFrom::Start(len.saturating_sub(1 << 20))))
+                    .and_then(|_| file.read_to_end(&mut tail))
+                    .is_ok_and(|_| tail.windows(13).any(|w| w == b"RTDETRDecoder"))
+            });
 
         // Determine optimal thread count based on available parallelism
         let num_threads = if config.num_threads > 0 {
@@ -637,8 +645,8 @@ impl YOLOModel {
     /// FP16 is enabled for `quantize=16`. On Ada and
     /// newer GPUs this is ~2x faster than FP32 with negligible accuracy delta
     /// for YOLO detection. Engine and timing caches are written under
-    /// `<model_dir>/.trt_cache/<model_stem>_{fp16,fp32}/` so subsequent loads
-    /// skip the multi-minute TRT engine compile.
+    /// `<model_dir>/.trt_cache/<model_stem>_{fp16,fp32}/` (`_fp16_o3/` for RT-DETR) so
+    /// subsequent loads skip the multi-minute TRT engine compile.
     ///
     /// `compute_stream` (when `Some`) binds the EP to an external cudarc stream
     /// for the `cuda-preprocess` fast path; see [`bind_compute_stream`].
