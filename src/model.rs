@@ -510,8 +510,11 @@ impl YOLOModel {
             #[cfg(feature = "cuda-preprocess")]
             Err(e) if cuda_graph => {
                 crate::info!("Loading without a CUDA graph: {e}");
+                if e.to_string().contains("graph nodes have not been assigned") {
+                    let _ = std::fs::write(&graph_marker, "");
+                }
                 drop(gpu);
-                return Self::load_without_graph(path, retry_config, &graph_marker);
+                return Self::load_session(path, retry_config, false);
             }
             Err(e) => {
                 return Err(InferenceError::ModelLoadError(format!(
@@ -526,8 +529,9 @@ impl YOLOModel {
         // A captured CUDA graph replays every run, so any other model reloads without one.
         #[cfg(feature = "cuda-preprocess")]
         if cuda_graph && !Self::graph_capturable(&session, metadata.task) {
+            let _ = std::fs::write(&graph_marker, "");
             drop((session, gpu));
-            return Self::load_without_graph(path, retry_config, &graph_marker);
+            return Self::load_session(path, retry_config, false);
         }
 
         // Get input/output names and detect input type
@@ -1414,13 +1418,6 @@ impl YOLOModel {
                 static_f32(i.dtype()) && i.dtype().tensor_shape().is_some_and(|s| s[0] == 1)
             })
             && session.outputs().iter().all(|o| static_f32(o.dtype()))
-    }
-
-    /// Reload without a CUDA graph, and write `marker` so later loads skip the attempt.
-    #[cfg(feature = "cuda-preprocess")]
-    fn load_without_graph(path: &Path, config: InferenceConfig, marker: &Path) -> Result<Self> {
-        let _ = std::fs::write(marker, "");
-        Self::load_session(path, config, false)
     }
 
     /// Capture the CUDA graph on this thread: the first run is a regular one and the second
