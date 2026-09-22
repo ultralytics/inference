@@ -9,7 +9,7 @@ default-members = ["."]
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.46"
+version = "0.0.47"
 edition = "2024"
 rust-version = "1.89"
 authors = [
