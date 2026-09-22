@@ -35,9 +35,9 @@ Add the feature you need in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.46", features = ["tensorrt"] }
+ultralytics-inference = { version = "0.0.47", features = ["tensorrt"] }
 # or, for the fastest path:
-ultralytics-inference = { version = "0.0.46", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.47", features = ["cuda-preprocess"] }
 ```
 
 Then `cargo build --release` - no extra flags needed.
@@ -67,7 +67,7 @@ If you need to pin a specific version at compile time instead, override the cuda
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.46", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.47", features = ["cuda-preprocess"] }
 # Replace the default feature with a pinned one (e.g. CUDA 12.8):
 cudarc = { version = "0.19", default-features = false, features = ["driver", "nvrtc", "dynamic-loading", "cuda-12080"] }
 ```
@@ -106,7 +106,7 @@ minutes; it is **not** a hang.
 
 What to expect and how to avoid surprises:
 
-- **It's cached.** Builds are written to `<model_dir>/.trt_cache/<stem>_{fp16,fp32}/`
+- **It's cached.** Builds are written to `<model_dir>/.trt_cache/<stem>_{fp16,fp32}/` (`_fp16_o3/` for RT-DETR)
   (engine **and** timing cache). Later loads of the same model reuse them and
   start in seconds. **Keep `.trt_cache/` between runs** to avoid paying the cost
   again: add it to `.gitignore` rather than deleting it, and leave it in place
