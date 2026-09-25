@@ -33,8 +33,8 @@ use wasm_bindgen::prelude::*;
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{postprocess_semantic_mask, postprocess_with_head};
 use ultralytics_inference::preprocessing::{
-    PreprocessResult, calculate_rect_size, preprocess_image_center_crop, preprocess_image_stretch,
-    preprocess_image_with_precision,
+    PreprocessResult, calculate_rect_size, image_to_array, preprocess_image_center_crop,
+    preprocess_image_stretch, preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
 use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
@@ -227,11 +227,7 @@ fn preprocess_image(
     task: Task,
     rect: bool,
     rtdetr: bool,
-) -> Result<(Array3<u8>, PreprocessResult), JsError> {
-    let rgb = dynimg.to_rgb8();
-    let (w, h) = rgb.dimensions();
-    let orig_img = Array3::from_shape_vec((h as usize, w as usize, 3), rgb.into_raw())
-        .map_err(err_ctx("failed to build image array"))?;
+) -> (Array3<u8>, PreprocessResult) {
     let pre = if task == Task::Classify {
         preprocess_image_center_crop(dynimg, imgsz, None)
     } else if rtdetr {
@@ -242,13 +238,13 @@ fn preprocess_image(
         // 16:9 frame skips ~40% of its pixels. Only a model that left its height and width
         // dynamic can accept the resulting shape; see `YoloModel::rect`.
         let target = if rect {
-            calculate_rect_size(w, h, imgsz, stride)
+            calculate_rect_size(dynimg.width(), dynimg.height(), imgsz, stride)
         } else {
             imgsz
         };
         preprocess_image_with_precision(dynimg, target, stride, None)
     };
-    Ok((orig_img, pre))
+    (image_to_array(dynimg), pre)
 }
 
 /// Wrap a raw `width * height * 4` RGBA buffer (e.g. a canvas/webcam `ImageData`)
@@ -522,7 +518,7 @@ impl YoloModel {
             self.metadata.task,
             self.rect,
             self.metadata.is_rtdetr(),
-        )?;
+        );
 
         // Resolve the output dtype path before borrowing the session for inference.
         let semantic_baked = self.semantic_baked();
@@ -749,7 +745,7 @@ impl YoloPipeline {
             self.metadata.task,
             false,
             self.metadata.is_rtdetr(),
-        )?;
+        );
         let data = pre
             .tensor
             .as_slice()

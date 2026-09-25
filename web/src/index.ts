@@ -293,12 +293,12 @@ async function fetchOk(url: string | URL, what: string): Promise<Response> {
   return resp;
 }
 
-/** Fetch/normalize an encoded image input to bytes the wasm side can decode. */
-async function toEncodedBytes(input: EncodedInput): Promise<Uint8Array> {
+/** Fetch a URL/path, or normalize provided bytes, into bytes the wasm side can read. */
+async function toBytes(input: EncodedInput, what: string): Promise<Uint8Array> {
   if (input instanceof Uint8Array) return input;
   if (input instanceof ArrayBuffer) return new Uint8Array(input);
   if (input instanceof Blob) return new Uint8Array(await input.arrayBuffer());
-  const resp = await fetchOk(input, "image");
+  const resp = await fetchOk(input, what);
   return new Uint8Array(await resp.arrayBuffer());
 }
 
@@ -615,16 +615,6 @@ class LiteRtEngine implements Engine {
   }
 }
 
-/** Fetch model bytes from a URL/path, or pass provided bytes through. */
-async function fetchModelBytes(source: ModelSource): Promise<Uint8Array> {
-  if (typeof source === "string" || source instanceof URL) {
-    const resp = await fetchOk(source.toString(), "model");
-    return new Uint8Array(await resp.arrayBuffer());
-  }
-  if (source instanceof Blob) return new Uint8Array(await source.arrayBuffer());
-  return source instanceof Uint8Array ? source : new Uint8Array(source);
-}
-
 /**
  * A loaded YOLO model. Loading is asynchronous, so use {@link YOLO.load} instead
  * of a constructor.
@@ -645,7 +635,7 @@ export class YOLO {
   static async load(source: ModelSource, options?: LoadOptions): Promise<YOLO> {
     await ensureInit(options?.wasmUrl);
     // Fetch once, then pick the backend from the extension, or the bytes when it is unknown.
-    const bytes = await fetchModelBytes(source);
+    const bytes = await toBytes(source, "model");
     if (inferBackend(source, bytes) === "litert") {
       return YOLO.loadLiteRt(bytes, options);
     }
@@ -734,7 +724,7 @@ export class YOLO {
       const { data, width, height } = toImageData(image);
       return decodeResults(await this.engine.predictDrawable(data, width, height, p));
     }
-    const bytes = await toEncodedBytes(image);
+    const bytes = await toBytes(image, "image");
     return decodeResults(await this.engine.predictEncoded(bytes, p));
   }
 
