@@ -736,6 +736,9 @@ fn draw_pose(
         let kpt_data = &keypoints.data;
         let n_persons = kpt_data.shape()[0];
         let n_kpts = kpt_data.shape()[1];
+        // A 2-channel export carries no visibility score, so every point counts as seen.
+        let has_conf = kpt_data.shape()[2] > 2;
+        let conf_at = |p: usize, k: usize| if has_conf { kpt_data[[p, k, 2]] } else { 1.0 };
 
         // Post-processing clips keypoints into the frame, so one sitting exactly on a border
         // was outside the image and is really "not seen": drawing it anchors a limb to the
@@ -753,10 +756,10 @@ fn draw_pose(
 
                 let x1 = kpt_data[[person_idx, kpt_a, 0]];
                 let y1 = kpt_data[[person_idx, kpt_a, 1]];
-                let conf1 = kpt_data[[person_idx, kpt_a, 2]];
+                let conf1 = conf_at(person_idx, kpt_a);
                 let x2 = kpt_data[[person_idx, kpt_b, 0]];
                 let y2 = kpt_data[[person_idx, kpt_b, 1]];
-                let conf2 = kpt_data[[person_idx, kpt_b, 2]];
+                let conf2 = conf_at(person_idx, kpt_b);
 
                 if visible(x1, y1, conf1) && visible(x2, y2, conf2) {
                     let color_idx = limb_colors[limb_idx % limb_colors.len()];
@@ -768,7 +771,7 @@ fn draw_pose(
             for kpt_idx in 0..n_kpts {
                 let x = kpt_data[[person_idx, kpt_idx, 0]];
                 let y = kpt_data[[person_idx, kpt_idx, 1]];
-                let conf = kpt_data[[person_idx, kpt_idx, 2]];
+                let conf = conf_at(person_idx, kpt_idx);
 
                 if visible(x, y, conf) {
                     let color_idx = kpt_colors[kpt_idx % kpt_colors.len()];
@@ -1092,16 +1095,25 @@ mod tests {
     #[allow(clippy::cast_precision_loss)]
     fn test_annotate_pose_draws() {
         let mut r = base_results(HashMap::from([(0usize, "person".to_string())]));
-        // One pose, 17 COCO keypoints with (x, y, conf).
-        let mut kpt = Array3::<f32>::zeros((1, 17, 3));
-        for k in 0..17 {
-            kpt[[0, k, 0]] = 20.0 + k as f32;
-            kpt[[0, k, 1]] = 30.0 + k as f32;
-            kpt[[0, k, 2]] = 0.9;
+        // One pose, 17 COCO keypoints with (x, y, conf), and the (x, y) layout of exports
+        // without a visibility channel.
+        for dims in [3, 2] {
+            let mut kpt = Array3::<f32>::zeros((1, 17, dims));
+            for k in 0..17 {
+                kpt[[0, k, 0]] = 20.0 + k as f32;
+                kpt[[0, k, 1]] = 30.0 + k as f32;
+                if dims > 2 {
+                    kpt[[0, k, 2]] = 0.9;
+                }
+            }
+            r.keypoints = Some(Keypoints::new(kpt, (128, 128)));
+            let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
+            assert_ne!(
+                out,
+                DynamicImage::new_rgb8(128, 128),
+                "nothing drawn for {dims} dims"
+            );
         }
-        r.keypoints = Some(Keypoints::new(kpt, (128, 128)));
-        let out = annotate_image(&DynamicImage::new_rgb8(128, 128), &r, None);
-        assert_eq!(out.width(), 128);
     }
 
     #[test]
