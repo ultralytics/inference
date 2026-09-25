@@ -227,7 +227,8 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
 
 An alternative inference engine that runs an Ultralytics **`.tflite`** export
 through [**LiteRT.js**](https://developers.google.com/edge/litert/web) (Google's
-LiteRT for Web), which is often **~2× faster than ONNX Runtime Web on WebGPU**.
+LiteRT for Web), which runs detection and segmentation **1.2 to 1.5× faster than ONNX Runtime Web
+on WebGPU and 1.6 to 2× faster on CPU** (see Benchmarks below).
 Only the inference engine changes; the preprocessing, postprocessing, drawing,
 and `Results` shape are the same shared Rust code, so output matches the `ort`
 path.
@@ -302,6 +303,25 @@ Notes:
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
   so serve with `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.
+
+## 🏎️ Benchmarks
+
+Mean inference time per image (ms, lower is better) reported by `results.speed.inference`, LiteRT.js (`.tflite`) vs
+ONNX Runtime Web (`.onnx`):
+
+| Model   | Task    | WebGPU LiteRT (ms) | WebGPU ONNX (ms) | CPU LiteRT (ms) | CPU ONNX (ms) |
+| ------- | ------- | -----------------: | ---------------: | --------------: | ------------: |
+| YOLO11n | detect  |            **9.6** |             14.7 |        **26.7** |          45.8 |
+| YOLO11n | segment |           **13.8** |             19.8 |        **37.9** |          66.0 |
+| YOLO26n | detect  |            **9.3** |             14.0 |        **24.2** |          38.5 |
+| YOLO26n | segment |           **13.8** |             19.7 |        **36.6** |          62.7 |
+| YOLO26x | detect  |          **151.2** |            176.4 |       **560.3** |        1138.6 |
+| YOLO26x | segment |          **187.1** |            285.5 |       **910.5** |        1698.7 |
+
+Apple M4, Chrome 153, `@ultralytics/yolo` 0.0.48 (ONNX Runtime Web 1.27, LiteRT.js 2.5.3). FP32 640×640 models
+exported with Ultralytics 8.4.163 (`nms=None`), cycling through the 128 COCO128 images after warmup (128 timed runs on
+WebGPU, 50 on CPU). NMS-free exports (`nms=False`) run at the same speed on ONNX Runtime Web, but LiteRT.js falls back
+to CPU/wasm for them, so keep `nms=None` for WebGPU.
 
 ## 🔨 Building From Source
 

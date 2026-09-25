@@ -210,8 +210,8 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
 ## ⚡ LiteRT.js 后端
 
 这是一个可选的推理引擎，通过 [**LiteRT.js**](https://developers.google.com/edge/litert/web)
-（Google 面向 Web 的 LiteRT）运行 Ultralytics 导出的 **`.tflite`** 模型，在 WebGPU 上
-**通常比 ONNX Runtime Web 快约 2 倍**。只有推理引擎发生变化，前处理、后处理、绘制和 `Results`
+（Google 面向 Web 的 LiteRT）运行 Ultralytics 导出的 **`.tflite`** 模型，其检测和分割
+**在 WebGPU 上比 ONNX Runtime Web 快 1.2 至 1.5 倍，在 CPU 上快 1.6 至 2 倍**（见下方基准测试）。只有推理引擎发生变化，前处理、后处理、绘制和 `Results`
 结构仍是同一份共享 Rust 代码，因此输出与 `ort` 路径一致。
 
 后端根据文件扩展名选择，无扩展名时回退到嗅探 `TFL3` 魔数：`.tflite` 使用 LiteRT.js，`.onnx` 使用 ONNX Runtime Web。LiteRT.js 的
@@ -279,6 +279,25 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 - **跨源隔离**：LiteRT 的多线程 wasm 需要 `SharedArrayBuffer`，因此请以
   `Cross-Origin-Opener-Policy: same-origin` 和 `Cross-Origin-Embedder-Policy: require-corp`
   提供服务。
+
+## 🏎️ 基准测试
+
+每张图像的平均推理时间（毫秒，越低越好），取自 `results.speed.inference`，对比 LiteRT.js（`.tflite`）与 ONNX Runtime
+Web（`.onnx`）：
+
+| 模型    | 任务    | WebGPU LiteRT (ms) | WebGPU ONNX (ms) | CPU LiteRT (ms) | CPU ONNX (ms) |
+| ------- | ------- | -----------------: | ---------------: | --------------: | ------------: |
+| YOLO11n | detect  |            **9.6** |             14.7 |        **26.7** |          45.8 |
+| YOLO11n | segment |           **13.8** |             19.8 |        **37.9** |          66.0 |
+| YOLO26n | detect  |            **9.3** |             14.0 |        **24.2** |          38.5 |
+| YOLO26n | segment |           **13.8** |             19.7 |        **36.6** |          62.7 |
+| YOLO26x | detect  |          **151.2** |            176.4 |       **560.3** |        1138.6 |
+| YOLO26x | segment |          **187.1** |            285.5 |       **910.5** |        1698.7 |
+
+测试环境：Apple M4、Chrome 153、`@ultralytics/yolo` 0.0.48（ONNX Runtime Web 1.27、LiteRT.js 2.5.3）。模型为使用
+Ultralytics 8.4.163 导出的 FP32 640×640 模型（`nms=None`），预热后循环使用 COCO128 的 128 张图像（WebGPU 计时 128 次，CPU
+计时 50 次）。无 NMS 导出（`nms=False`）在 ONNX Runtime Web 上速度相同，但 LiteRT.js 会回退到 CPU/wasm 运行，因此 WebGPU
+请保持 `nms=None`。
 
 ## 🔨 从源码构建
 
