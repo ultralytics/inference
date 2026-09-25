@@ -49,10 +49,6 @@ mod onnx_meta;
 mod payload;
 mod tflite_meta;
 
-/// Default inference image size used when a model does not record `imgsz` in its
-/// metadata. Mirrors the native crate's fallback.
-const DEFAULT_IMGSZ: usize = 640;
-
 /// The device (accelerator) a model load asks for, mirroring the native
 /// [`Device`](ultralytics_inference::Device) concept for the browser.
 ///
@@ -469,9 +465,7 @@ impl YoloModel {
             }
             _ => None,
         });
-        let imgsz = fixed_imgsz
-            .or(metadata.imgsz)
-            .unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
+        let imgsz = fixed_imgsz.unwrap_or_else(|| metadata.imgsz_or_default());
         // A pinned height/width can only ever take `imgsz`, so rect applies exactly when
         // the export left them dynamic - the same invariant as the native `rect_enabled`.
         let rect = fixed_imgsz.is_none() && !metadata.is_rtdetr();
@@ -654,7 +648,7 @@ impl YoloPipeline {
     #[wasm_bindgen(constructor)]
     pub fn new(tflite: &[u8]) -> Result<YoloPipeline, JsError> {
         let metadata = build_tflite_metadata(tflite)?;
-        let imgsz = metadata.imgsz.unwrap_or((DEFAULT_IMGSZ, DEFAULT_IMGSZ));
+        let imgsz = metadata.imgsz_or_default();
         Ok(Self {
             metadata,
             imgsz,

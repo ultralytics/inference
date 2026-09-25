@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{InferenceError, Result};
-use crate::inference::Quantization;
+use crate::inference::{InferenceConfig, Quantization};
 use crate::task::Task;
 
 /// Metadata extracted from an Ultralytics YOLO ONNX model.
@@ -390,6 +390,17 @@ impl ModelMetadata {
     #[must_use]
     pub fn is_rtdetr(&self) -> bool {
         self.head == "RTDETRDecoder"
+    }
+
+    /// Input size recorded by the export, or the task default when it records none
+    /// ([`InferenceConfig::DEFAULT_OBB_IMGSZ`] for OBB, [`InferenceConfig::DEFAULT_IMGSZ`]
+    /// otherwise).
+    #[must_use]
+    pub fn imgsz_or_default(&self) -> (usize, usize) {
+        self.imgsz.unwrap_or(match self.task {
+            Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
+            _ => InferenceConfig::DEFAULT_IMGSZ,
+        })
     }
 
     /// Extract the model name from the description.
