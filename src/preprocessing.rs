@@ -260,14 +260,16 @@ pub fn preprocess_image(
 pub fn preprocess_image_with_precision(
     image: &DynamicImage,
     target_size: (usize, usize),
-    stride: u32,
+    _stride: u32,
     quantize: impl IntoQuantization,
 ) -> PreprocessResult {
     let quantize = quantize.into_quantization();
     let (orig_width, orig_height) = image.dimensions();
     let orig_shape = (orig_height, orig_width);
 
-    let (geom, scale) = calculate_letterbox_params(orig_width, orig_height, target_size, stride);
+    // A single uniform `gain` on both axes for coordinate back-projection; per-axis gains
+    // from the rounded extents can diverge slightly, shifting boxes and changing NMS.
+    let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size, false);
     build_preprocess_result(
         image,
         target_size,
@@ -571,36 +573,6 @@ pub fn calculate_rect_size(
     (rect_h, rect_w)
 }
 
-/// Calculate letterbox parameters for resizing.
-///
-/// Computes new dimensions and padding to fit the image within the target size while maintaining aspect ratio.
-///
-/// # Arguments
-///
-/// * `orig_width` - Original image width.
-/// * `orig_height` - Original image height.
-/// * `target_size` - Target size as (height, width).
-/// * `stride` - Model stride for alignment (unused in calculation but kept for API compatibility).
-///
-/// # Returns
-///
-/// Tuple containing:
-/// 1. `new_width`: Scaled width.
-/// 2. `new_height`: Scaled height.
-/// 3. `pad_left`: Left padding.
-/// 4. `pad_top`: Top padding.
-/// 5. `(scale_y, scale_x)`: Scale factors.
-fn calculate_letterbox_params(
-    orig_width: u32,
-    orig_height: u32,
-    target_size: (usize, usize),
-    _stride: u32,
-) -> (LetterboxGeometry, (f32, f32)) {
-    // A single uniform `gain` on both axes for coordinate back-projection; per-axis gains
-    // from the rounded extents can diverge slightly, shifting boxes and changing NMS.
-    LetterboxGeometry::compute(orig_width, orig_height, target_size, false)
-}
-
 /// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.
 ///
 /// Allocates the `(1, 3, H, W)` tensor, splits it into per-channel slices, and fills each
@@ -855,25 +827,14 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     let crop_y_float = (new_h.saturating_sub(target_h)) as f32 / 2.0;
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let crop_x = bankers_round(crop_x_float) as u32;
+    let crop_x = crop_x_float.round_ties_even() as u32;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let crop_y = bankers_round(crop_y_float) as u32;
+    let crop_y = crop_y_float.round_ties_even() as u32;
 
     let cropped =
         image::imageops::crop_imm(&resized_rgb, crop_x, crop_y, target_w, target_h).to_image();
 
     (cropped, (scale, scale))
-}
-
-/// Round float to nearest integer, rounding half to even (Banker's Rounding).
-fn bankers_round(v: f32) -> f32 {
-    let n = v.floor();
-    let d = v - n;
-    if (d - 0.5).abs() < 1e-6 {
-        if n % 2.0 == 0.0 { n } else { n + 1.0 }
-    } else {
-        v.round()
-    }
 }
 
 #[allow(clippy::similar_names)]
@@ -885,7 +846,7 @@ mod tests {
     /// discard the image and hand the model a uniformly gray tensor.
     #[test]
     fn test_extreme_aspect_ratio_keeps_image_content() {
-        let (geom, _) = calculate_letterbox_params(10000, 1, (640, 640), 32);
+        let (geom, _) = LetterboxGeometry::compute(10000, 1, (640, 640), false);
         assert!(geom.new_h >= 1, "height collapsed to {}", geom.new_h);
         assert!(geom.new_w >= 1);
 
@@ -942,17 +903,17 @@ mod tests {
     #[test]
     fn test_letterbox_params() {
         // Square input into a square target: exact fit, no padding.
-        let (geom, _scale) = calculate_letterbox_params(640, 640, (640, 640), 32);
+        let (geom, _scale) = LetterboxGeometry::compute(640, 640, (640, 640), false);
         assert_eq!((geom.new_w, geom.new_h), (640, 640));
         assert_eq!((geom.pad_left, geom.pad_top), (0, 0));
 
         // Wide input is scaled down to fit and padded top/bottom, not left/right.
-        let (geom, _) = calculate_letterbox_params(1280, 720, (640, 640), 32);
+        let (geom, _) = LetterboxGeometry::compute(1280, 720, (640, 640), false);
         assert!(geom.new_w <= 640 && geom.new_h <= 640);
         assert_eq!(geom.pad_left, 0);
 
         // Tall input is the mirror case: padded left/right, not top/bottom.
-        let (geom, _) = calculate_letterbox_params(480, 640, (640, 640), 32);
+        let (geom, _) = LetterboxGeometry::compute(480, 640, (640, 640), false);
         assert!(geom.pad_left > 0);
         assert_eq!(geom.pad_top, 0);
     }

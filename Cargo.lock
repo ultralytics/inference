@@ -306,9 +306,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cc"
-version = "1.5.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "207aedd8d29a0eb804986bc99eed0d43719fec84a9b7f9c8b70cf83b97cffcc1"
+checksum = "f360145194ee8e21db5ee7f3fcd4fe52210864c75c985dae33218202c8bbe040"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -2427,7 +2427,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ultralytics-inference"
-version = "0.0.48"
+version = "0.0.49"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -2455,7 +2455,7 @@ dependencies = [
 
 [[package]]
 name = "ultralytics-inference-web"
-version = "0.0.48"
+version = "0.0.49"
 dependencies = [
  "console_error_panic_hook",
  "half",

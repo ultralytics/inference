@@ -574,25 +574,14 @@ impl YOLOModel {
             _ => None,
         });
 
-        let resolved_imgsz = if let Some(fixed) = fixed_imgsz {
-            if let Some(requested) = config.imgsz
-                && requested != fixed
-            {
-                warn!(
-                    "imgsz={requested:?} ignored: this model has a fixed input shape of {fixed:?}."
-                );
-            }
-            fixed
-        } else if let Some(sz) = config.imgsz {
-            sz
-        } else if let Some(sz) = metadata.imgsz {
-            sz
-        } else {
-            match metadata.task {
-                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
-                _ => InferenceConfig::DEFAULT_IMGSZ,
-            }
-        };
+        if let (Some(fixed), Some(requested)) = (fixed_imgsz, config.imgsz)
+            && requested != fixed
+        {
+            warn!("imgsz={requested:?} ignored: this model has a fixed input shape of {fixed:?}.");
+        }
+        let resolved_imgsz = fixed_imgsz
+            .or(config.imgsz)
+            .unwrap_or_else(|| metadata.imgsz_or_default());
 
         let quantize = if provider_name == "TensorRTExecutionProvider" {
             Some(if config.quantize == Some(Quantization::Fp16) {
@@ -2261,11 +2250,7 @@ impl YOLOModel {
     pub fn imgsz(&self) -> (usize, usize) {
         self.config
             .imgsz
-            .or(self.metadata.imgsz)
-            .unwrap_or(match self.metadata.task {
-                Task::Obb => InferenceConfig::DEFAULT_OBB_IMGSZ,
-                _ => InferenceConfig::DEFAULT_IMGSZ,
-            })
+            .unwrap_or_else(|| self.metadata.imgsz_or_default())
     }
 
     /// Get the model's stride.

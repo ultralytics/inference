@@ -152,10 +152,15 @@ impl JsResults {
 
         let keypoints = r.keypoints.as_ref().map_or_else(Vec::new, |k| {
             let (n, npt) = (k.data.shape()[0], k.data.shape()[1]);
+            // A 2-channel export carries no visibility score, so every point counts as seen.
+            let has_conf = k.data.shape()[2] > 2;
             (0..n)
                 .map(|i| JsKeypoints {
                     points: (0..npt)
-                        .map(|j| [k.data[[i, j, 0]], k.data[[i, j, 1]], k.data[[i, j, 2]]])
+                        .map(|j| {
+                            let conf = if has_conf { k.data[[i, j, 2]] } else { 1.0 };
+                            [k.data[[i, j, 0]], k.data[[i, j, 1]], conf]
+                        })
                         .collect(),
                     // Skeleton uses the matching detection's color.
                     color: boxes.get(i).map_or_else(|| hex(0), |b| b.color.clone()),
