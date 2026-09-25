@@ -346,6 +346,23 @@ fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
     (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
 }
 
+/// Append `nk` keypoints of `kpt_dim` channels from `kpts`, with x/y scaled to original image
+/// space. The channels after x/y (the visibility score, when the export carries one) pass through.
+fn push_keypoints(
+    kpts: &ArrayView1<f32>,
+    nk: usize,
+    kpt_dim: usize,
+    preprocess: &PreprocessResult,
+    out: &mut Vec<f32>,
+) {
+    for off in (0..nk).map(|k| k * kpt_dim) {
+        let (x, y) = scale_keypoint(kpts[off], kpts[off + 1], preprocess);
+        out.push(x);
+        out.push(y);
+        out.extend((2..kpt_dim).map(|c| kpts[off + c]));
+    }
+}
+
 /// Return the `(index, score)` of the highest class score. NaN scores (and an empty row) map to
 /// negative infinity before the reduction, so a NaN can never win selection over a real score,
 /// and an all-NaN or empty row scores below any confidence threshold (even `0.0`) rather than
@@ -895,20 +912,8 @@ fn postprocess_segment(
     let num_masks = if shape1.len() == 4 { shape1[1] } else { 32 };
     let expected_features = 4 + nc + num_masks;
 
-    // Manual shape check
-    let (num_preds, is_transposed) = if shape0.len() == 3 {
-        let (a, b) = (shape0[1], shape0[2]);
-        if a == expected_features {
-            (b, false) // [1, features, preds]
-        } else if b == expected_features {
-            (a, true) // [1, preds, features]
-        } else {
-            // Assume format [1, 116, 8400] if ambiguous
-            if a < b { (b, false) } else { (a, true) }
-        }
-    } else {
-        (0, false)
-    };
+    let (num_preds, is_transposed) =
+        parse_transposed_shape(shape0, expected_features, expected_features);
 
     if output0.is_empty() || num_preds == 0 {
         return results;
@@ -1085,67 +1090,39 @@ fn postprocess_pose(
         return results;
     }
 
-    // Filter and NMS - store candidates with keypoints
-    let mut candidates: Vec<([f32; 4], f32, usize, Vec<[f32; 3]>)> = Vec::with_capacity(256);
-
-    for i in 0..num_preds {
-        let Some((bbox, best_score, best_class)) =
+    // Filter and NMS. The original row index is kept to decode keypoints for kept rows only.
+    let candidates: Vec<([f32; 4], f32, usize, usize)> = (0..num_preds)
+        .filter_map(|i| {
             decode_row(&output_2d, i, num_classes, preprocess, config)
-        else {
-            continue;
-        };
+                .map(|(bbox, score, class)| (bbox, score, class, i))
+        })
+        .collect();
 
-        // Extract keypoints (after class scores), scaled to original image space. The third
-        // channel is the visibility score, which `kpt_dim == 2` exports do not carry.
-        let kpt_start = 4 + num_classes;
-        let keypoints = (0..num_keypoints)
-            .map(|k| {
-                let off = kpt_start + k * kpt_dim;
-                let (x, y) =
-                    scale_keypoint(output_2d[[i, off]], output_2d[[i, off + 1]], preprocess);
-                let conf = if kpt_dim > 2 {
-                    output_2d[[i, off + 2]]
-                } else {
-                    0.0
-                };
-                [x, y, conf]
-            })
-            .collect();
-
-        candidates.push((bbox, best_score, best_class, keypoints));
-    }
-
-    if candidates.is_empty() {
-        results.keypoints = Some(Keypoints::new(
-            Array3::zeros((0, num_keypoints, kpt_dim)),
-            preprocess.orig_shape,
-        ));
-        return results;
-    }
-
-    // Apply NMS
     let keep_indices = nms_keep_indices(&candidates, config.iou_threshold, config.max_det);
     let num_kept = keep_indices.len();
 
-    // Build output arrays
     let mut boxes_data = Array2::zeros((num_kept, 6));
-    let mut keypoints_data = Array3::zeros((num_kept, num_keypoints, kpt_dim));
+    let mut flat_kpts: Vec<f32> = Vec::with_capacity(num_kept * kpt_features);
+    let kpt_start = 4 + num_classes;
 
     for (out_idx, &keep_idx) in keep_indices.iter().enumerate() {
-        let (bbox, score, class, kpts) = &candidates[keep_idx];
-
-        // Store box data
+        let (bbox, score, class, row) = &candidates[keep_idx];
         write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
+        push_keypoints(
+            &output_2d.slice(s![*row, kpt_start..]),
+            num_keypoints,
+            kpt_dim,
+            preprocess,
+            &mut flat_kpts,
+        );
+    }
 
-        // Store keypoints. Only `kpt_dim` channels exist, so a 2-channel layout has no
-        // confidence slot to write.
-        for (k, kpt) in kpts.iter().enumerate() {
-            keypoints_data[[out_idx, k, 0]] = kpt[0]; // x
-            keypoints_data[[out_idx, k, 1]] = kpt[1]; // y
-            if kpt_dim > 2 {
-                keypoints_data[[out_idx, k, 2]] = kpt[2]; // confidence
-            }
-        }
+    let keypoints_data = Array3::from_shape_vec((num_kept, num_keypoints, kpt_dim), flat_kpts)
+        .expect("flat length matches (n, nk, kpt_dim)");
+
+    if num_kept == 0 {
+        results.keypoints = Some(Keypoints::new(keypoints_data, preprocess.orig_shape));
+        return results;
     }
 
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
@@ -1549,7 +1526,7 @@ fn postprocess_pose_end2end(
     let user_cap = config.max_det.min(max_det);
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
-    let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * 3);
+    let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * kpt_dim);
 
     decode_end2end(
         output,
@@ -1561,20 +1538,20 @@ fn postprocess_pose_end2end(
         None,
         |base, bbox, conf, cls| {
             flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
-            let kstart = base + 6;
-            for k in 0..nk {
-                let off = kstart + k * kpt_dim;
-                let (sx, sy) = scale_keypoint(output[off], output[off + 1], preprocess);
-                let kconf = if kpt_dim >= 3 { output[off + 2] } else { 1.0 };
-                flat_kpts.extend_from_slice(&[sx, sy, kconf]);
-            }
+            push_keypoints(
+                &ArrayView1::from(&output[base + 6..]),
+                nk,
+                kpt_dim,
+                preprocess,
+                &mut flat_kpts,
+            );
         },
     );
 
     let n = flat_boxes.len() / 6;
     // Always emit a keypoints tensor (even empty) to match the non-end2end pose path.
-    let kdata =
-        Array3::from_shape_vec((n, nk, 3), flat_kpts).expect("flat length matches (n, nk, 3)");
+    let kdata = Array3::from_shape_vec((n, nk, kpt_dim), flat_kpts)
+        .expect("flat length matches (n, nk, kpt_dim)");
     results.keypoints = Some(Keypoints::new(kdata, preprocess.orig_shape));
     if n > 0 {
         let boxes_data =
@@ -1600,10 +1577,7 @@ fn postprocess_obb_end2end(
         let max_det = output_shape[1];
         let feats = output_shape[2];
         if feats >= 7 && max_det > 0 {
-            let (oh, ow) = preprocess.orig_shape;
-            let (max_w, max_h) = (ow as f32, oh as f32);
             let (scale_y, scale_x) = preprocess.scale;
-            let (pad_top, pad_left) = preprocess.padding;
             let user_cap = config.max_det.min(max_det);
             flat.reserve(user_cap * 7);
 
@@ -1618,11 +1592,10 @@ fn postprocess_obb_end2end(
                 user_cap,
                 None,
                 |base, _bbox, conf, cls| {
-                    let cx = (output[base] - pad_left) / scale_x;
-                    let cy = (output[base + 1] - pad_top) / scale_y;
+                    let (cx, cy) = scale_keypoint(output[base], output[base + 1], preprocess);
                     flat.extend_from_slice(&[
-                        cx.clamp(0.0, max_w),
-                        cy.clamp(0.0, max_h),
+                        cx,
+                        cy,
                         output[base + 2] / scale_x,
                         output[base + 3] / scale_y,
                         output[base + 6],
