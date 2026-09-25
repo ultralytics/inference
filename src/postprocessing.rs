@@ -1514,7 +1514,7 @@ fn postprocess_pose_end2end(
     nk: usize,
     kpt_dim: usize,
 ) -> Results {
-    if output_shape.len() != 3 || output.is_empty() || nk == 0 || kpt_dim < 2 {
+    if output_shape.len() != 3 || output.is_empty() || nk == 0 || !(2..=3).contains(&kpt_dim) {
         return results;
     }
     let max_det = output_shape[1];
