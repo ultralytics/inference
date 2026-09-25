@@ -59,7 +59,7 @@ body:
         Please include:
         - OS (e.g., Ubuntu 22.04, macOS 15.5, Windows 11)
         - Rust toolchain (e.g., rustc --version)
-        - Crate version and features (e.g., ultralytics-inference 0.0.48 with cuda,video)
+        - Crate version and features (e.g., ultralytics-inference 0.0.49 with cuda,video)
         - Model (e.g., yolo26n.onnx exported with ultralytics 8.3.x)
         - Hardware (e.g., CPU, GPU model)
         - For @ultralytics/yolo: npm package version and browser (e.g., Chrome 138, WebGPU)
@@ -68,7 +68,7 @@ body:
         ```
         OS: macOS-15.5
         Rust: rustc 1.89.0
-        Crate: ultralytics-inference 0.0.48 (features: coreml,annotate)
+        Crate: ultralytics-inference 0.0.49 (features: coreml,annotate)
         Model: yolo26n.onnx
         Hardware: Apple M3, 16GB RAM
         ```
