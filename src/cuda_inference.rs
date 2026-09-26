@@ -26,7 +26,8 @@
 use std::sync::Arc;
 
 use cudarc::driver::{
-    CudaContext, CudaFunction, CudaSlice, CudaStream, DevicePtr, LaunchConfig, PushKernelArg,
+    CudaContext, CudaEvent, CudaFunction, CudaSlice, CudaStream, DevicePtr, LaunchConfig,
+    PinnedHostSlice, PushKernelArg,
 };
 use cudarc::nvrtc::compile_ptx_with_opts;
 
@@ -172,6 +173,12 @@ pub(crate) struct CudaPreprocessor {
     /// when frame size changes between calls.
     frame_dev: CudaSlice<u8>,
     frame_dev_capacity: usize,
+    /// Pinned staging copy of the source frame, the same capacity as `frame_dev`, so the
+    /// upload runs as an async DMA the caller overlaps with host work. `None` on an
+    /// integrated GPU (DGX Spark, Jetson), where the pageable copy is already cheaper.
+    frame_host: Option<PinnedHostSlice<u8>>,
+    /// Recorded after each staged upload; `frame_host` is rewritten only once it completes.
+    uploaded: CudaEvent,
 
     /// Persistent device buffer for the model input tensor
     /// (`batch * 3 * dst_h * dst_w` f32). Pointer is stable for the buffer's
@@ -229,6 +236,18 @@ impl CudaPreprocessor {
         let frame_dev = stream
             .alloc_zeros::<u8>(1)
             .map_err(|e| InferenceError::ModelLoadError(format!("alloc frame_dev: {e:?}")))?;
+        let load_err = |e: cudarc::driver::DriverError| {
+            InferenceError::ModelLoadError(format!("frame staging: {e:?}"))
+        };
+        let integrated = ctx
+            .attribute(cudarc::driver::sys::CUdevice_attribute::CU_DEVICE_ATTRIBUTE_INTEGRATED)
+            .map_err(load_err)?;
+        let frame_host = if integrated == 0 {
+            Some(unsafe { ctx.alloc_pinned::<u8>(1) }.map_err(load_err)?)
+        } else {
+            None
+        };
+        let uploaded = ctx.new_event(None).map_err(load_err)?;
 
         Ok(Self {
             _ctx: ctx,
@@ -236,6 +255,8 @@ impl CudaPreprocessor {
             kernel,
             frame_dev,
             frame_dev_capacity: 1,
+            frame_host,
+            uploaded,
             input_dev,
             input_dev_ptr,
             dst_h,
@@ -257,6 +278,11 @@ impl CudaPreprocessor {
     /// GPU is handed a pointer it cannot read.
     pub(crate) const fn device_id(&self) -> usize {
         self.device_id
+    }
+
+    /// Whether uploads go through the pinned staging buffer, which only a discrete GPU uses.
+    pub(crate) const fn stages_upload(&self) -> bool {
+        self.frame_host.is_some()
     }
 
     /// Number of images the input buffer was sized for. A caller passing more than this
@@ -330,17 +356,32 @@ impl CudaPreprocessor {
             )));
         }
 
+        let err =
+            |e: cudarc::driver::DriverError| InferenceError::InferenceError(format!("htod: {e:?}"));
+        // The previous upload may still be reading the staging buffer.
+        self.uploaded.synchronize().map_err(err)?;
         if self.frame_dev_capacity < needed {
-            self.frame_dev = self
-                .stream
-                .alloc_zeros::<u8>(needed)
-                .map_err(|e| InferenceError::InferenceError(format!("realloc frame_dev: {e:?}")))?;
+            self.frame_dev = self.stream.alloc_zeros::<u8>(needed).map_err(err)?;
+            if let Some(host) = &mut self.frame_host {
+                *host = unsafe { self.stream.context().alloc_pinned::<u8>(needed) }.map_err(err)?;
+            }
             self.frame_dev_capacity = needed;
         }
 
-        self.stream
-            .memcpy_htod(frame_hwc, &mut self.frame_dev)
-            .map_err(|e| InferenceError::InferenceError(format!("htod: {e:?}")))?;
+        if let Some(host) = &mut self.frame_host {
+            let host = &mut host.as_mut_slice().map_err(err)?[..needed];
+            host.copy_from_slice(frame_hwc);
+            let (frame_ptr, _record) = self.frame_dev.device_ptr(&self.stream);
+            unsafe {
+                cudarc::driver::result::memcpy_htod_async(frame_ptr, host, self.stream.cu_stream())
+            }
+            .map_err(err)?;
+            self.uploaded.record(&self.stream).map_err(err)?;
+        } else {
+            self.stream
+                .memcpy_htod(frame_hwc, &mut self.frame_dev)
+                .map_err(err)?;
+        }
 
         // Geometry from the shared CPU helper, so the kernel and the CPU path can never
         // disagree on scale/rounding/padding. `scale` is the `(y, x)` gain post-processing
@@ -408,6 +449,13 @@ impl CudaPreprocessor {
             pad_x,
             pad_y,
         })
+    }
+}
+
+impl Drop for CudaPreprocessor {
+    fn drop(&mut self) {
+        // `PinnedHostSlice` frees without waiting for the raw async upload that reads it.
+        let _ = self.uploaded.synchronize();
     }
 }
 

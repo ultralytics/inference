@@ -196,6 +196,12 @@ without a host-side concatenation. A batch of more than one image keeps the CPU 
 for `Semantic` models, and for a batch larger than the device buffer, which is sized
 at load for the model's pinned batch or the configured `batch`.
 
+The source frame goes to the GPU as 8-bit RGB, a third of the bytes of the f32 tensor. On a
+discrete GPU it is first copied into a reused pinned host buffer, so the upload runs as an async
+DMA while the copy of the image that `Results` keeps is made on the CPU. On an RTX 4000 Ada that
+saved about 0.9 ms per 4K frame. An integrated GPU (DGX Spark, Jetson) keeps the plain copy,
+which is already cheaper there because the GPU shares memory with the CPU.
+
 On `TensorRt`, a model with static f32 batch-1 input and outputs (the default export) also replays its engine as one
 CUDA graph, which cut inference by up to about a quarter on an RTX 4000 Ada (yolo26n 0.95 to 0.7 ms). The graph is
 captured while the model loads, so CUDA work of your own on another thread during a load can fail.
