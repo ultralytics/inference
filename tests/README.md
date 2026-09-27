@@ -23,11 +23,11 @@ To generate code coverage locally (Linux recommended), use the same feature set 
 
 ```bash
 cargo llvm-cov --features annotate,video,visualize --workspace --html \
-  --ignore-filename-regex '(src/cuda_inference\.rs|src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
+  --ignore-filename-regex '(src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
 ```
 
 The `--ignore-filename-regex` matches CI: it drops code that host-side unit tests cannot exercise
-(the CUDA GPU kernel, the GUI viewer window, the thin CLI entry point, and the wasm32-only web crate)
+(the GUI viewer window, the thin CLI entry point, and the wasm32-only web crate)
 so the reported percentage reflects testable code.
 
 ## ✨ Contributing
