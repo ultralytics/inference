@@ -926,16 +926,15 @@ impl YOLOModel {
             .map_err(|e| ov_err(&e))
     }
 
-    /// Distribute the elapsed wall time since `start` evenly across every result in the
-    /// batch and stamp it onto `res.speed.postprocess`. Shared by both postprocess closures.
-    fn apply_postprocess_time(batch: &mut [Vec<Results>], start: Instant, n_images_f: f64) {
+    /// Distribute the elapsed wall time since `start` evenly across the images of `batch`
+    /// and stamp it onto every result's `speed.postprocess`. Shared by both batch builders.
+    fn apply_postprocess_time(mut batch: Vec<Vec<Results>>, start: Instant) -> Vec<Vec<Results>> {
         #[allow(clippy::cast_precision_loss)]
-        let ms = start.elapsed().as_secs_f64() * 1000.0 / n_images_f;
-        for img_results in batch {
-            for res in img_results {
-                res.speed.postprocess = Some(ms);
-            }
+        let ms = start.elapsed().as_secs_f64() * 1000.0 / batch.len() as f64;
+        for res in batch.iter_mut().flatten() {
+            res.speed.postprocess = Some(ms);
         }
+        batch
     }
 
     /// Concatenate per-image input tensor views along the batch axis into a 4D array.
@@ -1017,7 +1016,7 @@ impl YOLOModel {
         inference_shape: (u32, u32),
     ) -> Vec<Vec<Results>> {
         let start_postprocess = Instant::now();
-        let mut batch_results: Vec<Vec<Results>> = image_arrays
+        let batch_results = image_arrays
             .into_iter()
             .zip(preprocessed)
             .enumerate()
@@ -1038,10 +1037,7 @@ impl YOLOModel {
                 )]
             })
             .collect();
-        #[allow(clippy::cast_precision_loss)]
-        let n_images_f = batch_results.len() as f64;
-        Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
-        batch_results
+        Self::apply_postprocess_time(batch_results, start_postprocess)
     }
 
     /// Build per-image semantic-mask results from a batched `uint8` model output (a model
@@ -1055,7 +1051,7 @@ impl YOLOModel {
         inference_shape: (u32, u32),
     ) -> Vec<Vec<Results>> {
         let start_postprocess = Instant::now();
-        let mut batch_results: Vec<Vec<Results>> = image_arrays
+        let batch_results = image_arrays
             .into_iter()
             .enumerate()
             .map(|(i, orig_img)| {
@@ -1071,10 +1067,7 @@ impl YOLOModel {
                 )]
             })
             .collect();
-        #[allow(clippy::cast_precision_loss)]
-        let n_images_f = batch_results.len() as f64;
-        Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
-        batch_results
+        Self::apply_postprocess_time(batch_results, start_postprocess)
     }
 
     /// Build per-image results from one run's outputs, shared by the CPU and `cuda-preprocess`
@@ -2223,8 +2216,7 @@ mod tests {
                 (4, 4),
             )]
         };
-        let mut batch: Vec<Vec<Results>> = vec![result(), result()];
-        YOLOModel::apply_postprocess_time(&mut batch, Instant::now(), 2.0);
+        let batch = YOLOModel::apply_postprocess_time(vec![result(), result()], Instant::now());
         for img in &batch {
             for r in img {
                 assert!(r.speed.postprocess.is_some());
