@@ -232,11 +232,6 @@ impl Default for SourceMeta {
 #[cfg(feature = "video")]
 use ffmpeg_next as ffmpeg;
 
-/// Custom `FFmpeg` video decoder using `SWS_BILINEAR` for YUV -> RGB conversion.
-///
-/// Other scaler choices such as `SWS_AREA` produce slightly different pixel values
-/// during colorspace conversion. Those differences can affect borderline confidence
-/// predictions and lead to small detection drift, so `SWS_BILINEAR` is explicit here.
 /// Convert a decoded video frame to a tightly-packed RGB24 [`DynamicImage`] using a BILINEAR
 /// scaler. `scaler` caches the context and is rebuilt when the frame's format or size
 /// changes, so pass a persistent `Option` to reuse it across frames.
@@ -290,6 +285,11 @@ fn frame_to_rgb_image(
     Ok(DynamicImage::ImageRgb8(img_buffer))
 }
 
+/// Custom `FFmpeg` video decoder using `SWS_BILINEAR` for YUV -> RGB conversion.
+///
+/// Other scaler choices such as `SWS_AREA` produce slightly different pixel values
+/// during colorspace conversion. Those differences can affect borderline confidence
+/// predictions and lead to small detection drift, so `SWS_BILINEAR` is explicit here.
 #[cfg(feature = "video")]
 struct BilinearVideoDecoder {
     input_ctx: ffmpeg::format::context::Input,
