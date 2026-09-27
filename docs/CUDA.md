@@ -192,8 +192,9 @@ the CPU path runs and the flag is silently ignored:
 
 `predict_batch` and the multi-image path use the same kernel, writing each image
 into its own slot of one `[N, 3, H, W]` device buffer, so a batch is uploaded
-without a host-side concatenation. The batch path additionally excludes
-`Semantic`, whose baked-in `ArgMax` output is handled by the CPU path.
+without a host-side concatenation. A batch of more than one image keeps the CPU path
+for `Semantic` models, and for a batch larger than the device buffer, which is sized
+at load for the model's pinned batch or the configured `batch`.
 
 On `TensorRt`, a model with static f32 batch-1 input and outputs (the default export) also replays its engine as one
 CUDA graph, which cut inference by up to about a quarter on an RTX 4000 Ada (yolo26n 0.95 to 0.7 ms). The graph is
@@ -217,8 +218,10 @@ ultralytics-inference predict --model yolo26n-b16.onnx --source images/ \
   --device tensorrt:0 --quantize 16 --batch 16
 ```
 
-The model must be exported with a matching batch size, or with a dynamic batch
-axis. A model whose input pins `[16, 3, 640, 640]` cannot run at `--batch 1`.
+The model should be exported with a matching batch size, or with a dynamic batch
+axis. A model whose input pins `[16, 3, 640, 640]` always runs 16 images at a time:
+a larger request is split into chunks of 16, and a shorter one is padded with its
+last image, so `--batch 1` on it still pays for 16.
 
 [`YOLOModel::predict_image`]: https://docs.rs/ultralytics-inference/latest/ultralytics_inference/model/struct.YOLOModel.html#method.predict_image
 
