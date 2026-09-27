@@ -126,7 +126,17 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
 
     match ureq::get(&url).call() {
         Ok(response) => {
-            let mut file = match File::create(&font_path) {
+            // Stage in a unique temp file and rename it into place, so an interrupted or
+            // concurrent download never leaves a truncated font for the `exists()` check to reuse.
+            let tmp_path = config_dir.join(format!(
+                "{font_name}.part.{}.{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos()
+            ));
+            let mut file = match File::create(&tmp_path) {
                 Ok(f) => f,
                 Err(e) => {
                     eprintln!("Failed to create font file: {e}");
@@ -134,11 +144,11 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
                 }
             };
 
-            let mut reader = response.into_body().into_reader();
-            if let Err(e) = io::copy(&mut reader, &mut file) {
+            let copied = io::copy(&mut response.into_body().into_reader(), &mut file);
+            drop(file);
+            if let Err(e) = copied.and_then(|_| fs::rename(&tmp_path, &font_path)) {
                 eprintln!("Failed to download font: {e}");
-                // Try to remove partial file
-                let _ = fs::remove_file(&font_path);
+                let _ = fs::remove_file(&tmp_path);
                 return None;
             }
 

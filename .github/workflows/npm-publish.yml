@@ -1,6 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-# Publish the browser/WebGPU package to npm https://www.npmjs.com/package/ultralytics-inference
+# Publish the browser/WebGPU package to npm https://www.npmjs.com/package/@ultralytics/yolo
 # Mirrors publish.yml (crates.io): on push to main, if the version in Cargo.toml
 # is not already on npm, build the wasm + TypeScript and publish it. So a single
 # version bump in Cargo.toml releases both the crate and the npm package.
