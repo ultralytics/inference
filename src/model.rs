@@ -1077,6 +1077,81 @@ impl YOLOModel {
         batch_results
     }
 
+    /// Build per-image results from one run's outputs, shared by the CPU and `cuda-preprocess`
+    /// paths. When `semantic_u8`, the model has ArgMax+Cast(uint8) baked in and its only output
+    /// is a class map; otherwise every output is an f32 (or f16) head.
+    ///
+    /// Outputs are borrowed straight from the ORT-owned buffers, which avoids a ~40 ms memcpy
+    /// for large semantic segmentation outputs; only an f16 output is converted into an owned
+    /// f32 copy.
+    #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn postprocess_outputs(
+        outputs: &ort::session::SessionOutputs<'_>,
+        output_names: &[String],
+        semantic_u8: bool,
+        metadata: &ModelMetadata,
+        config: &InferenceConfig,
+        preprocessed: &[crate::preprocessing::PreprocessResult],
+        image_arrays: Vec<Array3<u8>>,
+        paths: &[String],
+        speed: &Speed,
+        inference_shape: (u32, u32),
+    ) -> Result<Vec<Vec<Results>>> {
+        let output = |name: &String| {
+            outputs
+                .get(name.as_str())
+                .ok_or_else(|| InferenceError::InferenceError(format!("Output '{name}' not found")))
+        };
+        if semantic_u8 {
+            let views = output_names
+                .iter()
+                .map(|name| {
+                    let (shape, data) = output(name)?.try_extract_tensor::<u8>().map_err(|e| {
+                        InferenceError::InferenceError(format!(
+                            "Failed to extract uint8 output: {e}"
+                        ))
+                    })?;
+                    Ok((data, shape_to_usize(shape)))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(Self::semantic_mask_batch_results(
+                &views,
+                &metadata.names,
+                image_arrays,
+                paths,
+                speed,
+                inference_shape,
+            ));
+        }
+        let bufs = output_names
+            .iter()
+            .map(|name| {
+                let output = output(name)?;
+                if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
+                    return Ok((std::borrow::Cow::Borrowed(data), shape_to_usize(shape)));
+                }
+                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
+                    InferenceError::InferenceError(format!("Failed to extract output: {e}"))
+                })?;
+                let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
+                Ok((std::borrow::Cow::Owned(converted), shape_to_usize(shape)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let views: Vec<(&[f32], Vec<usize>)> =
+            bufs.iter().map(|(b, s)| (b.as_ref(), s.clone())).collect();
+        Ok(Self::postprocess_batch_results(
+            &views,
+            metadata,
+            config,
+            preprocessed,
+            image_arrays,
+            paths,
+            speed,
+            inference_shape,
+        ))
+    }
+
     /// Slice image `i` out of each batched output, keeping the full rank with a batch of one
     /// (which is what `postprocess` expects).
     ///
@@ -1626,35 +1701,18 @@ impl YOLOModel {
                 inference_shape,
             ));
         };
-        if semantic_u8 {
-            return Self::extract_and_invoke_u8(
-                outputs,
-                &self.output_names,
-                inference_time,
-                |outs, _| {
-                    Ok(Self::semantic_mask_batch_results(
-                        outs,
-                        &self.metadata.names,
-                        image_arrays,
-                        paths,
-                        &speed,
-                        inference_shape,
-                    ))
-                },
-            );
-        }
-        Self::extract_and_invoke(outputs, &self.output_names, inference_time, |outs, _| {
-            Ok(Self::postprocess_batch_results(
-                outs,
-                &self.metadata,
-                &self.config,
-                &preprocessed,
-                image_arrays,
-                paths,
-                &speed,
-                inference_shape,
-            ))
-        })
+        Self::postprocess_outputs(
+            outputs,
+            &self.output_names,
+            semantic_u8,
+            &self.metadata,
+            &self.config,
+            &preprocessed,
+            image_arrays,
+            paths,
+            &speed,
+            inference_shape,
+        )
     }
 
     /// Run inference on the default Ultralytics sample images.
@@ -1866,43 +1924,19 @@ impl YOLOModel {
             0.0,
         );
 
-        if semantic_mask_output {
-            // Fast path: the exported ONNX graph already contains ArgMax+Cast(uint8) nodes,
-            // so ONNX Runtime returns a uint8 class map directly (no f32 logits, no CPU argmax).
-            debug_assert_eq!(self.metadata.task, crate::task::Task::Semantic);
-            return Self::extract_and_invoke_u8(
-                &outputs,
-                &self.output_names,
-                inference_ms_total,
-                |outputs, _| {
-                    Ok(Self::semantic_mask_batch_results(
-                        outputs,
-                        &self.metadata.names,
-                        image_arrays,
-                        paths,
-                        &speed,
-                        inference_shape,
-                    ))
-                },
-            );
-        }
-
-        Self::extract_and_invoke(
+        // A baked-in ArgMax+Cast(uint8) graph returns the class map directly.
+        debug_assert!(!semantic_mask_output || self.metadata.task == Task::Semantic);
+        Self::postprocess_outputs(
             &outputs,
             &self.output_names,
-            inference_ms_total,
-            |outputs, _| {
-                Ok(Self::postprocess_batch_results(
-                    outputs,
-                    &self.metadata,
-                    &self.config,
-                    &preprocessed_results,
-                    image_arrays,
-                    paths,
-                    &speed,
-                    inference_shape,
-                ))
-            },
+            semantic_mask_output,
+            &self.metadata,
+            &self.config,
+            &preprocessed_results,
+            image_arrays,
+            paths,
+            &speed,
+            inference_shape,
         )
     }
 
@@ -1964,85 +1998,6 @@ impl YOLOModel {
             InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
         })?;
         Self::run_timed(session, ort::inputs![input_name => input_tensor])
-    }
-
-    /// Build zero-copy slice views over ORT output tensors and call `cb`.
-    ///
-    /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
-    /// buffers (no extra Vec allocation), plus the measured `session.run()` time in ms.
-    /// This avoids a ~40 ms memcpy for large semantic segmentation outputs.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn extract_and_invoke<R>(
-        outputs: &ort::session::SessionOutputs<'_>,
-        output_names: &[String],
-        inference_ms: f64,
-        cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        // Holds each output as either a zero-copy borrow into the ORT buffer or, for f16
-        // outputs needing dtype conversion, an owned Vec<f32>. Vec reallocation moves the
-        // enum value but not the heap allocation behind `Vec<f32>`, so `.as_slice()` taken
-        // in the second pass is stable.
-        enum OutBuf<'a> {
-            Borrow(&'a [f32]),
-            Owned(Vec<f32>),
-        }
-        let mut bufs: Vec<(OutBuf<'_>, Vec<usize>)> = Vec::with_capacity(output_names.len());
-        for output_name in output_names {
-            let output = outputs.get(output_name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
-            })?;
-            let (buf, shape) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
-                let shape_vec = shape_to_usize(shape);
-                (OutBuf::Borrow(data), shape_vec)
-            } else {
-                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
-                    InferenceError::InferenceError(format!("Failed to extract output: {e}"))
-                })?;
-                let shape_vec = shape_to_usize(shape);
-                let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
-                (OutBuf::Owned(converted), shape_vec)
-            };
-            bufs.push((buf, shape));
-        }
-        let views: Vec<(&[f32], Vec<usize>)> = bufs
-            .iter()
-            .map(|(b, s)| {
-                let slice: &[f32] = match b {
-                    OutBuf::Borrow(d) => d,
-                    OutBuf::Owned(v) => v.as_slice(),
-                };
-                (slice, s.clone())
-            })
-            .collect();
-
-        cb(&views, inference_ms)
-    }
-
-    /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`
-    /// (e.g. a semantic segmentation model that has ArgMax+Cast(uint8) baked in).
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn extract_and_invoke_u8<R>(
-        outputs: &ort::session::SessionOutputs<'_>,
-        output_names: &[String],
-        inference_ms: f64,
-        cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        // All outputs are direct borrows from ORT - no fallback path, no unsafe needed.
-        let views: Vec<(&[u8], Vec<usize>)> = output_names
-            .iter()
-            .map(|name| {
-                let output = outputs.get(name.as_str()).ok_or_else(|| {
-                    InferenceError::InferenceError(format!("Output '{name}' not found"))
-                })?;
-                let (shape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
-                    InferenceError::InferenceError(format!("Failed to extract uint8 output: {e}"))
-                })?;
-                let shape_vec = shape_to_usize(shape);
-                Ok((data, shape_vec))
-            })
-            .collect::<Result<_>>()?;
-
-        cb(&views, inference_ms)
     }
 
     /// Get the model's task type as detected from ONNX metadata.
