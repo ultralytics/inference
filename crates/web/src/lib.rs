@@ -518,7 +518,7 @@ impl YoloModel {
     ) -> Result<JsValue, JsError> {
         let t_pre = now_ms();
 
-        let (orig_img, pre) = preprocess_image(
+        let (orig_img, mut pre) = preprocess_image(
             dynimg,
             self.imgsz,
             self.metadata.stride,
@@ -530,9 +530,15 @@ impl YoloModel {
         // Resolve the output dtype path before borrowing the session for inference.
         let semantic_baked = self.semantic_baked();
 
-        // Upload the NCHW f32 tensor into the ORT (WebGPU) context and run.
+        // The tensor actually fed to the model, which `rect` makes differ from `imgsz`.
+        // `build_instance_masks` turns this into prototype-space crop coordinates.
+        let tensor_shape = pre.tensor.shape();
+        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
+
+        // Upload the NCHW f32 tensor into the ORT (WebGPU) context and run. Postprocessing
+        // reads only the letterbox geometry from `pre`, so the tensor moves instead of cloning.
         let t_inf = now_ms();
-        let input = Tensor::from_array(pre.tensor.clone()).map_err(map_ort)?;
+        let input = Tensor::from_array(std::mem::take(&mut pre.tensor)).map_err(map_ort)?;
         let run_options = RunOptions::new().map_err(map_ort)?;
         let mut outputs = self
             .session
@@ -547,10 +553,6 @@ impl YoloModel {
         let t_post = now_ms();
         let config = make_config(conf, iou, classes);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
-        // The tensor actually fed to the model, which `rect` makes differ from `imgsz`.
-        // `build_instance_masks` turns this into prototype-space crop coordinates.
-        let tensor_shape = pre.tensor.shape();
-        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
         // Postprocess is timed after it returns (below), the same as the `YoloPipeline`
         // path: building the `Speed` here would only measure the setup above it.
         let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, 0.0);
