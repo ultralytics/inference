@@ -33,8 +33,8 @@ use wasm_bindgen::prelude::*;
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{postprocess_semantic_mask, postprocess_with_head};
 use ultralytics_inference::preprocessing::{
-    PreprocessResult, calculate_rect_size, image_to_array, preprocess_image_center_crop,
-    preprocess_image_stretch, preprocess_image_with_precision,
+    PreprocessResult, calculate_rect_size, preprocess_image_center_crop, preprocess_image_stretch,
+    preprocess_image_with_precision,
 };
 use ultralytics_inference::results::Speed;
 use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
@@ -221,30 +221,37 @@ fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
 /// the NCHW f32 input tensor. Classification center-crops, RT-DETR scale-fills, every
 /// other task letterboxes. Shared by the ONNX and LiteRT paths.
 fn preprocess_image(
-    dynimg: &image::DynamicImage,
+    dynimg: image::DynamicImage,
     imgsz: (usize, usize),
     stride: u32,
     task: Task,
     rect: bool,
     rtdetr: bool,
 ) -> (Array3<u8>, PreprocessResult) {
+    // Convert to RGB once and reuse it for both outputs: an RGBA canvas frame would
+    // otherwise be converted twice, and a decoded RGB image now moves without a copy.
+    let rgb = image::DynamicImage::ImageRgb8(dynimg.into_rgb8());
     let pre = if task == Task::Classify {
-        preprocess_image_center_crop(dynimg, imgsz, None)
+        preprocess_image_center_crop(&rgb, imgsz, None)
     } else if rtdetr {
         // RT-DETR is trained on a stretched square input, so it never letterboxes.
-        preprocess_image_stretch(dynimg, imgsz, None)
+        preprocess_image_stretch(&rgb, imgsz, None)
     } else {
         // Rectangular inference pads only up to the stride instead of to a square, so a
         // 16:9 frame skips ~40% of its pixels. Only a model that left its height and width
         // dynamic can accept the resulting shape; see `YoloModel::rect`.
         let target = if rect {
-            calculate_rect_size(dynimg.width(), dynimg.height(), imgsz, stride)
+            calculate_rect_size(rgb.width(), rgb.height(), imgsz, stride)
         } else {
             imgsz
         };
-        preprocess_image_with_precision(dynimg, target, stride, None)
+        preprocess_image_with_precision(&rgb, target, stride, None)
     };
-    (image_to_array(dynimg), pre)
+    let rgb = rgb.into_rgb8();
+    let (width, height) = rgb.dimensions();
+    let orig_img = Array3::from_shape_vec((height as usize, width as usize, 3), rgb.into_raw())
+        .expect("rgb buffer is height*width*3");
+    (orig_img, pre)
 }
 
 /// Wrap a raw `width * height * 4` RGBA buffer (e.g. a canvas/webcam `ImageData`)
@@ -512,7 +519,7 @@ impl YoloModel {
         let t_pre = now_ms();
 
         let (orig_img, pre) = preprocess_image(
-            &dynimg,
+            dynimg,
             self.imgsz,
             self.metadata.stride,
             self.metadata.task,
@@ -739,7 +746,7 @@ impl YoloPipeline {
         // `rect: false` - the engine allocated its input tensor from `inputShape`, so the
         // shape has to stay put across frames.
         let (orig_img, pre) = preprocess_image(
-            &dynimg,
+            dynimg,
             self.imgsz,
             self.metadata.stride,
             self.metadata.task,
