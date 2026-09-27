@@ -734,7 +734,18 @@ fn extract_detect_boxes(
 /// Applies sigmoid to `mask_flat`, resizes from the prototype grid (`mw×mh`) to the
 /// original image size (`ow×oh`) with a letterbox crop, then zeros pixels outside the
 /// bounding box stored in `box_data[0..4]` (x1, y1, x2, y2).
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+///
+/// The bilinear resize runs as two single-axis passes so only the box columns are ever
+/// resized to full height, instead of the whole `ow×oh` frame per detection. Each pass
+/// gets the same crop and destination size along its axis as a single full-frame resize,
+/// so `fast_image_resize` computes the same coefficients, the same f32 intermediate rows,
+/// and the output is exactly the same.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn apply_mask_proto(
     mut mask_out: ArrayViewMut2<f32>,
     mask_flat: &ArrayView1<f32>,
@@ -748,39 +759,11 @@ fn apply_mask_proto(
     crop_w: f32,
     crop_h: f32,
 ) {
-    let mut resizer = Resizer::new();
-    let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
-
-    let f32_data: Vec<f32> = mask_flat
-        .iter()
-        .map(|&v| 1.0 / (1.0 + (-v).exp()))
-        .collect();
-    let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-    let Ok(src_image) = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32) else {
-        return;
-    };
-
-    let mut dst_image = Image::new(ow, oh, PixelType::F32);
-    let options = ResizeOptions::new().resize_alg(resize_alg).crop(
-        f64::from(crop_x.max(0.0)),
-        f64::from(crop_y.max(0.0)),
-        f64::from(crop_w.max(1.0).min(mw as f32)),
-        f64::from(crop_h.max(1.0).min(mh as f32)),
-    );
-    if resizer
-        .resize(&src_image, &mut dst_image, &options)
-        .is_err()
-    {
-        return;
-    }
-
-    let dst_slice: &[f32] = bytemuck::cast_slice(dst_image.buffer());
     let x1 = box_data[0].max(0.0).min(ow as f32);
     let y1 = box_data[1].max(0.0).min(oh as f32);
     let x2 = box_data[2].max(0.0).min(ow as f32);
     let y2 = box_data[3].max(0.0).min(oh as f32);
 
-    let (ow, oh) = (ow as usize, oh as usize);
     if ow == 0 || oh == 0 {
         return;
     }
@@ -791,18 +774,59 @@ fn apply_mask_proto(
     // degenerate box gives an empty range and writes nothing, as before.
     let x_start = x1.ceil() as usize;
     let y_start = y1.ceil() as usize;
-    let x_end = (x2.floor() as usize).min(ow - 1);
-    let y_end = (y2.floor() as usize).min(oh - 1);
+    let x_end = (x2.floor() as usize).min(ow as usize - 1);
+    let y_end = (y2.floor() as usize).min(oh as usize - 1);
 
     if x_start > x_end || y_start > y_end {
         return;
     }
 
-    // Copy the box region in one row-wise `assign` rather than element by element.
-    let src = ArrayView2::from_shape((oh, ow), dst_slice).expect("resized buffer is oh*ow");
+    let f32_data: Vec<f32> = mask_flat
+        .iter()
+        .map(|&v| 1.0 / (1.0 + (-v).exp()))
+        .collect();
+    let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
+    let Ok(src_image) = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32) else {
+        return;
+    };
+
+    let mut resizer = Resizer::new();
+    let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
+
+    // Horizontal pass: every prototype row resized to the full output width. Keeping all
+    // `mh` rows at an integer top makes `fast_image_resize` skip its vertical pass.
+    let mut rows = Image::new(ow, mh as u32, PixelType::F32);
+    let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+        f64::from(crop_x.max(0.0)),
+        0.0,
+        f64::from(crop_w.max(1.0).min(mw as f32)),
+        mh as f64,
+    );
+    if resizer.resize(&src_image, &mut rows, &options).is_err() {
+        return;
+    }
+
+    // Vertical pass over the box columns only, to the full output height. An integer
+    // left edge and unchanged width make `fast_image_resize` skip its horizontal pass.
+    let box_w = x_end - x_start + 1;
+    let mut cols = Image::new(box_w as u32, oh, PixelType::F32);
+    let options = ResizeOptions::new().resize_alg(resize_alg).crop(
+        x_start as f64,
+        f64::from(crop_y.max(0.0)),
+        box_w as f64,
+        f64::from(crop_h.max(1.0).min(mh as f32)),
+    );
+    if resizer.resize(&rows, &mut cols, &options).is_err() {
+        return;
+    }
+
+    // Copy the box rows in one row-wise `assign` rather than element by element.
+    let cols_slice: &[f32] = bytemuck::cast_slice(cols.buffer());
+    let src = ArrayView2::from_shape((oh as usize, box_w), cols_slice)
+        .expect("resized buffer is oh*box_w");
     mask_out
         .slice_mut(s![y_start..=y_end, x_start..=x_end])
-        .assign(&src.slice(s![y_start..=y_end, x_start..=x_end]));
+        .assign(&src.slice(s![y_start..=y_end, ..]));
 }
 
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
