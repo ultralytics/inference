@@ -334,9 +334,16 @@ impl BilinearVideoDecoder {
 
         let context_decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
             .map_err(|e| InferenceError::VideoError(format!("Codec context: {e}")))?;
+        // libavcodec decodes on one thread unless asked; `threads=auto` sizes the pool to the
+        // CPU count and keeps its default frame+slice threading, with identical output.
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("threads", "auto");
+        let context_decoder = context_decoder.decoder();
+        let codec = ffmpeg::decoder::find(context_decoder.id())
+            .ok_or_else(|| InferenceError::VideoError("Video decoder not found".into()))?;
         let decoder = context_decoder
-            .decoder()
-            .video()
+            .open_as_with(codec, options)
+            .and_then(ffmpeg::decoder::Opened::video)
             .map_err(|e| InferenceError::VideoError(format!("Video decoder: {e}")))?;
 
         Ok(Self {
@@ -656,15 +663,19 @@ impl SourceIterator {
             })?;
         self.webcam_stream_index = stream.index();
 
-        let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+        let mut decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
             .map_err(|e| {
                 InferenceError::VideoError(format!("Failed to read webcam stream parameters: {e}"))
             })?
-            .decoder()
-            .video()
-            .map_err(|e| {
-                InferenceError::VideoError(format!("Failed to create webcam decoder: {e}"))
-            })?;
+            .decoder();
+        // Slice threads with an auto count; frame threading would hold frames back, adding
+        // latency and breaking the one frame per packet capture loop below.
+        decoder.set_threading(ffmpeg::threading::Config::kind(
+            ffmpeg::threading::Type::Slice,
+        ));
+        let decoder = decoder.video().map_err(|e| {
+            InferenceError::VideoError(format!("Failed to create webcam decoder: {e}"))
+        })?;
 
         self.webcam_decoder = Some((ictx, decoder));
         Ok(())
