@@ -147,9 +147,12 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
             let copied = io::copy(&mut response.into_body().into_reader(), &mut file);
             drop(file);
             if let Err(e) = copied.and_then(|_| fs::rename(&tmp_path, &font_path)) {
-                eprintln!("Failed to download font: {e}");
                 let _ = fs::remove_file(&tmp_path);
-                return None;
+                // A concurrent caller may have already renamed its complete copy into place.
+                if !font_path.exists() {
+                    eprintln!("Failed to download font: {e}");
+                    return None;
+                }
             }
 
             Some(font_path)
