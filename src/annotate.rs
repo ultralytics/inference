@@ -305,11 +305,6 @@ fn draw_line_segment(
     color: Rgb<u8>,
     thickness: i32,
 ) {
-    #[allow(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_possible_wrap
-    )]
     let (width, height) = img.dimensions();
 
     // Bresenham's line algorithm with thickness
