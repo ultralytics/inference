@@ -703,6 +703,19 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
+在 JetPack 7 的 Jetson 上，NVIDIA 的 `ffmpeg` 软件包（`8.0.1-nvidia1`）会替换 FFmpeg 的 `pkg-config` 文件，但不提供
+`libswscale` 的文件，因此构建会把 FFmpeg 8 与 Ubuntu 的 FFmpeg 6.1 `libswscale` 混在一起；它额外的
+`AV_PIX_FMT_NVBUFSURFACE` 像素格式也会导致 `ffmpeg-next` 编译失败。请将 FFmpeg 构建到独立的前缀目录并让构建指向它（如需用
+`--save` 保存视频，请安装 `libx264-dev` 并加上 `--enable-gpl --enable-libx264`）：
+
+```bash
+./configure --prefix=$HOME/ffmpeg --enable-shared --disable-programs --disable-doc
+make -j$(nproc) && make install
+export PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig
+export LD_LIBRARY_PATH=$HOME/ffmpeg/lib:$LD_LIBRARY_PATH
+cargo build --release --features video
+```
+
 如需构建不含标注和可视化支持的更小二进制：
 
 ```bash

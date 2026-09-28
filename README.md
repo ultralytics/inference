@@ -710,6 +710,19 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
+On a Jetson with JetPack 7, NVIDIA's `ffmpeg` package (`8.0.1-nvidia1`) replaces the FFmpeg `pkg-config` files but ships
+none for `libswscale`, so the build mixes FFmpeg 8 with Ubuntu's FFmpeg 6.1 `libswscale`, and its extra
+`AV_PIX_FMT_NVBUFSURFACE` pixel format also fails to compile in `ffmpeg-next`. Build FFmpeg into its own prefix and point
+the build at it (add `--enable-gpl --enable-libx264` with `libx264-dev` installed if you save videos with `--save`):
+
+```bash
+./configure --prefix=$HOME/ffmpeg --enable-shared --disable-programs --disable-doc
+make -j$(nproc) && make install
+export PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig
+export LD_LIBRARY_PATH=$HOME/ffmpeg/lib:$LD_LIBRARY_PATH
+cargo build --release --features video
+```
+
 To build without annotation and visualization support (smaller binary):
 
 ```bash
