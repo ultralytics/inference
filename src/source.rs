@@ -357,7 +357,7 @@ impl BilinearVideoDecoder {
         loop {
             // Try to receive a frame from the decoder first
             if self.decoder.receive_frame(&mut decoded).is_ok() {
-                return Some(self.frame_to_image(&decoded));
+                return Some(frame_to_rgb_image(&mut self.scaler, &decoded));
             }
 
             // Read packets until we find one for our stream
@@ -376,7 +376,7 @@ impl BilinearVideoDecoder {
                 // End of stream - flush decoder
                 let _ = self.decoder.send_eof();
                 return if self.decoder.receive_frame(&mut decoded).is_ok() {
-                    Some(self.frame_to_image(&decoded))
+                    Some(frame_to_rgb_image(&mut self.scaler, &decoded))
                 } else {
                     None
                 };
@@ -384,18 +384,9 @@ impl BilinearVideoDecoder {
 
             // Try to receive again after sending the packet
             if self.decoder.receive_frame(&mut decoded).is_ok() {
-                return Some(self.frame_to_image(&decoded));
+                return Some(frame_to_rgb_image(&mut self.scaler, &decoded));
             }
         }
-    }
-
-    /// Convert a decoded video frame to RGB24 `DynamicImage` using BILINEAR scaler.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn frame_to_image(
-        &mut self,
-        decoded: &ffmpeg::util::frame::video::Video,
-    ) -> Result<DynamicImage> {
-        frame_to_rgb_image(&mut self.scaler, decoded)
     }
 }
 
