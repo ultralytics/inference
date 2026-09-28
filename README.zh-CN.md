@@ -703,6 +703,9 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
+视频文件和流会使用所有 CPU 核心解码（FFmpeg `threads=auto`），摄像头使用切片线程以保持低延迟。解码中的帧会占用额外内存，
+1080p 到 4K 视频的峰值内存大约增加 10% 到 35%。
+
 在 JetPack 7 的 Jetson 上，NVIDIA 的 `ffmpeg` 软件包（`8.0.1-nvidia1`）会替换 FFmpeg 的 `pkg-config` 文件，但不提供
 `libswscale` 的文件，因此构建会把 FFmpeg 8 与 Ubuntu 的 FFmpeg 6.1 `libswscale` 混在一起；它额外的
 `AV_PIX_FMT_NVBUFSURFACE` 像素格式也会导致 `ffmpeg-next` 编译失败。请将 FFmpeg 构建到独立的前缀目录并让构建指向它（如需用

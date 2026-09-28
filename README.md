@@ -710,6 +710,9 @@ apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdev
 cargo build --release --features video
 ```
 
+Video files and streams decode on every CPU core (FFmpeg `threads=auto`) and webcams use slice threads to keep latency
+low. The frames in flight cost some memory, about 10 to 35 percent more peak RAM on 1080p to 4K video.
+
 On a Jetson with JetPack 7, NVIDIA's `ffmpeg` package (`8.0.1-nvidia1`) replaces the FFmpeg `pkg-config` files but ships
 none for `libswscale`, so the build mixes FFmpeg 8 with Ubuntu's FFmpeg 6.1 `libswscale`, and its extra
 `AV_PIX_FMT_NVBUFSURFACE` pixel format also fails to compile in `ffmpeg-next`. Build FFmpeg into its own prefix and point
