@@ -181,6 +181,8 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut last_err = InferenceError::ModelLoadError(String::new());
 
     for attempt in 1..=MAX_RETRIES {
+        // An error paired with whether retrying the download could help.
+        let fail = |msg: String, transient: bool| (InferenceError::ModelLoadError(msg), transient);
         let attempt_result: std::result::Result<(), (InferenceError, bool)> = (|| {
             let config = ureq::Agent::config_builder()
                 .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
@@ -196,7 +198,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                     ureq::Error::Io(io_err) => format!("Network error downloading {url}: {io_err}"),
                     _ => format!("Failed to download {url}: {e}"),
                 };
-                (InferenceError::ModelLoadError(msg), is_transient(&e))
+                fail(msg, is_transient(&e))
             })?;
 
             let total_size: u64 = response
@@ -224,11 +226,8 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
             eprintln!("Downloading {url} to '{}'", dest.display());
             let stream_result: std::result::Result<(), (InferenceError, bool)> = {
                 let mut writer = BufWriter::new(File::create(&temp_path).map_err(|e| {
-                    (
-                        InferenceError::ModelLoadError(format!(
-                            "Failed to create temp file {}: {e}",
-                            temp_path.display()
-                        )),
+                    fail(
+                        format!("Failed to create temp file {}: {e}", temp_path.display()),
                         false,
                     )
                 })?);
@@ -238,24 +237,14 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
                 (|| {
                     loop {
-                        let bytes_read = reader.read(&mut buffer).map_err(|e| {
-                            (
-                                InferenceError::ModelLoadError(format!(
-                                    "Failed to read from network: {e}"
-                                )),
-                                true,
-                            )
-                        })?;
+                        let bytes_read = reader
+                            .read(&mut buffer)
+                            .map_err(|e| fail(format!("Failed to read from network: {e}"), true))?;
                         if bytes_read == 0 {
                             break;
                         }
                         writer.write_all(&buffer[..bytes_read]).map_err(|e| {
-                            (
-                                InferenceError::ModelLoadError(format!(
-                                    "Failed to write to temp file: {e}"
-                                )),
-                                false,
-                            )
+                            fail(format!("Failed to write to temp file: {e}"), false)
                         })?;
                         downloaded += bytes_read as u64;
 
@@ -269,14 +258,9 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                         eprint!("\r\x1b[K{}", progress_line(downloaded, total_size, elapsed));
                         std::io::stderr().flush().ok();
                     }
-                    writer.flush().map_err(|e| {
-                        (
-                            InferenceError::ModelLoadError(format!(
-                                "Failed to flush temp file: {e}"
-                            )),
-                            false,
-                        )
-                    })?;
+                    writer
+                        .flush()
+                        .map_err(|e| fail(format!("Failed to flush temp file: {e}"), false))?;
                     Ok(())
                 })()
                 // writer, reader, buffer, last_update dropped here
@@ -295,11 +279,8 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                 if dest.exists() {
                     return Ok(());
                 }
-                return Err((
-                    InferenceError::ModelLoadError(format!(
-                        "Failed to move downloaded file to {}: {e}",
-                        dest.display()
-                    )),
+                return Err(fail(
+                    format!("Failed to move downloaded file to {}: {e}", dest.display()),
                     false,
                 ));
             }
