@@ -1090,15 +1090,11 @@ fn postprocess_pose(
 
     let keypoints_data = Array3::from_shape_vec((num_kept, num_keypoints, kpt_dim), flat_kpts)
         .expect("flat length matches (n, nk, kpt_dim)");
-
-    if num_kept == 0 {
-        results.keypoints = Some(Keypoints::new(keypoints_data, preprocess.orig_shape));
-        return results;
-    }
-
-    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    // An empty keypoints tensor is still emitted when nothing is kept.
     results.keypoints = Some(Keypoints::new(keypoints_data, preprocess.orig_shape));
-
+    if num_kept > 0 {
+        results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    }
     results
 }
 
