@@ -20,6 +20,7 @@
     clippy::manual_div_ceil
 )]
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -190,20 +191,12 @@ fn build_preprocess_result(
     // gains from the rounded extents can diverge slightly, shifting boxes and changing NMS.
     let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size, stretch);
 
-    let tensor = match image {
-        DynamicImage::ImageRgb8(rgb) => {
-            fused_zerocopy_preprocess(rgb.as_raw(), orig_width, orig_height, target_size, &geom)
-        }
-        _ => {
-            let src_rgb = image.to_rgb8();
-            fused_zerocopy_preprocess(
-                src_rgb.as_raw(),
-                orig_width,
-                orig_height,
-                target_size,
-                &geom,
-            )
-        }
+    // Borrow the samples of an RGB8 image; any other layout converts a copy, dropped here.
+    let tensor = {
+        let rgb = image
+            .as_rgb8()
+            .map_or_else(|| Cow::Owned(image.to_rgb8()), Cow::Borrowed);
+        fused_zerocopy_preprocess(rgb.as_raw(), orig_width, orig_height, target_size, &geom)
     };
 
     let tensor_f16 = if quantize == Some(Quantization::Fp16) {
