@@ -926,16 +926,15 @@ impl YOLOModel {
             .map_err(|e| ov_err(&e))
     }
 
-    /// Distribute the elapsed wall time since `start` evenly across every result in the
-    /// batch and stamp it onto `res.speed.postprocess`. Shared by both postprocess closures.
-    fn apply_postprocess_time(batch: &mut [Vec<Results>], start: Instant, n_images_f: f64) {
+    /// Distribute the elapsed wall time since `start` evenly across the images of `batch`
+    /// and stamp it onto every result's `speed.postprocess`. Shared by both batch builders.
+    fn apply_postprocess_time(mut batch: Vec<Vec<Results>>, start: Instant) -> Vec<Vec<Results>> {
         #[allow(clippy::cast_precision_loss)]
-        let ms = start.elapsed().as_secs_f64() * 1000.0 / n_images_f;
-        for img_results in batch {
-            for res in img_results {
-                res.speed.postprocess = Some(ms);
-            }
+        let ms = start.elapsed().as_secs_f64() * 1000.0 / batch.len() as f64;
+        for res in batch.iter_mut().flatten() {
+            res.speed.postprocess = Some(ms);
         }
+        batch
     }
 
     /// Concatenate per-image input tensor views along the batch axis into a 4D array.
@@ -1002,63 +1001,148 @@ impl YOLOModel {
         Self::concat_views(&arrays, "FP16")
     }
 
-    /// Build per-image semantic-mask results from a batched `uint8` model output.
-    ///
-    /// Shared by the FP16 and FP32 semantic fast paths (models with ArgMax+Cast
-    /// baked into the ONNX graph). Consumes `preprocessed_results` and
-    /// `image_arrays`, slicing the batched output into per-image class maps.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::too_many_arguments,
-        clippy::needless_pass_by_value
-    )]
-    fn semantic_mask_batch_results(
-        outputs: &[(&[u8], Vec<usize>)],
-        inference_ms_total: f64,
-        n_images_f: f64,
-        preprocess_time: f64,
-        preprocessed_results: Vec<crate::preprocessing::PreprocessResult>,
+    /// Build per-image results from a batched f32 model output, decoding each image's slice
+    /// with the model's head. Shared by the CPU and `cuda-preprocess` paths; every image in
+    /// the batch ran at the same `inference_shape`.
+    #[allow(clippy::too_many_arguments)]
+    fn postprocess_batch_results(
+        outputs: &[(&[f32], Vec<usize>)],
+        metadata: &ModelMetadata,
+        config: &InferenceConfig,
+        preprocessed: &[crate::preprocessing::PreprocessResult],
         image_arrays: Vec<Array3<u8>>,
         paths: &[String],
-        names: &Arc<HashMap<usize, String>>,
+        speed: &Speed,
+        inference_shape: (u32, u32),
     ) -> Vec<Vec<Results>> {
-        let inference_time = inference_ms_total / n_images_f;
         let start_postprocess = Instant::now();
-        let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(image_arrays.len());
-
-        for (i, (orig_img, preprocess_res)) in image_arrays
+        let batch_results = image_arrays
             .into_iter()
-            .zip(preprocessed_results)
+            .zip(preprocessed)
             .enumerate()
-        {
-            let path_i = paths.get(i).cloned().unwrap_or_default();
-            let speed = Speed::new(preprocess_time, inference_time, 0.0);
+            .map(|(i, (orig_img, pre))| {
+                vec![postprocess_with_head(
+                    Self::slice_batch_output(outputs, i),
+                    metadata.task,
+                    pre,
+                    config,
+                    Arc::clone(&metadata.names),
+                    orig_img,
+                    paths.get(i).cloned().unwrap_or_default(),
+                    speed.clone(),
+                    inference_shape,
+                    metadata.end2end,
+                    metadata.kpt_shape,
+                    metadata.is_rtdetr(),
+                )]
+            })
+            .collect();
+        Self::apply_postprocess_time(batch_results, start_postprocess)
+    }
 
-            // Build the per-image slice from the batch output.
-            let (data, shape) = &outputs[0];
-            let actual_batch = if shape[0] > 0 { shape[0] } else { 1 };
-            let elems_per_img = data.len() / actual_batch;
-            let img_slice = &data[i * elems_per_img..(i + 1) * elems_per_img];
-            // Per-image shape view (drops the batch dim). Zero-copy slice.
-            let img_shape: &[usize] = &shape[1..];
+    /// Build per-image semantic-mask results from a batched `uint8` model output (a model
+    /// with ArgMax+Cast baked into the ONNX graph), slicing out each image's class map.
+    fn semantic_mask_batch_results(
+        outputs: &[(&[u8], Vec<usize>)],
+        names: &Arc<HashMap<usize, String>>,
+        image_arrays: Vec<Array3<u8>>,
+        paths: &[String],
+        speed: &Speed,
+        inference_shape: (u32, u32),
+    ) -> Vec<Vec<Results>> {
+        let start_postprocess = Instant::now();
+        let batch_results = image_arrays
+            .into_iter()
+            .enumerate()
+            .map(|(i, orig_img)| {
+                let (data, shape) = &Self::slice_batch_output(outputs, i)[0];
+                vec![crate::postprocessing::postprocess_semantic_mask(
+                    data,
+                    &shape[1..],
+                    Arc::clone(names),
+                    orig_img,
+                    paths.get(i).cloned().unwrap_or_default(),
+                    speed.clone(),
+                    inference_shape,
+                )]
+            })
+            .collect();
+        Self::apply_postprocess_time(batch_results, start_postprocess)
+    }
 
-            let tensor_shape = preprocess_res.tensor.shape();
-            let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
-
-            let result = crate::postprocessing::postprocess_semantic_mask(
-                img_slice,
-                img_shape,
-                Arc::clone(names),
-                orig_img,
-                path_i,
+    /// Build per-image results from one run's outputs, shared by the CPU and `cuda-preprocess`
+    /// paths. When `semantic_u8`, the model has ArgMax+Cast(uint8) baked in and its only output
+    /// is a class map; otherwise every output is an f32 (or f16) head.
+    ///
+    /// Outputs are borrowed straight from the ORT-owned buffers, which avoids a ~40 ms memcpy
+    /// for large semantic segmentation outputs; only an f16 output is converted into an owned
+    /// f32 copy.
+    #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn postprocess_outputs(
+        outputs: &ort::session::SessionOutputs<'_>,
+        output_names: &[String],
+        semantic_u8: bool,
+        metadata: &ModelMetadata,
+        config: &InferenceConfig,
+        preprocessed: &[crate::preprocessing::PreprocessResult],
+        image_arrays: Vec<Array3<u8>>,
+        paths: &[String],
+        speed: &Speed,
+        inference_shape: (u32, u32),
+    ) -> Result<Vec<Vec<Results>>> {
+        let output = |name: &String| {
+            outputs
+                .get(name.as_str())
+                .ok_or_else(|| InferenceError::InferenceError(format!("Output '{name}' not found")))
+        };
+        if semantic_u8 {
+            let views = output_names
+                .iter()
+                .map(|name| {
+                    let (shape, data) = output(name)?.try_extract_tensor::<u8>().map_err(|e| {
+                        InferenceError::InferenceError(format!(
+                            "Failed to extract uint8 output: {e}"
+                        ))
+                    })?;
+                    Ok((data, shape_to_usize(shape)))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(Self::semantic_mask_batch_results(
+                &views,
+                &metadata.names,
+                image_arrays,
+                paths,
                 speed,
                 inference_shape,
-            );
-            batch_results.push(vec![result]);
+            ));
         }
-
-        Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
-        batch_results
+        let bufs = output_names
+            .iter()
+            .map(|name| {
+                let output = output(name)?;
+                if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
+                    return Ok((std::borrow::Cow::Borrowed(data), shape_to_usize(shape)));
+                }
+                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
+                    InferenceError::InferenceError(format!("Failed to extract output: {e}"))
+                })?;
+                let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
+                Ok((std::borrow::Cow::Owned(converted), shape_to_usize(shape)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let views: Vec<(&[f32], Vec<usize>)> =
+            bufs.iter().map(|(b, s)| (b.as_ref(), s.clone())).collect();
+        Ok(Self::postprocess_batch_results(
+            &views,
+            metadata,
+            config,
+            preprocessed,
+            image_arrays,
+            paths,
+            speed,
+            inference_shape,
+        ))
     }
 
     /// Slice image `i` out of each batched output, keeping the full rank with a batch of one
@@ -1066,10 +1150,10 @@ impl YOLOModel {
     ///
     /// The per-image stride comes from the output's own leading dimension, not the caller's
     /// image count, so a model with a pinned batch slices correctly.
-    fn slice_batch_output<'a>(
-        outputs: &[(&'a [f32], Vec<usize>)],
+    fn slice_batch_output<'a, T>(
+        outputs: &[(&'a [T], Vec<usize>)],
         i: usize,
-    ) -> Vec<(&'a [f32], Vec<usize>)> {
+    ) -> Vec<(&'a [T], Vec<usize>)> {
         outputs
             .iter()
             .map(|(data, shape)| {
@@ -1394,9 +1478,9 @@ impl YOLOModel {
         Ok(unsafe { ort::value::DynValue::from_ptr(value, None) })
     }
 
-    /// Whether a task's preprocessing is a letterbox, so [`Self::predict_image_cuda_pre`]
+    /// Whether a task's preprocessing is a letterbox, so [`Self::predict_cuda_pre`]
     /// can run it. Classify uses center-crop (not letterbox), so it's excluded. Semantic
-    /// is included: `predict_image_cuda_pre` handles both its f32-logits and baked-in
+    /// is included: `predict_cuda_pre` handles both its f32-logits and baked-in
     /// `ArgMax` (u8) output forms. Depth is included too: it is a plain letterbox + f32
     /// input with a single f32 output, post-processed through the shared pipeline like
     /// every other task.
@@ -1474,16 +1558,18 @@ impl YOLOModel {
         })
     }
 
-    /// CUDA-preprocess fast path used by [`Self::predict_image`] when
-    /// `cuda_preprocessor` is populated. Runs the fused letterbox+normalize kernel,
-    /// binds the resulting device buffer with [`Self::device_binding`],
-    /// then post-processes with the standard pipeline.
+    /// CUDA-preprocess fast path of [`Self::predict_internal`]. The fused letterbox+normalize
+    /// kernel writes every image straight into its slot of the device-side `[N, 3, H, W]`
+    /// input, so a batch costs no host tensor allocation and no concatenation. The run binds
+    /// that buffer with [`Self::device_binding`], or replays the CUDA graph of a batch-1
+    /// static model, then post-processes with the shared pipeline.
     #[cfg(feature = "cuda-preprocess")]
-    fn predict_image_cuda_pre(
+    #[allow(clippy::cast_precision_loss)]
+    fn predict_cuda_pre(
         &mut self,
-        image: &DynamicImage,
-        path: String,
-    ) -> Result<Vec<Results>> {
+        images: &[&DynamicImage],
+        paths: &[String],
+    ) -> Result<Vec<Vec<Results>>> {
         // A thread other than the capturing one has no graph yet, so it captures its own.
         if let Some(graph) = graph_mut(&mut self.graph_io)
             && graph.thread != std::thread::current().id()
@@ -1491,187 +1577,19 @@ impl YOLOModel {
             Self::capture_graph(&mut self.session, graph)?;
         }
         let _gpu = gpu_work();
-        // Computed before `run_binding` borrows the session: true when the
-        // ONNX bakes in ArgMax+Cast(u8) so the single output is a uint8 class
-        // map (semantic segmentation fast form).
+        // Computed before `run_binding` borrows the session: true when the ONNX bakes in
+        // ArgMax+Cast(u8) so the single output is a uint8 class map.
         let semantic_u8 = self.has_semantic_mask_output();
-
-        let start_preprocess = Instant::now();
-        let rgb_img = image.to_rgb8();
-        let (w, h) = (rgb_img.width(), rgb_img.height());
-        let rgb_bytes = rgb_img.into_raw();
-
-        // Same letterbox target the CPU path would pick, so both paths feed the model
-        // identical pixels. Computed from the model input, not the (stride-rounded)
-        // device buffer, and read before `cuda_preprocessor` borrows `self`.
-        let imgsz = self.imgsz();
-        let target = if self.rect_enabled() {
-            calculate_rect_size(w, h, imgsz, self.metadata.stride)
-        } else {
-            imgsz
-        };
-        let pre = self
-            .cuda_preprocessor
-            .as_mut()
-            .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
-        let geom = pre.preprocess(&rgb_bytes, h, w, false, target, 0)?;
-        let (dst_h, dst_w) = target;
-        #[allow(clippy::cast_precision_loss)]
-        let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0;
-
-        let binding;
-        let start_inference;
-        // A graph model replays over its fixed device I/O and copies the outputs back itself.
-        let outputs = if let Some(graph) = graph_mut(&mut self.graph_io) {
-            start_inference = Instant::now();
-            self.session
-                .run_binding(&graph.binding)
-                .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
-            let pre = self
-                .cuda_preprocessor
-                .as_ref()
-                .expect("predict_image_cuda_pre invariant: cuda_preprocessor.is_some()");
-            pre.read_back(
-                graph
-                    .outputs
-                    .iter_mut()
-                    .map(|(ptr, host, _)| (*ptr, host.as_mut_slice())),
-            )?;
-            None
-        } else {
-            binding = self.device_binding(&[1, 3, dst_h as i64, dst_w as i64])?;
-            start_inference = Instant::now();
-            let outputs = self
-                .session
-                .run_binding(&binding)
-                .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
-            binding
-                .synchronize_outputs()
-                .map_err(|e| InferenceError::InferenceError(format!("sync_outputs: {e}")))?;
-            Some(outputs)
-        };
-        #[allow(clippy::cast_precision_loss)]
-        let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0;
-
-        // HWC u8 ndarray for annotators/postprocess reuses the rgb buffer
-        // (moved in), no copy.
-        let orig_img = ndarray::Array3::from_shape_vec((h as usize, w as usize, 3), rgb_bytes)
-            .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))?;
-
-        let start_postprocess = Instant::now();
-        let speed = Speed::new(preprocess_time, inference_time, 0.0);
-
-        // Semantic fast form: the ONNX emits a single uint8 class map. Extract
-        // it directly (no f32 logits, no CPU argmax) and run the dedicated
-        // mask post-processor - mirrors the CPU `extract_and_invoke_u8` path.
-        if semantic_u8 {
-            let name = self.output_names.first().ok_or_else(|| {
-                InferenceError::InferenceError("semantic model has no output".into())
-            })?;
-            let output = outputs
-                .as_ref()
-                .and_then(|o| o.get(name.as_str()))
-                .ok_or_else(|| {
-                    InferenceError::InferenceError(format!("Output '{name}' not found"))
-                })?;
-            let (oshape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
-                InferenceError::InferenceError(format!("extract uint8 semantic output: {e}"))
-            })?;
-            let shape_vec = shape_to_usize(oshape);
-            // Drop the leading batch dim (batch == 1 here).
-            let img_shape: &[usize] = if shape_vec.len() > 1 {
-                &shape_vec[1..]
-            } else {
-                &shape_vec
-            };
-            let mut result = crate::postprocessing::postprocess_semantic_mask(
-                data,
-                img_shape,
-                Arc::clone(&self.metadata.names),
-                orig_img,
-                path,
-                speed,
-                (dst_h as u32, dst_w as u32),
-            );
-            #[allow(clippy::cast_precision_loss)]
-            let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
-            result.speed.postprocess = Some(postprocess_time);
-            return Ok(vec![result]);
-        }
-
-        // Minimal PreprocessResult - postprocess reads orig_shape, scale, padding.
-        // tensor/tensor_f16 are unused in the GPU path (preprocess ran on device).
-        let pre = crate::preprocessing::PreprocessResult {
-            tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
-            tensor_f16: None,
-            orig_shape: (h, w),
-            scale: geom.scale,
-            padding: (geom.pad_y as f32, geom.pad_x as f32),
-        };
-        let postprocess = |img_outputs: Vec<(&[f32], Vec<usize>)>| {
-            postprocess_with_head(
-                img_outputs,
-                self.metadata.task,
-                &pre,
-                &self.config,
-                Arc::clone(&self.metadata.names),
-                orig_img,
-                path,
-                speed,
-                (dst_h as u32, dst_w as u32),
-                self.metadata.end2end,
-                self.metadata.kpt_shape,
-                self.metadata.is_rtdetr(),
-            )
-        };
-        let mut result = if let Some(outputs) = &outputs {
-            // Reuse the shared zero-copy extraction helper (it handles the f16→f32
-            // fallback) rather than duplicating the borrow-or-own here.
-            Self::extract_and_invoke(outputs, &self.output_names, inference_time, |outs, _ms| {
-                Ok(postprocess(
-                    outs.iter().map(|(d, s)| (*d, s.clone())).collect(),
-                ))
-            })?
-        } else {
-            // The graph run left every output in `graph_io`'s host copies.
-            postprocess(
-                graph_mut(&mut self.graph_io)
-                    .into_iter()
-                    .flat_map(|g| &g.outputs)
-                    .map(|(_, d, s)| (d.as_slice(), s.clone()))
-                    .collect(),
-            )
-        };
-        #[allow(clippy::cast_precision_loss)]
-        let postprocess_time = start_postprocess.elapsed().as_secs_f64() * 1000.0;
-        result.speed.postprocess = Some(postprocess_time);
-
-        Ok(vec![result])
-    }
-
-    /// Batched twin of [`Self::predict_image_cuda_pre`]: letterboxes every image straight
-    /// into its slot of the device-side `[N, 3, H, W]` input, so a batch costs no host
-    /// tensor allocation and no concatenation - which otherwise dominate a batched GPU run.
-    #[cfg(feature = "cuda-preprocess")]
-    #[allow(clippy::cast_precision_loss)]
-    fn predict_batch_cuda_pre(
-        &mut self,
-        images: &[&DynamicImage],
-        paths: &[String],
-    ) -> Result<Vec<Vec<Results>>> {
-        let _gpu = gpu_work();
-        let n_images = images.len();
-        let n_images_f = n_images as f64;
+        let n_images_f = images.len() as f64;
         let start_preprocess = Instant::now();
 
-        // One letterbox target for the whole batch, chosen the same way the CPU batch path
-        // chooses it: `rect` applies only when the model is dynamic and every source shares
-        // a shape, since a mixed batch cannot share one padded target.
+        // One letterbox target for the whole batch, chosen the way the CPU path chooses it so
+        // both feed the model identical pixels: `rect` applies only when every image shares a
+        // shape, since a mixed batch cannot share one padded target. Computed from the model
+        // input, not the (stride-rounded) device buffer.
         let imgsz = self.imgsz();
-        let first_dims = images[0].dimensions();
-        let uniform_shape = images.iter().all(|img| img.dimensions() == first_dims);
-        let target = if self.rect_enabled() && uniform_shape {
-            let (w, h) = first_dims;
+        let (w, h) = images[0].dimensions();
+        let target = if self.rect_enabled() && images.iter().all(|i| i.dimensions() == (w, h)) {
             calculate_rect_size(w, h, imgsz, self.metadata.stride)
         } else {
             imgsz
@@ -1683,77 +1601,111 @@ impl YOLOModel {
             .par_iter()
             .map(|image| {
                 let rgb = image.to_rgb8();
-                let (w, h) = (rgb.width(), rgb.height());
+                let (w, h) = rgb.dimensions();
                 (rgb.into_raw(), h, w)
             })
             .collect();
-
-        let mut geoms = Vec::with_capacity(n_images);
-        for (slot, (bytes, h, w)) in frames.iter().enumerate() {
-            let pre = self
-                .cuda_preprocessor
-                .as_mut()
-                .expect("predict_batch_cuda_pre invariant: cuda_preprocessor.is_some()");
-            geoms.push(pre.preprocess(bytes, *h, *w, false, target, slot)?);
-        }
+        let pre = self
+            .cuda_preprocessor
+            .as_mut()
+            .expect("predict_cuda_pre invariant: cuda_preprocessor.is_some()");
+        let geoms = frames
+            .iter()
+            .enumerate()
+            .map(|(slot, (bytes, h, w))| pre.preprocess(bytes, *h, *w, false, target, slot))
+            .collect::<Result<Vec<_>>>()?;
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
 
         let (dst_h, dst_w) = target;
-        // The buffer was sized for `slots >= n_images` at load, checked before dispatch.
-        let binding = self.device_binding(&[n_images as i64, 3, dst_h as i64, dst_w as i64])?;
-        let start_inference = Instant::now();
-        let outputs = self
-            .session
-            .run_binding(&binding)
-            .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
-        binding
-            .synchronize_outputs()
-            .map_err(|e| InferenceError::InferenceError(format!("sync_outputs: {e}")))?;
+        let binding;
+        let start_inference;
+        // A graph model replays over its fixed device I/O and copies the outputs back itself.
+        let outputs = if let Some(graph) = graph_mut(&mut self.graph_io) {
+            start_inference = Instant::now();
+            self.session
+                .run_binding(&graph.binding)
+                .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
+            let pre = self
+                .cuda_preprocessor
+                .as_ref()
+                .expect("predict_cuda_pre invariant: cuda_preprocessor.is_some()");
+            pre.read_back(
+                graph
+                    .outputs
+                    .iter_mut()
+                    .map(|(ptr, host, _)| (*ptr, host.as_mut_slice())),
+            )?;
+            None
+        } else {
+            // The buffer was sized for `slots >= images.len()` at load, checked before dispatch.
+            let shape = [images.len() as i64, 3, dst_h as i64, dst_w as i64];
+            binding = self.device_binding(&shape)?;
+            start_inference = Instant::now();
+            let outputs = self
+                .session
+                .run_binding(&binding)
+                .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
+            binding
+                .synchronize_outputs()
+                .map_err(|e| InferenceError::InferenceError(format!("sync_outputs: {e}")))?;
+            Some(outputs)
+        };
         let inference_time = start_inference.elapsed().as_secs_f64() * 1000.0 / n_images_f;
 
+        // Postprocess reads only orig_shape, scale and padding: the input tensor never left
+        // the device, so it stays empty.
+        let preprocessed: Vec<_> = frames
+            .iter()
+            .zip(&geoms)
+            .map(|((_, h, w), geom)| crate::preprocessing::PreprocessResult {
+                tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
+                tensor_f16: None,
+                orig_shape: (*h, *w),
+                scale: geom.scale,
+                padding: (geom.pad_y as f32, geom.pad_x as f32),
+            })
+            .collect();
         // Reuse each frame's RGB buffer as the annotator's HWC array; no copy.
-        let mut origs = Vec::with_capacity(n_images);
-        for (bytes, h, w) in frames {
-            origs.push(
-                ndarray::Array3::from_shape_vec((h as usize, w as usize, 3), bytes)
-                    .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))?,
-            );
-        }
+        let image_arrays = frames
+            .into_iter()
+            .map(|(bytes, h, w)| {
+                Array3::from_shape_vec((h as usize, w as usize, 3), bytes)
+                    .map_err(|e| InferenceError::InferenceError(format!("Array3 from rgb: {e}")))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        let start_postprocess = Instant::now();
-        let mut batch_results =
-            Self::extract_and_invoke(&outputs, &self.output_names, inference_time, |outs, _ms| {
-                let mut results = Vec::with_capacity(n_images);
-                for (i, (orig_img, geom)) in origs.into_iter().zip(&geoms).enumerate() {
-                    let (h, w) = (orig_img.shape()[0] as u32, orig_img.shape()[1] as u32);
-                    let img_outputs = Self::slice_batch_output(outs, i);
-                    let pre = crate::preprocessing::PreprocessResult {
-                        tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
-                        tensor_f16: None,
-                        orig_shape: (h, w),
-                        scale: geom.scale,
-                        padding: (geom.pad_y as f32, geom.pad_x as f32),
-                    };
-                    results.push(vec![postprocess_with_head(
-                        img_outputs,
-                        self.metadata.task,
-                        &pre,
-                        &self.config,
-                        Arc::clone(&self.metadata.names),
-                        orig_img,
-                        paths.get(i).cloned().unwrap_or_default(),
-                        Speed::new(preprocess_time, inference_time, 0.0),
-                        (dst_h as u32, dst_w as u32),
-                        self.metadata.end2end,
-                        self.metadata.kpt_shape,
-                        self.metadata.is_rtdetr(),
-                    )]);
-                }
-                Ok(results)
-            })?;
-        Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
-
-        Ok(batch_results)
+        let speed = Speed::new(preprocess_time, inference_time, 0.0);
+        let inference_shape = (dst_h as u32, dst_w as u32);
+        let Some(outputs) = &outputs else {
+            // The graph run left every output in `graph_io`'s host copies.
+            let views: Vec<(&[f32], Vec<usize>)> = graph_mut(&mut self.graph_io)
+                .into_iter()
+                .flat_map(|g| &g.outputs)
+                .map(|(_, d, s)| (d.as_slice(), s.clone()))
+                .collect();
+            return Ok(Self::postprocess_batch_results(
+                &views,
+                &self.metadata,
+                &self.config,
+                &preprocessed,
+                image_arrays,
+                paths,
+                &speed,
+                inference_shape,
+            ));
+        };
+        Self::postprocess_outputs(
+            outputs,
+            &self.output_names,
+            semantic_u8,
+            &self.metadata,
+            &self.config,
+            &preprocessed,
+            image_arrays,
+            paths,
+            &speed,
+            inference_shape,
+        )
     }
 
     /// Run inference on the default Ultralytics sample images.
@@ -1835,38 +1787,23 @@ impl YOLOModel {
             return Ok(results);
         }
 
-        // Fast path for one image: GPU preprocess + zero-copy device input, for the tasks in
-        // `cuda_pre_task` with f32 input (the kernel writes f32, not f16). The CLI takes it
-        // too, because `BatchProcessor` always calls `predict_batch`, and so does every
-        // image of a CUDA graph model, which is pinned to batch 1 and chunked above.
+        // Fast path: GPU preprocess + zero-copy device input, one device slot per image, for
+        // the tasks in `cuda_pre_task` with f32 input (the kernel writes f32, not f16). The
+        // CLI takes it too, because `BatchProcessor` always calls `predict_batch`, and so
+        // does every image of a CUDA graph model, which is pinned to batch 1 and chunked
+        // above. `predict_batch` is public and its length is not tied to `config.batch`, so
+        // a batch larger than the buffer was sized for falls back to the CPU path rather
+        // than indexing past the last slot. Semantic models take it one image at a time.
         #[cfg(feature = "cuda-preprocess")]
-        if images.len() == 1
-            && self.cuda_preprocessor.is_some()
+        if self
+            .cuda_preprocessor
+            .as_ref()
+            .is_some_and(|p| images.len() <= p.slots())
             && !self.fp16_input
             && Self::cuda_pre_task(self.metadata.task)
+            && (images.len() == 1 || self.metadata.task != Task::Semantic)
         {
-            let path = paths.first().cloned().unwrap_or_default();
-            return Ok(vec![self.predict_image_cuda_pre(images[0], path)?]);
-        }
-
-        // The same fast path for a batch, filling one device slot per image.
-        // `predict_batch` is public and its length is not tied to `config.batch`, so a batch
-        // larger than the buffer was sized for falls back to the CPU path rather than
-        // indexing past the last slot.
-        #[cfg(feature = "cuda-preprocess")]
-        if images.len() > 1
-            && self
-                .cuda_preprocessor
-                .as_ref()
-                .is_some_and(|p| images.len() <= p.slots())
-            && !self.fp16_input
-            && !self.has_semantic_mask_output()
-            && matches!(
-                self.metadata.task,
-                Task::Detect | Task::Segment | Task::Pose | Task::Obb | Task::Depth
-            )
-        {
-            return self.predict_batch_cuda_pre(images, paths);
+            return self.predict_cuda_pre(images, paths);
         }
 
         // Get target size from config or metadata
@@ -1938,71 +1875,12 @@ impl YOLOModel {
         let preprocess_time =
             start_preprocess.elapsed().as_secs_f64() * 1000.0 / images.len() as f64;
 
-        // Postprocess driver: runs INSIDE the inference closure so we can read the
-        // ORT output buffers without copying. Returns the final batch_results.
-        let n_images = images.len();
-        #[allow(clippy::cast_precision_loss)]
-        let n_images_f = n_images as f64;
-        let task = self.metadata.task;
-        let names = &self.metadata.names;
-        let cfg = &self.config;
-        let end2end = self.metadata.end2end;
-        let kpt_shape = self.metadata.kpt_shape;
-
-        // Compute orig_img arrays now. `image_to_array` copies the full frame, so run the
-        // batch across cores like the preprocess fan-out above.
+        // `image_to_array` copies the full frame, so run the batch across cores like the
+        // preprocess fan-out above.
         let image_arrays: Vec<Array3<u8>> = images.par_iter().map(|i| image_to_array(i)).collect();
-        // Move preprocessed_results into an Option so the closure can consume it.
-        let preprocessed_results_opt = std::cell::RefCell::new(Some(preprocessed_results));
-        let image_arrays_opt = std::cell::RefCell::new(Some(image_arrays));
-        let paths_ref = paths;
-
-        let postprocess_cb = |outputs: &[(&[f32], Vec<usize>)],
-                              inference_ms_total: f64|
-         -> Result<Vec<Vec<Results>>> {
-            let inference_time = inference_ms_total / n_images_f;
-            let start_postprocess = Instant::now();
-            let preprocessed_results = preprocessed_results_opt
-                .borrow_mut()
-                .take()
-                .expect("preprocessed_results");
-            let image_arrays = image_arrays_opt.borrow_mut().take().expect("image_arrays");
-
-            let mut batch_results: Vec<Vec<Results>> = Vec::with_capacity(n_images);
-            for (i, (orig_img, preprocess_res)) in image_arrays
-                .into_iter()
-                .zip(preprocessed_results)
-                .enumerate()
-            {
-                let path = paths_ref.get(i).cloned().unwrap_or_default();
-                let speed = Speed::new(preprocess_time, inference_time, 0.0);
-
-                let img_outputs = Self::slice_batch_output(outputs, i);
-
-                let tensor_shape = preprocess_res.tensor.shape();
-                let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
-
-                let result = postprocess_with_head(
-                    img_outputs,
-                    task,
-                    &preprocess_res,
-                    cfg,
-                    Arc::clone(names),
-                    orig_img,
-                    path,
-                    speed,
-                    inference_shape,
-                    end2end,
-                    kpt_shape,
-                    rtdetr,
-                );
-
-                batch_results.push(vec![result]);
-            }
-
-            Self::apply_postprocess_time(&mut batch_results, start_postprocess, n_images_f);
-            Ok(batch_results)
-        };
+        // Every image of a batch ran at the tensor shape the model was fed.
+        let tensor_shape = preprocessed_results[0].tensor.shape();
+        let inference_shape = (tensor_shape[2] as u32, tensor_shape[3] as u32);
 
         // Resolve the output dtype path before the session is mutably borrowed below.
         let semantic_mask_output = self.has_semantic_mask_output();
@@ -2012,67 +1890,46 @@ impl YOLOModel {
         // A batch of one is the common case (single image, video, webcam) and there is
         // nothing to join: `concatenate` would allocate and copy the whole NCHW tensor to
         // reproduce the one already sitting in `preprocessed_results`, so feed that instead.
-        let (outputs, inference_ms_total) = {
-            let pre_borrow = preprocessed_results_opt.borrow();
-            let pre = pre_borrow.as_deref().expect("preprocessed_results");
-            if self.fp16_input {
-                match pre {
-                    [single] => {
-                        let tensor = single.tensor_f16.as_ref().expect("fp16 tensor");
-                        Self::run_input(&mut self.session, &self.input_name, tensor)?
-                    }
-                    batch => {
-                        let batch_tensor = Self::concat_f16_batch(batch)?;
-                        Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
-                    }
+        let (outputs, inference_ms_total) = if self.fp16_input {
+            match preprocessed_results.as_slice() {
+                [single] => {
+                    let tensor = single.tensor_f16.as_ref().expect("fp16 tensor");
+                    Self::run_input(&mut self.session, &self.input_name, tensor)?
                 }
-            } else {
-                match pre {
-                    [single] => {
-                        Self::run_input(&mut self.session, &self.input_name, &single.tensor)?
-                    }
-                    batch => {
-                        let batch_tensor = Self::concat_f32_batch(batch)?;
-                        Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
-                    }
+                batch => {
+                    let batch_tensor = Self::concat_f16_batch(batch)?;
+                    Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
+                }
+            }
+        } else {
+            match preprocessed_results.as_slice() {
+                [single] => Self::run_input(&mut self.session, &self.input_name, &single.tensor)?,
+                batch => {
+                    let batch_tensor = Self::concat_f32_batch(batch)?;
+                    Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
                 }
             }
         };
+        #[allow(clippy::cast_precision_loss)]
+        let speed = Speed::new(
+            preprocess_time,
+            inference_ms_total / images.len() as f64,
+            0.0,
+        );
 
-        if semantic_mask_output {
-            // Fast path: the exported ONNX graph already contains ArgMax+Cast(uint8) nodes,
-            // so ONNX Runtime returns a uint8 class map directly (no f32 logits, no CPU argmax).
-            debug_assert_eq!(self.metadata.task, crate::task::Task::Semantic);
-            let names = &self.metadata.names;
-            let preprocessed_results = preprocessed_results_opt.borrow_mut().take().unwrap();
-            let image_arrays = image_arrays_opt.borrow_mut().take().unwrap();
-            let mut batch_results: Vec<Vec<Results>> = Vec::new();
-            Self::extract_and_invoke_u8(
-                &outputs,
-                &self.output_names,
-                inference_ms_total,
-                |outputs, inference_ms_total| {
-                    batch_results = Self::semantic_mask_batch_results(
-                        outputs,
-                        inference_ms_total,
-                        n_images_f,
-                        preprocess_time,
-                        preprocessed_results,
-                        image_arrays,
-                        paths_ref,
-                        names,
-                    );
-                    Ok(())
-                },
-            )?;
-            return Ok(batch_results);
-        }
-
-        Self::extract_and_invoke(
+        // A baked-in ArgMax+Cast(uint8) graph returns the class map directly.
+        debug_assert!(!semantic_mask_output || self.metadata.task == Task::Semantic);
+        Self::postprocess_outputs(
             &outputs,
             &self.output_names,
-            inference_ms_total,
-            postprocess_cb,
+            semantic_mask_output,
+            &self.metadata,
+            &self.config,
+            &preprocessed_results,
+            image_arrays,
+            paths,
+            &speed,
+            inference_shape,
         )
     }
 
@@ -2134,85 +1991,6 @@ impl YOLOModel {
             InferenceError::InferenceError(format!("Failed to create input tensor: {e}"))
         })?;
         Self::run_timed(session, ort::inputs![input_name => input_tensor])
-    }
-
-    /// Build zero-copy slice views over ORT output tensors and call `cb`.
-    ///
-    /// `cb` receives `&[(&[f32], shape)]` borrowing directly into ORT-owned device-to-host
-    /// buffers (no extra Vec allocation), plus the measured `session.run()` time in ms.
-    /// This avoids a ~40 ms memcpy for large semantic segmentation outputs.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn extract_and_invoke<R>(
-        outputs: &ort::session::SessionOutputs<'_>,
-        output_names: &[String],
-        inference_ms: f64,
-        cb: impl FnOnce(&[(&[f32], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        // Holds each output as either a zero-copy borrow into the ORT buffer or, for f16
-        // outputs needing dtype conversion, an owned Vec<f32>. Vec reallocation moves the
-        // enum value but not the heap allocation behind `Vec<f32>`, so `.as_slice()` taken
-        // in the second pass is stable.
-        enum OutBuf<'a> {
-            Borrow(&'a [f32]),
-            Owned(Vec<f32>),
-        }
-        let mut bufs: Vec<(OutBuf<'_>, Vec<usize>)> = Vec::with_capacity(output_names.len());
-        for output_name in output_names {
-            let output = outputs.get(output_name.as_str()).ok_or_else(|| {
-                InferenceError::InferenceError(format!("Output '{output_name}' not found"))
-            })?;
-            let (buf, shape) = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
-                let shape_vec = shape_to_usize(shape);
-                (OutBuf::Borrow(data), shape_vec)
-            } else {
-                let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
-                    InferenceError::InferenceError(format!("Failed to extract output: {e}"))
-                })?;
-                let shape_vec = shape_to_usize(shape);
-                let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
-                (OutBuf::Owned(converted), shape_vec)
-            };
-            bufs.push((buf, shape));
-        }
-        let views: Vec<(&[f32], Vec<usize>)> = bufs
-            .iter()
-            .map(|(b, s)| {
-                let slice: &[f32] = match b {
-                    OutBuf::Borrow(d) => d,
-                    OutBuf::Owned(v) => v.as_slice(),
-                };
-                (slice, s.clone())
-            })
-            .collect();
-
-        cb(&views, inference_ms)
-    }
-
-    /// Build zero-copy `&[u8]` slice views over ORT output tensors and call `cb`
-    /// (e.g. a semantic segmentation model that has ArgMax+Cast(uint8) baked in).
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn extract_and_invoke_u8<R>(
-        outputs: &ort::session::SessionOutputs<'_>,
-        output_names: &[String],
-        inference_ms: f64,
-        cb: impl FnOnce(&[(&[u8], Vec<usize>)], f64) -> Result<R>,
-    ) -> Result<R> {
-        // All outputs are direct borrows from ORT - no fallback path, no unsafe needed.
-        let views: Vec<(&[u8], Vec<usize>)> = output_names
-            .iter()
-            .map(|name| {
-                let output = outputs.get(name.as_str()).ok_or_else(|| {
-                    InferenceError::InferenceError(format!("Output '{name}' not found"))
-                })?;
-                let (shape, data) = output.try_extract_tensor::<u8>().map_err(|e| {
-                    InferenceError::InferenceError(format!("Failed to extract uint8 output: {e}"))
-                })?;
-                let shape_vec = shape_to_usize(shape);
-                Ok((data, shape_vec))
-            })
-            .collect::<Result<_>>()?;
-
-        cb(&views, inference_ms)
     }
 
     /// Get the model's task type as detected from ONNX metadata.
@@ -2438,8 +2216,7 @@ mod tests {
                 (4, 4),
             )]
         };
-        let mut batch: Vec<Vec<Results>> = vec![result(), result()];
-        YOLOModel::apply_postprocess_time(&mut batch, Instant::now(), 2.0);
+        let batch = YOLOModel::apply_postprocess_time(vec![result(), result()], Instant::now());
         for img in &batch {
             for r in img {
                 assert!(r.speed.postprocess.is_some());
@@ -2490,20 +2267,16 @@ mod tests {
         let data: Vec<u8> = vec![0, 1, 1, 0];
         let outputs: Vec<(&[u8], Vec<usize>)> = vec![(data.as_slice(), vec![1, 2, 2])];
 
-        let img = image::DynamicImage::new_rgb8(2, 2);
-        let preprocessed = vec![crate::preprocessing::preprocess_image(&img, (32, 32), 32)];
         let image_arrays = vec![Array3::<u8>::zeros((2, 2, 3))];
         let paths = vec!["frame.jpg".to_string()];
 
         let batch = YOLOModel::semantic_mask_batch_results(
             &outputs,
-            10.0,
-            1.0,
-            1.0,
-            preprocessed,
+            &names,
             image_arrays,
             &paths,
-            &names,
+            &Speed::new(1.0, 10.0, 0.0),
+            (32, 32),
         );
         assert_eq!(batch.len(), 1);
         let results = &batch[0][0];
