@@ -243,7 +243,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.49 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.50 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -263,7 +263,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.49 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.50 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -366,7 +366,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.49"
+ultralytics-inference = "0.0.50"
 ```
 
 ```toml
@@ -580,7 +580,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.49", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.50", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
@@ -700,6 +700,22 @@ brew install ffmpeg
 apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libclang-dev
 
 # 使用视频支持构建
+cargo build --release --features video
+```
+
+视频文件和流会使用所有 CPU 核心解码（FFmpeg `threads=auto`），摄像头使用切片线程以保持低延迟。解码中的帧会占用额外内存，
+1080p 到 4K 视频的峰值内存大约增加 10% 到 35%。
+
+在 JetPack 7 的 Jetson 上，NVIDIA 的 `ffmpeg` 软件包（`8.0.1-nvidia1`）会替换 FFmpeg 的 `pkg-config` 文件，但不提供
+`libswscale` 的文件，因此构建会把 FFmpeg 8 与 Ubuntu 的 FFmpeg 6.1 `libswscale` 混在一起；它额外的
+`AV_PIX_FMT_NVBUFSURFACE` 像素格式也会导致 `ffmpeg-next` 编译失败。请将 FFmpeg 构建到独立的前缀目录并让构建指向它（如需用
+`--save` 保存视频，请安装 `libx264-dev` 并加上 `--enable-gpl --enable-libx264`）：
+
+```bash
+./configure --prefix=$HOME/ffmpeg --enable-shared --disable-programs --disable-doc
+make -j$(nproc) && make install
+export PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig
+export LD_LIBRARY_PATH=$HOME/ffmpeg/lib:$LD_LIBRARY_PATH
 cargo build --release --features video
 ```
 

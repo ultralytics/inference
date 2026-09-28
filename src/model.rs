@@ -1595,25 +1595,41 @@ impl YOLOModel {
             imgsz
         };
 
-        // RGB extraction is per-image and host-side, so fan it out; the device uploads
-        // below must stay ordered on the shared stream.
-        let frames: Vec<(Vec<u8>, u32, u32)> = images
-            .par_iter()
-            .map(|image| {
-                let rgb = image.to_rgb8();
-                let (w, h) = rgb.dimensions();
-                (rgb.into_raw(), h, w)
-            })
-            .collect();
         let pre = self
             .cuda_preprocessor
             .as_mut()
             .expect("predict_cuda_pre invariant: cuda_preprocessor.is_some()");
-        let geoms = frames
+        // With a pinned staging buffer an RGB8 image uploads straight from its own pixels, so
+        // the owned copies the results keep are made while the uploads are in flight.
+        // Otherwise every copy comes first and is uploaded while still warm in cache. RGB
+        // extraction is host-side, so fan it out; the uploads must stay ordered on the stream.
+        let stages_upload = pre.stages_upload();
+        let converted: Vec<_> = images
+            .par_iter()
+            .map(|image| (!stages_upload || image.as_rgb8().is_none()).then(|| image.to_rgb8()))
+            .collect();
+        let geoms = images
             .iter()
+            .zip(&converted)
             .enumerate()
-            .map(|(slot, (bytes, h, w))| pre.preprocess(bytes, *h, *w, false, target, slot))
+            .map(|(slot, (image, converted))| {
+                let rgb = converted
+                    .as_ref()
+                    .or_else(|| image.as_rgb8())
+                    .expect("an image is either RGB8 or converted to it");
+                let (w, h) = rgb.dimensions();
+                pre.preprocess(rgb.as_raw(), h, w, false, target, slot)
+            })
             .collect::<Result<Vec<_>>>()?;
+        let frames: Vec<(Vec<u8>, u32, u32)> = images
+            .par_iter()
+            .zip(rayon::iter::IntoParallelIterator::into_par_iter(converted))
+            .map(|(image, converted)| {
+                let (w, h) = image.dimensions();
+                let rgb = converted.unwrap_or_else(|| image.to_rgb8());
+                (rgb.into_raw(), h, w)
+            })
+            .collect();
         let preprocess_time = start_preprocess.elapsed().as_secs_f64() * 1000.0 / n_images_f;
 
         let (dst_h, dst_w) = target;
