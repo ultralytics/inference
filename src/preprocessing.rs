@@ -20,6 +20,7 @@
     clippy::manual_div_ceil
 )]
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -175,38 +176,30 @@ impl LetterboxGeometry {
     }
 }
 
-/// Build a `PreprocessResult` from a resolved letterbox geometry.
-///
-/// Runs the fused zero-copy resize/pad/normalize, optionally produces an FP16 tensor,
-/// and packages the transform metadata.
+/// Letterbox (or, when `stretch`, scale-fill) `image` into `target_size` and build its
+/// `PreprocessResult`: the fused zero-copy resize/pad/normalize, an FP16 tensor when
+/// `quantize` asks for one, and the transform metadata.
 #[allow(clippy::cast_precision_loss)]
 fn build_preprocess_result(
     image: &DynamicImage,
     target_size: (usize, usize),
-    geom: LetterboxGeometry,
-    scale: (f32, f32),
-    orig_shape: (u32, u32),
-    fp16: bool,
+    quantize: Option<Quantization>,
+    stretch: bool,
 ) -> PreprocessResult {
     let (orig_width, orig_height) = image.dimensions();
+    // A letterbox uses one uniform `gain` on both axes for coordinate back-projection; per-axis
+    // gains from the rounded extents can diverge slightly, shifting boxes and changing NMS.
+    let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size, stretch);
 
-    let tensor = match image {
-        DynamicImage::ImageRgb8(rgb) => {
-            fused_zerocopy_preprocess(rgb.as_raw(), orig_width, orig_height, target_size, &geom)
-        }
-        _ => {
-            let src_rgb = image.to_rgb8();
-            fused_zerocopy_preprocess(
-                src_rgb.as_raw(),
-                orig_width,
-                orig_height,
-                target_size,
-                &geom,
-            )
-        }
+    // Borrow the samples of an RGB8 image; any other layout converts a copy, dropped here.
+    let tensor = {
+        let rgb = image
+            .as_rgb8()
+            .map_or_else(|| Cow::Owned(image.to_rgb8()), Cow::Borrowed);
+        fused_zerocopy_preprocess(rgb.as_raw(), orig_width, orig_height, target_size, &geom)
     };
 
-    let tensor_f16 = if fp16 {
+    let tensor_f16 = if quantize == Some(Quantization::Fp16) {
         Some(tensor_f32_to_f16(&tensor))
     } else {
         None
@@ -215,7 +208,7 @@ fn build_preprocess_result(
     PreprocessResult {
         tensor,
         tensor_f16,
-        orig_shape,
+        orig_shape: (orig_height, orig_width),
         scale,
         padding: (geom.pad_top as f32, geom.pad_left as f32),
     }
@@ -263,21 +256,7 @@ pub fn preprocess_image_with_precision(
     _stride: u32,
     quantize: impl IntoQuantization,
 ) -> PreprocessResult {
-    let quantize = quantize.into_quantization();
-    let (orig_width, orig_height) = image.dimensions();
-    let orig_shape = (orig_height, orig_width);
-
-    // A single uniform `gain` on both axes for coordinate back-projection; per-axis gains
-    // from the rounded extents can diverge slightly, shifting boxes and changing NMS.
-    let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size, false);
-    build_preprocess_result(
-        image,
-        target_size,
-        geom,
-        scale,
-        orig_shape,
-        quantize == Some(Quantization::Fp16),
-    )
+    build_preprocess_result(image, target_size, quantize.into_quantization(), false)
 }
 
 /// Preprocess an image for RT-DETR inference.
@@ -301,17 +280,7 @@ pub fn preprocess_image_stretch(
     target_size: (usize, usize),
     quantize: impl IntoQuantization,
 ) -> PreprocessResult {
-    let quantize = quantize.into_quantization();
-    let (orig_width, orig_height) = image.dimensions();
-    let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size, true);
-    build_preprocess_result(
-        image,
-        target_size,
-        geom,
-        scale,
-        (orig_height, orig_width),
-        quantize == Some(Quantization::Fp16),
-    )
+    build_preprocess_result(image, target_size, quantize.into_quantization(), true)
 }
 
 /// Get or compute the X coordinate LUT for bilinear interpolation.

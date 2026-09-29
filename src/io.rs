@@ -407,8 +407,6 @@ impl SaveResults {
         meta: &crate::source::SourceMeta,
         annotated: &image::DynamicImage,
     ) -> Result<()> {
-        init_logging();
-
         #[cfg(feature = "video")]
         let save_as_video = is_video && !self.save_frames;
         #[cfg(not(feature = "video"))]
@@ -434,10 +432,6 @@ impl SaveResults {
                     let width = annotated.width() as usize;
                     let height = annotated.height() as usize;
                     let fps = meta.fps.unwrap_or(30.0);
-
-                    if let Some(parent) = save_path.parent() {
-                        ensure_dir(parent)?;
-                    }
 
                     self.video_writer = Some(VideoWriter::new(save_path, width, height, fps)?);
                 }

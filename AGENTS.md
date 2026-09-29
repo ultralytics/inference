@@ -46,9 +46,6 @@ cargo clippy --all-targets --no-default-features --features annotate -- -D warni
 # Format (checked with --check in ci.yml and format.yml)
 cargo fmt --all
 
-# Coverage exactly as CI (ci.yml `coverage` job: nightly toolchain, cargo-llvm-cov, FFmpeg dev libs)
-cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/cuda_inference\.rs|src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
-
 # Wasm checks (ci.yml `wasm` job)
 cargo build -p ultralytics-inference --lib --no-default-features --target wasm32-unknown-unknown
 cargo clippy -p ultralytics-inference-web --target wasm32-unknown-unknown -- -D warnings
@@ -60,24 +57,22 @@ cd web && npm ci && npm run build
 cargo run -- predict
 ```
 
-- CI matrix (`ci.yml`): `test` on ubuntu/macos/windows (ubuntu also lints and tests `annotate,cuda,tensorrt`); `test-video` in FFmpeg 7.1/8.0/9.0 Linux containers (`--features annotate,video`); video builds on macOS (Homebrew FFmpeg 9) and Windows (FFmpeg 8.1/9.0); `wasm`; `coverage` (nightly) uploads to Codecov.
-- MSRV is Rust 1.89 (`rust-version` in Cargo.toml), edition 2024.
+- CI matrix (`ci.yml`): `test` on ubuntu/macos/windows (ubuntu also lints and tests `annotate,cuda,tensorrt` and lints `annotate,openvino`); `cuda` on the self-hosted GPU runner (same-repo PRs only; lints `annotate,cuda-preprocess` and runs coverage with `--include-ignored`); `test-video` in FFmpeg 7.1/8.0/9.0 Linux containers (`--features annotate,video`); video builds on macOS (Homebrew FFmpeg 9) and Windows (FFmpeg 8.1/9.0); `wasm`; `coverage` (nightly) uploads to Codecov.
 - First native build downloads ONNX Runtime binaries (ort `download-binaries` feature), so builds need network once.
 
 ## Architecture
 
 Rust workspace with two crates plus an npm wrapper, all versioned together from the root `Cargo.toml`:
 
-- Root crate `ultralytics-inference`: YOLO inference library (`src/lib.rs`) and CLI binary (`src/main.rs`, thin wrapper over `src/cli/`). Pipeline: `source.rs` (images/dirs/globs/video/webcam) → `preprocessing.rs` (SIMD letterbox) → `model.rs` (`YOLOModel`, the ONNX Runtime session via `ort`, configured by `inference.rs`'s `InferenceConfig`) → `postprocessing.rs` → `results.rs` (`Results`/`Boxes`/`Masks`/`Keypoints`/`Probs`/`Obb`/`SemanticMask`/`DepthMap`/`Speed`, mirroring the Ultralytics Python API). `model.rs` reads embedded ONNX metadata (`metadata.rs`) and auto-downloads known YOLOv8/YOLO11/YOLO26 models and sample images (`download.rs`).
+- Root crate `ultralytics-inference`: YOLO inference library (`src/lib.rs`) and CLI binary (`src/main.rs`, thin wrapper over `src/cli/`). Pipeline: `source.rs` (images/dirs/globs/video/webcam) → `preprocessing.rs` (fused LUT letterbox) → `model.rs` (`YOLOModel`, the ONNX Runtime session via `ort`, configured by `inference.rs`'s `InferenceConfig`) → `postprocessing.rs` → `results.rs` (`Results`/`Boxes`/`Masks`/`Keypoints`/`Probs`/`Obb`/`SemanticMask`/`DepthMap`/`Speed`, mirroring the Ultralytics Python API). `model.rs` reads embedded ONNX metadata (`metadata.rs`) and auto-downloads known YOLOv8/YOLO11/YOLO26 models and sample images (`download.rs`).
 - `crates/web` (`ultralytics-inference-web`, `publish = false`): wasm32-only WebGPU bindings via `ort-web`. Excluded from `default-members`, so plain `cargo build`/`cargo test` from the root skip it; it only builds for `--target wasm32-unknown-unknown`.
 - `web/`: npm package `@ultralytics/yolo` — TypeScript wrapper (`web/src/index.ts`) over the wasm-pack output of `crates/web`, with an optional LiteRT.js backend for `.tflite` models.
 - GPU/accelerator features (`cuda`, `tensorrt`, `coreml`, …) gate no public API; docs.rs builds with `annotate,visualize,video` only (see `[package.metadata.docs.rs]`).
-- Release gating: on every push to main, `publish.yml` reads the version from `Cargo.toml` — if tag `v{version}` does not exist it tags, creates a GitHub release, and publishes to crates.io; `npm-publish.yml` likewise publishes `@ultralytics/yolo` if that version is missing from npm. So merging a version bump to main releases both packages.
 
 ## Conventions
 
 - Every source file starts with the `// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license` header — Ultralytics Actions adds them automatically; don't add or revert manually.
-- Ultralytics Actions (`format.yml`) also runs prettier (YAML/JSON/Markdown), codespell, and a nightly `cargo fmt` check on PRs; expect bot commits on your PR branch. Format markdown exactly as the bot does, never with unpinned defaults: `npx prettier@3.8.5 --print-width 120 --write`.
-- Lints are strict: clippy `all`/`pedantic`/`nursery`/`cargo` plus `missing_docs` and `unsafe_code` warn at the workspace level (CI promotes to errors with `-D warnings`), and `src/lib.rs` denies `dead_code` — document all public items and delete unused code.
-- Unit tests live inline in `src/` modules; integration tests in `tests/integration_test.rs`. The e2e tests that download models/images (e.g. `test_run_prediction_e2e`) are `#[ignore]`d — run them explicitly with `-- --ignored`; macOS CI runs `test_coreml_model_loads_and_warms_up` this way. The `src/batch.rs` tests skip themselves when `yolo26n.onnx` is neither present nor downloadable, so the plain suite passes offline; with network they download the model once and run in full. The `src/annotate.rs` tests likewise try to fetch `Arial.ttf` from the Ultralytics asset CDN on a cold machine, caching it under `dirs::config_dir()/Ultralytics/`; they fall back to unfonted rendering when that fails, so label layout is only exercised once the font is cached.
-- Version bumps update root `Cargo.toml`, `crates/web/Cargo.toml`, and `web/package.json` together; merging the bump to main auto-tags and publishes (see Architecture).
+- Ultralytics Actions (`format.yml`) also runs prettier (YAML/JSON/Markdown), codespell, and a nightly `cargo fmt` check on PRs; expect bot commits on your PR branch. Format markdown exactly as the bot does, never with unpinned defaults: `npx prettier@3.8.5 --print-width 120 --write`, adding `--tab-width 4` for `docs/**/*.md`.
+- Lints are strict: clippy `all`/`pedantic`/`nursery`/`cargo` plus `missing_docs` and `unsafe_code` warn in the root crate's `[lints]` (`crates/web` sets only the latter two; CI promotes all to errors with `-D warnings`), and `src/lib.rs`/`src/main.rs` deny `dead_code` — document all public items and delete unused code.
+- Unit tests live inline in `src/` modules; integration tests in `tests/integration_test.rs`. The e2e tests that download models/images (e.g. `test_run_prediction_e2e`) are `#[ignore]`d — run them explicitly with `-- --ignored`; macOS CI runs `test_coreml_model_loads_and_warms_up` this way. The plain suite passes offline: `src/batch.rs` skips when `yolo26n.onnx` cannot be downloaded, and `src/annotate.rs` renders without labels until `Arial.ttf` is cached under `dirs::config_dir()/Ultralytics/`.
+- Version bumps update root `Cargo.toml`, `crates/web/Cargo.toml`, `web/package.json`, and both lockfiles together (`publish.yml` runs `cargo publish --locked`). On push to main, `publish.yml` tags `v{version}`, creates the GitHub release, and publishes to crates.io when that tag is missing, and `npm-publish.yml` publishes `@ultralytics/yolo` when that version is missing from npm, so merging a bump releases both.

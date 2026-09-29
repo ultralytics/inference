@@ -510,6 +510,20 @@ fn extract_detect_boxes(
     let conf_v = f32x8::splat(conf_thresh);
 
     let mut candidates: Vec<Candidate> = Vec::with_capacity(256);
+    // Keep a row that cleared the threshold when its class passes the filter, reading its
+    // `[cx, cy, w, h]` from `output[base + k * step]` and scaling it to the original image.
+    let mut push_candidate = |base: usize, step: usize, score: f32, class: usize| {
+        if !config.keep_class(class) {
+            return;
+        }
+        let at = |k: usize| unsafe { *output.get_unchecked(base + k * step) };
+        let bbox = scale_coords(
+            &xywh_to_xyxy(at(0), at(1), at(2), at(3)),
+            preprocess.scale,
+            preprocess.padding,
+        );
+        candidates.push(Candidate { bbox, score, class });
+    };
 
     // Candidate Extraction
     if !is_transposed {
@@ -530,29 +544,7 @@ fn extract_detect_boxes(
 
         for (idx, &score) in max_scores.iter().enumerate() {
             if score > conf_thresh {
-                let best_class = max_classes[idx];
-
-                // Filter by class if specified
-                if !config.keep_class(best_class) {
-                    continue;
-                }
-
-                let cx = unsafe { *output.get_unchecked(idx) };
-                let cy = unsafe { *output.get_unchecked(num_predictions + idx) };
-                let w = unsafe { *output.get_unchecked(2 * num_predictions + idx) };
-                let h = unsafe { *output.get_unchecked(3 * num_predictions + idx) };
-
-                let bbox = scale_coords(
-                    &xywh_to_xyxy(cx, cy, w, h),
-                    preprocess.scale,
-                    preprocess.padding,
-                );
-
-                candidates.push(Candidate {
-                    bbox,
-                    score,
-                    class: best_class,
-                });
+                push_candidate(idx, num_predictions, score, max_classes[idx]);
             }
         }
     } else {
@@ -588,27 +580,7 @@ fn extract_detect_boxes(
             }
 
             if best_score > conf_thresh {
-                // Filter by class if specified
-                if !config.keep_class(best_class) {
-                    continue;
-                }
-
-                let cx = unsafe { *output.get_unchecked(base) };
-                let cy = unsafe { *output.get_unchecked(base + 1) };
-                let w = unsafe { *output.get_unchecked(base + 2) };
-                let h = unsafe { *output.get_unchecked(base + 3) };
-
-                let bbox = scale_coords(
-                    &xywh_to_xyxy(cx, cy, w, h),
-                    preprocess.scale,
-                    preprocess.padding,
-                );
-
-                candidates.push(Candidate {
-                    bbox,
-                    score: best_score,
-                    class: best_class,
-                });
+                push_candidate(base, 1, best_score, best_class);
             }
         }
     }
@@ -713,17 +685,16 @@ fn extract_detect_boxes(
         }
     }
     // Result Construction
-    let num_kept = keep.len();
-    let mut result = Array2::zeros((num_kept, 6));
+    let mut result = Array2::zeros((keep.len(), 6));
     for (out_idx, &idx) in keep.iter().enumerate() {
         let c = &candidates[idx];
-        let [x1, y1, x2, y2] = clip_coords(&c.bbox, orig_shape);
-        result[[out_idx, 0]] = x1;
-        result[[out_idx, 1]] = y1;
-        result[[out_idx, 2]] = x2;
-        result[[out_idx, 3]] = y2;
-        result[[out_idx, 4]] = c.score;
-        result[[out_idx, 5]] = c.class as f32;
+        write_box_row(
+            &mut result,
+            out_idx,
+            &clip_coords(&c.bbox, orig_shape),
+            c.score,
+            c.class,
+        );
     }
 
     result
@@ -1143,15 +1114,11 @@ fn postprocess_pose(
 
     let keypoints_data = Array3::from_shape_vec((num_kept, num_keypoints, kpt_dim), flat_kpts)
         .expect("flat length matches (n, nk, kpt_dim)");
-
-    if num_kept == 0 {
-        results.keypoints = Some(Keypoints::new(keypoints_data, preprocess.orig_shape));
-        return results;
-    }
-
-    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    // An empty keypoints tensor is still emitted when nothing is kept.
     results.keypoints = Some(Keypoints::new(keypoints_data, preprocess.orig_shape));
-
+    if num_kept > 0 {
+        results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
+    }
     results
 }
 

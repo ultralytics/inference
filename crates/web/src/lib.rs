@@ -269,18 +269,6 @@ fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::Dynami
         .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))
 }
 
-/// Parse a JS colormap name into a [`Colormap`], falling back to the default (`jet`)
-/// for an empty or unknown value. Only depth results use it.
-fn parse_colormap(s: &str) -> Colormap {
-    s.parse().unwrap_or_default()
-}
-
-/// Parse a JS depth-viz name into a [`DepthViz`], falling back to the default (`disparity`)
-/// for an empty or unknown value. Only depth results use it.
-fn parse_depth_viz(s: &str) -> DepthViz {
-    s.parse().unwrap_or_default()
-}
-
 /// Build the shared `InferenceConfig` from the JS thresholds and class filter.
 fn make_config(conf: f32, iou: f32, classes: Option<Vec<u32>>) -> InferenceConfig {
     let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
@@ -392,8 +380,8 @@ impl YoloModel {
             conf,
             iou,
             classes,
-            parse_colormap(&colormap),
-            parse_depth_viz(&depth_viz),
+            colormap.parse().unwrap_or_default(),
+            depth_viz.parse().unwrap_or_default(),
         )
         .await
     }
@@ -422,8 +410,8 @@ impl YoloModel {
             conf,
             iou,
             classes,
-            parse_colormap(&colormap),
-            parse_depth_viz(&depth_viz),
+            colormap.parse().unwrap_or_default(),
+            depth_viz.parse().unwrap_or_default(),
         )
         .await
     }
@@ -863,8 +851,8 @@ impl YoloPipeline {
         let payload = JsResults::from_results(
             &results,
             self.metadata.task,
-            parse_colormap(&colormap),
-            parse_depth_viz(&depth_viz),
+            colormap.parse().unwrap_or_default(),
+            depth_viz.parse().unwrap_or_default(),
         );
         to_js(&payload, "results")
     }

@@ -232,44 +232,48 @@ impl Default for SourceMeta {
 #[cfg(feature = "video")]
 use ffmpeg_next as ffmpeg;
 
-/// Custom `FFmpeg` video decoder using `SWS_BILINEAR` for YUV -> RGB conversion.
-///
-/// Other scaler choices such as `SWS_AREA` produce slightly different pixel values
-/// during colorspace conversion. Those differences can affect borderline confidence
-/// predictions and lead to small detection drift, so `SWS_BILINEAR` is explicit here.
+/// Cached `RGB24` colorspace conversion: the scaler context and the output frame it writes.
+#[cfg(feature = "video")]
+type RgbScaler = (
+    ffmpeg::software::scaling::context::Context,
+    ffmpeg::util::frame::video::Video,
+);
+
 /// Convert a decoded video frame to a tightly-packed RGB24 [`DynamicImage`] using a BILINEAR
-/// scaler. `scaler` caches the context and is rebuilt when the frame's format or size
-/// changes, so pass a persistent `Option` to reuse it across frames.
+/// scaler. `scaler` caches the context and its output frame and is rebuilt when the frame's
+/// format or size changes, so pass a persistent `Option` to reuse them across frames.
 #[cfg(feature = "video")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn frame_to_rgb_image(
-    scaler: &mut Option<ffmpeg::software::scaling::context::Context>,
+    scaler: &mut Option<RgbScaler>,
     decoded: &ffmpeg::util::frame::video::Video,
 ) -> Result<DynamicImage> {
     // Drop a cached context whose source properties no longer match: a webcam can
     // renegotiate format or resolution mid-capture.
-    let reusable = scaler.take().filter(|s| {
+    let reusable = scaler.take().filter(|(s, _)| {
         let i = s.input();
         i.format == decoded.format() && i.width == decoded.width() && i.height == decoded.height()
     });
-    let context = match reusable {
-        Some(s) => s,
-        None => ffmpeg::software::scaling::context::Context::get(
-            decoded.format(),
-            decoded.width(),
-            decoded.height(),
-            ffmpeg::format::Pixel::RGB24,
-            decoded.width(),
-            decoded.height(),
-            ffmpeg::software::scaling::flag::Flags::BILINEAR,
-        )
-        .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
+    let cached = match reusable {
+        Some(cached) => cached,
+        None => (
+            ffmpeg::software::scaling::context::Context::get(
+                decoded.format(),
+                decoded.width(),
+                decoded.height(),
+                ffmpeg::format::Pixel::RGB24,
+                decoded.width(),
+                decoded.height(),
+                ffmpeg::software::scaling::flag::Flags::BILINEAR,
+            )
+            .map_err(|e| InferenceError::VideoError(format!("Scaler init: {e}")))?,
+            ffmpeg::util::frame::video::Video::empty(),
+        ),
     };
 
-    let mut rgb_frame = ffmpeg::util::frame::video::Video::empty();
-    scaler
-        .insert(context)
-        .run(decoded, &mut rgb_frame)
+    let (context, rgb_frame) = scaler.insert(cached);
+    context
+        .run(decoded, rgb_frame)
         .map_err(|e| InferenceError::VideoError(format!("Scale: {e}")))?;
 
     let width = rgb_frame.width();
@@ -290,11 +294,16 @@ fn frame_to_rgb_image(
     Ok(DynamicImage::ImageRgb8(img_buffer))
 }
 
+/// Custom `FFmpeg` video decoder using `SWS_BILINEAR` for YUV -> RGB conversion.
+///
+/// Other scaler choices such as `SWS_AREA` produce slightly different pixel values
+/// during colorspace conversion. Those differences can affect borderline confidence
+/// predictions and lead to small detection drift, so `SWS_BILINEAR` is explicit here.
 #[cfg(feature = "video")]
 struct BilinearVideoDecoder {
     input_ctx: ffmpeg::format::context::Input,
     decoder: ffmpeg::decoder::Video,
-    scaler: Option<ffmpeg::software::scaling::context::Context>,
+    scaler: Option<RgbScaler>,
     stream_index: usize,
     /// Total frames (estimated from duration * fps).
     total_frames: Option<usize>,
@@ -334,9 +343,16 @@ impl BilinearVideoDecoder {
 
         let context_decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
             .map_err(|e| InferenceError::VideoError(format!("Codec context: {e}")))?;
+        // libavcodec decodes on one thread unless asked; `threads=auto` sizes the pool to the
+        // CPU count and keeps its default frame+slice threading, with identical output.
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("threads", "auto");
+        let context_decoder = context_decoder.decoder();
+        let codec = ffmpeg::decoder::find(context_decoder.id())
+            .ok_or_else(|| InferenceError::VideoError("Video decoder not found".into()))?;
         let decoder = context_decoder
-            .decoder()
-            .video()
+            .open_as_with(codec, options)
+            .and_then(ffmpeg::decoder::Opened::video)
             .map_err(|e| InferenceError::VideoError(format!("Video decoder: {e}")))?;
 
         Ok(Self {
@@ -357,7 +373,7 @@ impl BilinearVideoDecoder {
         loop {
             // Try to receive a frame from the decoder first
             if self.decoder.receive_frame(&mut decoded).is_ok() {
-                return Some(self.frame_to_image(&decoded));
+                return Some(frame_to_rgb_image(&mut self.scaler, &decoded));
             }
 
             // Read packets until we find one for our stream
@@ -376,7 +392,7 @@ impl BilinearVideoDecoder {
                 // End of stream - flush decoder
                 let _ = self.decoder.send_eof();
                 return if self.decoder.receive_frame(&mut decoded).is_ok() {
-                    Some(self.frame_to_image(&decoded))
+                    Some(frame_to_rgb_image(&mut self.scaler, &decoded))
                 } else {
                     None
                 };
@@ -384,18 +400,9 @@ impl BilinearVideoDecoder {
 
             // Try to receive again after sending the packet
             if self.decoder.receive_frame(&mut decoded).is_ok() {
-                return Some(self.frame_to_image(&decoded));
+                return Some(frame_to_rgb_image(&mut self.scaler, &decoded));
             }
         }
-    }
-
-    /// Convert a decoded video frame to RGB24 `DynamicImage` using BILINEAR scaler.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn frame_to_image(
-        &mut self,
-        decoded: &ffmpeg::util::frame::video::Video,
-    ) -> Result<DynamicImage> {
-        frame_to_rgb_image(&mut self.scaler, decoded)
     }
 }
 
@@ -410,7 +417,7 @@ pub struct SourceIterator {
     webcam_decoder: Option<(ffmpeg::format::context::Input, ffmpeg::decoder::Video)>,
     /// Colorspace context reused across webcam frames, as the video path does.
     #[cfg(feature = "video")]
-    webcam_scaler: Option<ffmpeg::software::scaling::context::Context>,
+    webcam_scaler: Option<RgbScaler>,
     #[cfg(feature = "video")]
     webcam_stream_index: usize,
     #[cfg(feature = "video")]
@@ -665,15 +672,19 @@ impl SourceIterator {
             })?;
         self.webcam_stream_index = stream.index();
 
-        let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+        let mut decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
             .map_err(|e| {
                 InferenceError::VideoError(format!("Failed to read webcam stream parameters: {e}"))
             })?
-            .decoder()
-            .video()
-            .map_err(|e| {
-                InferenceError::VideoError(format!("Failed to create webcam decoder: {e}"))
-            })?;
+            .decoder();
+        // Slice threads with an auto count; frame threading would hold frames back, adding
+        // latency and breaking the one frame per packet capture loop below.
+        decoder.set_threading(ffmpeg::threading::Config::kind(
+            ffmpeg::threading::Type::Slice,
+        ));
+        let decoder = decoder.video().map_err(|e| {
+            InferenceError::VideoError(format!("Failed to create webcam decoder: {e}"))
+        })?;
 
         self.webcam_decoder = Some((ictx, decoder));
         Ok(())

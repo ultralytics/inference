@@ -176,5 +176,9 @@ a reasonable choice.
 Batching raises throughput but not single-frame latency: at batch 16 a frame waits for the other 15,
 so a webcam or video pipeline that wants the freshest frame should stay at batch 1.
 
+The GB10 is an integrated GPU, so the GPU preprocess path uploads each frame with a plain copy
+instead of the pinned staging buffer it uses on discrete GPUs; on the Spark that copy is the faster
+of the two.
+
 The first TensorRT run builds an engine and takes tens of seconds; engines are cached under
 `.trt_cache/` next to the model and reused afterwards.

@@ -244,7 +244,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.49 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.50 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -264,7 +264,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.49 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.50 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -367,7 +367,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.49"
+ultralytics-inference = "0.0.50"
 ```
 
 ```toml
@@ -584,7 +584,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.49", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.50", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 ```
 
@@ -707,6 +707,22 @@ brew install ffmpeg
 apt-get install -y ffmpeg libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev libclang-dev
 
 # Build with video support
+cargo build --release --features video
+```
+
+Video files and streams decode on every CPU core (FFmpeg `threads=auto`) and webcams use slice threads to keep latency
+low. The frames in flight cost some memory, about 10 to 35 percent more peak RAM on 1080p to 4K video.
+
+On a Jetson with JetPack 7, NVIDIA's `ffmpeg` package (`8.0.1-nvidia1`) replaces the FFmpeg `pkg-config` files but ships
+none for `libswscale`, so the build mixes FFmpeg 8 with Ubuntu's FFmpeg 6.1 `libswscale`, and its extra
+`AV_PIX_FMT_NVBUFSURFACE` pixel format also fails to compile in `ffmpeg-next`. Build FFmpeg into its own prefix and point
+the build at it (add `--enable-gpl --enable-libx264` with `libx264-dev` installed if you save videos with `--save`):
+
+```bash
+./configure --prefix=$HOME/ffmpeg --enable-shared --disable-programs --disable-doc
+make -j$(nproc) && make install
+export PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig
+export LD_LIBRARY_PATH=$HOME/ffmpeg/lib:$LD_LIBRARY_PATH
 cargo build --release --features video
 ```
 
