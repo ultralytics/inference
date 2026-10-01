@@ -135,36 +135,6 @@ pub fn postprocess_with_head(
                 postprocess_segment(outputs, preprocess, config, results)
             }
         }
-        Task::Pose => {
-            let (output, shape) = &outputs[0];
-            // Prefer metadata-provided `kpt_shape`; otherwise infer the keypoint
-            // layout from the tensor shape so non-COCO pose models still work.
-            let resolved_kpt = kpt_shape.or_else(|| infer_end2end_kpt_shape(shape));
-            let is_end2end = end2end
-                || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_shape(shape, 6 + nk * kd));
-            let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
-            if is_end2end {
-                postprocess_pose_end2end(output, shape, preprocess, config, results, nk, kpt_dim)
-            } else {
-                postprocess_pose(output, shape, preprocess, config, results, nk, kpt_dim)
-            }
-        }
-        Task::Classify => {
-            let (output, _) = &outputs[0];
-            postprocess_classify(output, results)
-        }
-        Task::Obb => {
-            let (output, shape) = &outputs[0];
-            if end2end || is_end2end_shape(shape, 7) {
-                postprocess_obb_end2end(output, shape, preprocess, config, results)
-            } else {
-                postprocess_obb(output, shape, preprocess, config, results)
-            }
-        }
-        Task::Depth => {
-            let (output, shape) = &outputs[0];
-            postprocess_depth(output, shape, results)
-        }
         Task::Semantic => {
             let (output, shape) = &outputs[0];
             let n_classes = results.names.len();
@@ -183,6 +153,36 @@ pub fn postprocess_with_head(
                 }
             }
             results
+        }
+        Task::Depth => {
+            let (output, shape) = &outputs[0];
+            postprocess_depth(output, shape, results)
+        }
+        Task::Classify => {
+            let (output, _) = &outputs[0];
+            postprocess_classify(output, results)
+        }
+        Task::Pose => {
+            let (output, shape) = &outputs[0];
+            // Prefer metadata-provided `kpt_shape`; otherwise infer the keypoint
+            // layout from the tensor shape so non-COCO pose models still work.
+            let resolved_kpt = kpt_shape.or_else(|| infer_end2end_kpt_shape(shape));
+            let is_end2end = end2end
+                || resolved_kpt.is_some_and(|(nk, kd)| is_end2end_shape(shape, 6 + nk * kd));
+            let (nk, kpt_dim) = resolved_kpt.unwrap_or((17, 3));
+            if is_end2end {
+                postprocess_pose_end2end(output, shape, preprocess, config, results, nk, kpt_dim)
+            } else {
+                postprocess_pose(output, shape, preprocess, config, results, nk, kpt_dim)
+            }
+        }
+        Task::Obb => {
+            let (output, shape) = &outputs[0];
+            if end2end || is_end2end_shape(shape, 7) {
+                postprocess_obb_end2end(output, shape, preprocess, config, results)
+            } else {
+                postprocess_obb(output, shape, preprocess, config, results)
+            }
         }
     }
 }
