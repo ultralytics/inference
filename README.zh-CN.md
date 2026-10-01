@@ -63,7 +63,7 @@
 <br>
 <br>
 
-本库可运行 [YOLOv8](https://docs.ultralytics.com/models/yolov8)、[YOLO11](https://docs.ultralytics.com/models/yolo11) 和 [YOLO26](https://docs.ultralytics.com/models/yolo26) 的 ONNX 模型。这些模型在 [COCO](https://docs.ultralytics.com/datasets/detect/coco) 上预训练用于[检测](https://docs.ultralytics.com/tasks/detect)、[分割](https://docs.ultralytics.com/tasks/segment)和[姿态估计](https://docs.ultralytics.com/tasks/pose)；在 [DOTA](https://docs.ultralytics.com/datasets/obb/dota-v2) 上预训练用于 [OBB](https://docs.ultralytics.com/tasks/obb)；在 [Cityscapes](https://docs.ultralytics.com/datasets/semantic/cityscapes) 上预训练用于[语义分割](https://docs.ultralytics.com/tasks/semantic)；在 [ImageNet](https://docs.ultralytics.com/datasets/classify/imagenet) 上预训练用于[分类](https://docs.ultralytics.com/tasks/classify)；以及用于单目[深度估计](https://docs.ultralytics.com/tasks/depth)（仅 YOLO26）。所有[模型](https://docs.ultralytics.com/models)在首次使用时自动从最新的 Ultralytics [发布](https://github.com/ultralytics/assets/releases)下载。
+本库可运行 [YOLOv8](https://docs.ultralytics.com/models/yolov8)、[YOLO11](https://docs.ultralytics.com/models/yolo11) 和 [YOLO26](https://docs.ultralytics.com/models/yolo26) 的 ONNX 模型。这些模型涵盖[检测](https://docs.ultralytics.com/tasks/detect)、[分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、单目[深度估计](https://docs.ultralytics.com/tasks/depth)（仅 YOLO26）、[分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和 [OBB](https://docs.ultralytics.com/tasks/obb)，其中检测、分割和姿态估计在 [COCO](https://docs.ultralytics.com/datasets/detect/coco) 上预训练，语义分割在 [Cityscapes](https://docs.ultralytics.com/datasets/semantic/cityscapes) 上预训练，分类在 [ImageNet](https://docs.ultralytics.com/datasets/classify/imagenet) 上预训练，OBB 在 [DOTA](https://docs.ultralytics.com/datasets/obb/dota-v2) 上预训练。所有[模型](https://docs.ultralytics.com/models)在首次使用时自动从最新的 Ultralytics [发布](https://github.com/ultralytics/assets/releases)下载。
 
 [RT-DETR](https://docs.ultralytics.com/models/rtdetr) 检测模型也可以运行。没有可直接下载的 RT-DETR ONNX 文件，需要先自行导出（见下文）。导出之后，它与本库的其他模型一样加载和运行，并支持全部设备。
 
@@ -191,11 +191,11 @@ ultralytics-inference predict
 
 # 选择任务：自动下载对应任务的 nano 模型
 ultralytics-inference predict --task segment  # 下载 yolo26n-seg.onnx
-ultralytics-inference predict --task pose     # 下载 yolo26n-pose.onnx
-ultralytics-inference predict --task obb      # 下载 yolo26n-obb.onnx
-ultralytics-inference predict --task classify # 下载 yolo26n-cls.onnx
 ultralytics-inference predict --task semantic # 下载 yolo26n-sem.onnx（仅 YOLO26）
 ultralytics-inference predict --task depth    # 下载 yolo26n-depth.onnx（仅 YOLO26）
+ultralytics-inference predict --task classify # 下载 yolo26n-cls.onnx
+ultralytics-inference predict --task pose     # 下载 yolo26n-pose.onnx
+ultralytics-inference predict --task obb      # 下载 yolo26n-obb.onnx
 
 # 使用显式模型（任务从模型元数据读取）
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
@@ -296,7 +296,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | 选项                 | 简写 | 说明                                                                                                                                                              | 默认值                                                          |
 | -------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `--model`            | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                                                   | `yolo26n.onnx`                                                  |
-| `--task`             |      | 任务类型（`detect`、`segment`、`pose`、`obb`、`classify`、`semantic`\*、`depth`\*）；省略 `--model` 时选择 nano 模型                                              | `detect`                                                        |
+| `--task`             |      | 任务类型（`detect`、`segment`、`semantic`\*、`depth`\*、`classify`、`pose`、`obb`）；省略 `--model` 时选择 nano 模型                                              | `detect`                                                        |
 | `--source`           | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                                                | 与任务相关的 Ultralytics URL 资源                               |
 | `--conf`             |      | 置信度阈值                                                                                                                                                        | `0.25`                                                          |
 | `--iou`              |      | NMS IoU 阈值                                                                                                                                                      | `0.7`                                                           |
@@ -325,11 +325,11 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | ------------------------------------------------- | ---------------------- | ------------------------------------------------------- |
 | `predict`                                         | `yolo26n.onnx`         | 默认检测模型，自动下载                                  |
 | `predict --task segment`                          | `yolo26n-seg.onnx`     | nano 分割模型，自动下载                                 |
-| `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                 |
-| `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                 |
-| `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                 |
 | `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | nano 语义分割模型，自动下载（仅 YOLO26）                |
 | `predict --task depth`                            | `yolo26n-depth.onnx`\* | nano 深度估计模型，自动下载（仅 YOLO26）                |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                 |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                 |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                 |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | 从模型元数据读取任务                                    |
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` 与元数据一致，正常执行                         |
 | `predict --task segment --model yolo26n.onnx`     | error                  | `--task` 与模型元数据（`detect`）冲突，程序以错误退出。 |
@@ -342,9 +342,9 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 
 | 系列   | 变体                                                                                                  |
 | ------ | ----------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`、`-sem`\*、`-depth`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`                       |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`                       |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-sem`\*、`-depth`\*、`-cls`、`-pose`、`-obb` |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                       |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                       |
 
 \* `-sem`（语义分割）和 `-depth`（深度估计）仅支持 YOLO26。
 
@@ -508,7 +508,7 @@ inference/
 │   ├── postprocessing.rs   # 所有任务的后处理（检测 NMS/decode、语义分割 argmax、深度 resize）
 │   ├── metadata.rs         # ONNX 模型元数据解析
 │   ├── source.rs           # 输入源处理（图片、视频、摄像头）
-│   ├── task.rs             # Task 枚举（Detect, Segment, Pose, Classify, Obb, Semantic）
+│   ├── task.rs             # Task 枚举（Detect, Segment, Semantic, Depth, Classify, Pose, Obb）
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch 处理流程
 │   ├── device.rs           # Device 枚举（CPU, CUDA, CoreML 等）
@@ -772,7 +772,7 @@ Apple M4 MacBook Pro（10 核 CPU，ONNX Runtime 1.28，release 构建，100 张
 
 ### 已完成
 
-- [x] 检测、分割、姿态、分类、OBB、语义分割和深度估计推理。
+- [x] 检测、分割、语义分割、深度估计、分类、姿态和 OBB 推理。
 - [x] ONNX 模型元数据解析（自动检测类别、任务和 imgsz）。
 - [x] 硬件加速支持（CUDA、TensorRT、CoreML、OpenVINO、XNNPACK）。
 - [x] 兼容 Ultralytics 的 Results API（`Boxes`、`Masks`、`Keypoints`、`Probs`、`Obb`、`SemanticMask`、`DepthMap`）。

@@ -24,7 +24,7 @@
 //! - **High Performance** - Pure Rust with zero-cost abstractions and SIMD-optimized preprocessing
 //! - **ONNX Runtime** - Leverages ONNX Runtime for cross-platform hardware acceleration
 //! - **Supported Models** - `YOLO26`, `YOLO11`, and `YOLOv8` (including YOLO26 end-to-end NMS-free exports), plus `RT-DETR` for detection
-//! - **All Tasks** - [Detection](https://docs.ultralytics.com/tasks/detect), [segmentation](https://docs.ultralytics.com/tasks/segment), [pose estimation](https://docs.ultralytics.com/tasks/pose), [classification](https://docs.ultralytics.com/tasks/classify), [OBB](https://docs.ultralytics.com/tasks/obb), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), and [depth estimation](https://docs.ultralytics.com/tasks/depth) (last two YOLO26 only)
+//! - **All Tasks** - [Detection](https://docs.ultralytics.com/tasks/detect), [segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic) and [depth estimation](https://docs.ultralytics.com/tasks/depth) (both YOLO26 only), [classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [OBB](https://docs.ultralytics.com/tasks/obb)
 //! - **Ultralytics API** - Results API for easy migration
 //! - **Multiple Backends** - CPU, CUDA, `TensorRT`, `CoreML`, `OpenVINO`, and more
 //! - **Multiple Sources** - Images, directories, glob patterns, video, webcam, streams
@@ -86,9 +86,9 @@
 //!
 //! # Select task: auto-downloads the matching nano model
 //! ultralytics-inference predict --task segment
+//! ultralytics-inference predict --task classify
 //! ultralytics-inference predict --task pose
 //! ultralytics-inference predict --task obb
-//! ultralytics-inference predict --task classify
 //!
 //! # Run on a specific image
 //! ultralytics-inference predict --model yolo26n.onnx --source image.jpg
@@ -123,7 +123,7 @@
 //! | Option | Short | Description | Default |
 //! |--------|-------|-------------|---------|
 //! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO26/YOLO11/YOLOv8 name | `yolo26n.onnx` |
-//! | `--task` | | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*, `depth`\*); selects nano model when `--model` is omitted | `detect` |
+//! | `--task` | | Task type (`detect`, `segment`, `semantic`\*, `depth`\*, `classify`, `pose`, `obb`); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
 //! | `--iou` | | `IoU` threshold for NMS | `0.7` |
@@ -316,11 +316,11 @@
 //!
 //! - [`Boxes`] - Bounding boxes with `xyxy()`, `xywh()`, `xyxyn()`, `xywhn()`, `conf()`, `cls()` methods
 //! - [`Masks`] - Segmentation masks with `data`, `orig_shape` fields
-//! - [`Keypoints`] - Pose keypoints with `xy()`, `xyn()`, `conf()` methods
-//! - [`Probs`] - Classification probabilities with `top1()`, `top5()`, `top1conf()`, `top5conf()` methods
-//! - [`Obb`] - Oriented bounding boxes with `xyxyxyxy()`, `xywhr()`, `conf()`, `cls()` methods
 //! - [`SemanticMask`] - Per-pixel class map with `class_ids()`, `classes_present()` methods
 //! - [`DepthMap`] - Per-pixel depth map with `min_depth()`, `max_depth()`, `colorize(colormap, viz)` methods
+//! - [`Probs`] - Classification probabilities with `top1()`, `top5()`, `top1conf()`, `top5conf()` methods
+//! - [`Keypoints`] - Pose keypoints with `xy()`, `xyn()`, `conf()` methods
+//! - [`Obb`] - Oriented bounding boxes with `xyxyxyxy()`, `xywhr()`, `conf()`, `cls()` methods
 //! - [`Speed`] - Per-stage timings with a `total()` method
 //!
 //! ## Module Overview
@@ -331,7 +331,7 @@
 //! | [`results`] | Output types ([`Results`], [`Boxes`], [`Masks`], etc.) |
 //! | [`inference`] | [`InferenceConfig`] for customizing inference settings |
 //! | [`source`] | Input source handling ([`Source`], [`SourceIterator`]) |
-//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Pose, Classify, Obb, Semantic, Depth) |
+//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Semantic, Depth, Classify, Pose, Obb) |
 //! | [`mod@error`] | Error types ([`InferenceError`], [`Result`]) |
 //! | [`preprocessing`] | Image preprocessing utilities |
 //! | [`postprocessing`] | Post-processing for all tasks (NMS/decode for detection; argmax for semantic segmentation; letterbox-crop resize for depth) |

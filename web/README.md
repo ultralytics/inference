@@ -32,7 +32,7 @@
 
 </div>
 
-Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser, with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm fallback) and covers [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [pose estimation](https://docs.ultralytics.com/tasks/pose), [image classification](https://docs.ultralytics.com/tasks/classify), [oriented bounding boxes](https://docs.ultralytics.com/tasks/obb), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), and [depth estimation](https://docs.ultralytics.com/tasks/depth), behind a small TypeScript API with a built-in `annotate()` that draws results straight to a canvas.
+Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser, with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm fallback) and covers [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented bounding boxes](https://docs.ultralytics.com/tasks/obb), behind a small TypeScript API with a built-in `annotate()` that draws results straight to a canvas.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -124,11 +124,11 @@ Runs [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8),
 [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX exports for
 [detection](https://docs.ultralytics.com/tasks/detect),
 [segmentation](https://docs.ultralytics.com/tasks/segment),
-[pose](https://docs.ultralytics.com/tasks/pose),
-[OBB](https://docs.ultralytics.com/tasks/obb),
+[semantic segmentation](https://docs.ultralytics.com/tasks/semantic),
+[depth estimation](https://docs.ultralytics.com/tasks/depth),
 [classification](https://docs.ultralytics.com/tasks/classify),
-[semantic segmentation](https://docs.ultralytics.com/tasks/semantic), and
-[depth estimation](https://docs.ultralytics.com/tasks/depth).
+[pose](https://docs.ultralytics.com/tasks/pose), and
+[OBB](https://docs.ultralytics.com/tasks/obb).
 
 `YOLO.load` takes a URL or path, and serves it to the browser like any other asset. Download the weights you want from the [Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the same files the native crate and Python use) and host them **same-origin**, or behind a CORS-enabled origin:
 
@@ -299,7 +299,7 @@ Notes:
   If you load an NMS-free `.tflite`, the backend auto-switches it to wasm
   (slower) and logs a warning rather than returning empty results.
 
-- **Tasks**: detect, segment, pose, obb, classify, semantic, and depth are all supported.
+- **Tasks**: detect, segment, semantic, depth, classify, pose, and obb are all supported.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
   so serve with `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.

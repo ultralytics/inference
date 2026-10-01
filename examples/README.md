@@ -45,11 +45,11 @@ The `tasks` example defaults to detection and works with the other tasks when yo
 ```bash
 cargo run --example tasks                       # detect (default)
 cargo run --example tasks -- yolo26n-seg.onnx   # segment
-cargo run --example tasks -- yolo26n-pose.onnx  # pose
-cargo run --example tasks -- yolo26n-obb.onnx   # obb
-cargo run --example tasks -- yolo26n-cls.onnx   # classify
 cargo run --example tasks -- yolo26n-sem.onnx   # semantic (Ultralytics YOLO26)
 cargo run --example tasks -- yolo26n-depth.onnx # depth (Ultralytics YOLO26)
+cargo run --example tasks -- yolo26n-cls.onnx   # classify
+cargo run --example tasks -- yolo26n-pose.onnx  # pose
+cargo run --example tasks -- yolo26n-obb.onnx   # obb
 ```
 
 The `basic` example prints one block per image:

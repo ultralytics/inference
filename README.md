@@ -63,7 +63,7 @@ Request an Enterprise License for commercial use at [Ultralytics Licensing](http
 <br>
 <br>
 
-This crate runs [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](https://docs.ultralytics.com/models/yolo11), and [YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX models. They are pretrained on [COCO](https://docs.ultralytics.com/datasets/detect/coco) for [Detection](https://docs.ultralytics.com/tasks/detect), [Segmentation](https://docs.ultralytics.com/tasks/segment), and [Pose Estimation](https://docs.ultralytics.com/tasks/pose); on [DOTA](https://docs.ultralytics.com/datasets/obb/dota-v2) for [OBB](https://docs.ultralytics.com/tasks/obb); on [Cityscapes](https://docs.ultralytics.com/datasets/semantic/cityscapes) for [Semantic Segmentation](https://docs.ultralytics.com/tasks/semantic); on [ImageNet](https://docs.ultralytics.com/datasets/classify/imagenet) for [Classification](https://docs.ultralytics.com/tasks/classify); and for monocular [Depth Estimation](https://docs.ultralytics.com/tasks/depth) (YOLO26 only). All [models](https://docs.ultralytics.com/models) download automatically from the latest Ultralytics [release](https://github.com/ultralytics/assets/releases) on first use.
+This crate runs [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](https://docs.ultralytics.com/models/yolo11), and [YOLO26](https://docs.ultralytics.com/models/yolo26) ONNX models. They cover [Detection](https://docs.ultralytics.com/tasks/detect), [Segmentation](https://docs.ultralytics.com/tasks/segment), [Semantic Segmentation](https://docs.ultralytics.com/tasks/semantic), monocular [Depth Estimation](https://docs.ultralytics.com/tasks/depth) (YOLO26 only), [Classification](https://docs.ultralytics.com/tasks/classify), [Pose Estimation](https://docs.ultralytics.com/tasks/pose), and [OBB](https://docs.ultralytics.com/tasks/obb), pretrained on [COCO](https://docs.ultralytics.com/datasets/detect/coco) for detection, segmentation, and pose, on [Cityscapes](https://docs.ultralytics.com/datasets/semantic/cityscapes) for semantic segmentation, on [ImageNet](https://docs.ultralytics.com/datasets/classify/imagenet) for classification, and on [DOTA](https://docs.ultralytics.com/datasets/obb/dota-v2) for OBB. All [models](https://docs.ultralytics.com/models) download automatically from the latest Ultralytics [release](https://github.com/ultralytics/assets/releases) on first use.
 
 [RT-DETR](https://docs.ultralytics.com/models/rtdetr) detection models also run. There is no prebuilt RT-DETR ONNX to download, so export one yourself first (see below). After that it loads and runs like any other model here, on every device this crate supports.
 
@@ -192,11 +192,11 @@ ultralytics-inference predict
 
 # Select task: auto-downloads the nano model for that task
 ultralytics-inference predict --task segment  # downloads yolo26n-seg.onnx
-ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
-ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
-ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
 ultralytics-inference predict --task semantic # downloads yolo26n-sem.onnx (YOLO26 only)
 ultralytics-inference predict --task depth    # downloads yolo26n-depth.onnx (YOLO26 only)
+ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
+ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
+ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
 
 # With explicit model (task is read from model metadata)
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
@@ -297,7 +297,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | Option               | Short | Description                                                                                                                                                                                           | Default                                                                      |
 | -------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `--model`            | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                                                                                                         | `yolo26n.onnx`                                                               |
-| `--task`             |       | Task type (`detect`, `segment`, `pose`, `obb`, `classify`, `semantic`\*, `depth`\*); selects nano model when `--model` is omitted                                                                     | `detect`                                                                     |
+| `--task`             |       | Task type (`detect`, `segment`, `semantic`\*, `depth`\*, `classify`, `pose`, `obb`); selects nano model when `--model` is omitted                                                                     | `detect`                                                                     |
 | `--source`           | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                                                                                                    | Task-dependent Ultralytics URL assets                                        |
 | `--conf`             |       | Confidence threshold                                                                                                                                                                                  | `0.25`                                                                       |
 | `--iou`              |       | IoU threshold for NMS                                                                                                                                                                                 | `0.7`                                                                        |
@@ -326,11 +326,11 @@ On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds t
 | ------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
 | `predict`                                         | `yolo26n.onnx`         | Default detect model, auto-downloaded                               |
 | `predict --task segment`                          | `yolo26n-seg.onnx`     | Nano seg model, auto-downloaded                                     |
-| `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                    |
-| `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                     |
-| `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                |
 | `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | Nano semantic segmentation model, auto-downloaded (YOLO26 only)     |
 | `predict --task depth`                            | `yolo26n-depth.onnx`\* | Nano depth estimation model, auto-downloaded (YOLO26 only)          |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                    |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                     |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | Task read from model metadata                                       |
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, proceeds normally                        |
 | `predict --task segment --model yolo26n.onnx`     | error                  | `--task` conflicts with model metadata (`detect`), exits with error |
@@ -343,9 +343,9 @@ YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are suppor
 
 | Family | Variants                                                                                              |
 | ------ | ----------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`, `-sem`\*, `-depth`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`                       |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`                       |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-sem`\*, `-depth`\*, `-cls`, `-pose`, `-obb` |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                       |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                       |
 
 \* `-sem` (semantic segmentation) and `-depth` (depth estimation) are YOLO26-only.
 
@@ -512,7 +512,7 @@ inference/
 │   ├── postprocessing.rs   # Post-processing for all tasks (NMS/decode for detection, argmax for semantic, resize for depth)
 │   ├── metadata.rs         # ONNX model metadata parsing
 │   ├── source.rs           # Input source handling (images, video, webcam)
-│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb, Semantic, Depth)
+│   ├── task.rs             # Task enum (Detect, Segment, Semantic, Depth, Classify, Pose, Obb)
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch processing pipeline
 │   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)
@@ -779,7 +779,7 @@ On Apple M4 the fastest setting is 4 threads, one per performance core; adding t
 
 ### Completed
 
-- [x] Detection, Segmentation, Pose, Classification, OBB, Semantic Segmentation, and Depth Estimation inference
+- [x] Detection, Segmentation, Semantic Segmentation, Depth Estimation, Classification, Pose, and OBB inference
 - [x] ONNX model metadata parsing (auto-detect classes, task, imgsz)
 - [x] Hardware acceleration support (CUDA, TensorRT, CoreML, OpenVINO, XNNPACK)
 - [x] Ultralytics-compatible Results API (`Boxes`, `Masks`, `Keypoints`, `Probs`, `Obb`, `SemanticMask`, `DepthMap`)

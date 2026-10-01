@@ -331,8 +331,8 @@ impl YoloModel {
         Self::from_session(session, metadata, Device::Cpu)
     }
 
-    /// The model's task (`"detect"`, `"segment"`, `"pose"`, `"classify"`,
-    /// `"obb"`, `"semantic"`, or `"depth"`).
+    /// The model's task (`"detect"`, `"segment"`, `"semantic"`, `"depth"`,
+    /// `"classify"`, `"pose"`, or `"obb"`).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn task(&self) -> String {
@@ -886,7 +886,7 @@ fn decode_shapes(flat: &[u32], count: usize) -> Result<Vec<Vec<usize>>, JsError>
 /// Some LiteRT exports emit box (and pose keypoint) coordinates normalized to
 /// `[0, 1]`, while the shared postprocess expects model-input pixels. Handles both
 /// `[1, C, N]` and `[1, N, C]` layouts; a max-coordinate guard makes it a no-op for
-/// pixel-coordinate exports and for box-less tasks (classify/semantic). The OBB
+/// pixel-coordinate exports and for box-less tasks (semantic/classify). The OBB
 /// angle and keypoint confidence channels are left untouched.
 fn denormalize_head(
     buf: &mut [f32],

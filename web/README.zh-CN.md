@@ -32,7 +32,7 @@
 
 </div>
 
-直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com) YOLO 模型，无需服务器，也无需 Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[姿态估计](https://docs.ultralytics.com/tasks/pose)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[旋转边界框](https://docs.ultralytics.com/tasks/obb)、[语义分割](https://docs.ultralytics.com/tasks/semantic)和[深度估计](https://docs.ultralytics.com/tasks/depth)，接口是一个小巧的 TypeScript API，内置的 `annotate()` 可直接把结果绘制到 canvas 上。
+直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com) YOLO 模型，无需服务器，也无需 Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、[深度估计](https://docs.ultralytics.com/tasks/depth)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和[旋转边界框](https://docs.ultralytics.com/tasks/obb)，接口是一个小巧的 TypeScript API，内置的 `annotate()` 可直接把结果绘制到 canvas 上。
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -120,11 +120,11 @@ async function frame() {
 [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26) 的 ONNX 导出模型，覆盖
 [检测](https://docs.ultralytics.com/tasks/detect)、
 [分割](https://docs.ultralytics.com/tasks/segment)、
-[姿态](https://docs.ultralytics.com/tasks/pose)、
-[OBB](https://docs.ultralytics.com/tasks/obb)、
+[语义分割](https://docs.ultralytics.com/tasks/semantic)、
+[深度估计](https://docs.ultralytics.com/tasks/depth)、
 [分类](https://docs.ultralytics.com/tasks/classify)、
-[语义分割](https://docs.ultralytics.com/tasks/semantic)和
-[深度估计](https://docs.ultralytics.com/tasks/depth)。
+[姿态](https://docs.ultralytics.com/tasks/pose)和
+[OBB](https://docs.ultralytics.com/tasks/obb)。
 
 `YOLO.load` 接受 URL 或路径，浏览器会像加载其他静态资源一样获取它。请从 [Ultralytics assets release](https://github.com/ultralytics/assets/releases) 下载所需权重（与原生 crate 和 Python 使用的是同一份文件），并部署在**同源**位置，或放在启用了 CORS 的源之后：
 
@@ -275,7 +275,7 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 
   如果加载了无 NMS 的 `.tflite`，后端会自动切换到 wasm（较慢）并打印警告，而不是返回空结果。
 
-- **支持的任务**：detect、segment、pose、obb、classify、semantic 和 depth 均已支持。
+- **支持的任务**：detect、segment、semantic、depth、classify、pose 和 obb 均已支持。
 - **跨源隔离**：LiteRT 的多线程 wasm 需要 `SharedArrayBuffer`，因此请以
   `Cross-Origin-Opener-Policy: same-origin` 和 `Cross-Origin-Embedder-Policy: require-corp`
   提供服务。
