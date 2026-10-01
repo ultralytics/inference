@@ -1488,7 +1488,7 @@ impl YOLOModel {
     const fn cuda_pre_task(task: Task) -> bool {
         matches!(
             task,
-            Task::Detect | Task::Segment | Task::Pose | Task::Obb | Task::Semantic | Task::Depth
+            Task::Detect | Task::Segment | Task::Semantic | Task::Depth | Task::Pose | Task::Obb
         )
     }
 

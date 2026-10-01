@@ -22,21 +22,21 @@ pub enum Task {
     /// Instance segmentation.
     /// Predicts bounding boxes, class labels, and pixel-level masks for objects.
     Segment,
-    /// Pose estimation.
-    /// Predicts bounding boxes and skeletal keypoints for objects (e.g., humans).
-    Pose,
-    /// Image classification.
-    /// Predicts class probabilities for the entire image (no localization).
-    Classify,
-    /// Oriented bounding box detection (OBB).
-    /// Predicts rotated bounding boxes for objects, useful for aerial imagery etc.
-    Obb,
     /// Semantic segmentation.
     /// Assigns a class label to every pixel in the image.
     Semantic,
     /// Monocular depth estimation.
     /// Predicts a per-pixel depth map (in meters) for the whole image.
     Depth,
+    /// Image classification.
+    /// Predicts class probabilities for the entire image (no localization).
+    Classify,
+    /// Pose estimation.
+    /// Predicts bounding boxes and skeletal keypoints for objects (e.g., humans).
+    Pose,
+    /// Oriented bounding box detection (OBB).
+    /// Predicts rotated bounding boxes for objects, useful for aerial imagery etc.
+    Obb,
 }
 
 impl Task {
@@ -47,11 +47,11 @@ impl Task {
         match self {
             Self::Detect => "detect",
             Self::Segment => "segment",
-            Self::Pose => "pose",
-            Self::Classify => "classify",
-            Self::Obb => "obb",
             Self::Semantic => "semantic",
             Self::Depth => "depth",
+            Self::Classify => "classify",
+            Self::Pose => "pose",
+            Self::Obb => "obb",
         }
     }
 
@@ -68,11 +68,11 @@ impl Task {
         match self {
             Self::Detect => "",
             Self::Segment => "-seg",
-            Self::Pose => "-pose",
-            Self::Classify => "-cls",
-            Self::Obb => "-obb",
             Self::Semantic => "-sem",
             Self::Depth => "-depth",
+            Self::Classify => "-cls",
+            Self::Pose => "-pose",
+            Self::Obb => "-obb",
         }
     }
 
@@ -105,11 +105,11 @@ impl FromStr for Task {
         match s.to_lowercase().as_str() {
             "detect" | "detection" => Ok(Self::Detect),
             "segment" | "segmentation" => Ok(Self::Segment),
-            "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
-            "classify" | "classification" | "cls" => Ok(Self::Classify),
-            "obb" | "oriented" => Ok(Self::Obb),
             "semantic" | "semantic_segmentation" | "semseg" => Ok(Self::Semantic),
             "depth" | "depth_estimation" => Ok(Self::Depth),
+            "classify" | "classification" | "cls" => Ok(Self::Classify),
+            "pose" | "keypoint" | "keypoints" => Ok(Self::Pose),
+            "obb" | "oriented" => Ok(Self::Obb),
             _ => Err(TaskParseError(s.to_string())),
         }
     }
@@ -139,23 +139,22 @@ mod tests {
     fn test_task_from_str() {
         assert_eq!("detect".parse::<Task>().unwrap(), Task::Detect);
         assert_eq!("segment".parse::<Task>().unwrap(), Task::Segment);
-        assert_eq!("pose".parse::<Task>().unwrap(), Task::Pose);
-        assert_eq!("classify".parse::<Task>().unwrap(), Task::Classify);
-        assert_eq!("obb".parse::<Task>().unwrap(), Task::Obb);
-
         assert_eq!("semantic".parse::<Task>().unwrap(), Task::Semantic);
         assert_eq!("depth".parse::<Task>().unwrap(), Task::Depth);
+        assert_eq!("classify".parse::<Task>().unwrap(), Task::Classify);
+        assert_eq!("pose".parse::<Task>().unwrap(), Task::Pose);
+        assert_eq!("obb".parse::<Task>().unwrap(), Task::Obb);
 
         // Alternative names
         assert_eq!("detection".parse::<Task>().unwrap(), Task::Detect);
         assert_eq!("segmentation".parse::<Task>().unwrap(), Task::Segment);
-        assert_eq!("keypoints".parse::<Task>().unwrap(), Task::Pose);
-        assert_eq!("cls".parse::<Task>().unwrap(), Task::Classify);
         assert_eq!(
             "semantic_segmentation".parse::<Task>().unwrap(),
             Task::Semantic
         );
         assert_eq!("depth_estimation".parse::<Task>().unwrap(), Task::Depth);
+        assert_eq!("cls".parse::<Task>().unwrap(), Task::Classify);
+        assert_eq!("keypoints".parse::<Task>().unwrap(), Task::Pose);
     }
 
     #[test]
@@ -170,11 +169,11 @@ mod tests {
         let cases = [
             (Task::Detect, "detect", "", "yolo26n.onnx"),
             (Task::Segment, "segment", "-seg", "yolo26n-seg.onnx"),
-            (Task::Pose, "pose", "-pose", "yolo26n-pose.onnx"),
-            (Task::Classify, "classify", "-cls", "yolo26n-cls.onnx"),
-            (Task::Obb, "obb", "-obb", "yolo26n-obb.onnx"),
             (Task::Semantic, "semantic", "-sem", "yolo26n-sem.onnx"),
             (Task::Depth, "depth", "-depth", "yolo26n-depth.onnx"),
+            (Task::Classify, "classify", "-cls", "yolo26n-cls.onnx"),
+            (Task::Pose, "pose", "-pose", "yolo26n-pose.onnx"),
+            (Task::Obb, "obb", "-obb", "yolo26n-obb.onnx"),
         ];
         for (task, name, suffix, model) in cases {
             assert_eq!(task.as_str(), name);
@@ -185,10 +184,10 @@ mod tests {
 
     #[test]
     fn test_task_from_str_aliases_and_errors() {
-        assert_eq!("KEYPOINT".parse::<Task>().unwrap(), Task::Pose);
-        assert_eq!("oriented".parse::<Task>().unwrap(), Task::Obb);
         assert_eq!("semseg".parse::<Task>().unwrap(), Task::Semantic);
         assert_eq!("Classification".parse::<Task>().unwrap(), Task::Classify);
+        assert_eq!("KEYPOINT".parse::<Task>().unwrap(), Task::Pose);
+        assert_eq!("oriented".parse::<Task>().unwrap(), Task::Obb);
         assert!("not_a_task".parse::<Task>().is_err());
     }
 }
