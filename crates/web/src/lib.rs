@@ -331,8 +331,8 @@ impl YoloModel {
         Self::from_session(session, metadata, Device::Cpu)
     }
 
-    /// The model's task (`"detect"`, `"segment"`, `"pose"`, `"classify"`,
-    /// `"obb"`, `"semantic"`, or `"depth"`).
+    /// The model's task (`"detect"`, `"segment"`, `"semantic"`, `"depth"`,
+    /// `"classify"`, `"pose"`, or `"obb"`).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn task(&self) -> String {

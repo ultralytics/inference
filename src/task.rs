@@ -123,7 +123,7 @@ impl fmt::Display for TaskParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid task '{}', expected one of: detect, segment, pose, classify, obb, semantic, depth",
+            "invalid task '{}', expected one of: detect, segment, semantic, depth, classify, pose, obb",
             self.0
         )
     }
