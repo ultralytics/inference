@@ -31,11 +31,11 @@ use clap::{Args, Parser, Subcommand};
 Examples:
     ultralytics-inference predict
     ultralytics-inference predict --task segment
-    ultralytics-inference predict --task pose
-    ultralytics-inference predict --task obb --source aerial.jpg
-    ultralytics-inference predict --task classify --source image.jpg
     ultralytics-inference predict --task semantic --source image.jpg
     ultralytics-inference predict --task depth --source image.jpg
+    ultralytics-inference predict --task classify --source image.jpg
+    ultralytics-inference predict --task pose
+    ultralytics-inference predict --task obb --source aerial.jpg
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames

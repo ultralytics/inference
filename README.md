@@ -192,11 +192,11 @@ ultralytics-inference predict
 
 # Select task: auto-downloads the nano model for that task
 ultralytics-inference predict --task segment  # downloads yolo26n-seg.onnx
-ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
-ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
-ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
 ultralytics-inference predict --task semantic # downloads yolo26n-sem.onnx (YOLO26 only)
 ultralytics-inference predict --task depth    # downloads yolo26n-depth.onnx (YOLO26 only)
+ultralytics-inference predict --task classify # downloads yolo26n-cls.onnx
+ultralytics-inference predict --task pose     # downloads yolo26n-pose.onnx
+ultralytics-inference predict --task obb      # downloads yolo26n-obb.onnx
 
 # With explicit model (task is read from model metadata)
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
@@ -326,11 +326,11 @@ On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds t
 | ------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
 | `predict`                                         | `yolo26n.onnx`         | Default detect model, auto-downloaded                               |
 | `predict --task segment`                          | `yolo26n-seg.onnx`     | Nano seg model, auto-downloaded                                     |
-| `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                    |
-| `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                     |
-| `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                |
 | `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | Nano semantic segmentation model, auto-downloaded (YOLO26 only)     |
 | `predict --task depth`                            | `yolo26n-depth.onnx`\* | Nano depth estimation model, auto-downloaded (YOLO26 only)          |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                    |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                     |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | Task read from model metadata                                       |
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, proceeds normally                        |
 | `predict --task segment --model yolo26n.onnx`     | error                  | `--task` conflicts with model metadata (`detect`), exits with error |
@@ -343,9 +343,9 @@ YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are suppor
 
 | Family | Variants                                                                                              |
 | ------ | ----------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`, `-sem`\*, `-depth`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`                       |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-pose`, `-obb`, `-cls`                       |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-sem`\*, `-depth`\*, `-cls`, `-pose`, `-obb` |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                       |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                       |
 
 \* `-sem` (semantic segmentation) and `-depth` (depth estimation) are YOLO26-only.
 
@@ -512,7 +512,7 @@ inference/
 │   ├── postprocessing.rs   # Post-processing for all tasks (NMS/decode for detection, argmax for semantic, resize for depth)
 │   ├── metadata.rs         # ONNX model metadata parsing
 │   ├── source.rs           # Input source handling (images, video, webcam)
-│   ├── task.rs             # Task enum (Detect, Segment, Pose, Classify, Obb, Semantic, Depth)
+│   ├── task.rs             # Task enum (Detect, Segment, Semantic, Depth, Classify, Pose, Obb)
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch processing pipeline
 │   ├── device.rs           # Device enum (CPU, CUDA, CoreML, etc.)

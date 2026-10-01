@@ -886,7 +886,7 @@ fn decode_shapes(flat: &[u32], count: usize) -> Result<Vec<Vec<usize>>, JsError>
 /// Some LiteRT exports emit box (and pose keypoint) coordinates normalized to
 /// `[0, 1]`, while the shared postprocess expects model-input pixels. Handles both
 /// `[1, C, N]` and `[1, N, C]` layouts; a max-coordinate guard makes it a no-op for
-/// pixel-coordinate exports and for box-less tasks (classify/semantic). The OBB
+/// pixel-coordinate exports and for box-less tasks (semantic/classify). The OBB
 /// angle and keypoint confidence channels are left untouched.
 fn denormalize_head(
     buf: &mut [f32],

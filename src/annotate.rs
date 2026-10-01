@@ -166,9 +166,9 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
 
 /// Overlay inference results onto `image` and return the annotated copy.
 ///
-/// Draws whichever result types are present: semantic segmentation mask, detection boxes
-/// with instance masks, pose skeletons, oriented bounding boxes, and classification
-/// probabilities. The font (Arial or Arial Unicode for non-ASCII names) is downloaded
+/// Draws whichever result types are present: detection boxes with instance masks,
+/// semantic segmentation mask, classification probabilities, pose skeletons, and
+/// oriented bounding boxes. The font (Arial or Arial Unicode for non-ASCII names) is downloaded
 /// on first use and cached locally.
 ///
 /// # Arguments

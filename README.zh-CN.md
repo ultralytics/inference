@@ -191,11 +191,11 @@ ultralytics-inference predict
 
 # 选择任务：自动下载对应任务的 nano 模型
 ultralytics-inference predict --task segment  # 下载 yolo26n-seg.onnx
-ultralytics-inference predict --task pose     # 下载 yolo26n-pose.onnx
-ultralytics-inference predict --task obb      # 下载 yolo26n-obb.onnx
-ultralytics-inference predict --task classify # 下载 yolo26n-cls.onnx
 ultralytics-inference predict --task semantic # 下载 yolo26n-sem.onnx（仅 YOLO26）
 ultralytics-inference predict --task depth    # 下载 yolo26n-depth.onnx（仅 YOLO26）
+ultralytics-inference predict --task classify # 下载 yolo26n-cls.onnx
+ultralytics-inference predict --task pose     # 下载 yolo26n-pose.onnx
+ultralytics-inference predict --task obb      # 下载 yolo26n-obb.onnx
 
 # 使用显式模型（任务从模型元数据读取）
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
@@ -325,11 +325,11 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | ------------------------------------------------- | ---------------------- | ------------------------------------------------------- |
 | `predict`                                         | `yolo26n.onnx`         | 默认检测模型，自动下载                                  |
 | `predict --task segment`                          | `yolo26n-seg.onnx`     | nano 分割模型，自动下载                                 |
-| `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                 |
-| `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                 |
-| `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                 |
 | `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | nano 语义分割模型，自动下载（仅 YOLO26）                |
 | `predict --task depth`                            | `yolo26n-depth.onnx`\* | nano 深度估计模型，自动下载（仅 YOLO26）                |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                 |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                 |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                 |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | 从模型元数据读取任务                                    |
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` 与元数据一致，正常执行                         |
 | `predict --task segment --model yolo26n.onnx`     | error                  | `--task` 与模型元数据（`detect`）冲突，程序以错误退出。 |
@@ -342,9 +342,9 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 
 | 系列   | 变体                                                                                                  |
 | ------ | ----------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`、`-sem`\*、`-depth`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`                       |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-pose`、`-obb`、`-cls`                       |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-sem`\*、`-depth`\*、`-cls`、`-pose`、`-obb` |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                       |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                       |
 
 \* `-sem`（语义分割）和 `-depth`（深度估计）仅支持 YOLO26。
 
@@ -508,7 +508,7 @@ inference/
 │   ├── postprocessing.rs   # 所有任务的后处理（检测 NMS/decode、语义分割 argmax、深度 resize）
 │   ├── metadata.rs         # ONNX 模型元数据解析
 │   ├── source.rs           # 输入源处理（图片、视频、摄像头）
-│   ├── task.rs             # Task 枚举（Detect, Segment, Pose, Classify, Obb, Semantic）
+│   ├── task.rs             # Task 枚举（Detect, Segment, Semantic, Depth, Classify, Pose, Obb）
 │   ├── inference.rs        # InferenceConfig
 │   ├── batch.rs            # Batch 处理流程
 │   ├── device.rs           # Device 枚举（CPU, CUDA, CoreML 等）

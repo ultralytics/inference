@@ -86,9 +86,9 @@
 //!
 //! # Select task: auto-downloads the matching nano model
 //! ultralytics-inference predict --task segment
+//! ultralytics-inference predict --task classify
 //! ultralytics-inference predict --task pose
 //! ultralytics-inference predict --task obb
-//! ultralytics-inference predict --task classify
 //!
 //! # Run on a specific image
 //! ultralytics-inference predict --model yolo26n.onnx --source image.jpg
@@ -316,11 +316,11 @@
 //!
 //! - [`Boxes`] - Bounding boxes with `xyxy()`, `xywh()`, `xyxyn()`, `xywhn()`, `conf()`, `cls()` methods
 //! - [`Masks`] - Segmentation masks with `data`, `orig_shape` fields
-//! - [`Keypoints`] - Pose keypoints with `xy()`, `xyn()`, `conf()` methods
-//! - [`Probs`] - Classification probabilities with `top1()`, `top5()`, `top1conf()`, `top5conf()` methods
-//! - [`Obb`] - Oriented bounding boxes with `xyxyxyxy()`, `xywhr()`, `conf()`, `cls()` methods
 //! - [`SemanticMask`] - Per-pixel class map with `class_ids()`, `classes_present()` methods
 //! - [`DepthMap`] - Per-pixel depth map with `min_depth()`, `max_depth()`, `colorize(colormap, viz)` methods
+//! - [`Probs`] - Classification probabilities with `top1()`, `top5()`, `top1conf()`, `top5conf()` methods
+//! - [`Keypoints`] - Pose keypoints with `xy()`, `xyn()`, `conf()` methods
+//! - [`Obb`] - Oriented bounding boxes with `xyxyxyxy()`, `xywhr()`, `conf()`, `cls()` methods
 //! - [`Speed`] - Per-stage timings with a `total()` method
 //!
 //! ## Module Overview
@@ -331,7 +331,7 @@
 //! | [`results`] | Output types ([`Results`], [`Boxes`], [`Masks`], etc.) |
 //! | [`inference`] | [`InferenceConfig`] for customizing inference settings |
 //! | [`source`] | Input source handling ([`Source`], [`SourceIterator`]) |
-//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Pose, Classify, Obb, Semantic, Depth) |
+//! | [`task`] | YOLO task types ([`Task`]: Detect, Segment, Semantic, Depth, Classify, Pose, Obb) |
 //! | [`mod@error`] | Error types ([`InferenceError`], [`Result`]) |
 //! | [`preprocessing`] | Image preprocessing utilities |
 //! | [`postprocessing`] | Post-processing for all tasks (NMS/decode for detection; argmax for semantic segmentation; letterbox-crop resize for depth) |

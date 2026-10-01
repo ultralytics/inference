@@ -48,11 +48,11 @@ fn supported_models_help() -> String {
     let variants_display = [
         "detect",
         "-seg",
-        "-pose",
-        "-obb",
-        "-cls",
         "-sem (yolo26 only)",
         "-depth (yolo26 only)",
+        "-cls",
+        "-pose",
+        "-obb",
     ];
     let sizes_display = MODEL_SIZES.join(", ");
     let variants_joined = variants_display.join(", ");
