@@ -655,7 +655,7 @@ default), and read `model.device` to see what actually ran.
 The backend is picked automatically from the model format (its extension when
 available, otherwise the model bytes), so switching is just a matter of the model
 you load. LiteRT.js (Google's LiteRT for Web) is optional and
-often **~2× faster than ONNX Runtime Web on WebGPU** — point `YOLO.load` at an
+runs **1.2 to 1.5× faster than ONNX Runtime Web on WebGPU** — point `YOLO.load` at an
 Ultralytics `.tflite` export and `npm install @litertjs/core` alongside the package.
 See the [LiteRT.js section](web/README.md#-litertjs-backend) for details.
 
