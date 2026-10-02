@@ -130,7 +130,7 @@ cargo install --path . --locked
 `cargo install` 会把二进制文件安装到 Cargo 默认 bin 目录：
 
 - macOS/Linux：`~/.cargo/bin`
-- Windows：`%USERPROFILE%\\.cargo\\bin`
+- Windows：`%USERPROFILE%\.cargo\bin`
 
 确认该目录已加入 `PATH` 后，可在任意位置运行：
 
