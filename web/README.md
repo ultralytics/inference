@@ -130,7 +130,7 @@ Runs [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8),
 [pose](https://docs.ultralytics.com/tasks/pose), and
 [OBB](https://docs.ultralytics.com/tasks/obb).
 
-`YOLO.load` takes a URL or path, and serves it to the browser like any other asset. Download the weights you want from the [Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the same files the native crate and Python use) and host them **same-origin**, or behind a CORS-enabled origin:
+`YOLO.load` takes a URL or path, which the browser fetches like any other asset. Download the weights you want from the [Ultralytics assets release](https://github.com/ultralytics/assets/releases) (the same files the native crate and Python use) and host them **same-origin**, or behind a CORS-enabled origin:
 
 ```ts
 await YOLO.load("/models/yolo26n.onnx");
