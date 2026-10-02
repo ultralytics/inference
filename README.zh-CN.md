@@ -648,8 +648,8 @@ console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 `model.device` 查看实际使用的设备。
 
 后端会根据模型格式自动选择（优先使用扩展名，否则读取模型字节），因此切换后端只取决于
-加载的模型。LiteRT.js（Google 的 Web 版 LiteRT）是可选项，且在 WebGPU 上常常
-**比 ONNX Runtime Web 快约 2 倍**：将 `YOLO.load` 指向 Ultralytics 导出的 `.tflite`
+加载的模型。LiteRT.js（Google 的 Web 版 LiteRT）是可选项，且在 WebGPU 上
+**比 ONNX Runtime Web 快 1.2 至 1.5 倍**：将 `YOLO.load` 指向 Ultralytics 导出的 `.tflite`
 模型，并在安装本包的同时执行 `npm install @litertjs/core` 即可。详见
 [LiteRT.js 章节](web/README.md#-litertjs-backend)。
 
