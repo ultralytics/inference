@@ -683,10 +683,10 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 
 ### Optional Dependencies (for the `annotate` feature)
 
-| Crate       | Purpose                        |
-| ----------- | ------------------------------ |
-| `imageproc` | Drawing boxes and shapes       |
-| `ab_glyph`  | Text rendering (embedded font) |
+| Crate       | Purpose                                              |
+| ----------- | ---------------------------------------------------- |
+| `imageproc` | Drawing boxes and shapes                             |
+| `ab_glyph`  | Text rendering (Arial font, downloaded on first use) |
 
 ### Optional Dependencies (for Video & Visualization)
 
