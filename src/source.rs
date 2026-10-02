@@ -955,7 +955,7 @@ mod tests {
         let m = SourceMeta::default();
         assert_eq!(m.frame_idx, 0);
         assert_eq!(m.total_frames, Some(1));
-        assert!(m.path.is_empty());
+        assert_eq!(m.path, "");
         assert!(m.fps.is_none());
     }
 
