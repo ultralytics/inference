@@ -8,7 +8,6 @@ behaviors helps ensure changes remain reliable and well-documented.
 ## 🧪 Overview
 
 - Uses standard [Cargo tests](https://doc.rust-lang.org/cargo/guide/tests.html) with Rust’s built-in test harness.
-- Organized to mirror the structure of the source code directory for easy navigation and reference.
 - Tests should be comprehensive, covering user-facing behavior, error handling, and edge cases.
 
 ## 🚀 Running Tests
