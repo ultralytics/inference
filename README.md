@@ -130,7 +130,7 @@ cargo install --path . --locked
 `cargo install` places binaries in Cargo's default bin directory:
 
 - macOS/Linux: `~/.cargo/bin`
-- Windows: `%USERPROFILE%\\.cargo\\bin`
+- Windows: `%USERPROFILE%\.cargo\bin`
 
 Ensure this directory is in your `PATH`, then run from anywhere:
 
