@@ -7,7 +7,7 @@
 Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ultralytics-inference) library. Each example is a single file you run with `cargo run --example`. They show how to load and run [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8) models from Rust.
 
 > [!NOTE]
-> Model metadata (classes, task, image size) is read from the ONNX file, so Ultralytics YOLOv8, Ultralytics YOLO11, Ultralytics YOLO26, and RT-DETR models all work without extra configuration. Each example takes an optional image path and downloads a sample image when none is given.
+> Model metadata (classes, task, image size) is read from the ONNX file, so Ultralytics YOLOv8, Ultralytics YOLO11, Ultralytics YOLO26, and RT-DETR models all work without extra configuration. The `basic`, `config`, and `annotate` examples take an optional image path and download a sample image when none is given.
 
 ## 📂 Examples
 
@@ -74,7 +74,7 @@ cargo run --example basic -- image.jpg
 
 The default `nms=None` exports raw one-to-many outputs, with NMS handled by this library.
 For the other NMS modes and tasks, see [ONNX export options](../README.md#export-a-yolo-model-to-onnx).
-To run a different model, change the model path in the example.
+`basic` and `tasks` take the model path as an argument; for `config` and `annotate`, change the model path in the example.
 
 ## 🤝 Contributing
 
