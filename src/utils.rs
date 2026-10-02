@@ -42,8 +42,8 @@ fn get_covariance_params(w: f32, h: f32, angle: f32) -> (f32, f32, f32) {
     let cos2 = cos.powi(2);
     let sin2 = sin.powi(2);
 
-    let a_val = a * cos2 + b * sin2;
-    let b_val = a * sin2 + b * cos2;
+    let a_val = b.mul_add(sin2, a * cos2);
+    let b_val = b.mul_add(cos2, a * sin2);
     let c_val = (a - b) * cos * sin;
 
     (a_val, b_val, c_val)
@@ -399,7 +399,7 @@ mod tests {
             ([0.0, 0.0, 10.0, 10.0], 0.9, 0),
             ([50.0, 50.0, 60.0, 60.0], 0.8, 0),
         ];
-        assert!(nms_per_class_capped(&boxes, 0.5, 0).is_empty());
+        assert_eq!(nms_per_class_capped(&boxes, 0.5, 0), Vec::<usize>::new());
         assert_eq!(nms_per_class_capped(&boxes, 0.5, 1), vec![0]);
 
         // A NaN score used to panic in the sort comparator.
@@ -432,7 +432,10 @@ mod tests {
             ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 0),
         ];
         assert_eq!(nms_rotated_per_class(&within, 0.5), vec![0]);
-        assert!(nms_rotated_per_class_capped(&within, 0.5, 0).is_empty());
+        assert_eq!(
+            nms_rotated_per_class_capped(&within, 0.5, 0),
+            Vec::<usize>::new()
+        );
     }
 
     #[test]
