@@ -4,7 +4,7 @@
 name = "ultralytics-inference-web"
 version = "0.0.50"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.92"
 description = "Browser/WebAssembly bindings for ultralytics-inference (WebGPU via ort-web)"
 license = "AGPL-3.0"
 repository = "https://github.com/ultralytics/inference"
