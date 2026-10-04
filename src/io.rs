@@ -5,8 +5,11 @@
 #[cfg(feature = "video")]
 use ffmpeg_next as ffmpeg;
 
+use crate::error;
 use crate::error::{InferenceError, Result};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::SyncSender;
+use std::thread::JoinHandle;
 
 #[cfg(feature = "video")]
 use std::borrow::Cow;
@@ -354,12 +357,23 @@ impl Drop for VideoWriter {
     }
 }
 
+/// Queue and worker threads that write images off the calling thread.
+type ImageWriter = (
+    SyncSender<(PathBuf, image::DynamicImage)>,
+    Vec<JoinHandle<()>>,
+);
+
+/// Worker threads encoding images, enough to keep up with inference on large frames.
+const IMAGE_WRITER_THREADS: usize = 3;
+
 /// Helper struct to handle saving inference results to video or disk.
 ///
 /// This consolidates logic for deciding whether to save as a video file
 /// or individual frames, and manages the `VideoWriter` state.
 pub struct SaveResults {
     save_dir: PathBuf,
+    /// Encodes and writes images on worker threads so JPEG encoding overlaps inference.
+    image_writer: Option<ImageWriter>,
     #[cfg(feature = "video")]
     save_frames: bool,
     #[cfg(feature = "video")]
@@ -380,6 +394,7 @@ impl SaveResults {
 
         Self {
             save_dir,
+            image_writer: None,
             #[cfg(feature = "video")]
             save_frames,
             #[cfg(feature = "video")]
@@ -405,7 +420,7 @@ impl SaveResults {
         &mut self,
         is_video: bool,
         meta: &crate::source::SourceMeta,
-        annotated: &image::DynamicImage,
+        annotated: image::DynamicImage,
     ) -> Result<()> {
         #[cfg(feature = "video")]
         let save_as_video = is_video && !self.save_frames;
@@ -437,7 +452,7 @@ impl SaveResults {
                 }
 
                 if let Some(writer) = &mut self.video_writer {
-                    writer.write_frame(annotated)?;
+                    writer.write_frame(&annotated)?;
                 }
             }
         } else {
@@ -464,19 +479,48 @@ impl SaveResults {
 
             ensure_dir(&save_dir)?;
 
-            annotated
-                .save(&save_path)
+            let (sender, _) = self.image_writer.get_or_insert_with(|| {
+                let (sender, receiver) = std::sync::mpsc::sync_channel::<(
+                    PathBuf,
+                    image::DynamicImage,
+                )>(IMAGE_WRITER_THREADS * 2);
+                let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
+                let workers = (0..IMAGE_WRITER_THREADS)
+                    .map(|_| {
+                        let receiver = receiver.clone();
+                        std::thread::spawn(move || {
+                            loop {
+                                // Release the lock before encoding so the workers run in parallel.
+                                let job = receiver.lock().ok().and_then(|r| r.recv().ok());
+                                let Some((path, image)) = job else { break };
+                                if let Err(e) = image.save(&path) {
+                                    error!("Failed to save '{}': {e}", path.display());
+                                }
+                            }
+                        })
+                    })
+                    .collect();
+                (sender, workers)
+            });
+            sender
+                .send((save_path, annotated))
                 .map_err(|e| InferenceError::ImageError(e.to_string()))?;
         }
         Ok(())
     }
 
-    /// Finish any active video writing.
+    /// Wait for queued images to be written and finish any active video writing.
     ///
     /// # Errors
     ///
     /// Returns an error if the video writer fails to finish.
     pub fn finish(self) -> Result<()> {
+        if let Some((sender, workers)) = self.image_writer {
+            drop(sender);
+            for worker in workers {
+                let _ = worker.join();
+            }
+        }
         #[cfg(feature = "video")]
         if let Some(writer) = self.video_writer {
             writer.finish()?;
@@ -577,11 +621,9 @@ mod tests {
             ..SourceMeta::default()
         };
 
-        saver.save(false, &meta, &img).unwrap();
-        assert!(tmp.path().join("frame.jpg").exists());
-
-        // finish() is a clean no-op when no video writer was opened.
+        saver.save(false, &meta, img).unwrap();
         saver.finish().unwrap();
+        assert!(tmp.path().join("frame.jpg").exists());
     }
 
     #[cfg(feature = "video")]
@@ -623,9 +665,9 @@ mod tests {
             ..SourceMeta::default()
         };
 
-        saver.save(true, &meta, &img).unwrap();
-        assert!(tmp.path().join("clip_frames").join("clip_1.jpg").exists());
+        saver.save(true, &meta, img).unwrap();
         saver.finish().unwrap();
+        assert!(tmp.path().join("clip_frames").join("clip_1.jpg").exists());
     }
 
     #[cfg(feature = "video")]
@@ -642,8 +684,8 @@ mod tests {
             fps: Some(10.0),
             ..SourceMeta::default()
         };
-        saver.save(true, &meta, &img).unwrap();
-        saver.save(true, &meta, &img).unwrap();
+        saver.save(true, &meta, img.clone()).unwrap();
+        saver.save(true, &meta, img).unwrap();
         saver.finish().unwrap();
         assert!(tmp.path().join("movie.mp4").exists());
     }
