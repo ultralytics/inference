@@ -176,15 +176,9 @@ impl DepthMap {
                 (vmin, 1.0 / (vmax - vmin), false)
             }
             DepthViz::Disparity => {
-                let mut disp: Vec<f32> = data
-                    .iter()
-                    .filter(|&&d| d > 0.0)
-                    .map(|&d| 1.0 / d)
-                    .collect();
-                if disp.is_empty() {
+                let Some((lo, hi)) = disparity_percentiles(data.iter().copied()) else {
                     return vec![black; data.len()];
-                }
-                let (lo, hi) = percentile_2_98(&mut disp);
+                };
                 (lo, 1.0 / (hi - lo).max(1e-6), true)
             }
         };
@@ -229,20 +223,59 @@ impl DepthMap {
     }
 }
 
-/// Return the 2nd and 98th percentiles of `vals`, reordering it in place (`O(n)` selection).
+/// Return the 2nd and 98th percentiles of the inverse depth `1/d` over the positive samples
+/// (`None` when there are none).
+///
+/// Positive floats order like their bit patterns, so one counting pass over the top 16 bits
+/// locates the bins holding both ranks and only those few values are gathered and selected,
+/// instead of copying and partitioning the whole frame. The result equals an exact selection.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn percentile_2_98(vals: &mut [f32]) -> (f32, f32) {
-    let n = vals.len();
+fn disparity_percentiles(data: impl Iterator<Item = f32> + Clone) -> Option<(f32, f32)> {
+    let bin = |d: f32| ((1.0 / d).to_bits() >> 16) as usize;
+    let mut hist = vec![0usize; 1 << 16];
+    for d in data.clone().filter(|&d| d > 0.0) {
+        hist[bin(d)] += 1;
+    }
+    let n: usize = hist.iter().sum();
+    if n == 0 {
+        return None;
+    }
     let idx = |p: f32| ((p * (n - 1) as f32).round() as usize).min(n - 1);
-    let (lo_i, hi_i) = (idx(0.02), idx(0.98));
-    vals.select_nth_unstable_by(lo_i, f32::total_cmp);
-    let lo = vals[lo_i];
-    vals.select_nth_unstable_by(hi_i, f32::total_cmp);
-    (lo, vals[hi_i])
+    // Bin holding the value of a given rank, and that rank's position inside the bin.
+    let locate = |rank: usize| {
+        let mut before = 0;
+        for (b, &count) in hist.iter().enumerate() {
+            if rank < before + count {
+                return (b, rank - before);
+            }
+            before += count;
+        }
+        unreachable!("rank is below the sample count")
+    };
+    let ((lo_bin, lo_rank), (hi_bin, hi_rank)) = (locate(idx(0.02)), locate(idx(0.98)));
+    let mut lo_vals = Vec::new();
+    let mut hi_vals = Vec::new();
+    for d in data.filter(|&d| d > 0.0) {
+        let (v, b) = (1.0 / d, bin(d));
+        if b == lo_bin {
+            lo_vals.push(v);
+        }
+        if b == hi_bin && hi_bin != lo_bin {
+            hi_vals.push(v);
+        }
+    }
+    let lo = *lo_vals.select_nth_unstable_by(lo_rank, f32::total_cmp).1;
+    let hi_vals = if hi_bin == lo_bin {
+        &mut lo_vals
+    } else {
+        &mut hi_vals
+    };
+    let hi = *hi_vals.select_nth_unstable_by(hi_rank, f32::total_cmp).1;
+    Some((lo, hi))
 }
 
 /// Main results container for YOLO inference.
@@ -1198,6 +1231,27 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.detection_summary(), "depth 1.50-4.00m");
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    fn test_disparity_percentiles_match_a_full_sort() {
+        // Pseudo-random depths with invalid (non-positive) samples mixed in.
+        let depths: Vec<f32> = (0..5000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 8) as f32 / 4000.0 - 1.0)
+            .collect();
+        let mut sorted: Vec<f32> = depths
+            .iter()
+            .filter(|&&d| d > 0.0)
+            .map(|&d| 1.0 / d)
+            .collect();
+        sorted.sort_by(f32::total_cmp);
+        let n = sorted.len();
+        let at = |p: f32| sorted[((p * (n - 1) as f32).round() as usize).min(n - 1)];
+
+        let (lo, hi) = disparity_percentiles(depths.iter().copied()).unwrap();
+        assert_eq!((lo, hi), (at(0.02), at(0.98)));
+        assert!(disparity_percentiles([0.0, -1.0].into_iter()).is_none());
     }
 
     #[test]
