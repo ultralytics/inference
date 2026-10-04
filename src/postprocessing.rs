@@ -777,27 +777,29 @@ fn apply_mask_proto(
         return;
     }
 
-    // Vertical pass over the box columns only, to the full output height. An integer
-    // left edge and unchanged width make `fast_image_resize` skip its horizontal pass.
+    // Vertical pass over the box only: just the output rows inside the box are resized, from
+    // the matching source rows at the same scale. An integer left edge and unchanged width
+    // make `fast_image_resize` skip its horizontal pass.
     let box_w = x_end - x_start + 1;
-    let mut cols = Image::new(box_w as u32, oh, PixelType::F32);
+    let box_h = y_end - y_start + 1;
+    let row_scale = f64::from(crop_h.max(1.0).min(mh as f32)) / f64::from(oh);
+    let mut cols = Image::new(box_w as u32, box_h as u32, PixelType::F32);
     let options = ResizeOptions::new().resize_alg(resize_alg).crop(
         x_start as f64,
-        f64::from(crop_y.max(0.0)),
+        (y_start as f64).mul_add(row_scale, f64::from(crop_y.max(0.0))),
         box_w as f64,
-        f64::from(crop_h.max(1.0).min(mh as f32)),
+        box_h as f64 * row_scale,
     );
     if resizer.resize(&rows, &mut cols, &options).is_err() {
         return;
     }
 
-    // Copy the box rows in one row-wise `assign` rather than element by element.
     let cols_slice: &[f32] = bytemuck::cast_slice(cols.buffer());
-    let src = ArrayView2::from_shape((oh as usize, box_w), cols_slice)
-        .expect("resized buffer is oh*box_w");
+    let src =
+        ArrayView2::from_shape((box_h, box_w), cols_slice).expect("resized buffer is box_h*box_w");
     mask_out
         .slice_mut(s![y_start..=y_end, x_start..=x_end])
-        .assign(&src.slice(s![y_start..=y_end, ..]));
+        .assign(&src);
 }
 
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
