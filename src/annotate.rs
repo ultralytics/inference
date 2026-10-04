@@ -575,10 +575,17 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
                 let x2 = xyxy[[i, 2]].max(0.0).min(width as f32) as u32;
                 let y2 = xyxy[[i, 3]].max(0.0).min(height as f32) as u32;
 
-                for y in y1..y2 {
-                    for x in x1..x2 {
-                        if masks.data[[i, y as usize, x as usize]] > 0.5 {
-                            *overlay.get_pixel_mut(x, y) = color;
+                // Row slices instead of per-pixel `[[i, y, x]]` and `get_pixel_mut` indexing.
+                let plane = masks.data.index_axis(ndarray::Axis(0), i);
+                let (w, x1, x2) = (width as usize, x1 as usize, x2 as usize);
+                let samples = overlay.as_flat_samples_mut().samples;
+                for y in y1 as usize..y2 as usize {
+                    let hits = plane.slice(ndarray::s![y, x1..x2]);
+                    let row = &mut samples[(y * w + x1) * 3..(y * w + x2) * 3];
+                    let (pixels, _) = row.as_chunks_mut::<3>();
+                    for (m, px) in hits.iter().zip(pixels) {
+                        if *m > 0.5 {
+                            *px = color.0;
                         }
                     }
                 }
@@ -589,14 +596,17 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
         // this a linear pass; `get_pixel_mut` recomputed the offset for all 300k+ pixels.
         if let Some(overlay) = overlay.filter(|_| mask_present) {
             let alpha = 0.3;
-            for (px, src) in img
-                .as_flat_samples_mut()
+            let overlay = overlay.as_raw();
+            img.as_flat_samples_mut()
                 .samples
-                .iter_mut()
-                .zip(overlay.as_raw())
-            {
-                *px = f32::from(*src).mul_add(alpha, f32::from(*px) * (1.0 - alpha)) as u8;
-            }
+                .par_chunks_mut(BLEND_CHUNK * 3)
+                .enumerate()
+                .for_each(|(c, dst)| {
+                    let src = &overlay[c * BLEND_CHUNK * 3..];
+                    for (px, src) in dst.iter_mut().zip(src) {
+                        *px = f32::from(*src).mul_add(alpha, f32::from(*px) * (1.0 - alpha)) as u8;
+                    }
+                });
         }
 
         // Keep track of occupied label areas to avoid overlap
