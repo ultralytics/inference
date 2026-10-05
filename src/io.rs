@@ -362,12 +362,14 @@ type ImageWorker = (
     JoinHandle<Result<()>>,
 );
 
-/// Close a worker's queue and wait for it to drain, returning its first failure.
-fn join_worker<T>((sender, worker): (SyncSender<T>, JoinHandle<Result<()>>)) -> Result<()> {
+/// Close a worker's queue and wait for it to drain, returning its first failure, or
+/// `panicked` if the thread panicked.
+fn join_worker<T>(
+    (sender, worker): (SyncSender<T>, JoinHandle<Result<()>>),
+    panicked: InferenceError,
+) -> Result<()> {
     drop(sender);
-    worker
-        .join()
-        .unwrap_or_else(|_| Err(InferenceError::ImageError("writer thread panicked".into())))
+    worker.join().unwrap_or(Err(panicked))
 }
 
 /// Worker threads encoding images, enough to keep up with inference on large frames.
@@ -423,7 +425,9 @@ impl SaveResults {
     ///
     /// # Errors
     ///
-    /// Returns an error if saving the image or video frame fails.
+    /// Writing is queued, so a failed image or video write is reported by [`Self::finish`].
+    /// This returns an error only if the output directory cannot be created or the writer
+    /// has already stopped.
     pub fn save(
         &mut self,
         is_video: bool,
@@ -437,7 +441,9 @@ impl SaveResults {
     ///
     /// # Errors
     ///
-    /// Returns an error if saving the image or video frame fails.
+    /// Writing is queued, so a failed image or video write is reported by [`Self::finish`].
+    /// This returns an error only if the output directory cannot be created or the writer
+    /// has already stopped.
     pub fn save_owned(
         &mut self,
         is_video: bool,
@@ -550,14 +556,20 @@ impl SaveResults {
     fn join_writers(&mut self) -> Result<()> {
         let mut result = Ok(());
         for worker in std::mem::take(&mut self.image_writer) {
-            let joined = join_worker(worker);
+            let joined = join_worker(
+                worker,
+                InferenceError::ImageError("image writer thread panicked".into()),
+            );
             if result.is_ok() {
                 result = joined;
             }
         }
         #[cfg(feature = "video")]
         if let Some(worker) = self.video_writer.take() {
-            let joined = join_worker(worker);
+            let joined = join_worker(
+                worker,
+                InferenceError::VideoError("video writer thread panicked".into()),
+            );
             if result.is_ok() {
                 result = joined;
             }
