@@ -421,6 +421,20 @@ impl SaveResults {
         meta: &crate::source::SourceMeta,
         annotated: &image::DynamicImage,
     ) -> Result<()> {
+        self.save_owned(is_video, meta, annotated.clone())
+    }
+
+    /// Like [`Self::save`], but takes the image by value so queuing it does not copy the pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if saving the image or video frame fails.
+    pub fn save_owned(
+        &mut self,
+        is_video: bool,
+        meta: &crate::source::SourceMeta,
+        annotated: image::DynamicImage,
+    ) -> Result<()> {
         #[cfg(feature = "video")]
         let save_as_video = is_video && !self.save_frames;
         #[cfg(not(feature = "video"))]
@@ -451,7 +465,7 @@ impl SaveResults {
                 }
 
                 if let Some(writer) = &mut self.video_writer {
-                    writer.write_frame(annotated)?;
+                    writer.write_frame(&annotated)?;
                 }
             }
         } else {
@@ -506,7 +520,7 @@ impl SaveResults {
             let worker = usize::try_from(slot).unwrap_or(0);
             self.image_writer[worker]
                 .0
-                .send((save_path, annotated.clone()))
+                .send((save_path, annotated))
                 .map_err(|e| InferenceError::ImageError(e.to_string()))?;
         }
         Ok(())
