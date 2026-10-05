@@ -386,30 +386,30 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
     let Some(ref semantic_mask) = result.semantic_mask else {
         return;
     };
-    let (width, height) = img.dimensions();
-    let w = width as usize;
+    let w = img.width() as usize;
     let mask_data = semantic_mask
         .data
         .as_slice()
         .expect("semantic mask must be contiguous");
-    let pixels = img.as_flat_samples_mut();
-    let buf = pixels.samples;
     let n_colors = COLORS.len();
-    for y in 0..height as usize {
-        let mask_row = y * w;
-        let img_row = y * w * 3;
-        for x in 0..w {
-            let raw = mask_data[mask_row + x];
-            if raw == crate::results::SemanticMask::IGNORE {
-                continue; // filtered-out class: leave the original pixel
+    // Rows are independent, so blend them across cores; `crate::parallel` is sequential on wasm.
+    // The chunk size is at least 1 because a zero-width image has no rows to blend.
+    img.as_flat_samples_mut()
+        .samples
+        .par_chunks_mut((w * 3).max(1))
+        .enumerate()
+        .for_each(|(y, row)| {
+            let (pixels, _) = row.as_chunks_mut::<3>();
+            for (px, &raw) in pixels.iter_mut().zip(&mask_data[y * w..(y + 1) * w]) {
+                if raw == crate::results::SemanticMask::IGNORE {
+                    continue; // filtered-out class: leave the original pixel
+                }
+                let color = COLORS[raw as usize % n_colors];
+                for (channel, tint) in px.iter_mut().zip(color) {
+                    *channel = (*channel / 2).saturating_add(tint / 2);
+                }
             }
-            let color = COLORS[raw as usize % n_colors];
-            let p = img_row + x * 3;
-            buf[p] = (buf[p] / 2).saturating_add(color[0] / 2);
-            buf[p + 1] = (buf[p + 1] / 2).saturating_add(color[1] / 2);
-            buf[p + 2] = (buf[p + 2] / 2).saturating_add(color[2] / 2);
-        }
-    }
+        });
 }
 
 /// Draw a class label with a filled background rectangle, avoiding overlap with previously placed labels.
