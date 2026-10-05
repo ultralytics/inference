@@ -516,27 +516,42 @@ impl SaveResults {
         Ok(())
     }
 
-    /// Wait for queued images to be written and finish any active video writing.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if a queued image could not be written or the video writer fails to finish.
-    pub fn finish(self) -> Result<()> {
-        let mut image_error = None;
-        for (sender, worker) in self.image_writer {
+    /// Close the image queues and wait for every queued image to be written, returning the
+    /// first write failure.
+    fn join_image_writers(&mut self) -> Result<()> {
+        let mut first_error = None;
+        for (sender, worker) in std::mem::take(&mut self.image_writer) {
             drop(sender);
             let result = worker.join().unwrap_or_else(|_| {
                 Err(InferenceError::ImageError("image writer panicked".into()))
             });
             if let Err(e) = result {
-                image_error.get_or_insert(e);
+                first_error.get_or_insert(e);
             }
         }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    /// Wait for queued images to be written and finish any active video writing.
+    ///
+    /// Dropping the saver also waits for queued images, but only this reports failures.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a queued image could not be written or the video writer fails to finish.
+    pub fn finish(mut self) -> Result<()> {
+        let images = self.join_image_writers();
         #[cfg(feature = "video")]
-        if let Some(writer) = self.video_writer {
+        if let Some(writer) = self.video_writer.take() {
             writer.finish()?;
         }
-        image_error.map_or(Ok(()), Err)
+        images
+    }
+}
+
+impl Drop for SaveResults {
+    fn drop(&mut self) {
+        let _ = self.join_image_writers();
     }
 }
 
@@ -634,6 +649,22 @@ mod tests {
 
         saver.save(false, &meta, img).unwrap();
         saver.finish().unwrap();
+        assert!(tmp.path().join("frame.jpg").exists());
+    }
+
+    #[test]
+    fn test_save_results_drop_waits_for_queued_images() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut saver = SaveResults::new(tmp.path().to_path_buf(), false);
+        let meta = SourceMeta {
+            path: "frame.jpg".to_string(),
+            ..SourceMeta::default()
+        };
+
+        saver
+            .save(false, &meta, image::DynamicImage::new_rgb8(8, 8))
+            .unwrap();
+        drop(saver);
         assert!(tmp.path().join("frame.jpg").exists());
     }
 
