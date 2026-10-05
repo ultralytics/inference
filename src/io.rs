@@ -5,7 +5,6 @@
 #[cfg(feature = "video")]
 use ffmpeg_next as ffmpeg;
 
-use crate::error;
 use crate::error::{InferenceError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
@@ -485,19 +484,16 @@ impl SaveResults {
                         let (sender, receiver) =
                             std::sync::mpsc::sync_channel::<(PathBuf, image::DynamicImage)>(2);
                         let worker = std::thread::spawn(move || {
-                            let mut first_error = None;
+                            let mut result = Ok(());
                             for (path, image) in receiver {
-                                if let Err(e) = image.save(&path) {
-                                    error!("Failed to save '{}': {e}", path.display());
-                                    first_error.get_or_insert_with(|| {
-                                        InferenceError::ImageError(format!(
-                                            "{}: {e}",
-                                            path.display()
-                                        ))
-                                    });
+                                let saved = image.save(&path).map_err(|e| {
+                                    InferenceError::ImageError(format!("{}: {e}", path.display()))
+                                });
+                                if result.is_ok() {
+                                    result = saved;
                                 }
                             }
-                            first_error.map_or(Ok(()), Err)
+                            result
                         });
                         (sender, worker)
                     })
@@ -519,17 +515,17 @@ impl SaveResults {
     /// Close the image queues and wait for every queued image to be written, returning the
     /// first write failure.
     fn join_image_writers(&mut self) -> Result<()> {
-        let mut first_error = None;
+        let mut result = Ok(());
         for (sender, worker) in std::mem::take(&mut self.image_writer) {
             drop(sender);
-            let result = worker.join().unwrap_or_else(|_| {
+            let joined = worker.join().unwrap_or_else(|_| {
                 Err(InferenceError::ImageError("image writer panicked".into()))
             });
-            if let Err(e) = result {
-                first_error.get_or_insert(e);
+            if result.is_ok() {
+                result = joined;
             }
         }
-        first_error.map_or(Ok(()), Err)
+        result
     }
 
     /// Wait for queued images to be written and finish any active video writing.
