@@ -393,9 +393,10 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         .expect("semantic mask must be contiguous");
     let n_colors = COLORS.len();
     // Rows are independent, so blend them across cores; `crate::parallel` is sequential on wasm.
+    // The chunk size is at least 1 because a zero-width image has no rows to blend.
     img.as_flat_samples_mut()
         .samples
-        .par_chunks_mut(w * 3)
+        .par_chunks_mut((w * 3).max(1))
         .enumerate()
         .for_each(|(y, row)| {
             let (pixels, _) = row.as_chunks_mut::<3>();
