@@ -896,31 +896,26 @@ fn draw_transparent_rect(
     let (width, height) = img.dimensions();
     let alpha = alpha.max(0.0).min(1.0);
     let inv_alpha = 1.0 - alpha;
+    let tint = color.0.map(|c| f32::from(c) * alpha);
 
-    let r = f32::from(color[0]);
-    let g = f32::from(color[1]);
-    let b = f32::from(color[2]);
-
-    for dy in 0..h {
-        let py = y + dy as i32;
-        if py < 0 || py >= height as i32 {
-            continue;
-        }
-
-        for dx in 0..w {
-            let px = x + dx as i32;
-            if px < 0 || px >= width as i32 {
-                continue;
+    // Clamp the rectangle to the image once, then blend whole row slices.
+    let (x0, x1) = (
+        x.clamp(0, width as i32),
+        (x + w as i32).clamp(0, width as i32),
+    );
+    let (y0, y1) = (
+        y.clamp(0, height as i32),
+        (y + h as i32).clamp(0, height as i32),
+    );
+    let width = width as usize;
+    let samples = img.as_flat_samples_mut().samples;
+    for py in y0 as usize..y1 as usize {
+        let row = &mut samples[(py * width + x0 as usize) * 3..(py * width + x1 as usize) * 3];
+        let (pixels, _) = row.as_chunks_mut::<3>();
+        for pixel in pixels {
+            for (channel, tint) in pixel.iter_mut().zip(tint) {
+                *channel = f32::from(*channel).mul_add(inv_alpha, tint) as u8;
             }
-
-            let pixel = img.get_pixel_mut(px as u32, py as u32);
-            let current = pixel.0;
-
-            let new_r = f32::from(current[0]).mul_add(inv_alpha, r * alpha) as u8;
-            let new_g = f32::from(current[1]).mul_add(inv_alpha, g * alpha) as u8;
-            let new_b = f32::from(current[2]).mul_add(inv_alpha, b * alpha) as u8;
-
-            *pixel = Rgb([new_r, new_g, new_b]);
         }
     }
 }
