@@ -1234,7 +1234,11 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     fn test_disparity_percentiles_match_a_full_sort() {
         // Pseudo-random depths with invalid (non-positive) samples mixed in.
         let depths: Vec<f32> = (0..5000u32)
