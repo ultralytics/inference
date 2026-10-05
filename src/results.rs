@@ -176,15 +176,9 @@ impl DepthMap {
                 (vmin, 1.0 / (vmax - vmin), false)
             }
             DepthViz::Disparity => {
-                let mut disp: Vec<f32> = data
-                    .iter()
-                    .filter(|&&d| d > 0.0)
-                    .map(|&d| 1.0 / d)
-                    .collect();
-                if disp.is_empty() {
+                let Some((lo, hi)) = disparity_percentiles(data) else {
                     return vec![black; data.len()];
-                }
-                let (lo, hi) = percentile_2_98(&mut disp);
+                };
                 (lo, 1.0 / (hi - lo).max(1e-6), true)
             }
         };
@@ -229,20 +223,59 @@ impl DepthMap {
     }
 }
 
-/// Return the 2nd and 98th percentiles of `vals`, reordering it in place (`O(n)` selection).
+/// Bin holding the value of a given rank in `hist`, and that rank's position inside the bin.
+fn locate(hist: &[u32], mut rank: usize) -> (usize, usize) {
+    for (bin, &count) in hist.iter().enumerate() {
+        if rank < count as usize {
+            return (bin, rank);
+        }
+        rank -= count as usize;
+    }
+    unreachable!("rank is below the sample count")
+}
+
+/// Return the 2nd and 98th percentiles of the inverse depth `1/d` over the positive samples
+/// (`None` when there are none).
+///
+/// Positive floats order like their bit patterns, so two counting passes (top 16 bits, then
+/// the low 16 bits inside the bins holding the two ranks) find the exact values without
+/// copying or partitioning the frame.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn percentile_2_98(vals: &mut [f32]) -> (f32, f32) {
-    let n = vals.len();
+fn disparity_percentiles(data: &ndarray::Array2<f32>) -> Option<(f32, f32)> {
+    let bits = |d: f32| (1.0 / d).to_bits();
+    let valid = || data.iter().copied().filter(|&d| d > 0.0);
+    let mut high = vec![0u32; 1 << 16];
+    for d in valid() {
+        high[(bits(d) >> 16) as usize] += 1;
+    }
+    let n: usize = high.iter().map(|&c| c as usize).sum();
+    if n == 0 {
+        return None;
+    }
     let idx = |p: f32| ((p * (n - 1) as f32).round() as usize).min(n - 1);
-    let (lo_i, hi_i) = (idx(0.02), idx(0.98));
-    vals.select_nth_unstable_by(lo_i, f32::total_cmp);
-    let lo = vals[lo_i];
-    vals.select_nth_unstable_by(hi_i, f32::total_cmp);
-    (lo, vals[hi_i])
+    let ((lo_bin, lo_rank), (hi_bin, hi_rank)) =
+        (locate(&high, idx(0.02)), locate(&high, idx(0.98)));
+    let mut lo_low = vec![0u32; 1 << 16];
+    let mut hi_low = vec![0u32; 1 << 16];
+    for b in valid().map(bits) {
+        if (b >> 16) as usize == lo_bin {
+            lo_low[(b & 0xFFFF) as usize] += 1;
+        }
+        if (b >> 16) as usize == hi_bin {
+            hi_low[(b & 0xFFFF) as usize] += 1;
+        }
+    }
+    let value = |bin: usize, low: &[u32], rank: usize| {
+        f32::from_bits(((bin as u32) << 16) | locate(low, rank).0 as u32)
+    };
+    Some((
+        value(lo_bin, &lo_low, lo_rank),
+        value(hi_bin, &hi_low, hi_rank),
+    ))
 }
 
 /// Main results container for YOLO inference.
@@ -1198,6 +1231,33 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.detection_summary(), "depth 1.50-4.00m");
+    }
+
+    #[test]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    fn test_disparity_percentiles_match_a_full_sort() {
+        // Pseudo-random depths with invalid (non-positive) samples mixed in.
+        let depths: Vec<f32> = (0..5000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 8) as f32 / 4000.0 - 1.0)
+            .collect();
+        let mut sorted: Vec<f32> = depths
+            .iter()
+            .filter(|&&d| d > 0.0)
+            .map(|&d| 1.0 / d)
+            .collect();
+        sorted.sort_by(f32::total_cmp);
+        let n = sorted.len();
+        let at = |p: f32| sorted[((p * (n - 1) as f32).round() as usize).min(n - 1)];
+
+        let (lo, hi) =
+            disparity_percentiles(&ndarray::Array2::from_shape_vec((50, 100), depths).unwrap())
+                .unwrap();
+        assert_eq!((lo, hi), (at(0.02), at(0.98)));
+        assert!(disparity_percentiles(&ndarray::array![[0.0, -1.0]]).is_none());
     }
 
     #[test]
