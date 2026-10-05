@@ -357,10 +357,10 @@ impl Drop for VideoWriter {
     }
 }
 
-/// Queue and worker threads that write images off the calling thread.
-type ImageWriter = (
+/// One queue and worker thread that writes images off the calling thread.
+type ImageWorker = (
     SyncSender<(PathBuf, image::DynamicImage)>,
-    Vec<JoinHandle<()>>,
+    JoinHandle<Result<()>>,
 );
 
 /// Worker threads encoding images, enough to keep up with inference on large frames.
@@ -373,7 +373,7 @@ const IMAGE_WRITER_THREADS: usize = 3;
 pub struct SaveResults {
     save_dir: PathBuf,
     /// Encodes and writes images on worker threads so JPEG encoding overlaps inference.
-    image_writer: Option<ImageWriter>,
+    image_writer: Vec<ImageWorker>,
     #[cfg(feature = "video")]
     save_frames: bool,
     #[cfg(feature = "video")]
@@ -394,7 +394,7 @@ impl SaveResults {
 
         Self {
             save_dir,
-            image_writer: None,
+            image_writer: Vec::new(),
             #[cfg(feature = "video")]
             save_frames,
             #[cfg(feature = "video")]
@@ -479,30 +479,37 @@ impl SaveResults {
 
             ensure_dir(&save_dir)?;
 
-            let (sender, _) = self.image_writer.get_or_insert_with(|| {
-                let (sender, receiver) = std::sync::mpsc::sync_channel::<(
-                    PathBuf,
-                    image::DynamicImage,
-                )>(IMAGE_WRITER_THREADS * 2);
-                let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
-                let workers = (0..IMAGE_WRITER_THREADS)
+            if self.image_writer.is_empty() {
+                self.image_writer = (0..IMAGE_WRITER_THREADS)
                     .map(|_| {
-                        let receiver = receiver.clone();
-                        std::thread::spawn(move || {
-                            loop {
-                                // Release the lock before encoding so the workers run in parallel.
-                                let job = receiver.lock().ok().and_then(|r| r.recv().ok());
-                                let Some((path, image)) = job else { break };
+                        let (sender, receiver) =
+                            std::sync::mpsc::sync_channel::<(PathBuf, image::DynamicImage)>(2);
+                        let worker = std::thread::spawn(move || {
+                            let mut first_error = None;
+                            for (path, image) in receiver {
                                 if let Err(e) = image.save(&path) {
                                     error!("Failed to save '{}': {e}", path.display());
+                                    first_error.get_or_insert_with(|| {
+                                        InferenceError::ImageError(format!(
+                                            "{}: {e}",
+                                            path.display()
+                                        ))
+                                    });
                                 }
                             }
-                        })
+                            first_error.map_or(Ok(()), Err)
+                        });
+                        (sender, worker)
                     })
                     .collect();
-                (sender, workers)
-            });
-            sender
+            }
+            // The same path always goes to the same worker, so writes to one file stay in order.
+            let mut hasher = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(&save_path, &mut hasher);
+            let slot = std::hash::Hasher::finish(&hasher) % self.image_writer.len() as u64;
+            let worker = usize::try_from(slot).unwrap_or(0);
+            self.image_writer[worker]
+                .0
                 .send((save_path, annotated))
                 .map_err(|e| InferenceError::ImageError(e.to_string()))?;
         }
@@ -513,19 +520,23 @@ impl SaveResults {
     ///
     /// # Errors
     ///
-    /// Returns an error if the video writer fails to finish.
+    /// Returns an error if a queued image could not be written or the video writer fails to finish.
     pub fn finish(self) -> Result<()> {
-        if let Some((sender, workers)) = self.image_writer {
+        let mut image_error = None;
+        for (sender, worker) in self.image_writer {
             drop(sender);
-            for worker in workers {
-                let _ = worker.join();
+            let result = worker.join().unwrap_or_else(|_| {
+                Err(InferenceError::ImageError("image writer panicked".into()))
+            });
+            if let Err(e) = result {
+                image_error.get_or_insert(e);
             }
         }
         #[cfg(feature = "video")]
         if let Some(writer) = self.video_writer {
             writer.finish()?;
         }
-        Ok(())
+        image_error.map_or(Ok(()), Err)
     }
 }
 
@@ -624,6 +635,23 @@ mod tests {
         saver.save(false, &meta, img).unwrap();
         saver.finish().unwrap();
         assert!(tmp.path().join("frame.jpg").exists());
+    }
+
+    #[test]
+    fn test_save_results_reports_failed_image_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A directory where the image should go makes the write fail.
+        std::fs::create_dir(tmp.path().join("frame.jpg")).unwrap();
+        let mut saver = SaveResults::new(tmp.path().to_path_buf(), false);
+        let meta = SourceMeta {
+            path: "frame.jpg".to_string(),
+            ..SourceMeta::default()
+        };
+
+        saver
+            .save(false, &meta, image::DynamicImage::new_rgb8(8, 8))
+            .unwrap();
+        assert!(saver.finish().is_err());
     }
 
     #[cfg(feature = "video")]
