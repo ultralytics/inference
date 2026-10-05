@@ -491,7 +491,7 @@ impl SaveResults {
                 if let Some((sender, _)) = &self.video_writer {
                     sender
                         .send(annotated)
-                        .map_err(|e| InferenceError::ImageError(e.to_string()))?;
+                        .map_err(|e| InferenceError::VideoError(e.to_string()))?;
                 }
             }
         } else {
