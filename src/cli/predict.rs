@@ -311,7 +311,7 @@ pub fn run_prediction(args: &PredictArgs) {
                             let annotated = annotate_image(img, &result, None);
 
                             if let Some(saver) = &mut result_saver
-                                && let Err(e) = saver.save(is_video, meta, annotated)
+                                && let Err(e) = saver.save(is_video, meta, &annotated)
                             {
                                 error!("Failed to save result: {e}");
                             }

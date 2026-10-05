@@ -419,7 +419,7 @@ impl SaveResults {
         &mut self,
         is_video: bool,
         meta: &crate::source::SourceMeta,
-        annotated: image::DynamicImage,
+        annotated: &image::DynamicImage,
     ) -> Result<()> {
         #[cfg(feature = "video")]
         let save_as_video = is_video && !self.save_frames;
@@ -451,7 +451,7 @@ impl SaveResults {
                 }
 
                 if let Some(writer) = &mut self.video_writer {
-                    writer.write_frame(&annotated)?;
+                    writer.write_frame(annotated)?;
                 }
             }
         } else {
@@ -506,7 +506,7 @@ impl SaveResults {
             let worker = usize::try_from(slot).unwrap_or(0);
             self.image_writer[worker]
                 .0
-                .send((save_path, annotated))
+                .send((save_path, annotated.clone()))
                 .map_err(|e| InferenceError::ImageError(e.to_string()))?;
         }
         Ok(())
@@ -643,7 +643,7 @@ mod tests {
             ..SourceMeta::default()
         };
 
-        saver.save(false, &meta, img).unwrap();
+        saver.save(false, &meta, &img).unwrap();
         saver.finish().unwrap();
         assert!(tmp.path().join("frame.jpg").exists());
     }
@@ -658,7 +658,7 @@ mod tests {
         };
 
         saver
-            .save(false, &meta, image::DynamicImage::new_rgb8(8, 8))
+            .save(false, &meta, &image::DynamicImage::new_rgb8(8, 8))
             .unwrap();
         drop(saver);
         assert!(tmp.path().join("frame.jpg").exists());
@@ -676,7 +676,7 @@ mod tests {
         };
 
         saver
-            .save(false, &meta, image::DynamicImage::new_rgb8(8, 8))
+            .save(false, &meta, &image::DynamicImage::new_rgb8(8, 8))
             .unwrap();
         assert!(saver.finish().is_err());
     }
@@ -720,7 +720,7 @@ mod tests {
             ..SourceMeta::default()
         };
 
-        saver.save(true, &meta, img).unwrap();
+        saver.save(true, &meta, &img).unwrap();
         saver.finish().unwrap();
         assert!(tmp.path().join("clip_frames").join("clip_1.jpg").exists());
     }
@@ -739,8 +739,8 @@ mod tests {
             fps: Some(10.0),
             ..SourceMeta::default()
         };
-        saver.save(true, &meta, img.clone()).unwrap();
-        saver.save(true, &meta, img).unwrap();
+        saver.save(true, &meta, &img).unwrap();
+        saver.save(true, &meta, &img).unwrap();
         saver.finish().unwrap();
         assert!(tmp.path().join("movie.mp4").exists());
     }
