@@ -176,7 +176,7 @@ impl DepthMap {
                 (vmin, 1.0 / (vmax - vmin), false)
             }
             DepthViz::Disparity => {
-                let Some((lo, hi)) = disparity_percentiles(data.iter().copied()) else {
+                let Some((lo, hi)) = disparity_percentiles(data) else {
                     return vec![black; data.len()];
                 };
                 (lo, 1.0 / (hi - lo).max(1e-6), true)
@@ -223,59 +223,59 @@ impl DepthMap {
     }
 }
 
+/// Bin holding the value of a given rank in `hist`, and that rank's position inside the bin.
+fn locate(hist: &[u32], mut rank: usize) -> (usize, usize) {
+    for (bin, &count) in hist.iter().enumerate() {
+        if rank < count as usize {
+            return (bin, rank);
+        }
+        rank -= count as usize;
+    }
+    unreachable!("rank is below the sample count")
+}
+
 /// Return the 2nd and 98th percentiles of the inverse depth `1/d` over the positive samples
 /// (`None` when there are none).
 ///
-/// Positive floats order like their bit patterns, so one counting pass over the top 16 bits
-/// locates the bins holding both ranks and only those few values are gathered and selected,
-/// instead of copying and partitioning the whole frame. The result equals an exact selection.
+/// Positive floats order like their bit patterns, so two counting passes (top 16 bits, then
+/// the low 16 bits inside the bins holding the two ranks) find the exact values without
+/// copying or partitioning the frame.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn disparity_percentiles(data: impl Iterator<Item = f32> + Clone) -> Option<(f32, f32)> {
-    let bin = |d: f32| ((1.0 / d).to_bits() >> 16) as usize;
-    let mut hist = vec![0usize; 1 << 16];
-    for d in data.clone().filter(|&d| d > 0.0) {
-        hist[bin(d)] += 1;
+fn disparity_percentiles(data: &ndarray::Array2<f32>) -> Option<(f32, f32)> {
+    let bits = |d: f32| (1.0 / d).to_bits();
+    let valid = || data.iter().copied().filter(|&d| d > 0.0);
+    let mut high = vec![0u32; 1 << 16];
+    for d in valid() {
+        high[(bits(d) >> 16) as usize] += 1;
     }
-    let n: usize = hist.iter().sum();
+    let n: usize = high.iter().map(|&c| c as usize).sum();
     if n == 0 {
         return None;
     }
     let idx = |p: f32| ((p * (n - 1) as f32).round() as usize).min(n - 1);
-    // Bin holding the value of a given rank, and that rank's position inside the bin.
-    let locate = |rank: usize| {
-        let mut before = 0;
-        for (b, &count) in hist.iter().enumerate() {
-            if rank < before + count {
-                return (b, rank - before);
-            }
-            before += count;
+    let ((lo_bin, lo_rank), (hi_bin, hi_rank)) =
+        (locate(&high, idx(0.02)), locate(&high, idx(0.98)));
+    let mut lo_low = vec![0u32; 1 << 16];
+    let mut hi_low = vec![0u32; 1 << 16];
+    for b in valid().map(bits) {
+        if (b >> 16) as usize == lo_bin {
+            lo_low[(b & 0xFFFF) as usize] += 1;
         }
-        unreachable!("rank is below the sample count")
-    };
-    let ((lo_bin, lo_rank), (hi_bin, hi_rank)) = (locate(idx(0.02)), locate(idx(0.98)));
-    let mut lo_vals = Vec::new();
-    let mut hi_vals = Vec::new();
-    for d in data.filter(|&d| d > 0.0) {
-        let (v, b) = (1.0 / d, bin(d));
-        if b == lo_bin {
-            lo_vals.push(v);
-        }
-        if b == hi_bin && hi_bin != lo_bin {
-            hi_vals.push(v);
+        if (b >> 16) as usize == hi_bin {
+            hi_low[(b & 0xFFFF) as usize] += 1;
         }
     }
-    let lo = *lo_vals.select_nth_unstable_by(lo_rank, f32::total_cmp).1;
-    let hi_vals = if hi_bin == lo_bin {
-        &mut lo_vals
-    } else {
-        &mut hi_vals
+    let value = |bin: usize, low: &[u32], rank: usize| {
+        f32::from_bits(((bin as u32) << 16) | locate(low, rank).0 as u32)
     };
-    let hi = *hi_vals.select_nth_unstable_by(hi_rank, f32::total_cmp).1;
-    Some((lo, hi))
+    Some((
+        value(lo_bin, &lo_low, lo_rank),
+        value(hi_bin, &hi_low, hi_rank),
+    ))
 }
 
 /// Main results container for YOLO inference.
@@ -1253,9 +1253,11 @@ mod tests {
         let n = sorted.len();
         let at = |p: f32| sorted[((p * (n - 1) as f32).round() as usize).min(n - 1)];
 
-        let (lo, hi) = disparity_percentiles(depths.iter().copied()).unwrap();
+        let (lo, hi) =
+            disparity_percentiles(&ndarray::Array2::from_shape_vec((50, 100), depths).unwrap())
+                .unwrap();
         assert_eq!((lo, hi), (at(0.02), at(0.98)));
-        assert!(disparity_percentiles([0.0, -1.0].into_iter()).is_none());
+        assert!(disparity_percentiles(&ndarray::array![[0.0, -1.0]]).is_none());
     }
 
     #[test]
