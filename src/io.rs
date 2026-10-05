@@ -7,6 +7,8 @@ use ffmpeg_next as ffmpeg;
 
 use crate::error::{InferenceError, Result};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::SyncSender;
+use std::thread::JoinHandle;
 
 #[cfg(feature = "video")]
 use std::borrow::Cow;
@@ -354,12 +356,23 @@ impl Drop for VideoWriter {
     }
 }
 
+/// One queue and worker thread that writes images off the calling thread.
+type ImageWorker = (
+    SyncSender<(PathBuf, image::DynamicImage)>,
+    JoinHandle<Result<()>>,
+);
+
+/// Worker threads encoding images, enough to keep up with inference on large frames.
+const IMAGE_WRITER_THREADS: usize = 3;
+
 /// Helper struct to handle saving inference results to video or disk.
 ///
 /// This consolidates logic for deciding whether to save as a video file
 /// or individual frames, and manages the `VideoWriter` state.
 pub struct SaveResults {
     save_dir: PathBuf,
+    /// Encodes and writes images on worker threads so JPEG encoding overlaps inference.
+    image_writer: Vec<ImageWorker>,
     #[cfg(feature = "video")]
     save_frames: bool,
     #[cfg(feature = "video")]
@@ -380,6 +393,7 @@ impl SaveResults {
 
         Self {
             save_dir,
+            image_writer: Vec::new(),
             #[cfg(feature = "video")]
             save_frames,
             #[cfg(feature = "video")]
@@ -406,6 +420,20 @@ impl SaveResults {
         is_video: bool,
         meta: &crate::source::SourceMeta,
         annotated: &image::DynamicImage,
+    ) -> Result<()> {
+        self.save_owned(is_video, meta, annotated.clone())
+    }
+
+    /// Like [`Self::save`], but takes the image by value so queuing it does not copy the pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if saving the image or video frame fails.
+    pub fn save_owned(
+        &mut self,
+        is_video: bool,
+        meta: &crate::source::SourceMeta,
+        annotated: image::DynamicImage,
     ) -> Result<()> {
         #[cfg(feature = "video")]
         let save_as_video = is_video && !self.save_frames;
@@ -437,7 +465,7 @@ impl SaveResults {
                 }
 
                 if let Some(writer) = &mut self.video_writer {
-                    writer.write_frame(annotated)?;
+                    writer.write_frame(&annotated)?;
                 }
             }
         } else {
@@ -464,24 +492,76 @@ impl SaveResults {
 
             ensure_dir(&save_dir)?;
 
-            annotated
-                .save(&save_path)
+            if self.image_writer.is_empty() {
+                self.image_writer = (0..IMAGE_WRITER_THREADS)
+                    .map(|_| {
+                        let (sender, receiver) =
+                            std::sync::mpsc::sync_channel::<(PathBuf, image::DynamicImage)>(2);
+                        let worker = std::thread::spawn(move || {
+                            let mut result = Ok(());
+                            for (path, image) in receiver {
+                                let saved = image.save(&path).map_err(|e| {
+                                    InferenceError::ImageError(format!("{}: {e}", path.display()))
+                                });
+                                if result.is_ok() {
+                                    result = saved;
+                                }
+                            }
+                            result
+                        });
+                        (sender, worker)
+                    })
+                    .collect();
+            }
+            // The same path always goes to the same worker, so writes to one file stay in order.
+            let mut hasher = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(&save_path, &mut hasher);
+            let slot = std::hash::Hasher::finish(&hasher) % self.image_writer.len() as u64;
+            let worker = usize::try_from(slot).unwrap_or(0);
+            self.image_writer[worker]
+                .0
+                .send((save_path, annotated))
                 .map_err(|e| InferenceError::ImageError(e.to_string()))?;
         }
         Ok(())
     }
 
-    /// Finish any active video writing.
+    /// Close the image queues and wait for every queued image to be written, returning the
+    /// first write failure.
+    fn join_image_writers(&mut self) -> Result<()> {
+        let mut result = Ok(());
+        for (sender, worker) in std::mem::take(&mut self.image_writer) {
+            drop(sender);
+            let joined = worker.join().unwrap_or_else(|_| {
+                Err(InferenceError::ImageError("image writer panicked".into()))
+            });
+            if result.is_ok() {
+                result = joined;
+            }
+        }
+        result
+    }
+
+    /// Wait for queued images to be written and finish any active video writing.
+    ///
+    /// Dropping the saver also waits for queued images, but only this reports failures.
     ///
     /// # Errors
     ///
-    /// Returns an error if the video writer fails to finish.
-    pub fn finish(self) -> Result<()> {
+    /// Returns an error if a queued image could not be written or the video writer fails to finish.
+    pub fn finish(mut self) -> Result<()> {
+        let images = self.join_image_writers();
         #[cfg(feature = "video")]
-        if let Some(writer) = self.video_writer {
+        if let Some(writer) = self.video_writer.take() {
             writer.finish()?;
         }
-        Ok(())
+        images
+    }
+}
+
+impl Drop for SaveResults {
+    fn drop(&mut self) {
+        let _ = self.join_image_writers();
     }
 }
 
@@ -578,10 +658,41 @@ mod tests {
         };
 
         saver.save(false, &meta, &img).unwrap();
-        assert!(tmp.path().join("frame.jpg").exists());
-
-        // finish() is a clean no-op when no video writer was opened.
         saver.finish().unwrap();
+        assert!(tmp.path().join("frame.jpg").exists());
+    }
+
+    #[test]
+    fn test_save_results_drop_waits_for_queued_images() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut saver = SaveResults::new(tmp.path().to_path_buf(), false);
+        let meta = SourceMeta {
+            path: "frame.jpg".to_string(),
+            ..SourceMeta::default()
+        };
+
+        saver
+            .save(false, &meta, &image::DynamicImage::new_rgb8(8, 8))
+            .unwrap();
+        drop(saver);
+        assert!(tmp.path().join("frame.jpg").exists());
+    }
+
+    #[test]
+    fn test_save_results_reports_failed_image_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A directory where the image should go makes the write fail.
+        std::fs::create_dir(tmp.path().join("frame.jpg")).unwrap();
+        let mut saver = SaveResults::new(tmp.path().to_path_buf(), false);
+        let meta = SourceMeta {
+            path: "frame.jpg".to_string(),
+            ..SourceMeta::default()
+        };
+
+        saver
+            .save(false, &meta, &image::DynamicImage::new_rgb8(8, 8))
+            .unwrap();
+        assert!(saver.finish().is_err());
     }
 
     #[cfg(feature = "video")]
@@ -624,8 +735,8 @@ mod tests {
         };
 
         saver.save(true, &meta, &img).unwrap();
-        assert!(tmp.path().join("clip_frames").join("clip_1.jpg").exists());
         saver.finish().unwrap();
+        assert!(tmp.path().join("clip_frames").join("clip_1.jpg").exists());
     }
 
     #[cfg(feature = "video")]
