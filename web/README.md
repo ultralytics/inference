@@ -141,7 +141,7 @@ GitHub release assets send no `Access-Control-Allow-Origin`, so a browser cannot
 ## 📐 Results Shape
 
 `predict()` resolves to a `Results` object whose field names match the
-Rust/Ultralytics `Results` API 1-1:
+Rust/Ultralytics `Results` API one-to-one:
 
 | Field              | Type                                                                 | Tasks                 |
 | ------------------ | -------------------------------------------------------------------- | --------------------- |

@@ -71,7 +71,7 @@
 
 ### 前置条件
 
-- [Rust 1.89+](https://rustup.rs/)（通过 rustup 安装）。
+- [Rust 1.92+](https://rustup.rs/)（通过 rustup 安装）。
 - YOLO ONNX 模型（从 Ultralytics 导出：`yolo export model=yolo26n.pt format=onnx`）。
 
 ### 系统依赖

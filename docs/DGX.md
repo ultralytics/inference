@@ -156,7 +156,7 @@ pinned cores oversubscribes them and gives back most of the gain.
 
 ## Benchmarks
 
-yolo26n at 640x640 over coco128 (128 images), mean and sample standard deviation across independent
+yolo26n at 640×640 over coco128 (128 images), mean and sample standard deviation across independent
 runs, measured with the TensorRT execution provider and the `cuda-preprocess` feature.
 
 | Configuration                           | preprocess ms | inference ms  | end to end ms | FPS            |
