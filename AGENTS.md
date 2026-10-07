@@ -2,7 +2,7 @@
 
 This file provides guidance to AI coding agents (Claude Code, etc.) when working with code in this repository. CLAUDE.md is a symlink to this file.
 
-`ultralytics-inference` (crates.io, AGPL-3.0) is the official Rust package for YOLO-family vision model inference — detection, instance and semantic segmentation, depth estimation, classification, pose, and oriented boxes — over ONNX Runtime, with image/video/webcam sources, annotation and visualization, the `ultralytics-inference` CLI, and a WebGPU/wasm build published as `@ultralytics/yolo` on npm. The supported floor is Rust 1.89 (edition 2024).
+`ultralytics-inference` (crates.io, AGPL-3.0) is the official Rust package for YOLO-family vision model inference — detection, instance and semantic segmentation, depth estimation, classification, pose, and oriented boxes — over ONNX Runtime, with image/video/webcam sources, annotation and visualization, the `ultralytics-inference` CLI, and a WebGPU/wasm build published as `@ultralytics/yolo` on npm. The supported floor is Rust 1.92 (edition 2024).
 
 ## Core Principles (CRITICAL)
 

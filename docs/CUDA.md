@@ -8,7 +8,7 @@
 | `tensorrt`        | ORT TensorRT EP (FP16, engine cache, opt-level 5)   | NVIDIA GPU with TensorRT installed; 2–3× faster than `cuda`                                      |
 | `cuda-preprocess` | GPU-side preprocess + zero-copy device input to TRT | maximum throughput; `YOLOModel::predict_image` transparently uses a fused CUDA preprocess kernel |
 
-`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required - `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
+`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required: `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
 
 ## Requirements
 
@@ -40,7 +40,7 @@ ultralytics-inference = { version = "0.0.50", features = ["tensorrt"] }
 ultralytics-inference = { version = "0.0.50", features = ["cuda-preprocess"] }
 ```
 
-Then `cargo build --release` - no extra flags needed.
+Then `cargo build --release`: no extra flags needed.
 
 For the CLI / examples in this repo directly:
 
@@ -113,7 +113,7 @@ What to expect and how to avoid surprises:
   across clean builds.
 - **Cache is keyed to the build context.** A new engine is built whenever the
   model file, GPU/driver/TensorRT version, precision (`--quantize`), or **input
-  shape** changes. **Dynamic-shape models rebuild per new input size** - feed
+  shape** changes. **Dynamic-shape models rebuild per new input size**: feed
   consistently-sized inputs to keep it to a single cached engine. Note that rectangular
   inference (`rect`, on by default) letterboxes each image to its own aspect ratio, so a
   source with mixed aspect ratios produces one engine build per distinct shape; pass
@@ -144,7 +144,7 @@ device, [`YOLOModel::predict_image`] automatically runs the fused GPU
 preprocess kernel (bilinear letterbox + `/255` normalize + HWC→CHW) and hands
 the result to ORT as a zero-copy device tensor. The kernel mirrors the CPU letterbox -
 same half-pixel bilinear sampling, same per-axis resampling ratios, and the same
-stride-aligned rectangular target under `rect` - so `--device cuda` and `--device cpu`
+stride-aligned rectangular target under `rect`, so `--device cuda` and `--device cpu`
 agree to within one 8-bit quantization step (the CPU uses OpenCV's fixed-point weights,
 the kernel f32):
 
@@ -238,7 +238,7 @@ last image, so `--batch 1` on it still pays for 16.
 | ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).                                                                                                 |
 | `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.                                                                                              |
 | `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                                                                                                       |
-| TRT engine build is slow on first run                                      | Expected - engines are cached under `.trt_cache/`. Subsequent runs reuse them.                                                                                                        |
+| TRT engine build is slow on first run                                      | Expected: engines are cached under `.trt_cache/`. Subsequent runs reuse them.                                                                                                         |
 | Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.                                                                                                |
 | CUDA EP fails to load on a CUDA 12 system                                  | The downloaded binaries are CUDA 13 and no CUDA 12 build is published. Compile ONNX Runtime for CUDA 12 and link it with `ORT_LIB_PATH`.                                              |
 | `no builds available that satisfy the requested feature set` on aarch64    | Only a CPU distribution is published for `aarch64-unknown-linux-gnu`. Link a GPU ONNX Runtime yourself, see [DGX.md](https://github.com/ultralytics/inference/blob/main/docs/DGX.md). |

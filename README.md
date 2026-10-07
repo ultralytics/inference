@@ -71,7 +71,7 @@ This crate runs [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](h
 
 ### Prerequisites
 
-- [Rust 1.89+](https://rustup.rs/) (install via rustup)
+- [Rust 1.92+](https://rustup.rs/) (install via rustup)
 - A YOLO ONNX model (export from Ultralytics: `yolo export model=yolo26n.pt format=onnx`)
 
 ### System dependencies
@@ -179,7 +179,7 @@ RTDETR("rtdetr-l.pt").export(format="onnx")
 > **Precision / quantization:** Ultralytics ≥8.4 uses a single `quantize`
 > argument instead of the deprecated `half=True` / `int8=True` flags. For ONNX
 > the supported values are `32`/`fp32` (FP32, the default), `16`/`fp16` (FP16),
-> and `8`/`int8` (INT8 - requires a calibration dataset via `data=`). The old
+> and `8`/`int8` (INT8, requires a calibration dataset via `data=`). The old
 > flags still work but emit a deprecation warning. See the
 > [export docs](https://docs.ultralytics.com/modes/export) and the
 > [ONNX integration guide](https://docs.ultralytics.com/integrations/onnx).
