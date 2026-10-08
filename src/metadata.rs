@@ -392,6 +392,13 @@ impl ModelMetadata {
         self.head == "RTDETRDecoder"
     }
 
+    /// Whether the model was trained on stretched (scale-fill) input rather than letterboxed:
+    /// RT-DETR and depth, mirroring `scale_fill` on the Ultralytics predictors.
+    #[must_use]
+    pub fn scale_fill(&self) -> bool {
+        self.is_rtdetr() || self.task == Task::Depth
+    }
+
     /// Input size recorded by the export, or the task default when it records none
     /// ([`InferenceConfig::DEFAULT_OBB_IMGSZ`] for OBB, [`InferenceConfig::DEFAULT_IMGSZ`]
     /// otherwise).

@@ -649,7 +649,7 @@ impl YOLOModel {
                 dst_h,
                 dst_w,
                 slots,
-                metadata.is_rtdetr(),
+                metadata.scale_fill(),
             ) {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -1360,10 +1360,10 @@ impl YOLOModel {
     }
 
     /// Whether rectangular inference applies: requested in the config and supported by
-    /// the model. Fixed-shape models must letterbox to their own input size, and RT-DETR
-    /// scale-fills its square input, so neither leaves a rectangle to trim.
+    /// the model. Fixed-shape models must letterbox to their own input size, and RT-DETR and
+    /// depth scale-fill their square input, so neither leaves a rectangle to trim.
     fn rect_enabled(&self) -> bool {
-        self.config.rect && self.is_dynamic && !self.metadata.is_rtdetr()
+        self.config.rect && self.is_dynamic && !self.metadata.scale_fill()
     }
 
     /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
@@ -1481,7 +1481,7 @@ impl YOLOModel {
     /// Whether a task's preprocessing is a letterbox, so [`Self::predict_cuda_pre`]
     /// can run it. Classify uses center-crop (not letterbox), so it's excluded. Semantic
     /// is included: `predict_cuda_pre` handles both its f32-logits and baked-in
-    /// `ArgMax` (u8) output forms. Depth is included too: it is a plain letterbox + f32
+    /// `ArgMax` (u8) output forms. Depth is included too: it is a plain stretch + f32
     /// input with a single f32 output, post-processed through the shared pipeline like
     /// every other task.
     #[cfg(feature = "cuda-preprocess")]
@@ -1865,7 +1865,7 @@ impl YOLOModel {
         // instead of paying the per-image resize serially.
         let (stride, task, fp16_input) =
             (self.metadata.stride, self.metadata.task, self.fp16_input);
-        let rtdetr = self.metadata.is_rtdetr();
+        let scale_fill = self.metadata.scale_fill();
         let preprocessed_results: Vec<_> = images
             .par_iter()
             .map(|image| {
@@ -1880,7 +1880,7 @@ impl YOLOModel {
                 let quantize = fp16_input.then_some(Quantization::Fp16);
                 if task == Task::Classify {
                     preprocess_image_center_crop(image, current_target_size, quantize)
-                } else if rtdetr {
+                } else if scale_fill {
                     preprocess_image_stretch(image, current_target_size, quantize)
                 } else {
                     preprocess_image_with_precision(image, current_target_size, stride, quantize)
