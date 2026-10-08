@@ -1756,10 +1756,10 @@ pub fn postprocess_semantic_mask(
 /// Post-process a monocular depth model output into a per-pixel depth map (meters).
 ///
 /// The exported ONNX output is `[1, 1, lh, lw]` (or `[1, lh, lw]`) float32 with all
-/// activation and calibration baked into the graph, upsampled to the letterboxed input
-/// resolution. To recover the original image geometry we crop the centered letterbox
-/// padding and bilinear-resize the cropped region back to the original `(H, W)`, mirroring
-/// `ops.scale_masks` in the Python `DepthPredictor`.
+/// activation and calibration baked into the graph, at the stretched input resolution.
+/// Depth inputs are scale-filled, so there is no padding to crop: the whole output is
+/// bilinear-resized (`align_corners=True`) to the original `(H, W)`, mirroring the Python
+/// `DepthPredictor`.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
@@ -1778,25 +1778,26 @@ fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> R
         return results;
     }
 
-    // Crop the centered letterbox padding, then bilinear-upsample the crop to (oh, ow).
-    // Rows are filled in parallel; the `(d + 0.5) * scale - 0.5` sampling is the
-    // `align_corners=False` half-pixel convention of Python's `F.interpolate(mode="bilinear")`.
-    // When the output is already at original resolution this reduces to an exact copy.
-    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
-        return results;
+    // Source coordinate of destination index `d`: corners map to corners. A single-pixel
+    // destination axis samples the source origin.
+    let axis = |d: usize, dst: usize, src: usize| {
+        let pos = if dst > 1 {
+            d as f32 * (src - 1) as f32 / (dst - 1) as f32
+        } else {
+            0.0
+        };
+        let i0 = (pos as usize).min(src - 1);
+        (i0, (i0 + 1).min(src - 1), pos - i0 as f32)
     };
-    let x_lut = bilinear_x_lut(ow, lw, left, crop_w);
-    let scale_y = crop_h as f32 / oh as f32;
-    let lh_minus_1 = lh.saturating_sub(1);
+    let x_lut: Vec<_> = (0..ow).map(|dx| axis(dx, ow, lw)).collect();
 
     let mut buf = vec![0f32; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
-        let (y0, y1, fy) = bilinear_axis(dy, scale_y, top, lh_minus_1);
+        let (y0, y1, fy) = axis(dy, oh, lh);
         let (row0, row1) = (y0 * lw, y1 * lw);
-        for (dx, cell) in row.iter_mut().enumerate() {
-            let (x0, x1, fxi, fx) = x_lut[dx];
-            let top_row = output[row0 + x0].mul_add(fxi, output[row0 + x1] * fx);
-            let bot_row = output[row1 + x0].mul_add(fxi, output[row1 + x1] * fx);
+        for (cell, &(x0, x1, fx)) in row.iter_mut().zip(&x_lut) {
+            let top_row = output[row0 + x0].mul_add(1.0 - fx, output[row0 + x1] * fx);
+            let bot_row = output[row1 + x0].mul_add(1.0 - fx, output[row1 + x1] * fx);
             *cell = top_row.mul_add(1.0 - fy, bot_row * fy);
         }
     });
@@ -2539,9 +2540,9 @@ mod tests {
     }
 
     #[test]
-    fn test_postprocess_depth_letterbox_resize() {
-        // oh=2, ow=4 wide image letterboxed into 8x8: gain=2, 2 rows pad top/bottom,
-        // content rows 2..6, full width. A constant map must survive crop+resize.
+    fn test_postprocess_depth_stretch_resize() {
+        // oh=2, ow=4 wide image stretched into 8x8: no padding, so a constant map must
+        // survive the full-frame resize.
         let (oh, ow, lh, lw) = (2, 4, 8, 8);
         let output = vec![2.5f32; lh * lw];
         let result = postprocess_depth(
@@ -2554,6 +2555,19 @@ mod tests {
         for &v in &depth.data {
             assert!((v - 2.5).abs() < 1e-4);
         }
+    }
+
+    #[test]
+    fn test_postprocess_depth_stretch_corners_align() {
+        // align_corners=True: a 2x2 ramp upsampled to 3x3 keeps its corners and midpoints.
+        let result = postprocess_depth(
+            &[0.0, 2.0, 4.0, 6.0],
+            &[1, 1, 2, 2],
+            results_for(1, (3, 3), (2, 2)),
+        );
+        let d = result.depth.unwrap().data;
+        assert!((d[[0, 0]] - 0.0).abs() < 1e-6 && (d[[2, 2]] - 6.0).abs() < 1e-6);
+        assert!((d[[1, 1]] - 3.0).abs() < 1e-6 && (d[[0, 1]] - 1.0).abs() < 1e-6);
     }
 
     #[test]
