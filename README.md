@@ -508,7 +508,7 @@ inference/
 │   ├── main.rs             # CLI application
 │   ├── model.rs            # YOLOModel - ONNX session and inference
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask, DepthMap
-│   ├── preprocessing.rs    # Image preprocessing (letterbox, normalize, SIMD)
+│   ├── preprocessing.rs    # Image preprocessing (letterbox, stretch for RT-DETR and depth, normalize, SIMD)
 │   ├── postprocessing.rs   # Post-processing for all tasks (NMS/decode for detection, argmax for semantic, resize for depth)
 │   ├── metadata.rs         # ONNX model metadata parsing
 │   ├── source.rs           # Input source handling (images, video, webcam)

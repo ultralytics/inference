@@ -504,7 +504,7 @@ inference/
 │   ├── main.rs             # CLI 应用
 │   ├── model.rs            # YOLOModel - ONNX session 和推理
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask, DepthMap
-│   ├── preprocessing.rs    # 图片预处理（letterbox、normalize、SIMD）
+│   ├── preprocessing.rs    # 图片预处理（letterbox、RT-DETR 和深度模型的拉伸缩放、normalize、SIMD）
 │   ├── postprocessing.rs   # 所有任务的后处理（检测 NMS/decode、语义分割 argmax、深度 resize）
 │   ├── metadata.rs         # ONNX 模型元数据解析
 │   ├── source.rs           # 输入源处理（图片、视频、摄像头）
