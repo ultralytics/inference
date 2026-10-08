@@ -218,23 +218,23 @@ fn build_tflite_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
 }
 
 /// Build the original RGB image (HWC u8, for postprocess coordinate scaling) and
-/// the NCHW f32 input tensor. Classification center-crops, RT-DETR scale-fills, every
-/// other task letterboxes. Shared by the ONNX and LiteRT paths.
+/// the NCHW f32 input tensor. Classification center-crops, RT-DETR and depth scale-fill,
+/// every other task letterboxes. Shared by the ONNX and LiteRT paths.
 fn preprocess_image(
     dynimg: image::DynamicImage,
     imgsz: (usize, usize),
     stride: u32,
     task: Task,
     rect: bool,
-    rtdetr: bool,
+    scale_fill: bool,
 ) -> (Array3<u8>, PreprocessResult) {
     // Convert to RGB once and reuse it for both outputs: an RGBA canvas frame would
     // otherwise be converted twice, and a decoded RGB image now moves without a copy.
     let rgb = image::DynamicImage::ImageRgb8(dynimg.into_rgb8());
     let pre = if task == Task::Classify {
         preprocess_image_center_crop(&rgb, imgsz, None)
-    } else if rtdetr {
-        // RT-DETR is trained on a stretched square input, so it never letterboxes.
+    } else if scale_fill {
+        // RT-DETR and depth are trained on a stretched square input, so they never letterbox.
         preprocess_image_stretch(&rgb, imgsz, None)
     } else {
         // Rectangular inference pads only up to the stride instead of to a square, so a
@@ -459,7 +459,7 @@ impl YoloModel {
         let imgsz = fixed_imgsz.unwrap_or_else(|| metadata.imgsz_or_default());
         // A pinned height/width can only ever take `imgsz`, so rect applies exactly when
         // the export left them dynamic - the same invariant as the native `rect_enabled`.
-        let rect = fixed_imgsz.is_none() && !metadata.is_rtdetr();
+        let rect = fixed_imgsz.is_none() && !metadata.scale_fill();
         let output_names = session
             .outputs()
             .iter()
@@ -512,7 +512,7 @@ impl YoloModel {
             self.metadata.stride,
             self.metadata.task,
             self.rect,
-            self.metadata.is_rtdetr(),
+            self.metadata.scale_fill(),
         );
 
         // Resolve the output dtype path before borrowing the session for inference.
@@ -741,7 +741,7 @@ impl YoloPipeline {
             self.metadata.stride,
             self.metadata.task,
             false,
-            self.metadata.is_rtdetr(),
+            self.metadata.scale_fill(),
         );
         let data = pre
             .tensor
