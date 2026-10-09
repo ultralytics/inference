@@ -159,7 +159,7 @@ jobs:
 
   notify:
     needs: [check, build, publish, sbom]
-    if: always() && needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true)
+    if: always() && needs.check.outputs.increment == 'True' && (github.event_name == 'push' || inputs.publish == true) && github.run_attempt == '1'
     runs-on: ubuntu-latest
     permissions:
       contents: read
