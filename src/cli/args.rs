@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 #[command(after_help = r#"Predict Options:
-    --model, -m <MODEL>    Path to ONNX model file [default: yolo26n.onnx]
+    --model, -m <MODEL>    Path to ONNX model file, or OpenVINO .xml file or export folder [default: yolo26n.onnx]
     --task <TASK>          Task type: detect, segment, semantic, depth, classify, pose, obb [default: detect]
                            Selects the matching nano model when --model is omitted
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
@@ -62,7 +62,7 @@ pub enum Commands {
 #[derive(Args, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct PredictArgs {
-    /// Path to ONNX model file
+    /// Path to ONNX model file, or OpenVINO .xml file or export folder
     #[arg(short, long)]
     pub model: Option<String>,
 

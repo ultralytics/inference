@@ -168,8 +168,14 @@ pub fn run_prediction(args: &PredictArgs) {
 
     let precision = precision_label(model.quantize());
     let device_str = provider_label(model.execution_provider());
-    println!("{DISPLAY_NAME} {VERSION} 🚀 Rust ONNX {precision} {device_str}");
-    println!("Using ONNX Runtime {}", model.execution_provider());
+    // A native OpenVINO IR model reports the bare name; ONNX Runtime providers end in `Provider`.
+    if model.execution_provider() == "OpenVINO" {
+        println!("{DISPLAY_NAME} {VERSION} 🚀 Rust OpenVINO {precision} {device_str}");
+        println!("Using OpenVINO Runtime");
+    } else {
+        println!("{DISPLAY_NAME} {VERSION} 🚀 Rust ONNX {precision} {device_str}");
+        println!("Using ONNX Runtime {}", model.execution_provider());
+    }
 
     let imgsz = model.imgsz();
     verbose!(
