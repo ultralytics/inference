@@ -749,8 +749,8 @@ impl YOLOModel {
         let mut metadata = ModelMetadata::from_yaml_str(&yaml)?;
         let (h, w) = config.imgsz.unwrap_or_else(|| metadata.imgsz_or_default());
         #[allow(clippy::cast_possible_wrap)]
-        let npu_input = [config.batch.unwrap_or(1) as i64, 3, h as i64, w as i64];
-        let ov = crate::openvino::OvSession::load(&xml, config.device.as_ref(), npu_input)?;
+        let static_input = [config.batch.unwrap_or(1) as i64, 3, h as i64, w as i64];
+        let ov = crate::openvino::OvSession::load(&xml, config.device.as_ref(), static_input)?;
         let dims = ov.input_dims().to_vec();
         let is_dynamic = dims.len() == 4 && (dims[2] <= 0 || dims[3] <= 0);
         #[allow(clippy::cast_sign_loss)]
