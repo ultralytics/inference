@@ -198,9 +198,11 @@ impl ModelMetadata {
     }
 
     /// Insert a `class_id: name` entry into `names`, ignoring anything that is not one.
+    /// A bare `0:` is the head of a nested list such as `kpt_names`, not a class.
     fn insert_class_entry(names: &mut HashMap<usize, String>, entry: &str) {
         if let Some((key, value)) = entry.split_once(':')
             && let Ok(class_id) = key.trim().parse::<usize>()
+            && !value.trim().is_empty()
         {
             names.insert(class_id, Self::unquote(value).to_string());
         }
@@ -562,6 +564,13 @@ channels: 3
         let m = ModelMetadata::from_yaml_str(yaml).unwrap();
         assert_eq!(m.num_classes(), 3);
         assert_eq!(m.class_name(1), Some("bicycle"));
+    }
+
+    #[test]
+    fn test_block_kpt_names_does_not_overwrite_names() {
+        let yaml = "task: pose\nnames:\n  0: person\nkpt_names:\n  0:\n  - nose\n  - left_eye";
+        let metadata = ModelMetadata::from_yaml_str(yaml).unwrap();
+        assert_eq!(metadata.names[&0], "person");
     }
 
     #[test]
