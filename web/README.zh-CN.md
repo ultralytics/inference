@@ -86,6 +86,8 @@ const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
 console.log(model.device); // "webgpu" 或 "cpu"
 ```
 
+传入 `classes: [0, 2]` 可只保留这些类别 ID。
+
 `YOLO.load` 同样接受 `Blob`/`File`，因此可以加载用户拖入或选择的模型。后端根据字节内容自动检测，
 所以同一个调用可同时处理 `.onnx` 和 `.tflite`：
 
