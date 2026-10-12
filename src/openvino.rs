@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use ndarray::Array4;
 use openvino::{
-    CompiledModel, Core, DeviceType, ElementType, InferRequest, Model, PartialShape, Shape, Tensor,
+    CompiledModel, Core, DeviceType, ElementType, InferRequest, Model, PartialShape, RwPropertyKey,
+    Shape, Tensor,
 };
 
 use crate::Device;
@@ -25,6 +26,8 @@ pub struct OvSession {
     /// Input dimensions as `[N, C, H, W]`, with `-1` for a dynamic axis.
     input_dims: Vec<i64>,
     outputs: usize,
+    /// The input tensor of the last run, reused while the shape holds.
+    input: Option<(Vec<i64>, Tensor)>,
 }
 
 fn load_err(e: impl std::fmt::Display) -> InferenceError {
@@ -100,6 +103,7 @@ impl OvSession {
         device: Option<&Device>,
         static_input: [i64; 4],
         host_upsample: bool,
+        threads: usize,
     ) -> Result<Self> {
         let device = match device {
             None | Some(Device::Cpu | Device::IntelCpu) => DeviceType::CPU,
@@ -174,6 +178,14 @@ impl OvSession {
             ));
         }
         let outputs = model.get_outputs_len().map_err(load_err)?;
+        if threads > 0 && device == DeviceType::CPU {
+            core.set_property(
+                &device,
+                &RwPropertyKey::InferenceNumThreads,
+                &threads.to_string(),
+            )
+            .map_err(load_err)?;
+        }
         let mut compiled = core.compile_model(&model, device).map_err(load_err)?;
         let request = compiled.create_infer_request().map_err(load_err)?;
         Ok(Self {
@@ -181,6 +193,7 @@ impl OvSession {
             _compiled: compiled,
             _core: core,
             input_dims: dims,
+            input: None,
             outputs,
         })
     }
@@ -195,13 +208,18 @@ impl OvSession {
         let input = input.as_standard_layout();
         #[allow(clippy::cast_possible_wrap)]
         let dims: Vec<i64> = input.shape().iter().map(|&d| d as i64).collect();
-        let mut tensor =
-            Tensor::new(ElementType::F32, &Shape::new(&dims).map_err(run_err)?).map_err(run_err)?;
-        tensor
-            .get_data_mut::<f32>()
-            .map_err(run_err)?
-            .copy_from_slice(input.as_slice().expect("standard layout is contiguous"));
-        self.request.set_input_tensor(&tensor).map_err(run_err)?;
+        if self.input.as_ref().is_none_or(|(d, _)| *d != dims) {
+            let tensor = Tensor::new(ElementType::F32, &Shape::new(&dims).map_err(run_err)?)
+                .map_err(run_err)?;
+            self.request.set_input_tensor(&tensor).map_err(run_err)?;
+            self.input = Some((dims, tensor));
+        }
+        if let Some((_, tensor)) = &mut self.input {
+            tensor
+                .get_data_mut::<f32>()
+                .map_err(run_err)?
+                .copy_from_slice(input.as_slice().expect("standard layout is contiguous"));
+        }
         self.request.infer().map_err(run_err)?;
         (0..self.outputs)
             .map(|i| self.request.get_output_tensor_by_index(i).map_err(run_err))
@@ -245,11 +263,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let xml = dir.path().join("m.xml");
         std::fs::write(&xml, "").unwrap();
-        let err = OvSession::load(&xml, None, [1, 3, 4, 4], false)
+        let err = OvSession::load(&xml, None, [1, 3, 4, 4], false, 0)
             .err()
             .unwrap();
         assert!(err.to_string().contains("weights not found"), "{err}");
-        let err = OvSession::load(&xml, Some(&Device::Cuda(0)), [1, 3, 4, 4], false)
+        let err = OvSession::load(&xml, Some(&Device::Cuda(0)), [1, 3, 4, 4], false, 0)
             .err()
             .unwrap();
         assert!(
@@ -280,6 +298,7 @@ mod tests {
             Some(&Device::IntelCpu),
             [1, 3, 4, 4],
             false,
+            2,
         )
         .unwrap();
         assert_eq!(ov.input_dims(), [1, 3, 4, 4]);

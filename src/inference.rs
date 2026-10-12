@@ -125,7 +125,7 @@ pub struct InferenceConfig {
     /// Batch size for inference when using [`BatchProcessor`](crate::batch::BatchProcessor).
     /// If `None`, defaults to 1 (single-image inference).
     pub batch: Option<usize>,
-    /// Number of intra-op threads for ONNX Runtime.
+    /// Number of intra-op threads for ONNX Runtime, or inference threads for `OpenVINO` on the CPU.
     /// Setting this to `0` lets [`YOLOModel::load`](crate::YOLOModel::load) resolve it to
     /// [`std::thread::available_parallelism`] when it builds the session, falling back to
     /// `4` if that cannot be determined.

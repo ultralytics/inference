@@ -760,6 +760,7 @@ impl YOLOModel {
             config.device.as_ref(),
             static_input,
             metadata.task == Task::Depth,
+            config.num_threads,
         )?;
         let dims = ov.input_dims().to_vec();
         let is_dynamic = dims.len() == 4 && (dims[2] <= 0 || dims[3] <= 0);
