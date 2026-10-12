@@ -594,6 +594,15 @@ Providers missing from the chosen build are then absent at runtime and inference
 
 > `openvino` is the exception: no prebuilt ONNX Runtime ships the OpenVINO provider, so on first use it is downloaded as a plugin (Linux x64 or Windows x64) into the user cache folder. Its `onnxruntime_providers_shared` library is copied next to the executable when missing.
 
+**OpenVINO IR models:** with the `openvino` feature, `--model` also takes a native OpenVINO export, either the `.xml` file or the folder from `yolo export format=openvino`, and runs it through the OpenVINO runtime directly instead of ONNX Runtime. The folder needs its `metadata.yaml` beside the `.xml` and `.bin`. Install the OpenVINO runtime (`pip install openvino`, an archive, or a system package) and make `libopenvino_c` findable through `OPENVINO_INSTALL_DIR` or the library path; the crate loads it at run time, so building needs no OpenVINO install.
+
+```bash
+yolo export model=yolo26n.pt format=openvino                 # FP32, add half=True, int8=True, dynamic=True or batch=4
+ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
+```
+
+All five tasks (detect, segment, classify, pose, obb) of YOLO11 and YOLO26 load in FP32, FP16, INT8, dynamic, and fixed-batch exports on `intel:cpu` and `intel:gpu`. The NPU runs the same exports with two limits: a dynamic export is pinned to `--imgsz` and `--batch`, and the batch 4 OBB export fails in the NPU driver.
+
 **Available Features:**
 
 Default features (enabled unless `--no-default-features` is passed): `annotate`, `visualize`.
@@ -607,7 +616,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `tensorrt`        | NVIDIA TensorRT optimization                                                                          |
 | `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
 | `coreml`          | Apple CoreML (macOS/iOS)                                                                              |
-| `openvino`        | Intel OpenVINO                                                                                        |
+| `openvino`        | Intel OpenVINO (ONNX provider and native IR models)                                                   |
 | `onednn`          | Intel oneDNN                                                                                          |
 | `rocm`            | AMD ROCm                                                                                              |
 | `migraphx`        | AMD MIGraphX                                                                                          |

@@ -590,6 +590,15 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 
 > `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此首次使用时会以插件形式（Linux x64 或 Windows x64）下载到用户缓存目录。缺失时会把其 `onnxruntime_providers_shared` 库复制到可执行文件旁边。
 
+**OpenVINO IR 模型：** 启用 `openvino` feature 后，`--model` 也可以直接使用 `yolo export format=openvino` 导出的 `.xml` 文件或导出文件夹，并通过 OpenVINO 运行时直接推理，而不经过 ONNX Runtime。文件夹中需要 `metadata.yaml` 与 `.xml`、`.bin` 放在一起。需要安装 OpenVINO 运行时（`pip install openvino`、压缩包或系统软件包），并通过 `OPENVINO_INSTALL_DIR` 或库路径让 `libopenvino_c` 可被找到，构建时不需要安装 OpenVINO。
+
+```bash
+yolo export model=yolo26n.pt format=openvino                 # FP32，可加 half=True、int8=True、dynamic=True 或 batch=4
+ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
+```
+
+YOLO11 和 YOLO26 的五类任务（detect、segment、classify、pose、obb）的 FP32、FP16、INT8、动态和固定 batch 导出都可在 `intel:cpu` 和 `intel:gpu` 上加载。NPU 运行相同的导出，但有两点限制：动态导出会固定为 `--imgsz` 和 `--batch`，batch 4 的 OBB 导出会在 NPU 驱动中失败。
+
 **可用 Features：**
 
 默认 features（除非传入 `--no-default-features`）：`annotate`、`visualize`。
