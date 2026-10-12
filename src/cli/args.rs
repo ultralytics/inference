@@ -62,7 +62,7 @@ pub enum Commands {
 #[derive(Args, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct PredictArgs {
-    /// Path to ONNX model file, or OpenVINO .xml file or export folder
+    /// Path to ONNX model file, or `OpenVINO` `.xml` file or export folder
     #[arg(short, long)]
     pub model: Option<String>,
 

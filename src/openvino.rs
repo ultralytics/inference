@@ -9,7 +9,9 @@
 use std::path::{Path, PathBuf};
 
 use ndarray::Array4;
-use openvino::{CompiledModel, Core, DeviceType, ElementType, InferRequest, Shape, Tensor};
+use openvino::{
+    CompiledModel, Core, DeviceType, ElementType, InferRequest, PartialShape, Shape, Tensor,
+};
 
 use crate::Device;
 use crate::error::{InferenceError, Result};
@@ -52,8 +54,9 @@ pub fn resolve_xml(path: &Path) -> Result<PathBuf> {
 }
 
 impl OvSession {
-    /// Compile the IR at `xml` (weights next to it as `.bin`) for `device`.
-    pub fn load(xml: &Path, device: Option<&Device>) -> Result<Self> {
+    /// Compile the IR at `xml` (weights next to it as `.bin`) for `device`. The NPU compiles
+    /// only bounded shapes, so a dynamic model is pinned to `npu_input` (`[N, C, H, W]`) there.
+    pub fn load(xml: &Path, device: Option<&Device>, npu_input: [i64; 4]) -> Result<Self> {
         let device = match device {
             None | Some(Device::Cpu | Device::IntelCpu) => DeviceType::CPU,
             Some(Device::IntelGpu) => DeviceType::GPU,
@@ -66,9 +69,13 @@ impl OvSession {
         };
         let mut core = Core::new().map_err(load_err)?;
         let path = |p: &Path| p.to_string_lossy().into_owned();
-        let model = core
+        let mut model = core
             .read_model_from_file(&path(xml), &path(&xml.with_extension("bin")))
             .map_err(load_err)?;
+        if device == DeviceType::NPU && model.is_dynamic() {
+            let shape = PartialShape::new_static(4, &npu_input).map_err(load_err)?;
+            model.reshape_single_input(&shape).map_err(load_err)?;
+        }
         let input = model.get_input_by_index(0).map_err(load_err)?;
         if input.get_element_type().map_err(load_err)? != ElementType::F32 {
             return Err(InferenceError::ModelLoadError(

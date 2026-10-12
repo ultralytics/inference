@@ -741,13 +741,16 @@ impl YOLOModel {
     #[cfg(feature = "openvino")]
     fn load_openvino(path: &Path, config: InferenceConfig) -> Result<Self> {
         let xml = crate::openvino::resolve_xml(path)?;
-        let ov = crate::openvino::OvSession::load(&xml, config.device.as_ref())?;
         let yaml = std::fs::read_to_string(xml.with_file_name("metadata.yaml")).map_err(|e| {
             InferenceError::ModelLoadError(format!(
                 "OpenVINO models need metadata.yaml beside the .xml: {e}"
             ))
         })?;
         let mut metadata = ModelMetadata::from_yaml_str(&yaml)?;
+        let (h, w) = config.imgsz.unwrap_or_else(|| metadata.imgsz_or_default());
+        #[allow(clippy::cast_possible_wrap)]
+        let npu_input = [config.batch.unwrap_or(1) as i64, 3, h as i64, w as i64];
+        let ov = crate::openvino::OvSession::load(&xml, config.device.as_ref(), npu_input)?;
         let dims = ov.input_dims().to_vec();
         let is_dynamic = dims.len() == 4 && (dims[2] <= 0 || dims[3] <= 0);
         #[allow(clippy::cast_sign_loss)]
@@ -1482,7 +1485,10 @@ impl YOLOModel {
     /// the model. Fixed-shape models must letterbox to their own input size, and RT-DETR and
     /// depth scale-fill their square input, so neither leaves a rectangle to trim.
     fn rect_enabled(&self) -> bool {
-        self.config.rect && self.is_dynamic && !self.metadata.scale_fill()
+        self.config.rect
+            && self.is_dynamic
+            && !self.metadata.scale_fill()
+            && self.metadata.task != Task::Classify
     }
 
     /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
