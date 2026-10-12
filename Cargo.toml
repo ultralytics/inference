@@ -140,6 +140,8 @@ clap = { version = "^4.6.1", features = ["derive"] }
 # rayon-backed parallelism for ndarray and fast_image_resize, native only.
 ndarray = { version = "^0.17", features = ["rayon"] }
 fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
+# Native OpenVINO IR (.xml) runtime, loaded from the installed libraries at run time (openvino feature).
+openvino = { version = "0.11.1", default-features = false, features = ["runtime-linking"], optional = true }
 
 [features]
 default = ["annotate", "visualize"]
@@ -163,7 +165,7 @@ cuda-preprocess = ["cuda", "tensorrt", "dep:cudarc"]
 rocm = ["ort/rocm"]
 
 # Intel acceleration (OpenVINO provider downloaded as a plugin on first use)
-openvino = ["ort/api-22", "ort/preload-dylibs", "dep:hmac-sha256", "dep:flate2"]
+openvino = ["ort/api-22", "ort/preload-dylibs", "dep:hmac-sha256", "dep:flate2", "dep:openvino"]
 onednn = ["ort/onednn"]
 
 # DirectML (Windows)

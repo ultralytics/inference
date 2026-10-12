@@ -59,6 +59,37 @@ macro_rules! bind_compute_stream {
     };
 }
 
+/// The engine that runs a loaded model.
+enum Backend {
+    /// ONNX Runtime session for `.onnx` files.
+    Ort(Session),
+    /// Native `OpenVINO` IR model for `.xml` files. The `Mutex` keeps the model `Sync`; it is
+    /// only reached through `&mut self`, so it never blocks.
+    #[cfg(feature = "openvino")]
+    OpenVino(std::sync::Mutex<crate::openvino::OvSession>),
+}
+
+impl Backend {
+    /// The ONNX Runtime session, for the paths that only an ONNX model reaches.
+    #[allow(clippy::missing_const_for_fn)]
+    fn ort(&self) -> &Session {
+        match self {
+            Self::Ort(session) => session,
+            #[cfg(feature = "openvino")]
+            Self::OpenVino(_) => unreachable!("an OpenVINO model has no ONNX Runtime session"),
+        }
+    }
+
+    #[allow(clippy::missing_const_for_fn)]
+    fn ort_mut(&mut self) -> &mut Session {
+        match self {
+            Self::Ort(session) => session,
+            #[cfg(feature = "openvino")]
+            Self::OpenVino(_) => unreachable!("an OpenVINO model has no ONNX Runtime session"),
+        }
+    }
+}
+
 /// Fixed device I/O the `TensorRT` CUDA graph replays; `binding` drops before its allocator.
 #[cfg(feature = "cuda-preprocess")]
 struct GraphIo {
@@ -106,8 +137,8 @@ fn gpu_work() -> std::sync::RwLockReadGuard<'static, ()> {
 /// println!("Found {} detections", results.len());
 /// ```
 pub struct YOLOModel {
-    /// ONNX Runtime session.
-    session: Session,
+    /// Inference engine: an ONNX Runtime session, or a native `OpenVINO` IR model.
+    backend: Backend,
     /// Model metadata (task, classes, etc.).
     metadata: ModelMetadata,
     /// Input tensor name.
@@ -211,6 +242,11 @@ impl YOLOModel {
             std::borrow::Cow::Owned(try_download_model(path)?)
         };
         let path = path.as_ref();
+
+        #[cfg(feature = "openvino")]
+        if path.is_dir() || path.extension().is_some_and(|e| e == "xml") {
+            return Self::load_openvino(path, config);
+        }
 
         // Establish a shared cudarc stream up-front when the cuda-preprocess
         // fast path is eligible. The TRT/CUDA EPs below bind to this stream
@@ -665,7 +701,7 @@ impl YOLOModel {
         };
 
         let mut model = Self {
-            session,
+            backend: Backend::Ort(session),
             metadata,
             input_name,
             output_names,
@@ -697,6 +733,56 @@ impl YOLOModel {
         }
         model.warmup()?;
 
+        Ok(model)
+    }
+
+    /// Load a native `OpenVINO` IR model from its `.xml` file or export folder, reading the
+    /// metadata the exporter wrote to `metadata.yaml` beside it.
+    #[cfg(feature = "openvino")]
+    fn load_openvino(path: &Path, config: InferenceConfig) -> Result<Self> {
+        let xml = crate::openvino::resolve_xml(path)?;
+        let ov = crate::openvino::OvSession::load(&xml, config.device.as_ref())?;
+        let yaml = std::fs::read_to_string(xml.with_file_name("metadata.yaml")).map_err(|e| {
+            InferenceError::ModelLoadError(format!(
+                "OpenVINO models need metadata.yaml beside the .xml: {e}"
+            ))
+        })?;
+        let mut metadata = ModelMetadata::from_yaml_str(&yaml)?;
+        let dims = ov.input_dims().to_vec();
+        let is_dynamic = dims.len() == 4 && (dims[2] <= 0 || dims[3] <= 0);
+        #[allow(clippy::cast_sign_loss)]
+        let fixed_imgsz = (dims.len() == 4 && dims[2] > 0 && dims[3] > 0)
+            .then(|| (dims[2] as usize, dims[3] as usize));
+        if let (Some(fixed), Some(requested)) = (fixed_imgsz, config.imgsz)
+            && requested != fixed
+        {
+            warn!("imgsz={requested:?} ignored: this model has a fixed input shape of {fixed:?}.");
+        }
+        let imgsz = fixed_imgsz
+            .or(config.imgsz)
+            .unwrap_or_else(|| metadata.imgsz_or_default());
+        metadata.imgsz = Some(imgsz);
+        let quantize = metadata.quantize;
+        let mut model = Self {
+            backend: Backend::OpenVino(std::sync::Mutex::new(ov)),
+            input_name: String::new(),
+            output_names: Vec::new(),
+            config: InferenceConfig {
+                imgsz: Some(imgsz),
+                quantize,
+                ..config
+            },
+            metadata,
+            warmed_up: false,
+            fp16_input: false,
+            execution_provider: "OpenVINO".to_owned(),
+            is_dynamic,
+            #[cfg(feature = "cuda-preprocess")]
+            cuda_preprocessor: None,
+            #[cfg(feature = "cuda-preprocess")]
+            graph_io: None,
+        };
+        model.warmup()?;
         Ok(model)
     }
 
@@ -1169,7 +1255,11 @@ impl YOLOModel {
     /// Returns true when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only output is
     /// a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction + CPU argmax for semantic segmentation.
     fn has_semantic_mask_output(&self) -> bool {
-        let outs = self.session.outputs();
+        #[cfg(feature = "openvino")]
+        if matches!(self.backend, Backend::OpenVino(_)) {
+            return false;
+        }
+        let outs = self.backend.ort().outputs();
         outs.len() == 1
             && matches!(
                 outs[0].dtype(),
@@ -1182,12 +1272,27 @@ impl YOLOModel {
     /// Authoritative over a configured batch, the way the pinned height/width is.
     fn fixed_batch(session: &Session) -> Option<usize> {
         match session.inputs().first()?.dtype() {
-            ValueType::Tensor { shape, .. } if shape.len() == 4 && shape[0] > 0 =>
-            {
-                #[allow(clippy::cast_sign_loss)]
-                Some(shape[0] as usize)
-            }
+            ValueType::Tensor { shape, .. } => Self::pinned_batch(shape),
             _ => None,
+        }
+    }
+
+    /// The batch axis of an `[N, C, H, W]` input shape when it is not dynamic.
+    #[allow(clippy::cast_sign_loss)]
+    fn pinned_batch(shape: &[i64]) -> Option<usize> {
+        (shape.len() == 4 && shape[0] > 0).then(|| shape[0] as usize)
+    }
+
+    /// [`Self::fixed_batch`] of whichever engine runs this model.
+    fn model_fixed_batch(&self) -> Option<usize> {
+        match &self.backend {
+            Backend::Ort(session) => Self::fixed_batch(session),
+            #[cfg(feature = "openvino")]
+            Backend::OpenVino(ov) => Self::pinned_batch(
+                ov.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .input_dims(),
+            ),
         }
     }
 
@@ -1219,7 +1324,7 @@ impl YOLOModel {
 
         #[cfg(feature = "cuda-preprocess")]
         if let Some(graph) = graph_mut(&mut self.graph_io) {
-            Self::capture_graph(&mut self.session, graph)?;
+            Self::capture_graph(self.backend.ort_mut(), graph)?;
             self.warmed_up = true;
             return Ok(());
         }
@@ -1227,16 +1332,30 @@ impl YOLOModel {
         // Match whatever the export pinned on the batch axis, exactly as the height and
         // width are matched above: a `[8, 3, 640, 640]` model rejects a batch-1 warmup and
         // would fail the whole `load`. A dynamic batch takes the configured size.
-        let batch =
-            Self::fixed_batch(&self.session).unwrap_or_else(|| self.config.batch.unwrap_or(1));
+        let batch = self
+            .model_fixed_batch()
+            .unwrap_or_else(|| self.config.batch.unwrap_or(1));
 
-        let warmup_result = Self::run_warmup(
-            &mut self.session,
-            &self.input_name,
-            self.fp16_input,
-            target_size,
-            batch,
-        );
+        let warmup_result = match &mut self.backend {
+            Backend::Ort(session) => Self::run_warmup(
+                session,
+                &self.input_name,
+                self.fp16_input,
+                target_size,
+                batch,
+            ),
+            #[cfg(feature = "openvino")]
+            Backend::OpenVino(ov) => ov
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .run(&ndarray::Array4::zeros((
+                    batch,
+                    3,
+                    target_size.0,
+                    target_size.1,
+                )))
+                .map(drop),
+        };
 
         if let Err(e) = warmup_result {
             let msg = e.to_string();
@@ -1429,7 +1548,8 @@ impl YOLOModel {
         // the tensor alive until it drops.
         let input = unsafe { Self::device_input(&cuda_mem, pre.input_dev_ptr(), shape)? };
         let mut binding = self
-            .session
+            .backend
+            .ort()
             .create_binding()
             .map_err(|e| err("create_binding", e))?;
         binding
@@ -1536,11 +1656,11 @@ impl YOLOModel {
             dtype.tensor_shape().map(|s| s.to_vec()).unwrap_or_default()
         };
         // Outputs are rebound to device tensors, since a replay skips the copy to host.
-        let mut binding = self.device_binding(&shape(self.session.inputs()[0].dtype()))?;
-        let allocator =
-            Allocator::new(&self.session, self.cuda_memory()?).map_err(|e| err("allocator", e))?;
+        let mut binding = self.device_binding(&shape(self.backend.ort().inputs()[0].dtype()))?;
+        let allocator = Allocator::new(self.backend.ort(), self.cuda_memory()?)
+            .map_err(|e| err("allocator", e))?;
         let mut outputs = Vec::with_capacity(self.output_names.len());
-        for (name, output) in self.output_names.iter().zip(self.session.outputs()) {
+        for (name, output) in self.output_names.iter().zip(self.backend.ort().outputs()) {
             let dims = shape_to_usize(&shape(output.dtype()));
             let tensor =
                 Tensor::<f32>::new(&allocator, dims.clone()).map_err(|e| err("graph output", e))?;
@@ -1574,7 +1694,7 @@ impl YOLOModel {
         if let Some(graph) = graph_mut(&mut self.graph_io)
             && graph.thread != std::thread::current().id()
         {
-            Self::capture_graph(&mut self.session, graph)?;
+            Self::capture_graph(self.backend.ort_mut(), graph)?;
         }
         let _gpu = gpu_work();
         // Computed before `run_binding` borrows the session: true when the ONNX bakes in
@@ -1638,7 +1758,8 @@ impl YOLOModel {
         // A graph model replays over its fixed device I/O and copies the outputs back itself.
         let outputs = if let Some(graph) = graph_mut(&mut self.graph_io) {
             start_inference = Instant::now();
-            self.session
+            self.backend
+                .ort_mut()
                 .run_binding(&graph.binding)
                 .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
             let pre = self
@@ -1658,7 +1779,8 @@ impl YOLOModel {
             binding = self.device_binding(&shape)?;
             start_inference = Instant::now();
             let outputs = self
-                .session
+                .backend
+                .ort_mut()
                 .run_binding(&binding)
                 .map_err(|e| InferenceError::InferenceError(format!("run_binding: {e}")))?;
             binding
@@ -1787,7 +1909,7 @@ impl YOLOModel {
 
         // A model pinned to one batch size runs exactly that many images at a time: a larger
         // request goes in chunks, and a short chunk is padded with its last image.
-        if let Some(fixed) = Self::fixed_batch(&self.session)
+        if let Some(fixed) = self.model_fixed_batch()
             && images.len() != fixed
         {
             let mut results = Vec::with_capacity(images.len());
@@ -1901,6 +2023,50 @@ impl YOLOModel {
         // Resolve the output dtype path before the session is mutably borrowed below.
         let semantic_mask_output = self.has_semantic_mask_output();
 
+        // A native OpenVINO model takes f32 only and hands back owned tensors.
+        #[cfg(feature = "openvino")]
+        if let Backend::OpenVino(ov) = &mut self.backend {
+            let ov = ov
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let start = Instant::now();
+            let tensors = match preprocessed_results.as_slice() {
+                [single] => ov.run(&single.tensor)?,
+                batch => ov.run(&Self::concat_f32_batch(batch)?)?,
+            };
+            #[allow(clippy::cast_precision_loss)]
+            let speed = Speed::new(
+                preprocess_time,
+                start.elapsed().as_secs_f64() * 1000.0 / images.len() as f64,
+                0.0,
+            );
+            let bufs = tensors
+                .iter()
+                .map(|t| {
+                    let shape = t
+                        .get_shape()
+                        .map_err(|e| InferenceError::InferenceError(e.to_string()))?;
+                    let data = t
+                        .get_data::<f32>()
+                        .map_err(|e| InferenceError::InferenceError(e.to_string()))?;
+                    Ok((
+                        data,
+                        shape.get_dimensions().iter().map(|&d| d as usize).collect(),
+                    ))
+                })
+                .collect::<Result<Vec<(&[f32], Vec<usize>)>>>()?;
+            return Ok(Self::postprocess_batch_results(
+                &bufs,
+                &self.metadata,
+                &self.config,
+                &preprocessed_results,
+                image_arrays,
+                paths,
+                &speed,
+                inference_shape,
+            ));
+        }
+
         // One forward pass, whatever the input precision: the batch tensor only lives
         // long enough to be uploaded, while the outputs outlive it.
         // A batch of one is the common case (single image, video, webcam) and there is
@@ -1910,19 +2076,21 @@ impl YOLOModel {
             match preprocessed_results.as_slice() {
                 [single] => {
                     let tensor = single.tensor_f16.as_ref().expect("fp16 tensor");
-                    Self::run_input(&mut self.session, &self.input_name, tensor)?
+                    Self::run_input(self.backend.ort_mut(), &self.input_name, tensor)?
                 }
                 batch => {
                     let batch_tensor = Self::concat_f16_batch(batch)?;
-                    Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
+                    Self::run_input(self.backend.ort_mut(), &self.input_name, &batch_tensor)?
                 }
             }
         } else {
             match preprocessed_results.as_slice() {
-                [single] => Self::run_input(&mut self.session, &self.input_name, &single.tensor)?,
+                [single] => {
+                    Self::run_input(self.backend.ort_mut(), &self.input_name, &single.tensor)?
+                }
                 batch => {
                     let batch_tensor = Self::concat_f32_batch(batch)?;
-                    Self::run_input(&mut self.session, &self.input_name, &batch_tensor)?
+                    Self::run_input(self.backend.ort_mut(), &self.input_name, &batch_tensor)?
                 }
             }
         };

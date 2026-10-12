@@ -420,6 +420,8 @@ pub mod download;
 pub mod io;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod model;
+#[cfg(all(feature = "openvino", not(target_arch = "wasm32")))]
+mod openvino;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source;
 
