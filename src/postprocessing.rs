@@ -266,6 +266,13 @@ fn postprocess_detect(
     results
 }
 
+/// Infer `(num_classes, num_preds, transposed)` from a 2D shape with no metadata: the smaller
+/// dimension is the feature count.
+fn infer_detect_shape(a: usize, b: usize) -> (usize, usize, bool) {
+    let (num_features, num_preds, transposed) = if a < b { (a, b, false) } else { (b, a, true) };
+    (num_features.saturating_sub(4).max(1), num_preds, transposed)
+}
+
 /// Parse detection output shape to determine format.
 ///
 /// Derives class count from output shape when metadata is missing (`expected_classes` == 0).
@@ -284,10 +291,7 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
             // The smaller dimension (if >= 5) is likely num_features, larger is num_preds
             if expected_classes == 0 {
                 // No metadata - infer from shape
-                let (num_features, num_preds, transposed) =
-                    if a < b { (a, b, false) } else { (b, a, true) };
-                let inferred_classes = num_features.saturating_sub(4);
-                return (inferred_classes.max(1), num_preds, transposed);
+                return infer_detect_shape(a, b);
             }
             if a == 4 + expected_classes || (a >= 4 && a > b) {
                 // [num_features, num_preds]
@@ -308,10 +312,7 @@ fn parse_detect_shape(shape: &[usize], expected_classes: usize) -> (usize, usize
             if expected_classes == 0 {
                 // No metadata - infer from shape
                 // Typically num_features < num_preds (e.g., 84 < 8400)
-                let (num_features, num_preds, transposed) =
-                    if a < b { (a, b, false) } else { (b, a, true) };
-                let inferred_classes = num_features.saturating_sub(4);
-                return (inferred_classes.max(1), num_preds, transposed);
+                return infer_detect_shape(a, b);
             }
             if a == 4 + expected_classes || (expected_classes > 0 && a < b) {
                 // [1, num_features, num_preds]
@@ -1606,6 +1607,14 @@ fn postprocess_obb_end2end(
     results
 }
 
+/// Attach a row-major `oh x ow` class map to `results` as its semantic mask.
+#[allow(clippy::cast_possible_truncation)]
+fn finish_semantic_mask(mut results: Results, buf: Vec<u16>, oh: usize, ow: usize) -> Results {
+    let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
+    results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
+    results
+}
+
 /// Compute the centered-letterbox crop bounds in model-output (lh, lw) space that
 /// cover the original image (oh, ow).
 ///
@@ -1705,7 +1714,7 @@ pub fn postprocess_semantic_mask(
 ) -> Results {
     let oh = orig_img.shape()[0];
     let ow = orig_img.shape()[1];
-    let mut results = Results::new(orig_img, path, names, speed, inference_shape);
+    let results = Results::new(orig_img, path, names, speed, inference_shape);
 
     if shape.len() < 2 || output.is_empty() {
         return results;
@@ -1721,9 +1730,7 @@ pub fn postprocess_semantic_mask(
         for (dst, &src) in buf.iter_mut().zip(output.iter()) {
             *dst = u16::from(src);
         }
-        let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
-        results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
-        return results;
+        return finish_semantic_mask(results, buf, oh, ow);
     }
 
     // Slow path: crop centered letterbox padding in semantic-mask space, then NN upsample.
@@ -1748,9 +1755,7 @@ pub fn postprocess_semantic_mask(
             *cell = u16::from(output[src_row_base + x_lut[dx]]);
         }
     });
-    let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
-    results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
-    results
+    finish_semantic_mask(results, buf, oh, ow)
 }
 
 /// Post-process a monocular depth model output into a per-pixel depth map (meters).
@@ -1822,7 +1827,7 @@ fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> R
     clippy::cast_possible_truncation,
     clippy::similar_names
 )]
-fn postprocess_semantic(output: &[f32], shape: &[usize], mut results: Results) -> Results {
+fn postprocess_semantic(output: &[f32], shape: &[usize], results: Results) -> Results {
     let oh = results.orig_img.shape()[0];
     let ow = results.orig_img.shape()[1];
 
@@ -1873,9 +1878,7 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], mut results: Results) -
                 }
             },
         );
-        let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
-        results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
-        return results;
+        return finish_semantic_mask(results, buf, oh, ow);
     }
 
     // Crop centered letterbox padding, then bilinear-upsample crop to (oh, ow).
@@ -1933,9 +1936,7 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], mut results: Results) -
             };
         }
     });
-    let class_map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");
-    results.semantic_mask = Some(SemanticMask::new(class_map, (oh as u32, ow as u32)));
-    results
+    finish_semantic_mask(results, buf, oh, ow)
 }
 
 #[cfg(test)]

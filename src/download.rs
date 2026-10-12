@@ -163,6 +163,22 @@ const fn is_transient(e: &ureq::Error) -> bool {
     }
 }
 
+/// Unique sibling `<name>.part.<pid>.<nanos>` of `dest`, so an interrupted or concurrent
+/// download never leaves a truncated file at `dest` itself.
+pub(crate) fn part_path(dest: &Path) -> PathBuf {
+    dest.with_file_name(format!(
+        "{}.part.{}.{}",
+        dest.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("download"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+    ))
+}
+
 /// Download a file from URL to the specified path with progress bar and retry.
 ///
 /// Retries up to `MAX_RETRIES` times on transient failures with exponential backoff.
@@ -208,17 +224,7 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0);
 
-            let temp_path = dest.with_file_name(format!(
-                "{}.part.{}.{}",
-                dest.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("download"),
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .subsec_nanos()
-            ));
+            let temp_path = part_path(dest);
             let _ = fs::remove_file(&temp_path);
 
             let mut downloaded: u64 = 0;

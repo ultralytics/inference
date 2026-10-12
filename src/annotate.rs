@@ -128,14 +128,7 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
         Ok(response) => {
             // Stage in a unique temp file and rename it into place, so an interrupted or
             // concurrent download never leaves a truncated font for the `exists()` check to reuse.
-            let tmp_path = config_dir.join(format!(
-                "{font_name}.part.{}.{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .subsec_nanos()
-            ));
+            let tmp_path = crate::download::part_path(&font_path);
             let mut file = match File::create(&tmp_path) {
                 Ok(f) => f,
                 Err(e) => {
