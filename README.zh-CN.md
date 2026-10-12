@@ -597,7 +597,7 @@ yolo export model=yolo26n.pt format=openvino                 # FP32，可加 hal
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 
-YOLO11 和 YOLO26 的五类任务（detect、segment、classify、pose、obb）的 FP32、FP16、INT8、动态和固定 batch 导出都可在 `intel:cpu` 和 `intel:gpu` 上加载。NPU 运行相同的导出，但有一点限制：batch 4 的 OBB 导出会在 NPU 驱动中失败。在 GPU 和 NPU 上，动态导出会固定为 `--imgsz` 和 `--batch`，否则 GPU 每遇到新的图像尺寸都要花约一秒编译。
+YOLO11 和 YOLO26 的五类任务（detect、segment、classify、pose、obb）的 FP32、FP16、INT8、动态和固定 batch 导出都可在 `intel:cpu` 和 `intel:gpu` 上加载。NPU 同样可运行这些导出，其中带 batch 的导出会以 batch 1 运行，因为批处理在 NPU 上没有收益，而且驱动会拒绝 batch 4 的 OBB 图。在 GPU 和 NPU 上，动态导出会固定为 `--imgsz` 和 `--batch`，否则 GPU 每遇到新的图像尺寸都要花约一秒编译。
 
 **可用 Features：**
 

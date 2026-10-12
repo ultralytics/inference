@@ -601,7 +601,7 @@ yolo export model=yolo26n.pt format=openvino                 # FP32, add half=Tr
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 
-All five tasks (detect, segment, classify, pose, obb) of YOLO11 and YOLO26 load in FP32, FP16, INT8, dynamic, and fixed-batch exports on `intel:cpu` and `intel:gpu`. The NPU runs the same exports with one limit: the batch 4 OBB export fails in the NPU driver. On the GPU and NPU a dynamic export is pinned to `--imgsz` and `--batch`, because the GPU would otherwise spend about a second compiling for each new image shape.
+All five tasks (detect, segment, classify, pose, obb) of YOLO11 and YOLO26 load in FP32, FP16, INT8, dynamic, and fixed-batch exports on `intel:cpu` and `intel:gpu`. The NPU runs the same exports too, with batched exports run at batch 1 because batching gains nothing there and the driver rejects the batch 4 OBB graph. On the GPU and NPU a dynamic export is pinned to `--imgsz` and `--batch`, because the GPU would otherwise spend about a second compiling for each new image shape.
 
 **Available Features:**
 

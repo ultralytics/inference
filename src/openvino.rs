@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use ndarray::Array4;
 use openvino::{
-    CompiledModel, Core, DeviceType, ElementType, InferRequest, PartialShape, Shape, Tensor,
+    CompiledModel, Core, DeviceType, ElementType, InferRequest, Model, PartialShape, Shape, Tensor,
 };
 
 use crate::Device;
@@ -56,7 +56,9 @@ pub fn resolve_xml(path: &Path) -> Result<PathBuf> {
 impl OvSession {
     /// Compile the IR at `xml` (weights next to it as `.bin`) for `device`. The NPU compiles
     /// only bounded shapes and the GPU recompiles its kernels for every new shape (about a second
-    /// each), so on both a dynamic model is pinned to `static_input` (`[N, C, H, W]`).
+    /// each), so on both a dynamic model is pinned to `static_input` (`[N, C, H, W]`). The NPU also
+    /// runs a batched export at batch 1: batching gains nothing there and the driver fails the
+    /// batch 4 OBB graph.
     pub fn load(xml: &Path, device: Option<&Device>, static_input: [i64; 4]) -> Result<Self> {
         let device = match device {
             None | Some(Device::Cpu | Device::IntelCpu) => DeviceType::CPU,
@@ -73,9 +75,28 @@ impl OvSession {
         let mut model = core
             .read_model_from_file(&path(xml), &path(&xml.with_extension("bin")))
             .map_err(load_err)?;
-        if matches!(device, DeviceType::NPU | DeviceType::GPU) && model.is_dynamic() {
-            let shape = PartialShape::new_static(4, &static_input).map_err(load_err)?;
+        let input_dims = |model: &Model| -> Result<Vec<i64>> {
+            Ok(model
+                .get_input_by_index(0)
+                .and_then(|n| n.get_partial_shape())
+                .map_err(load_err)?
+                .get_dimensions()
+                .iter()
+                .map(|d| if d.is_dynamic() { -1 } else { d.get_min() })
+                .collect())
+        };
+        let mut dims = input_dims(&model)?;
+        let pinned = if matches!(device, DeviceType::NPU | DeviceType::GPU) && model.is_dynamic() {
+            Some(static_input)
+        } else if device == DeviceType::NPU && dims.first().is_some_and(|&n| n > 1) {
+            Some([1, dims[1], dims[2], dims[3]])
+        } else {
+            None
+        };
+        if let Some(shape) = pinned {
+            let shape = PartialShape::new_static(4, &shape).map_err(load_err)?;
             model.reshape_single_input(&shape).map_err(load_err)?;
+            dims = input_dims(&model)?;
         }
         let input = model.get_input_by_index(0).map_err(load_err)?;
         if input.get_element_type().map_err(load_err)? != ElementType::F32 {
@@ -83,13 +104,6 @@ impl OvSession {
                 "OpenVINO models must take f32 input".to_owned(),
             ));
         }
-        let input_dims = input
-            .get_partial_shape()
-            .map_err(load_err)?
-            .get_dimensions()
-            .iter()
-            .map(|d| if d.is_dynamic() { -1 } else { d.get_min() })
-            .collect();
         let outputs = model.get_outputs_len().map_err(load_err)?;
         let mut compiled = core.compile_model(&model, device).map_err(load_err)?;
         let request = compiled.create_infer_request().map_err(load_err)?;
@@ -97,7 +111,7 @@ impl OvSession {
             request,
             _compiled: compiled,
             _core: core,
-            input_dims,
+            input_dims: dims,
             outputs,
         })
     }
