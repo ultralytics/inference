@@ -750,7 +750,12 @@ impl YOLOModel {
         let (h, w) = config.imgsz.unwrap_or_else(|| metadata.imgsz_or_default());
         #[allow(clippy::cast_possible_wrap)]
         let static_input = [config.batch.unwrap_or(1) as i64, 3, h as i64, w as i64];
-        let ov = crate::openvino::OvSession::load(&xml, config.device.as_ref(), static_input)?;
+        let ov = crate::openvino::OvSession::load(
+            &xml,
+            config.device.as_ref(),
+            static_input,
+            metadata.task == Task::Depth,
+        )?;
         let dims = ov.input_dims().to_vec();
         let is_dynamic = dims.len() == 4 && (dims[2] <= 0 || dims[3] <= 0);
         #[allow(clippy::cast_sign_loss)]
@@ -1299,6 +1304,10 @@ impl YOLOModel {
         }
     }
 
+    /// Forward passes a native `OpenVINO` model runs at load.
+    #[cfg(feature = "openvino")]
+    const OPENVINO_WARMUP_RUNS: usize = 5;
+
     /// Maximum allowed image dimension to prevent OOM during warmup.
     const MAX_IMGSZ: usize = 8192;
 
@@ -1348,16 +1357,15 @@ impl YOLOModel {
                 batch,
             ),
             #[cfg(feature = "openvino")]
-            Backend::OpenVino(ov) => ov
-                .get_mut()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .run(&ndarray::Array4::zeros((
-                    batch,
-                    3,
-                    target_size.0,
-                    target_size.1,
-                )))
-                .map(drop),
+            // The first runs after compile are slow while oneDNN builds its primitives, so a
+            // few of them keep that cost out of the first real image.
+            Backend::OpenVino(ov) => {
+                let ov = ov
+                    .get_mut()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let dummy = ndarray::Array4::zeros((batch, 3, target_size.0, target_size.1));
+                (0..Self::OPENVINO_WARMUP_RUNS).try_for_each(|_| ov.run(&dummy).map(drop))
+            }
         };
 
         if let Err(e) = warmup_result {

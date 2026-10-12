@@ -53,13 +53,54 @@ pub fn resolve_xml(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+/// Value of `name="..."` inside an XML tag.
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let rest = &tag[tag.find(&format!(" {name}=\""))? + name.len() + 3..];
+    rest.split('"').next()
+}
+
+/// The `<edge .../>` tag feeding port 0 of layer `id`.
+fn edge_into<'a>(xml: &'a str, id: &str) -> Option<&'a str> {
+    let at = xml.find(&format!("to-layer=\"{id}\" to-port=\"0\""))?;
+    let start = xml[..at].rfind("<edge ")?;
+    Some(&xml[start..at + xml[at..].find("/>")? + 2])
+}
+
+/// Rewire a depth IR so its output is the input of the final `Interpolate`, which the caller
+/// resamples on the host straight to the image size. The graph's own bilinear
+/// `align_corners` upsample is wrong on the NPU, and on every device this skips resampling
+/// the map twice. `None` when the output is not fed by an `Interpolate`.
+fn drop_final_upsample(xml: &str) -> Option<String> {
+    let result = xml.rfind("type=\"Result\"")?;
+    let layer = &xml[xml[..result].rfind("<layer ")?..result];
+    let result_id = attr(layer, "id")?;
+    let out_edge = edge_into(xml, result_id)?;
+    let interp_id = attr(out_edge, "from-layer")?;
+    let interp = xml.find(&format!("<layer id=\"{interp_id}\" "))?;
+    if !xml[interp..xml[interp..].find('>')? + interp].contains("type=\"Interpolate\"") {
+        return None;
+    }
+    let in_edge = edge_into(xml, interp_id)?;
+    let rewired = format!(
+        "<edge from-layer=\"{}\" from-port=\"{}\" to-layer=\"{result_id}\" to-port=\"0\" />",
+        attr(in_edge, "from-layer")?,
+        attr(in_edge, "from-port")?
+    );
+    Some(xml.replace(out_edge, &rewired))
+}
+
 impl OvSession {
     /// Compile the IR at `xml` (weights next to it as `.bin`) for `device`. The NPU compiles
     /// only bounded shapes and the GPU recompiles its kernels for every new shape (about a second
     /// each), so on both a dynamic model is pinned to `static_input` (`[N, C, H, W]`). The NPU also
     /// runs a batched export at batch 1: batching gains nothing there and the driver fails the
     /// batch 4 OBB graph.
-    pub fn load(xml: &Path, device: Option<&Device>, static_input: [i64; 4]) -> Result<Self> {
+    pub fn load(
+        xml: &Path,
+        device: Option<&Device>,
+        static_input: [i64; 4],
+        host_upsample: bool,
+    ) -> Result<Self> {
         let device = match device {
             None | Some(Device::Cpu | Device::IntelCpu) => DeviceType::CPU,
             Some(Device::IntelGpu) => DeviceType::GPU,
@@ -72,9 +113,31 @@ impl OvSession {
         };
         let mut core = Core::new().map_err(load_err)?;
         let path = |p: &Path| p.to_string_lossy().into_owned();
-        let mut model = core
-            .read_model_from_file(&path(xml), &path(&xml.with_extension("bin")))
-            .map_err(load_err)?;
+        let bin = xml.with_extension("bin");
+        let mut model = match host_upsample
+            .then(|| {
+                std::fs::read_to_string(xml)
+                    .ok()
+                    .and_then(|x| drop_final_upsample(&x))
+            })
+            .flatten()
+        {
+            Some(cut) => {
+                let weights = std::fs::read(&bin).map_err(load_err)?;
+                let shape = Shape::new(&[i64::try_from(weights.len()).map_err(load_err)?])
+                    .map_err(load_err)?;
+                let mut tensor = Tensor::new(ElementType::U8, &shape).map_err(load_err)?;
+                tensor
+                    .get_raw_data_mut()
+                    .map_err(load_err)?
+                    .copy_from_slice(&weights);
+                core.read_model_from_buffer(cut.as_bytes(), Some(&tensor))
+                    .map_err(load_err)?
+            }
+            None => core
+                .read_model_from_file(&path(xml), &path(&bin))
+                .map_err(load_err)?,
+        };
         let input_dims = |model: &Model| -> Result<Vec<i64>> {
             Ok(model
                 .get_input_by_index(0)
@@ -137,5 +200,19 @@ impl OvSession {
         (0..self.outputs)
             .map(|i| self.request.get_output_tensor_by_index(i).map_err(run_err))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_drop_final_upsample_rewires_the_output() {
+        let xml = r#"<layers><layer id="5" name="up" type="Interpolate"></layer><layer id="6" name="r" type="Result"></layer></layers><edges><edge from-layer="4" from-port="2" to-layer="5" to-port="0" /><edge from-layer="5" from-port="3" to-layer="6" to-port="0" /></edges>"#;
+        let cut = drop_final_upsample(xml).unwrap();
+        assert!(cut.contains(r#"<edge from-layer="4" from-port="2" to-layer="6" to-port="0" />"#));
+        assert!(!cut.contains(r#"from-layer="5" from-port="3""#));
+        assert!(drop_final_upsample(&xml.replace("Interpolate", "Convolution")).is_none());
     }
 }
