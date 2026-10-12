@@ -8,12 +8,27 @@ use ndarray::Array3;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tempfile::tempdir;
+#[cfg(any(feature = "coreml", feature = "cuda"))]
+use ultralytics_inference::Device;
+#[cfg(any(feature = "coreml", feature = "cuda", feature = "openvino"))]
+use ultralytics_inference::YOLOModel;
 use ultralytics_inference::cli::args::PredictArgs;
 use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::task::Task;
 use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
-#[cfg(any(feature = "coreml", feature = "cuda"))]
-use ultralytics_inference::{Device, YOLOModel};
+
+/// Runs a native `OpenVINO` export end to end: set `OPENVINO_TEST_MODEL` to a detect model folder
+/// from `yolo export format=openvino` and install the `OpenVINO` runtime.
+#[cfg(feature = "openvino")]
+#[test]
+#[ignore = "needs an OpenVINO detect export in OPENVINO_TEST_MODEL and the OpenVINO runtime"]
+fn test_openvino_model_predicts() {
+    let dir = std::env::var("OPENVINO_TEST_MODEL").expect("OPENVINO_TEST_MODEL is not set");
+    let mut model = YOLOModel::load(dir).unwrap();
+    assert_eq!(model.execution_provider(), "OpenVINO");
+    let results = model.predict("assets/bus.jpg").unwrap();
+    assert!(results[0].boxes.as_ref().is_some_and(|b| b.len() >= 4));
+}
 
 /// End-to-end `CoreML` test covering two known regressions:
 ///

@@ -243,9 +243,14 @@ impl YOLOModel {
         };
         let path = path.as_ref();
 
-        #[cfg(feature = "openvino")]
         if path.is_dir() || path.extension().is_some_and(|e| e == "xml") {
+            #[cfg(feature = "openvino")]
             return Self::load_openvino(path, config);
+            #[cfg(not(feature = "openvino"))]
+            return Err(InferenceError::ModelLoadError(format!(
+                "{} is an OpenVINO model; build with the `openvino` feature to load it",
+                path.display()
+            )));
         }
 
         // Establish a shared cudarc stream up-front when the cuda-preprocess
@@ -770,7 +775,16 @@ impl YOLOModel {
             .or(config.imgsz)
             .unwrap_or_else(|| metadata.imgsz_or_default());
         metadata.imgsz = Some(imgsz);
+        // The export fixed the precision, so a requested one that differs cannot apply.
         let quantize = metadata.quantize;
+        if let Some(requested) = config.quantize
+            && requested != quantize.unwrap_or(Quantization::Fp32)
+        {
+            warn!(
+                "'quantize={requested}' is unavailable for an OpenVINO model; \
+                 it runs at the precision it was exported with."
+            );
+        }
         let mut model = Self {
             backend: Backend::OpenVino(std::sync::Mutex::new(ov)),
             input_name: String::new(),
@@ -2310,6 +2324,26 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[cfg(feature = "openvino")]
+    #[test]
+    fn test_openvino_model_load_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = YOLOModel::load(dir.path()).err().unwrap().to_string();
+        assert!(err.contains("exactly one .xml"), "{err}");
+        std::fs::write(dir.path().join("m.xml"), "").unwrap();
+        std::fs::write(dir.path().join("m.bin"), "").unwrap();
+        let err = YOLOModel::load(dir.path()).err().unwrap().to_string();
+        assert!(err.contains("metadata.yaml"), "{err}");
+    }
+
+    #[cfg(not(feature = "openvino"))]
+    #[test]
+    fn test_openvino_model_needs_the_feature() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = YOLOModel::load(dir.path()).err().unwrap().to_string();
+        assert!(err.contains("`openvino` feature"), "{err}");
+    }
 
     #[test]
     fn test_model_not_found() {

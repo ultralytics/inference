@@ -111,9 +111,15 @@ impl OvSession {
                 )));
             }
         };
+        let bin = xml.with_extension("bin");
+        if !bin.is_file() {
+            return Err(InferenceError::ModelLoadError(format!(
+                "OpenVINO model weights not found: {}",
+                bin.display()
+            )));
+        }
         let mut core = Core::new().map_err(load_err)?;
         let path = |p: &Path| p.to_string_lossy().into_owned();
-        let bin = xml.with_extension("bin");
         let mut model = match host_upsample
             .then(|| {
                 std::fs::read_to_string(xml)
@@ -214,5 +220,72 @@ mod tests {
         assert!(cut.contains(r#"<edge from-layer="4" from-port="2" to-layer="6" to-port="0" />"#));
         assert!(!cut.contains(r#"from-layer="5" from-port="3""#));
         assert!(drop_final_upsample(&xml.replace("Interpolate", "Convolution")).is_none());
+    }
+
+    #[test]
+    fn test_resolve_xml() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(resolve_xml(dir.path()).is_err(), "no .xml in the folder");
+        std::fs::write(dir.path().join("m.xml"), "").unwrap();
+        std::fs::write(dir.path().join("m.bin"), "").unwrap();
+        assert_eq!(resolve_xml(dir.path()).unwrap(), dir.path().join("m.xml"));
+        assert_eq!(
+            resolve_xml(&dir.path().join("m.xml")).unwrap(),
+            dir.path().join("m.xml")
+        );
+        std::fs::write(dir.path().join("n.xml"), "").unwrap();
+        assert!(
+            resolve_xml(dir.path()).is_err(),
+            "two .xml files are ambiguous"
+        );
+    }
+
+    #[test]
+    fn test_load_rejects_missing_weights_and_foreign_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let xml = dir.path().join("m.xml");
+        std::fs::write(&xml, "").unwrap();
+        let err = OvSession::load(&xml, None, [1, 3, 4, 4], false)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("weights not found"), "{err}");
+        let err = OvSession::load(&xml, Some(&Device::Cuda(0)), [1, 3, 4, 4], false)
+            .err()
+            .unwrap();
+        assert!(
+            err.to_string().contains("cannot run an OpenVINO model"),
+            "{err}"
+        );
+    }
+
+    /// A one-layer IR that returns its input, run when the `OpenVINO` runtime is installed.
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn test_identity_model_roundtrip() {
+        if Core::new().is_err() {
+            return;
+        }
+        let dims = "<dim>1</dim><dim>3</dim><dim>4</dim><dim>4</dim>";
+        let xml = format!(
+            r#"<?xml version="1.0"?><net name="id" version="11"><layers>
+<layer id="0" name="x" type="Parameter" version="opset1"><data shape="1,3,4,4" element_type="f32"/><output><port id="0" precision="FP32" names="x">{dims}</port></output></layer>
+<layer id="1" name="r" type="Result" version="opset1"><input><port id="0" precision="FP32">{dims}</port></input></layer>
+</layers><edges><edge from-layer="0" from-port="0" to-layer="1" to-port="0"/></edges></net>"#
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("id.xml"), xml).unwrap();
+        std::fs::write(dir.path().join("id.bin"), "").unwrap();
+        let mut ov = OvSession::load(
+            &dir.path().join("id.xml"),
+            Some(&Device::IntelCpu),
+            [1, 3, 4, 4],
+            false,
+        )
+        .unwrap();
+        assert_eq!(ov.input_dims(), [1, 3, 4, 4]);
+        let input = Array4::from_shape_fn((1, 3, 4, 4), |(_, c, h, w)| (c * 16 + h * 4 + w) as f32);
+        let out = ov.run(&input).unwrap();
+        assert_eq!(out[0].get_shape().unwrap().get_dimensions(), [1, 3, 4, 4]);
+        assert_eq!(out[0].get_data::<f32>().unwrap(), input.as_slice().unwrap());
     }
 }
