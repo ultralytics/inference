@@ -2418,7 +2418,6 @@ name = "ultralytics-inference-web"
 version = "0.0.51"
 dependencies = [
  "console_error_panic_hook",
- "half",
  "image",
  "js-sys",
  "miniz_oxide 0.9.1",
