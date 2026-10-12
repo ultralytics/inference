@@ -94,8 +94,9 @@ fn drop_final_upsample(xml: &str) -> Option<String> {
 
 impl OvSession {
     /// Compile the IR at `xml` (weights next to it as `.bin`) for `device`. The NPU compiles
-    /// only bounded shapes and the GPU recompiles its kernels for every new shape (about a second
-    /// each), so on both a dynamic model is pinned to `static_input` (`[N, C, H, W]`). The NPU also
+    /// only bounded shapes, the GPU recompiles its kernels for every new shape (about a second
+    /// each) and the CPU runs dynamic shapes about 1.5x slower, so a dynamic model is pinned to
+    /// `static_input` (`[N, C, H, W]`) on every device. The NPU also
     /// runs a batched export at batch 1: batching gains nothing there and the driver fails the
     /// batch 4 OBB graph.
     pub fn load(
@@ -159,7 +160,7 @@ impl OvSession {
                 .collect())
         };
         let mut dims = input_dims(&model)?;
-        let pinned = if matches!(device, DeviceType::NPU | DeviceType::GPU) && model.is_dynamic() {
+        let pinned = if model.is_dynamic() {
             Some(static_input)
         } else if device == DeviceType::NPU && dims.first().is_some_and(|&n| n > 1) {
             Some([1, dims[1], dims[2], dims[3]])
