@@ -1,0 +1,88 @@
+# OpenVINO Models
+
+`ultralytics-inference` runs native OpenVINO IR exports (`.xml` + `.bin`) on Intel CPUs, GPUs and NPUs through the opt-in `openvino-native` feature. Models load with `YOLOModel::load` and `--model`, the same way as ONNX.
+
+## Enable
+
+```toml
+# Cargo.toml
+[dependencies]
+ultralytics-inference = { version = "0.0", features = ["openvino-native"] }
+```
+
+```bash
+# build the CLI
+cargo build --release --features openvino-native
+```
+
+Building needs no OpenVINO install. The runtime libraries are loaded when the first model opens.
+
+## Requirements
+
+| Component       | Tested | How to verify                                                                         |
+| --------------- | ------ | ------------------------------------------------------------------------------------- |
+| OpenVINO        | 2026.4 | `python -c "import openvino as ov; print(ov.Core().available_devices)"` (pip install) |
+| Intel GPU setup | -      | `GPU` appears in `available_devices`, see [GPU configuration][gpu]                    |
+| Intel NPU setup | -      | `NPU` appears in `available_devices`, see [NPU configuration][npu]                    |
+| Rust            | 1.92+  | `rustc --version`                                                                     |
+
+## Get OpenVINO
+
+Install the OpenVINO runtime with any method on the [official install page](https://docs.openvino.ai/2026/get-started/install-openvino.html):
+
+| Method  | Where                                                                                                                                                                                                                                                                                                                         |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pip     | `pip install openvino` ([guide](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-pip.html), [PyPI](https://pypi.org/project/openvino/))                                                                                                                                                            |
+| Archive | [Linux](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-linux.html), [Windows](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-windows.html), [macOS](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-macos.html) |
+| Package | [APT](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-apt.html), [YUM](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-yum.html)                                                                                                                                      |
+
+Releases are also listed on [GitHub](https://github.com/openvinotoolkit/openvino/releases). The Rust bindings come from [`openvino-rs`](https://github.com/intel/openvino-rs).
+
+## Make the runtime findable
+
+The loader looks for `libopenvino_c` in this order:
+
+1. `OPENVINO_INSTALL_DIR`, the OpenVINO install folder
+2. `INTEL_OPENVINO_DIR`, set by the archive's `setupvars.sh`
+3. The library path: `LD_LIBRARY_PATH` on Linux, `PATH` on Windows, `DYLD_LIBRARY_PATH` on macOS
+4. Known install locations, so a system APT or YUM package needs no setup
+
+For a pip or archive install, set one of them:
+
+```bash
+# pip (Linux)
+export LD_LIBRARY_PATH=$(python -c "import openvino, os; print(os.path.dirname(openvino.__file__))")/libs
+
+# archive
+source <extracted folder>/setupvars.sh
+```
+
+## Export and run
+
+```bash
+yolo export model=yolo26n.pt format=openvino   # add half=True, int8=True, dynamic=True or batch=4
+ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
+```
+
+```rust
+use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
+
+let config = InferenceConfig::new()
+    .with_device(Device::IntelNpu) // IntelCpu, IntelGpu or IntelNpu
+    .with_threads(8);              // CPU inference threads
+let mut model = YOLOModel::load_with_config("yolo26n_openvino_model", config)?;
+let results = model.predict("assets/bus.jpg")?;
+```
+
+The run prints `Using OpenVINO Runtime` when the native path is active.
+
+## Good to know
+
+- The export folder needs its `metadata.yaml` beside the `.xml` and `.bin`.
+- Dynamic exports are pinned to a static shape, using `--imgsz` and `--batch`.
+- The NPU runs at batch 1, and larger batches are split into single images.
+- The export fixes the precision (FP32, FP16 or INT8), so `--quantize` has no effect and prints a warning.
+- Only Intel devices (`intel:cpu`, `intel:gpu`, `intel:npu`) are accepted, other devices give an error.
+
+[gpu]: https://docs.openvino.ai/2026/get-started/install-openvino/configurations/configurations-intel-gpu.html
+[npu]: https://docs.openvino.ai/2026/get-started/install-openvino/configurations/configurations-intel-npu.html
