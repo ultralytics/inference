@@ -11,12 +11,19 @@ Setup notes for running `ultralytics-inference` on a DGX Spark (GB10 Grace Black
 | Memory       | 121 GB unified                                                         |
 | Target       | `aarch64-unknown-linux-gnu`                                            |
 
-## The `ort` prebuilt binaries have no aarch64 GPU build
+## Prebuilt aarch64 GPU binaries
 
-This is the first thing to know, because the failure looks like a local misconfiguration and is not.
-`ort` downloads prebuilt ONNX Runtime binaries, and for `aarch64-unknown-linux-gnu` only a CPU
-distribution is published. Building with `--features cuda`, `tensorrt`, `cuda-preprocess` or
-`xnnpack` fails at link time:
+`ort` 2.0.0-rc.14 publishes prebuilt ONNX Runtime binaries for `aarch64-unknown-linux-gnu` with CUDA 13,
+TensorRT and NVRTX, covering Jetson Orin and Thor, Grace Hopper and Blackwell, and DGX Spark. With the
+CUDA 13 runtime installed, the GPU features build with no extra setup:
+
+```bash
+cargo build --release --features cuda-preprocess
+```
+
+Anything outside that build has no prebuilt binary on aarch64: other GPU features such as `xnnpack`, and
+CUDA 12 systems such as JetPack 6. Those fail at link time, and the failure looks like a local
+misconfiguration and is not:
 
 ```text
 = note: some `extern` functions couldn't be found
@@ -37,10 +44,11 @@ grep -r "link_error_bad_dist_features" target/*/build/ort-sys-*/output
 
 A plain `cargo build` with no GPU feature works normally and gives you the CPU execution provider.
 
-## Linking a GPU ONNX Runtime
+## Linking your own GPU ONNX Runtime
 
-To get the CUDA and TensorRT execution providers you need an ONNX Runtime built for aarch64 with
-those providers, and you point `ort` at it. PyPI publishes no aarch64 `onnxruntime-gpu` wheels, but
+Only needed when the prebuilt build does not fit, for example on CUDA 12. To get the CUDA and
+TensorRT execution providers you need an ONNX Runtime built for aarch64 with those providers, and you
+point `ort` at it. PyPI publishes no aarch64 `onnxruntime-gpu` wheels, but
 Ultralytics hosts them in
 [ultralytics/assets](https://github.com/ultralytics/assets/releases/tag/v0.0.0). The wheel is a zip
 archive, so the shared libraries can be extracted without installing Python packages:
