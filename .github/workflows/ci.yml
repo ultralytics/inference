@@ -281,7 +281,9 @@ jobs:
         run: rustup show
 
       - name: Build (annotate + video features)
-        run: cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
+        run: |
+          export RUSTFLAGS="-C link-arg=$(clang --print-file-name=libclang_rt.osx.a)"
+          cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
 
   # Windows FFmpeg 8 and 9 video build test
   build-windows-video:
