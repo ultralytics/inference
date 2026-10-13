@@ -206,8 +206,8 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   ```
   该目录需包含 ONNX Runtime Web 的入口脚本（`ort.webgpu.min.js`，以及 CPU 回退所需的
   `ort.wasm.min.js`）和 `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` 二进制文件。
-- **遥测**：`ort-web` 会在首次创建会话时向 pyke 上报页面域名。查看或关闭的方法见
-  [ort-web 文档](https://ort.pyke.io/backends/web)。
+- **遥测**：`ort-web` 可以在首次创建会话时向 pyke 上报页面域名。本包已将其关闭，不会发送任何数据。
+  上报内容见 [ort-web 文档](https://ort.pyke.io/backends/web)。
 
 ## ⚡ LiteRT.js 后端
 

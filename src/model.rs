@@ -90,6 +90,24 @@ impl Backend {
     }
 }
 
+/// The ONNX Runtime environment every model in this process shares. ONNX Runtime allows one
+/// environment per process, so the first load builds it and later loads clone the handle.
+fn ort_environment() -> Result<ort::environment::Environment> {
+    static ENV: std::sync::Mutex<Option<ort::environment::Environment>> =
+        std::sync::Mutex::new(None);
+    let mut env = ENV
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if env.is_none() {
+        *env = Some(ort::init().build().map_err(|e| {
+            InferenceError::ModelLoadError(format!(
+                "Failed to create the ONNX Runtime environment: {e}"
+            ))
+        })?);
+    }
+    Ok(env.clone().expect("environment was just built"))
+}
+
 /// Fixed device I/O the `TensorRT` CUDA graph replays; `binding` drops before its allocator.
 #[cfg(feature = "cuda-preprocess")]
 struct GraphIo {
@@ -334,7 +352,7 @@ impl YOLOModel {
         };
 
         // Create ONNX Runtime session with optimizations
-        let mut session_builder = Session::builder().map_err(|e| {
+        let mut session_builder = Session::builder(&ort_environment()?).map_err(|e| {
             InferenceError::ModelLoadError(format!("Failed to create session builder: {e}"))
         })?;
 
@@ -343,9 +361,6 @@ impl YOLOModel {
         // one ORT will prefer, so it names the session (CPU when none are registered).
         #[allow(unused_mut)]
         let mut eps: Vec<(ort::ep::ExecutionProviderDispatch, &str)> = Vec::new();
-        // `OpenVINO` is a downloaded plugin, attached through its devices after the providers above.
-        #[cfg(feature = "openvino")]
-        let mut openvino_device: Option<&str> = None;
 
         if let Some(device) = &config.device {
             // User requested specific device
@@ -381,6 +396,14 @@ impl YOLOModel {
                     ort::ep::ROCm::default().with_device_id(*i as i32).build(),
                     "ROCmExecutionProvider",
                 )),
+                #[cfg(feature = "migraphx")]
+                crate::Device::MiGraphX(i) => eps.push((
+                    ort::ep::MIGraphX::default()
+                        .with_device_id(*i as i32)
+                        .build()
+                        .error_on_failure(),
+                    "MIGraphXExecutionProvider",
+                )),
                 #[cfg(feature = "directml")]
                 crate::Device::DirectMl(i) => eps.push((
                     ort::ep::DirectML::default()
@@ -390,11 +413,17 @@ impl YOLOModel {
                 )),
                 #[cfg(feature = "openvino")]
                 crate::Device::IntelCpu | crate::Device::IntelGpu | crate::Device::IntelNpu => {
-                    openvino_device = Some(match device {
+                    let device_type = match device {
                         crate::Device::IntelGpu => "GPU",
                         crate::Device::IntelNpu => "NPU",
                         _ => "CPU",
-                    });
+                    };
+                    // A requested Intel device must not silently run on the plain CPU provider,
+                    // which is what a missing OpenVINO runtime would otherwise do.
+                    eps.push((
+                        Self::build_openvino_ep(path, device_type).error_on_failure(),
+                        "OpenVINOExecutionProvider",
+                    ));
                 }
                 #[cfg(feature = "xnnpack")]
                 crate::Device::Xnnpack => eps.push((
@@ -438,6 +467,12 @@ impl YOLOModel {
             #[cfg(feature = "rocm")]
             eps.push((ort::ep::ROCm::default().build(), "ROCmExecutionProvider"));
 
+            #[cfg(feature = "migraphx")]
+            eps.push((
+                ort::ep::MIGraphX::default().build(),
+                "MIGraphXExecutionProvider",
+            ));
+
             #[cfg(feature = "directml")]
             eps.push((
                 ort::ep::DirectML::default().build(),
@@ -445,9 +480,10 @@ impl YOLOModel {
             ));
 
             #[cfg(feature = "openvino")]
-            {
-                openvino_device = Some("CPU");
-            }
+            eps.push((
+                Self::build_openvino_ep(path, "CPU"),
+                "OpenVINOExecutionProvider",
+            ));
 
             #[cfg(feature = "xnnpack")]
             eps.push((
@@ -456,11 +492,9 @@ impl YOLOModel {
             ));
         }
 
-        let provider_name = eps.first().map(|&(_, name)| name);
-        #[cfg(feature = "openvino")]
-        let provider_name =
-            provider_name.or_else(|| openvino_device.map(|_| "OpenVINOExecutionProvider"));
-        let provider_name = provider_name.unwrap_or("CPUExecutionProvider");
+        let provider_name = eps
+            .first()
+            .map_or("CPUExecutionProvider", |&(_, name)| name);
         // XNNPACK runs its own threadpool whatever its priority, so this is a "registered
         // at all" check rather than "is primary": in the auto path it is registered last
         // and still executes the subgraphs the providers ahead of it decline.
@@ -487,7 +521,15 @@ impl YOLOModel {
                         provider_name,
                         "CUDAExecutionProvider" | "TensorRTExecutionProvider"
                     );
-                    if gpu {
+                    if provider_name == "OpenVINOExecutionProvider" && config.device.is_some() {
+                        InferenceError::ModelLoadError(format!(
+                            "OpenVINO failed to load: {e}\n\
+                             Hint: the openvino feature needs the OpenVINO runtime installed and on \
+                             the library path (for example `pip install openvino`, then add the \
+                             `openvino/libs` folder to `LD_LIBRARY_PATH`, or install the OpenVINO \
+                             package for your system). See https://docs.openvino.ai/2026/get-started/install-openvino.html"
+                        ))
+                    } else if gpu {
                         InferenceError::ModelLoadError(format!(
                             "{provider_name} failed to load, so the cuda-preprocess fast path \
                          cannot run on the GPU: {e}\n\
@@ -503,10 +545,6 @@ impl YOLOModel {
                         ))
                     }
                 })?;
-        }
-        #[cfg(feature = "openvino")]
-        if let Some(device_type) = openvino_device {
-            session_builder = Self::with_openvino(session_builder, path, device_type)?;
         }
         // CPU is the default - no warning needed when no accelerators are registered
 
@@ -962,11 +1000,10 @@ impl YOLOModel {
         ep.build()
     }
 
-    /// Attach the `OpenVINO` provider plugin on `device_type` (`CPU`, `GPU` or `NPU`) with a
+    /// Build the `OpenVINO` execution provider for `device_type` (`CPU`, `GPU` or `NPU`) with a
     /// compiled-model cache, mirroring the `TensorRT` engine cache.
     ///
-    /// The plugin is registered into the ONNX Runtime environment once, from its downloaded
-    /// bundle. The cache (`.ov_cache/`) lets repeat loads skip kernel recompilation, which is the
+    /// The cache (`.ov_cache/`) lets repeat loads skip kernel recompilation, which is the
     /// dominant GPU model-load cost. Precision, streams, and thread count are intentionally left to
     /// `OpenVINO`'s defaults, which already pick the optimal low-latency configuration for a
     /// single-stream batch-1 workload (GPU runs FP16, one stream, auto thread scheduling). Forcing
@@ -975,39 +1012,10 @@ impl YOLOModel {
     /// The cache is only passed once its directory is writable, since the GPU plugin fails
     /// compilation on a `CACHE_DIR` it cannot write.
     #[cfg(feature = "openvino")]
-    fn with_openvino(
-        builder: ort::session::builder::SessionBuilder,
+    fn build_openvino_ep(
         model_path: &Path,
         device_type: &str,
-    ) -> Result<ort::session::builder::SessionBuilder> {
-        let ov_err = |e: &dyn std::fmt::Display| {
-            InferenceError::ModelLoadError(format!("Failed to add OpenVINO: {e}"))
-        };
-        let env = ort::environment::Environment::current().map_err(|e| ov_err(&e))?;
-        let is_openvino =
-            |d: &ort::device::Device<'_>| d.ep().is_ok_and(|ep| ep == "OpenVINOExecutionProvider");
-        if !env.devices().any(|d| is_openvino(&d)) {
-            // A concurrent first load may register the plugin between the check and this call,
-            // and ONNX Runtime rejects the duplicate; that is fine as long as its devices exist.
-            if let Err(e) = env.register_ep_library("OpenVINO", crate::download::openvino_plugin()?)
-                && !env.devices().any(|d| is_openvino(&d))
-            {
-                return Err(ov_err(&e));
-            }
-        }
-        let devices: Vec<_> = env
-            .devices()
-            .filter(|d| {
-                is_openvino(d)
-                    && format!("{:?}", d.hardware_device().ty()).eq_ignore_ascii_case(device_type)
-            })
-            .collect();
-        if devices.is_empty() {
-            return Err(InferenceError::ModelLoadError(format!(
-                "OpenVINO found no {device_type} device on this machine"
-            )));
-        }
-
+    ) -> ort::ep::ExecutionProviderDispatch {
         let stem = model_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -1016,23 +1024,11 @@ impl YOLOModel {
         let cache_dir = parent
             .join(".ov_cache")
             .join(format!("{stem}_{}", device_type.to_ascii_lowercase()));
-        // Attached through devices, the plugin only accepts the cache as a `load_config` entry
-        // keyed by the OpenVINO device.
-        let options: Vec<(String, String)> = if crate::io::is_writable_dir(&cache_dir) {
-            let path = cache_dir
-                .to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"");
-            vec![(
-                "OpenVINOExecutionProvider.load_config".to_owned(),
-                format!(r#"{{"{device_type}": {{"CACHE_DIR": "{path}"}}}}"#),
-            )]
-        } else {
-            Vec::new()
-        };
-        builder
-            .with_devices(devices, Some(&options))
-            .map_err(|e| ov_err(&e))
+        let mut ep = ort::ep::OpenVINO::default().with_device_type(device_type);
+        if crate::io::is_writable_dir(&cache_dir) {
+            ep = ep.with_cache_dir(cache_dir.to_string_lossy());
+        }
+        ep.build()
     }
 
     /// Distribute the elapsed wall time since `start` evenly across the images of `batch`
@@ -1575,7 +1571,16 @@ impl YOLOModel {
         .map_err(|e| err("cpu meminfo", e))?;
         // The preprocessor owns the buffer for the model's lifetime, and the binding keeps
         // the tensor alive until it drops.
-        let input = unsafe { Self::device_input(&cuda_mem, pre.input_dev_ptr(), shape)? };
+        // SAFETY: the pointer holds `shape`'s element count of f32 on the CUDA device `cuda_mem`
+        // names, and the preprocessor keeps it alive for as long as the binding is used.
+        let input = unsafe {
+            ort::value::TensorRefMut::<f32>::from_raw(
+                cuda_mem,
+                pre.input_dev_ptr() as *mut core::ffi::c_void,
+                ort::value::Shape::from(shape),
+            )
+        }
+        .map_err(|e| err("device input", e))?;
         let mut binding = self
             .backend
             .ort()
@@ -1590,41 +1595,6 @@ impl YOLOModel {
                 .map_err(|e| err("bind_output", e))?;
         }
         Ok(binding)
-    }
-
-    /// Wrap the preprocessor's device buffer as an f32 input tensor ONNX Runtime reads in place.
-    ///
-    /// Stands in for `TensorRefMut::from_raw`, which in `ort` 2.0.0-rc.13 swaps the given
-    /// `MemoryInfo` for a CPU one, so ONNX Runtime took the device buffer for host memory and
-    /// copied it on every run. `ptr` must hold `shape`'s element count of f32 on the device
-    /// `cuda_mem` names, and stay valid while the returned value is in use.
-    #[cfg(feature = "cuda-preprocess")]
-    #[allow(unsafe_code)]
-    unsafe fn device_input(
-        cuda_mem: &ort::memory::MemoryInfo,
-        ptr: u64,
-        shape: &[i64],
-    ) -> Result<ort::value::DynValue> {
-        use ort::AsPointer;
-
-        let bytes = shape.iter().product::<i64>() as usize * std::mem::size_of::<f32>();
-        let mut value = std::mem::MaybeUninit::uninit();
-        let status = unsafe {
-            (ort::api().CreateTensorWithDataAsOrtValue)(
-                cuda_mem.ptr(),
-                ptr as *mut core::ffi::c_void,
-                bytes,
-                shape.as_ptr(),
-                shape.len(),
-                ort::sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-                value.as_mut_ptr(),
-            )
-        };
-        let err = |e: String| InferenceError::InferenceError(format!("device input: {e}"));
-        unsafe { ort::Error::result_from_status(status) }.map_err(|e| err(e.to_string()))?;
-        let value = std::ptr::NonNull::new(unsafe { value.assume_init() })
-            .ok_or_else(|| err("null value".into()))?;
-        Ok(unsafe { ort::value::DynValue::from_ptr(value, None) })
     }
 
     /// Whether a task's preprocessing is a letterbox, so [`Self::predict_cuda_pre`]

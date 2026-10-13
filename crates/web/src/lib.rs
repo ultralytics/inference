@@ -23,7 +23,8 @@ use std::sync::Arc;
 
 use js_sys::Float32Array;
 use ndarray::Array3;
-use ort::ep::WebGPU;
+use ort::AsPointer;
+use ort::environment::Environment;
 use ort::session::{RunOptions, Session};
 use ort::value::{Tensor, TensorElementType, ValueType};
 use ort_web::sync_outputs;
@@ -102,6 +103,9 @@ thread_local! {
     /// rejected rather than silently reusing the first. Wasm is single-threaded,
     /// so a thread-local is a sufficient guard.
     static BACKEND: RefCell<Option<(bool, Option<String>)>> = const { RefCell::new(None) };
+    /// The ONNX Runtime environment built once the backend is installed. Every session on
+    /// the page is created under it.
+    static ENV: RefCell<Option<Environment>> = const { RefCell::new(None) };
 }
 
 /// Install the ort-web backend for this page, or verify a later load matches the
@@ -168,6 +172,12 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
     }
     .map_err(err_ctx("failed to initialize ort-web backend"))?;
     ort::set_api(api);
+    // `ort-web` reports the page's hostname to pyke on session creation unless this is off.
+    let env = ort::init()
+        .with_telemetry(false)
+        .build()
+        .map_err(err_ctx("failed to create the ONNX Runtime environment"))?;
+    ENV.with(|e| *e.borrow_mut() = Some(env));
     BACKEND.with(|b| *b.borrow_mut() = Some(requested));
     Ok(())
 }
@@ -417,6 +427,27 @@ impl YoloModel {
     }
 }
 
+/// Append the WebGPU execution provider to `builder`, failing if it cannot be registered.
+///
+/// `ort-web` 0.4.0 only recognizes the short provider name `WebGPU`, while `ort` 2.0.0-rc.14
+/// sends `WebGpuExecutionProvider`, so `ort::ep::WebGPU` is rejected and every load would fall
+/// back to the CPU. Appending by the short name works until `ort-web` accepts both.
+#[allow(unsafe_code)]
+fn append_webgpu(builder: &ort::session::builder::SessionBuilder) -> Result<(), JsError> {
+    // SAFETY: `builder` owns a valid session options object for the whole call, and no
+    // provider options are passed.
+    let status = unsafe {
+        (ort::api().SessionOptionsAppendExecutionProvider)(
+            builder.ptr().cast_mut(),
+            c"WebGPU".as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+        )
+    };
+    unsafe { ort::Error::result_from_status(status) }.map_err(map_ort)
+}
+
 impl YoloModel {
     /// Commit an ONNX Runtime session from model bytes on `device`.
     ///
@@ -425,11 +456,12 @@ impl YoloModel {
     /// catches to fall back to CPU) instead of a silent downgrade we would
     /// mislabel.
     async fn commit(bytes: &[u8], device: Device) -> Result<Session, JsError> {
-        let mut builder = Session::builder().map_err(map_ort)?;
+        let env = ENV
+            .with(|e| e.borrow().clone())
+            .ok_or_else(|| JsError::new("the ONNX Runtime backend is not initialized"))?;
+        let mut builder = Session::builder(&env).map_err(map_ort)?;
         if device == Device::WebGpu {
-            builder = builder
-                .with_execution_providers([WebGPU::default().build().error_on_failure()])
-                .map_err(map_ort)?;
+            append_webgpu(&builder)?;
         }
         builder
             .commit_from_memory(bytes)

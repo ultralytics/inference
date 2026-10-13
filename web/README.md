@@ -221,9 +221,9 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   The folder must contain the ONNX Runtime Web entry scripts (`ort.webgpu.min.js`
   and `ort.wasm.min.js` for the CPU fallback) plus the
   `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` binaries.
-- **Telemetry**: `ort-web` reports the page domain to pyke on first session
-  creation. See the [ort-web docs](https://ort.pyke.io/backends/web) to review or
-  disable it.
+- **Telemetry**: `ort-web` can report the page domain to pyke on first session
+  creation. This package turns that off, so nothing is sent. See the
+  [ort-web docs](https://ort.pyke.io/backends/web) for what it would send.
 
 ## ⚡ LiteRT.js backend
 

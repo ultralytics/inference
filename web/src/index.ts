@@ -264,8 +264,21 @@ export type ImageInput =
 let initialized = false;
 
 /** Initialize the wasm module exactly once. */
+/**
+ * `ort-web` 0.4.0 reads tensor dims as 64-bit integers, but ONNX Runtime Web returns plain
+ * numbers, which the wasm glue then rejects with "Cannot convert 1 to a BigInt". Accept number
+ * arrays in `BigUint64Array.set`, which only ever threw for them before.
+ */
+function allowNumberDims(): void {
+  const set = BigUint64Array.prototype.set;
+  BigUint64Array.prototype.set = function (src: ArrayLike<bigint>, offset?: number): void {
+    set.call(this, Array.isArray(src) ? src.map((v) => BigInt(v)) : src, offset);
+  };
+}
+
 async function ensureInit(wasmUrl?: string | URL): Promise<void> {
   if (initialized) return;
+  allowNumberDims();
   await init(wasmUrl ? { module_or_path: wasmUrl } : undefined);
   start();
   initialized = true;

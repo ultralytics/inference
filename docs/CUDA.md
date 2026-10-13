@@ -27,6 +27,9 @@
 > The toolkit range above is what `cuda-preprocess` compiles its kernel against through `cudarc`,
 > independent of which EP binary is linked.
 
+> **Blackwell and Jetson.** The prebuilt CUDA binaries cover RTX 50xx (Blackwell) cards on x64, which the GPU CI job
+> runs on, and `aarch64` builds cover Jetson Orin and Thor, Grace Hopper and Blackwell, and DGX Spark.
+
 `cuda-preprocess` only needs `libcudart.so` and `libnvrtc.so` at **runtime**. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
 
 ## Enable in your project
@@ -233,12 +236,12 @@ last image, so `--batch 1` on it still pays for 16.
 
 ## Troubleshooting
 
-| Symptom                                                                    | Fix                                                                                                                                                                                   |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).                                                                                                 |
-| `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.                                                                                              |
-| `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                                                                                                       |
-| TRT engine build is slow on first run                                      | Expected: engines are cached under `.trt_cache/`. Subsequent runs reuse them.                                                                                                         |
-| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.                                                                                                |
-| CUDA EP fails to load on a CUDA 12 system                                  | The downloaded binaries are CUDA 13 and no CUDA 12 build is published. Compile ONNX Runtime for CUDA 12 and link it with `ORT_LIB_PATH`.                                              |
-| `no builds available that satisfy the requested feature set` on aarch64    | Only a CPU distribution is published for `aarch64-unknown-linux-gnu`. Link a GPU ONNX Runtime yourself, see [DGX.md](https://github.com/ultralytics/inference/blob/main/docs/DGX.md). |
+| Symptom                                                                    | Fix                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).                                                                                                                                    |
+| `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.                                                                                                                                 |
+| `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                                                                                                                                          |
+| TRT engine build is slow on first run                                      | Expected: engines are cached under `.trt_cache/`. Subsequent runs reuse them.                                                                                                                                            |
+| Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.                                                                                                                                   |
+| CUDA EP fails to load on a CUDA 12 system                                  | The downloaded binaries are CUDA 13 and no CUDA 12 build is published. Compile ONNX Runtime for CUDA 12 and link it with `ORT_LIB_PATH`.                                                                                 |
+| `no builds available that satisfy the requested feature set` on aarch64    | Only CUDA 13, TensorRT and NVRTX builds are published for `aarch64-unknown-linux-gnu`. For anything else link a GPU ONNX Runtime yourself, see [DGX.md](https://github.com/ultralytics/inference/blob/main/docs/DGX.md). |

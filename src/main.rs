@@ -39,9 +39,6 @@ fn run() {
 
     ultralytics_inference::io::init_logging();
 
-    #[cfg(debug_assertions)]
-    let _ = ort::init().commit();
-
     match &Cli::parse().command {
         Commands::Predict(args) => {
             set_verbose(args.verbose);
