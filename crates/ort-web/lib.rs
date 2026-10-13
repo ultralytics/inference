@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 //! `ort-web` is an [`ort`] backend that enables the usage of ONNX Runtime in the web.
 //!
 //! For more information, see https://ort.pyke.io/backends/web

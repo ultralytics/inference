@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 use alloc::{string::ToString, vec::Vec};
 
 use js_sys::JsString;

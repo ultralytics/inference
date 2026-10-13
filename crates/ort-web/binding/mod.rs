@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 use js_sys::Boolean;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;

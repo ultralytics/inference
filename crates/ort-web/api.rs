@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 use alloc::{
 	boxed::Box,

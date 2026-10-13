@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 pub struct PrivateTraitMarker;
 
 macro_rules! private_trait {

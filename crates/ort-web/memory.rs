@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 use alloc::ffi::CString;
 use core::{
 	ffi::{CStr, c_void},

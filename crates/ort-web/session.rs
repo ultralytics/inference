@@ -1,3 +1,5 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 use js_sys::Uint8Array;
 use ort::session::SessionOutputs;
 use ort_sys::{OrtErrorCode, stub::Error};
