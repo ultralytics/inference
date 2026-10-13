@@ -2313,7 +2313,7 @@ mod tests {
     fn test_openvino_model_needs_the_feature() {
         let dir = tempfile::tempdir().unwrap();
         let err = YOLOModel::load(dir.path()).err().unwrap().to_string();
-        assert!(err.contains("`openvino` feature"), "{err}");
+        assert!(err.contains("`openvino-native` feature"), "{err}");
     }
 
     #[test]
