@@ -172,7 +172,9 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
     }
     .map_err(err_ctx("failed to initialize ort-web backend"))?;
     ort::set_api(api);
+    // `ort-web` reports the page's hostname to pyke on session creation unless this is off.
     let env = ort::init()
+        .with_telemetry(false)
         .build()
         .map_err(err_ctx("failed to create the ONNX Runtime environment"))?;
     ENV.with(|e| *e.borrow_mut() = Some(env));
