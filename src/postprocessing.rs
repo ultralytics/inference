@@ -1796,14 +1796,21 @@ fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> R
     };
     let x_lut: Vec<_> = (0..ow).map(|dx| axis(dx, ow, lw)).collect();
 
+    // Resample every source row to the output width once, then blend neighbouring rows: the
+    // scattered reads happen once per source row instead of twice per output pixel.
+    let mut wide = vec![0f32; lh * ow];
+    wide.par_chunks_mut(ow).enumerate().for_each(|(y, dst)| {
+        let src = &output[y * lw..][..lw];
+        for (cell, &(x0, x1, fx)) in dst.iter_mut().zip(&x_lut) {
+            *cell = src[x0].mul_add(1.0 - fx, src[x1] * fx);
+        }
+    });
     let mut buf = vec![0f32; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
         let (y0, y1, fy) = axis(dy, oh, lh);
-        let (row0, row1) = (y0 * lw, y1 * lw);
-        for (cell, &(x0, x1, fx)) in row.iter_mut().zip(&x_lut) {
-            let top_row = output[row0 + x0].mul_add(1.0 - fx, output[row0 + x1] * fx);
-            let bot_row = output[row1 + x0].mul_add(1.0 - fx, output[row1 + x1] * fx);
-            *cell = top_row.mul_add(1.0 - fy, bot_row * fy);
+        let (top, bottom) = (&wide[y0 * ow..][..ow], &wide[y1 * ow..][..ow]);
+        for ((cell, &t), &b) in row.iter_mut().zip(top).zip(bottom) {
+            *cell = t.mul_add(1.0 - fy, b * fy);
         }
     });
     let map = Array2::from_shape_vec((oh, ow), buf).expect("shape matches");

@@ -128,32 +128,55 @@ impl DepthMap {
         Self { data, orig_shape }
     }
 
-    /// Reduce the valid (`> 0`) depth pixels with `f`, or `None` if there are none.
-    fn reduce_valid(&self, f: impl Fn(f32, f32) -> f32) -> Option<f32> {
-        self.data.iter().copied().filter(|&v| v > 0.0).reduce(f)
+    /// `(min, max)` over the valid (`> 0`) depth pixels in one pass, or `None` if there are none.
+    /// Eight independent lanes let the compiler vectorize the scan.
+    fn valid_range(&self) -> Option<(f32, f32)> {
+        const LANES: usize = 8;
+        let scan = |lo: &mut [f32; LANES], hi: &mut [f32; LANES], chunk: &[f32]| {
+            for (i, &v) in chunk.iter().enumerate() {
+                let valid = v > 0.0;
+                lo[i] = if valid && v < lo[i] { v } else { lo[i] };
+                hi[i] = if valid && v > hi[i] { v } else { hi[i] };
+            }
+        };
+        let (mut lo, mut hi) = ([f32::INFINITY; LANES], [f32::NEG_INFINITY; LANES]);
+        let scan_chunks = |lo: &mut [f32; LANES], hi: &mut [f32; LANES], src: &[f32]| {
+            let (chunks, rest) = src.as_chunks::<LANES>();
+            for chunk in chunks {
+                scan(lo, hi, chunk);
+            }
+            scan(lo, hi, rest);
+        };
+        if let Some(src) = self.data.as_slice() {
+            scan_chunks(&mut lo, &mut hi, src);
+        } else {
+            let values: Vec<f32> = self.data.iter().copied().collect();
+            scan_chunks(&mut lo, &mut hi, &values);
+        }
+        let lo = lo.into_iter().fold(f32::INFINITY, f32::min);
+        let hi = hi.into_iter().fold(f32::NEG_INFINITY, f32::max);
+        (lo <= hi).then_some((lo, hi))
     }
 
     /// Minimum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
     #[must_use]
     pub fn min_depth(&self) -> Option<f32> {
-        self.reduce_valid(f32::min)
+        self.valid_range().map(|(lo, _)| lo)
     }
 
     /// Maximum depth in meters over valid (`> 0`) pixels, or `None` if there are none.
     #[must_use]
     pub fn max_depth(&self) -> Option<f32> {
-        self.reduce_valid(f32::max)
+        self.valid_range().map(|(_, hi)| hi)
     }
 
     /// Color-normalization range `(min, max)` for visualization: the valid-pixel span,
     /// widened so `max > min`, falling back to `(0.0, 1.0)` when no pixels are valid.
-    /// `min_depth`/`max_depth` reduce the same data, so they are either both `Some` or both
-    /// `None` — never mixed.
     fn value_range(&self) -> (f32, f32) {
-        match (self.min_depth(), self.max_depth()) {
-            (Some(lo), Some(hi)) if hi > lo => (lo, hi),
-            (Some(lo), Some(_)) => (lo, lo + 1e-6),
-            _ => (0.0, 1.0),
+        match self.valid_range() {
+            Some((lo, hi)) if hi > lo => (lo, hi),
+            Some((lo, _)) => (lo, lo + 1e-6),
+            None => (0.0, 1.0),
         }
     }
 
@@ -464,9 +487,9 @@ impl Results {
         }
 
         if let Some(ref depth) = self.depth {
-            return match (depth.min_depth(), depth.max_depth()) {
-                (Some(lo), Some(hi)) => format!("depth {lo:.2}-{hi:.2}m"),
-                _ => "depth (no valid pixels)".to_string(),
+            return match depth.valid_range() {
+                Some((lo, hi)) => format!("depth {lo:.2}-{hi:.2}m"),
+                None => "depth (no valid pixels)".to_string(),
             };
         }
 
@@ -1231,6 +1254,30 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.detection_summary(), "depth 1.50-4.00m");
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn test_depth_range_matches_a_scalar_scan() {
+        // 7 x 13 is not a multiple of the 8 scan lanes, with invalid values mixed in.
+        let values: Vec<f32> = (0..91)
+            .map(|i| match i % 9 {
+                0 => 0.0,
+                1 => -3.0,
+                _ => ((i * 37 % 91) as f32).mul_add(0.25, 0.5),
+            })
+            .collect();
+        let valid = || values.iter().copied().filter(|&v| v > 0.0);
+        let expected = (
+            valid().fold(f32::INFINITY, f32::min),
+            valid().fold(f32::NEG_INFINITY, f32::max),
+        );
+        let map = ndarray::Array2::from_shape_vec((7, 13), values.clone()).unwrap();
+        let depth = DepthMap::new(map.clone(), (7, 13));
+        assert_eq!(depth.valid_range(), Some(expected));
+        // A transposed view is not contiguous, so it takes the copying path.
+        let strided = DepthMap::new(map.reversed_axes(), (13, 7));
+        assert_eq!(strided.valid_range(), Some(expected));
     }
 
     #[test]
