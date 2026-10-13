@@ -592,7 +592,7 @@ Providers missing from the chosen build are then absent at runtime and inference
 
 > The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
 
-> `openvino` uses a prebuilt ONNX Runtime with the OpenVINO provider (Linux x64 and Windows x64). The provider needs the OpenVINO runtime installed on the machine, and an `--device intel:*` run stops with an install hint when it is missing.
+> `openvino` uses a prebuilt ONNX Runtime with the OpenVINO provider (Linux x64 and Windows x64). The provider needs the OpenVINO runtime installed on the machine, and a `--device intel:*` run stops with an install hint when it is missing.
 
 **Available Features:**
 
