@@ -350,7 +350,7 @@
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
 //! | `cuda-preprocess` | GPU preprocessing with zero-copy `TensorRT` input |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
-//! | `openvino` | Intel `OpenVINO` |
+//! | `openvino` | Intel `OpenVINO` (Linux and Windows x64) |
 //! | `onednn` | Intel oneDNN |
 //! | `rocm` | AMD `ROCm` |
 //! | `migraphx` | AMD `MIGraphX` |

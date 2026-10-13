@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use js_sys::Float32Array;
 use ndarray::Array3;
+use ort::environment::Environment;
 use ort::ep::WebGPU;
 use ort::session::{RunOptions, Session};
 use ort::value::{Tensor, TensorElementType, ValueType};
@@ -102,6 +103,9 @@ thread_local! {
     /// rejected rather than silently reusing the first. Wasm is single-threaded,
     /// so a thread-local is a sufficient guard.
     static BACKEND: RefCell<Option<(bool, Option<String>)>> = const { RefCell::new(None) };
+    /// The ONNX Runtime environment built once the backend is installed. Every session on
+    /// the page is created under it.
+    static ENV: RefCell<Option<Environment>> = const { RefCell::new(None) };
 }
 
 /// Install the ort-web backend for this page, or verify a later load matches the
@@ -168,6 +172,10 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
     }
     .map_err(err_ctx("failed to initialize ort-web backend"))?;
     ort::set_api(api);
+    let env = ort::init()
+        .build()
+        .map_err(err_ctx("failed to create the ONNX Runtime environment"))?;
+    ENV.with(|e| *e.borrow_mut() = Some(env));
     BACKEND.with(|b| *b.borrow_mut() = Some(requested));
     Ok(())
 }
@@ -425,7 +433,10 @@ impl YoloModel {
     /// catches to fall back to CPU) instead of a silent downgrade we would
     /// mislabel.
     async fn commit(bytes: &[u8], device: Device) -> Result<Session, JsError> {
-        let mut builder = Session::builder().map_err(map_ort)?;
+        let env = ENV
+            .with(|e| e.borrow().clone())
+            .ok_or_else(|| JsError::new("the ONNX Runtime backend is not initialized"))?;
+        let mut builder = Session::builder(&env).map_err(map_ort)?;
         if device == Device::WebGpu {
             builder = builder
                 .with_execution_providers([WebGPU::default().build().error_on_failure()])

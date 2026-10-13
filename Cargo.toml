@@ -6,6 +6,8 @@ members = [".", "crates/web"]
 # `cargo test`, etc. run from the workspace root (use `wasm-pack` or
 # `-p ultralytics-inference-web --target wasm32-unknown-unknown` for it).
 default-members = ["."]
+# A patched copy of a third-party crate (see the patch section below), not ours to format or lint.
+exclude = ["crates/ort-web"]
 
 [package]
 name = "ultralytics-inference"
@@ -120,8 +122,8 @@ ab_glyph = { version = "^0.2", optional = true }
 
 # Native-only dependencies. None of these build for `wasm32-unknown-unknown`
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# ONNX Runtime 1.28.0
-ort = { version = "=2.0.0-rc.13", default-features = false, features = [
+# ONNX Runtime 1.31.0
+ort = { version = "=2.0.0-rc.14", default-features = false, features = [
     "std",
     "ndarray",
     "download-binaries",
@@ -132,9 +134,6 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = [
 ] }
 ureq = "^3.3.0"
 dirs = "^7.0"
-# Verify and unpack the downloaded OpenVINO provider plugin bundle (openvino feature).
-hmac-sha256 = { version = "^1.1", optional = true }
-flate2 = { version = "^1.1", optional = true }
 rayon = "^1.12"
 clap = { version = "^4.6.1", features = ["derive"] }
 # rayon-backed parallelism for ndarray and fast_image_resize, native only.
@@ -162,8 +161,8 @@ cuda-preprocess = ["cuda", "tensorrt", "dep:cudarc"]
 # AMD GPU acceleration
 rocm = ["ort/rocm"]
 
-# Intel acceleration (OpenVINO provider downloaded as a plugin on first use)
-openvino = ["ort/api-22", "ort/preload-dylibs", "dep:hmac-sha256", "dep:flate2"]
+# Intel acceleration (the downloaded ONNX Runtime includes the OpenVINO provider)
+openvino = ["ort/openvino"]
 onednn = ["ort/onednn"]
 
 # DirectML (Windows)
@@ -209,3 +208,8 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# `ort-web` 0.4.0 pairs with `ort` rc.14 but fails in the browser (see `crates/ort-web/PATCHES.md`), so the
+# browser crate uses a patched copy until a release fixes it.
+[patch.crates-io]
+ort-web = { path = "crates/ort-web" }

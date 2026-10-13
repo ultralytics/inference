@@ -581,14 +581,14 @@ cargo build --release --features "cuda,tensorrt"
 ```toml
 [dependencies]
 ultralytics-inference = { version = "0.0.50", features = ["coreml", "xnnpack"] }
-ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
+ort = { version = "=2.0.0-rc.14", features = ["lax-feature-matching"] }
 ```
 
 所选版本中缺失的 provider 在运行时将不可用，推理会回退到 CPU。在 `aarch64-unknown-linux-gnu` 上仅发布 CPU 版本，因此所有 GPU feature 都会遇到这种情况；如需链接 GPU 版 ONNX Runtime 而不是回退到 CPU，请见 [`docs/DGX.md`](docs/DGX.md)。
 
 > CUDA 与 TensorRT 二进制基于 CUDA 13 构建，且未发布 CUDA 12 版本。若需在 CUDA 12 上运行，请自行编译 ONNX Runtime，并通过 `ORT_LIB_PATH` 链接该构建。
 
-> `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此首次使用时会以插件形式（Linux x64 或 Windows x64）下载到用户缓存目录。缺失时会把其 `onnxruntime_providers_shared` 库复制到可执行文件旁边。
+> `openvino` 使用包含 OpenVINO provider 的预编译 ONNX Runtime（Linux x64 和 Windows x64）。该 provider 需要机器上已安装 OpenVINO 运行时，缺失时 `--device intel:*` 会停止并给出安装提示。
 
 **可用 Features：**
 
@@ -603,7 +603,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 | `tensorrt`        | NVIDIA TensorRT 优化                                                                     |
 | `cuda-preprocess` | GPU 预处理 + TensorRT 零拷贝输入（需要 CUDA toolkit；见 [`docs/CUDA.md`](docs/CUDA.md)） |
 | `coreml`          | Apple CoreML（macOS/iOS）                                                                |
-| `openvino`        | Intel OpenVINO                                                                           |
+| `openvino`        | Intel OpenVINO（Linux 和 Windows x64）                                                   |
 | `onednn`          | Intel oneDNN                                                                             |
 | `rocm`            | AMD ROCm                                                                                 |
 | `migraphx`        | AMD MIGraphX                                                                             |

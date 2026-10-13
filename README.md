@@ -585,14 +585,14 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 ```toml
 [dependencies]
 ultralytics-inference = { version = "0.0.50", features = ["coreml", "xnnpack"] }
-ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
+ort = { version = "=2.0.0-rc.14", features = ["lax-feature-matching"] }
 ```
 
 Providers missing from the chosen build are then absent at runtime and inference falls back to CPU. On `aarch64-unknown-linux-gnu` only a CPU distribution is published, so every GPU feature hits this; see [`docs/DGX.md`](docs/DGX.md) for linking a GPU ONNX Runtime instead of falling back.
 
 > The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
 
-> `openvino` is the exception: no prebuilt ONNX Runtime ships the OpenVINO provider, so on first use it is downloaded as a plugin (Linux x64 or Windows x64) into the user cache folder. Its `onnxruntime_providers_shared` library is copied next to the executable when missing.
+> `openvino` uses a prebuilt ONNX Runtime with the OpenVINO provider (Linux x64 and Windows x64). The provider needs the OpenVINO runtime installed on the machine, and an `--device intel:*` run stops with an install hint when it is missing.
 
 **Available Features:**
 
@@ -607,7 +607,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `tensorrt`        | NVIDIA TensorRT optimization                                                                          |
 | `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
 | `coreml`          | Apple CoreML (macOS/iOS)                                                                              |
-| `openvino`        | Intel OpenVINO                                                                                        |
+| `openvino`        | Intel OpenVINO (Linux and Windows x64)                                                                |
 | `onednn`          | Intel oneDNN                                                                                          |
 | `rocm`            | AMD ROCm                                                                                              |
 | `migraphx`        | AMD MIGraphX                                                                                          |

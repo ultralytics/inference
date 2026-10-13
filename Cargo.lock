@@ -1504,12 +1504,11 @@ dependencies = [
 
 [[package]]
 name = "ort"
-version = "2.0.0-rc.13"
+version = "2.0.0-rc.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4336a1e2b38848325241c72889086886004e589b7c74f335e60a8e8db5138a0b"
+checksum = "08ca9287c05aace7e95250104a00d54b7da0fc9ac5f25efa424b80827d2e25eb"
 dependencies = [
  "half",
- "libloading 0.9.0",
  "ndarray",
  "num-complex",
  "ort-sys",
@@ -1520,9 +1519,9 @@ dependencies = [
 
 [[package]]
 name = "ort-sys"
-version = "2.0.0-rc.13"
+version = "2.0.0-rc.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf211e3776eea6aec988552fa118dd746d70e1b1e5e244058d1c98015f3e5872"
+checksum = "4af4763e553f916650b0bfe4b8d217d61c28607f6117e48b8ab5584d1138f22f"
 dependencies = [
  "glob",
  "hmac-sha256",
@@ -1532,9 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "ort-web"
-version = "0.3.1+1.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b75b69e27ece1c9be6d3c5919e75c63ed0b7f61e615df752c13335fb45f3ec"
+version = "0.4.0+1.30"
 dependencies = [
  "js-sys",
  "ort",
@@ -2397,9 +2394,7 @@ dependencies = [
  "dirs",
  "fast_image_resize",
  "ffmpeg-next",
- "flate2",
  "half",
- "hmac-sha256",
  "image",
  "imageproc",
  "jpeg-decoder",
