@@ -87,7 +87,7 @@ cargo build --release --features cuda-preprocess
 `ort-sys could not link to the ONNX Runtime build in ...`.
 
 An ONNX Runtime older than the one `ort` targets still works. `ort` requests API version 17 as a
-minimum, not an exact match, so a 1.24 runtime satisfies a build that targets 1.28.
+minimum, not an exact match, so a 1.24 runtime satisfies a build that targets 1.31.
 
 At runtime the CUDA and TensorRT provider libraries need cuDNN 9 and TensorRT 10 on the library
 path. If you do not have them installed system-wide, the `nvidia-cudnn-cu13` and `tensorrt-cu13`
