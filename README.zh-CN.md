@@ -600,7 +600,7 @@ yolo export model=yolo26n.pt format=openvino                 # FP32，可加 hal
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 
-YOLO11 和 YOLO26 的五类任务（detect、segment、classify、pose、obb）的 FP32、FP16、INT8、动态和固定 batch 导出都可在 `intel:cpu`、`intel:gpu` 和 `intel:npu` 上加载且检测结果一致，depth 支持 FP32、FP16、动态和固定 batch 导出。在 Rust 中用法相同：`YOLOModel::load("yolo26n_openvino_model")`。几点细节：动态导出会固定为 `--imgsz` 和 `--batch`，因为动态形状在 CPU 上更慢，并且会让 GPU 对每个新的图像尺寸重新编译；NPU 以 batch 1 运行带 batch 和动态的导出，因为批处理在 NPU 上没有收益，而且驱动会拒绝 batch 4 的 OBB 图。精度由导出决定，因此 `--quantize` 不起作用并会给出警告，`InferenceConfig::with_threads` 用于设置 CPU 推理线程数，`cuda:`、`coreml` 等非 Intel 设备会被拒绝。Depth 模型会跳过图中最后的上采样，改在主机上重采样，因为 NPU 计算该上采样是错误的。NPU 返回的深度值仍与 CPU 不同，这是 NPU 的精度限制，Python 中也是如此。
+YOLO11 和 YOLO26 的五类任务（detect、segment、classify、pose、obb）的 FP32、FP16、INT8、动态和固定 batch 导出都可在 `intel:cpu`、`intel:gpu` 和 `intel:npu` 上加载且检测结果一致，depth 支持 FP32、FP16、动态和固定 batch 导出。在 Rust 中用法相同：`YOLOModel::load("yolo26n_openvino_model")`。几点细节：动态导出会固定为 `--imgsz` 和 `--batch`，因为动态形状在 CPU 上更慢，并且会让 GPU 对每个新的图像尺寸重新编译；NPU 以 batch 1 运行带 batch 和动态的导出，因为批处理在 NPU 上没有收益。精度由导出决定，因此 `--quantize` 不起作用并会给出警告，`InferenceConfig::with_threads` 用于设置 CPU 推理线程数，`cuda:`、`coreml` 等非 Intel 设备会被拒绝。Depth 模型会跳过图中最后的上采样，改在主机上重采样，因为 NPU 计算该上采样是错误的。NPU 返回的深度值仍与 CPU 不同，这是 NPU 的精度限制，Python 中也是如此。
 
 **可用 Features：**
 

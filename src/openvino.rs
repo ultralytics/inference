@@ -97,8 +97,7 @@ impl OvSession {
     /// only bounded shapes, the GPU recompiles its kernels for every new shape (about a second
     /// each) and the CPU runs dynamic shapes about 1.5x slower, so a dynamic model is pinned to
     /// `static_input` (`[N, C, H, W]`) on every device. The NPU always
-    /// runs at batch 1, for batched and dynamic exports alike: batching gains nothing there and
-    /// the driver fails the batch 4 OBB graph.
+    /// runs at batch 1, for batched and dynamic exports alike: batching gains nothing there.
     pub fn load(
         xml: &Path,
         device: Option<&Device>,
