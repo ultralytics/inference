@@ -11,7 +11,7 @@ exclude = ["crates/ort-web"]
 
 [package]
 name = "ultralytics-inference"
-version = "0.0.51"
+version = "0.0.52"
 edition = "2024"
 rust-version = "1.92"
 authors = [
