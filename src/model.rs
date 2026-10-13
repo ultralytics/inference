@@ -355,6 +355,14 @@ impl YOLOModel {
                     ort::ep::ROCm::default().with_device_id(*i as i32).build(),
                     "ROCmExecutionProvider",
                 )),
+                #[cfg(feature = "migraphx")]
+                crate::Device::MiGraphX(i) => eps.push((
+                    ort::ep::MIGraphX::default()
+                        .with_device_id(*i as i32)
+                        .build()
+                        .error_on_failure(),
+                    "MIGraphXExecutionProvider",
+                )),
                 #[cfg(feature = "directml")]
                 crate::Device::DirectMl(i) => eps.push((
                     ort::ep::DirectML::default()
@@ -417,6 +425,12 @@ impl YOLOModel {
 
             #[cfg(feature = "rocm")]
             eps.push((ort::ep::ROCm::default().build(), "ROCmExecutionProvider"));
+
+            #[cfg(feature = "migraphx")]
+            eps.push((
+                ort::ep::MIGraphX::default().build(),
+                "MIGraphXExecutionProvider",
+            ));
 
             #[cfg(feature = "directml")]
             eps.push((

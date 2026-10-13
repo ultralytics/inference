@@ -31,6 +31,9 @@ pub enum Device {
     /// `ROCm` (Radeon Open Compute) for AMD GPUs.
     /// The argument specifies the device index.
     Rocm(usize),
+    /// `MIGraphX` for AMD GPUs.
+    /// The argument specifies the device index.
+    MiGraphX(usize),
 }
 
 impl fmt::Display for Device {
@@ -46,6 +49,7 @@ impl fmt::Display for Device {
             Self::Xnnpack => write!(f, "xnnpack"),
             Self::TensorRt(i) => write!(f, "tensorrt:{i}"),
             Self::Rocm(i) => write!(f, "rocm:{i}"),
+            Self::MiGraphX(i) => write!(f, "migraphx:{i}"),
         }
     }
 }
@@ -66,6 +70,9 @@ impl FromStr for Device {
         }
         if let Some(rest) = s.strip_prefix("rocm") {
             return Ok(Self::Rocm(parse_device_index(rest, &s)?));
+        }
+        if let Some(rest) = s.strip_prefix("migraphx") {
+            return Ok(Self::MiGraphX(parse_device_index(rest, &s)?));
         }
         match s.as_str() {
             "cpu" => Ok(Self::Cpu),
@@ -106,6 +113,8 @@ mod tests {
         assert_eq!(Device::from_str("cuda:0").unwrap(), Device::Cuda(0));
         assert_eq!(Device::from_str("cuda:1").unwrap(), Device::Cuda(1));
         assert_eq!(Device::from_str("coreml").unwrap(), Device::CoreMl);
+        assert_eq!(Device::from_str("migraphx").unwrap(), Device::MiGraphX(0));
+        assert_eq!(Device::from_str("migraphx:1").unwrap(), Device::MiGraphX(1));
         assert_eq!(Device::from_str("directml").unwrap(), Device::DirectMl(0));
         assert_eq!(Device::from_str("directml:1").unwrap(), Device::DirectMl(1));
         // OpenVINO uses the Ultralytics `intel:<type>` naming.
@@ -129,6 +138,7 @@ mod tests {
             "cuda0",
             "tensorrt:x",
             "rocm:-2",
+            "migraphx:x",
             "directmlfoo",
             "cuda:99999999999999999999",
         ] {
@@ -146,6 +156,7 @@ mod tests {
             "directml:0",
             "tensorrt:2",
             "rocm:3",
+            "migraphx:2",
             "intel:cpu",
             "intel:gpu",
             "intel:npu",

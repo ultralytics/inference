@@ -526,6 +526,8 @@ fn provider_label(provider: &str) -> &'static str {
         "DirectML"
     } else if provider.contains("rocm") {
         "ROCm"
+    } else if provider.contains("migraphx") {
+        "MIGraphX"
     } else if provider.contains("openvino") {
         "OpenVINO"
     } else {
