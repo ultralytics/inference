@@ -1409,7 +1409,16 @@ impl YOLOModel {
         .map_err(|e| err("cpu meminfo", e))?;
         // The preprocessor owns the buffer for the model's lifetime, and the binding keeps
         // the tensor alive until it drops.
-        let input = unsafe { Self::device_input(&cuda_mem, pre.input_dev_ptr(), shape)? };
+        // SAFETY: the pointer holds `shape`'s element count of f32 on the CUDA device `cuda_mem`
+        // names, and the preprocessor keeps it alive for as long as the binding is used.
+        let input = unsafe {
+            ort::value::TensorRefMut::<f32>::from_raw(
+                cuda_mem,
+                pre.input_dev_ptr() as *mut core::ffi::c_void,
+                ort::value::Shape::from(shape),
+            )
+        }
+        .map_err(|e| err("device input", e))?;
         let mut binding = self
             .session
             .create_binding()
@@ -1423,41 +1432,6 @@ impl YOLOModel {
                 .map_err(|e| err("bind_output", e))?;
         }
         Ok(binding)
-    }
-
-    /// Wrap the preprocessor's device buffer as an f32 input tensor ONNX Runtime reads in place.
-    ///
-    /// Stands in for `TensorRefMut::from_raw`, which in `ort` 2.0.0-rc.13 swaps the given
-    /// `MemoryInfo` for a CPU one, so ONNX Runtime took the device buffer for host memory and
-    /// copied it on every run. `ptr` must hold `shape`'s element count of f32 on the device
-    /// `cuda_mem` names, and stay valid while the returned value is in use.
-    #[cfg(feature = "cuda-preprocess")]
-    #[allow(unsafe_code)]
-    unsafe fn device_input(
-        cuda_mem: &ort::memory::MemoryInfo,
-        ptr: u64,
-        shape: &[i64],
-    ) -> Result<ort::value::DynValue> {
-        use ort::AsPointer;
-
-        let bytes = shape.iter().product::<i64>() as usize * std::mem::size_of::<f32>();
-        let mut value = std::mem::MaybeUninit::uninit();
-        let status = unsafe {
-            (ort::api().CreateTensorWithDataAsOrtValue)(
-                cuda_mem.ptr(),
-                ptr as *mut core::ffi::c_void,
-                bytes,
-                shape.as_ptr(),
-                shape.len(),
-                ort::sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-                value.as_mut_ptr(),
-            )
-        };
-        let err = |e: String| InferenceError::InferenceError(format!("device input: {e}"));
-        unsafe { ort::Error::result_from_status(status) }.map_err(|e| err(e.to_string()))?;
-        let value = std::ptr::NonNull::new(unsafe { value.assume_init() })
-            .ok_or_else(|| err("null value".into()))?;
-        Ok(unsafe { ort::value::DynValue::from_ptr(value, None) })
     }
 
     /// Whether a task's preprocessing is a letterbox, so [`Self::predict_cuda_pre`]
