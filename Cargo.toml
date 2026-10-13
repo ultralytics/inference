@@ -6,8 +6,6 @@ members = [".", "crates/web"]
 # `cargo test`, etc. run from the workspace root (use `wasm-pack` or
 # `-p ultralytics-inference-web --target wasm32-unknown-unknown` for it).
 default-members = ["."]
-# A patched copy of a third-party crate (see the patch section below), not ours to format or lint.
-exclude = ["crates/ort-web"]
 
 [package]
 name = "ultralytics-inference"
@@ -208,8 +206,3 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
-
-# `ort-web` 0.4.0 pairs with `ort` rc.14 but fails in the browser (see `crates/ort-web/PATCHES.md`), so the
-# browser crate uses a patched copy until a release fixes it.
-[patch.crates-io]
-ort-web = { path = "crates/ort-web" }

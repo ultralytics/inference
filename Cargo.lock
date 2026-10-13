@@ -1532,6 +1532,8 @@ dependencies = [
 [[package]]
 name = "ort-web"
 version = "0.4.0+1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85d0b0991e09a3216a1142b01f8765a1f5d686b01f9409a4611352cb7c5552fa"
 dependencies = [
  "js-sys",
  "ort",

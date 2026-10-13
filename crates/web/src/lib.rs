@@ -23,8 +23,8 @@ use std::sync::Arc;
 
 use js_sys::Float32Array;
 use ndarray::Array3;
+use ort::AsPointer;
 use ort::environment::Environment;
-use ort::ep::WebGPU;
 use ort::session::{RunOptions, Session};
 use ort::value::{Tensor, TensorElementType, ValueType};
 use ort_web::sync_outputs;
@@ -425,6 +425,27 @@ impl YoloModel {
     }
 }
 
+/// Append the WebGPU execution provider to `builder`, failing if it cannot be registered.
+///
+/// `ort-web` 0.4.0 only recognizes the short provider name `WebGPU`, while `ort` 2.0.0-rc.14
+/// sends `WebGpuExecutionProvider`, so `ort::ep::WebGPU` is rejected and every load would fall
+/// back to the CPU. Appending by the short name works until `ort-web` accepts both.
+#[allow(unsafe_code)]
+fn append_webgpu(builder: &ort::session::builder::SessionBuilder) -> Result<(), JsError> {
+    // SAFETY: `builder` owns a valid session options object for the whole call, and no
+    // provider options are passed.
+    let status = unsafe {
+        (ort::api().SessionOptionsAppendExecutionProvider)(
+            builder.ptr().cast_mut(),
+            c"WebGPU".as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+        )
+    };
+    unsafe { ort::Error::result_from_status(status) }.map_err(map_ort)
+}
+
 impl YoloModel {
     /// Commit an ONNX Runtime session from model bytes on `device`.
     ///
@@ -438,9 +459,7 @@ impl YoloModel {
             .ok_or_else(|| JsError::new("the ONNX Runtime backend is not initialized"))?;
         let mut builder = Session::builder(&env).map_err(map_ort)?;
         if device == Device::WebGpu {
-            builder = builder
-                .with_execution_providers([WebGPU::default().build().error_on_failure()])
-                .map_err(map_ort)?;
+            append_webgpu(&builder)?;
         }
         builder
             .commit_from_memory(bytes)
