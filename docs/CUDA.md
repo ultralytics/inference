@@ -27,8 +27,8 @@
 > The toolkit range above is what `cuda-preprocess` compiles its kernel against through `cudarc`,
 > independent of which EP binary is linked.
 
-> **Blackwell and Jetson.** Per the `ort` 2.0.0-rc.14 release notes, the prebuilt CUDA binaries cover RTX 50xx
-> (Blackwell) cards on x64, and `aarch64` builds cover Jetson Orin and Thor, Grace Hopper and Blackwell, and DGX Spark.
+> **Blackwell and Jetson.** The prebuilt CUDA binaries cover RTX 50xx (Blackwell) cards on x64, which the GPU CI job
+> runs on, and `aarch64` builds cover Jetson Orin and Thor, Grace Hopper and Blackwell, and DGX Spark.
 
 `cuda-preprocess` only needs `libcudart.so` and `libnvrtc.so` at **runtime**. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
 
