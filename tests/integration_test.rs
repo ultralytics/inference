@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 #[cfg(any(feature = "coreml", feature = "cuda"))]
 use ultralytics_inference::Device;
-#[cfg(any(feature = "coreml", feature = "cuda", feature = "openvino"))]
+#[cfg(any(feature = "coreml", feature = "cuda", feature = "openvino-native"))]
 use ultralytics_inference::YOLOModel;
 use ultralytics_inference::cli::args::PredictArgs;
 use ultralytics_inference::cli::predict::run_prediction;
@@ -19,7 +19,7 @@ use ultralytics_inference::{Boxes, InferenceConfig, Results, Speed};
 
 /// Runs a native `OpenVINO` export end to end: set `OPENVINO_TEST_MODEL` to a detect model folder
 /// from `yolo export format=openvino` and install the `OpenVINO` runtime.
-#[cfg(feature = "openvino")]
+#[cfg(feature = "openvino-native")]
 #[test]
 #[ignore = "needs an OpenVINO detect export in OPENVINO_TEST_MODEL and the OpenVINO runtime"]
 fn test_openvino_model_predicts() {

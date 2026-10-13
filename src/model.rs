@@ -65,7 +65,7 @@ enum Backend {
     Ort(Session),
     /// Native `OpenVINO` IR model for `.xml` files. The `Mutex` keeps the model `Sync`; it is
     /// only reached through `&mut self`, so it never blocks.
-    #[cfg(feature = "openvino")]
+    #[cfg(feature = "openvino-native")]
     OpenVino(std::sync::Mutex<crate::openvino::OvSession>),
 }
 
@@ -75,7 +75,7 @@ impl Backend {
     fn ort(&self) -> &Session {
         match self {
             Self::Ort(session) => session,
-            #[cfg(feature = "openvino")]
+            #[cfg(feature = "openvino-native")]
             Self::OpenVino(_) => unreachable!("an OpenVINO model has no ONNX Runtime session"),
         }
     }
@@ -84,7 +84,7 @@ impl Backend {
     fn ort_mut(&mut self) -> &mut Session {
         match self {
             Self::Ort(session) => session,
-            #[cfg(feature = "openvino")]
+            #[cfg(feature = "openvino-native")]
             Self::OpenVino(_) => unreachable!("an OpenVINO model has no ONNX Runtime session"),
         }
     }
@@ -244,11 +244,11 @@ impl YOLOModel {
         let path = path.as_ref();
 
         if path.is_dir() || path.extension().is_some_and(|e| e == "xml") {
-            #[cfg(feature = "openvino")]
+            #[cfg(feature = "openvino-native")]
             return Self::load_openvino(path, config);
-            #[cfg(not(feature = "openvino"))]
+            #[cfg(not(feature = "openvino-native"))]
             return Err(InferenceError::ModelLoadError(format!(
-                "{} is an OpenVINO model; build with the `openvino` feature to load it",
+                "{} is an OpenVINO model; build with the `openvino-native` feature to load it",
                 path.display()
             )));
         }
@@ -743,7 +743,7 @@ impl YOLOModel {
 
     /// Load a native `OpenVINO` IR model from its `.xml` file or export folder, reading the
     /// metadata the exporter wrote to `metadata.yaml` beside it.
-    #[cfg(feature = "openvino")]
+    #[cfg(feature = "openvino-native")]
     fn load_openvino(path: &Path, config: InferenceConfig) -> Result<Self> {
         let xml = crate::openvino::resolve_xml(path)?;
         let yaml = std::fs::read_to_string(xml.with_file_name("metadata.yaml")).map_err(|e| {
@@ -1278,7 +1278,7 @@ impl YOLOModel {
     /// Returns true when the ONNX has `ArgMax` + `Cast(uint8)` baked in, so the only output is
     /// a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction + CPU argmax for semantic segmentation.
     fn has_semantic_mask_output(&self) -> bool {
-        #[cfg(feature = "openvino")]
+        #[cfg(feature = "openvino-native")]
         if matches!(self.backend, Backend::OpenVino(_)) {
             return false;
         }
@@ -1310,7 +1310,7 @@ impl YOLOModel {
     fn model_fixed_batch(&self) -> Option<usize> {
         match &self.backend {
             Backend::Ort(session) => Self::fixed_batch(session),
-            #[cfg(feature = "openvino")]
+            #[cfg(feature = "openvino-native")]
             Backend::OpenVino(ov) => Self::pinned_batch(
                 ov.lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1320,7 +1320,7 @@ impl YOLOModel {
     }
 
     /// Forward passes a native `OpenVINO` model runs at load.
-    #[cfg(feature = "openvino")]
+    #[cfg(feature = "openvino-native")]
     const OPENVINO_WARMUP_RUNS: usize = 5;
 
     /// Maximum allowed image dimension to prevent OOM during warmup.
@@ -1371,7 +1371,7 @@ impl YOLOModel {
                 target_size,
                 batch,
             ),
-            #[cfg(feature = "openvino")]
+            #[cfg(feature = "openvino-native")]
             // The first runs after compile are slow while oneDNN builds its primitives, so a
             // few of them keep that cost out of the first real image.
             Backend::OpenVino(ov) => {
@@ -2053,7 +2053,7 @@ impl YOLOModel {
         let semantic_mask_output = self.has_semantic_mask_output();
 
         // A native OpenVINO model takes f32 only and hands back owned tensors.
-        #[cfg(feature = "openvino")]
+        #[cfg(feature = "openvino-native")]
         if let Backend::OpenVino(ov) = &mut self.backend {
             let ov = ov
                 .get_mut()
@@ -2326,7 +2326,7 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    #[cfg(feature = "openvino")]
+    #[cfg(feature = "openvino-native")]
     #[test]
     fn test_openvino_model_load_errors() {
         let dir = tempfile::tempdir().unwrap();
@@ -2338,7 +2338,7 @@ mod tests {
         assert!(err.contains("metadata.yaml"), "{err}");
     }
 
-    #[cfg(not(feature = "openvino"))]
+    #[cfg(not(feature = "openvino-native"))]
     #[test]
     fn test_openvino_model_needs_the_feature() {
         let dir = tempfile::tempdir().unwrap();

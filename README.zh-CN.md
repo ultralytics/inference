@@ -570,6 +570,9 @@ cargo build --release --features coreml
 cargo build --release --features openvino
 ultralytics-inference predict --source bus.jpg --device intel:gpu
 
+# 原生 OpenVINO IR（.xml）模型，由 OpenVINO 运行时直接运行，不经过 ONNX Runtime
+cargo build --release --features openvino-native
+
 # 多个 features
 cargo build --release --features "cuda,tensorrt"
 ```
@@ -590,7 +593,7 @@ ort = { version = "=2.0.0-rc.13", features = ["lax-feature-matching"] }
 
 > `openvino` 是例外：没有任何预编译 ONNX Runtime 包含 OpenVINO provider，因此首次使用时会以插件形式（Linux x64 或 Windows x64）下载到用户缓存目录。缺失时会把其 `onnxruntime_providers_shared` 库复制到可执行文件旁边。
 
-**OpenVINO IR 模型：** 启用 `openvino` feature 后，`--model` 也可以直接使用 `yolo export format=openvino` 导出的 `.xml` 文件或导出文件夹，并通过 OpenVINO 运行时直接推理，而不经过 ONNX Runtime。文件夹中需要 `metadata.yaml` 与 `.xml`、`.bin` 放在一起。需要安装 OpenVINO 运行时（`pip install openvino`、压缩包或系统软件包），并通过 `OPENVINO_INSTALL_DIR` 或库路径让 `libopenvino_c` 可被找到，构建时不需要安装 OpenVINO。
+**OpenVINO IR 模型：** 启用 `openvino-native` feature（可与 `openvino` 同时启用）后，`--model` 也可以直接使用 `yolo export format=openvino` 导出的 `.xml` 文件或导出文件夹，并通过 OpenVINO 运行时直接推理，而不经过 ONNX Runtime。文件夹中需要 `metadata.yaml` 与 `.xml`、`.bin` 放在一起。需要安装 OpenVINO 运行时（`pip install openvino`、压缩包或系统软件包），并通过 `OPENVINO_INSTALL_DIR` 或库路径让 `libopenvino_c` 可被找到，构建时不需要安装 OpenVINO。
 
 ```bash
 yolo export model=yolo26n.pt format=openvino                 # FP32，可加 half=True、int8=True、dynamic=True 或 batch=4
@@ -612,7 +615,8 @@ YOLO11 和 YOLO26 的五类任务（detect、segment、classify、pose、obb）�
 | `tensorrt`        | NVIDIA TensorRT 优化                                                                     |
 | `cuda-preprocess` | GPU 预处理 + TensorRT 零拷贝输入（需要 CUDA toolkit；见 [`docs/CUDA.md`](docs/CUDA.md)） |
 | `coreml`          | Apple CoreML（macOS/iOS）                                                                |
-| `openvino`        | Intel OpenVINO（ONNX provider 和原生 IR 模型）                                           |
+| `openvino`        | 用于 ONNX 模型的 Intel OpenVINO provider                                                 |
+| `openvino-native` | 加载原生 OpenVINO IR（`.xml`）模型                                                       |
 | `onednn`          | Intel oneDNN                                                                             |
 | `rocm`            | AMD ROCm                                                                                 |
 | `migraphx`        | AMD MIGraphX                                                                             |

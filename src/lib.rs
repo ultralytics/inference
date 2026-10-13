@@ -308,6 +308,9 @@
 //!
 //! # Intel OpenVINO
 //! cargo build --release --features openvino
+//!
+//! # Native OpenVINO IR (.xml) models, run by the OpenVINO runtime without ONNX Runtime
+//! cargo build --release --features openvino-native
 //! ```
 //!
 //! ## Results API
@@ -350,7 +353,8 @@
 //! | `tensorrt` | NVIDIA `TensorRT` optimization |
 //! | `cuda-preprocess` | GPU preprocessing with zero-copy `TensorRT` input |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
-//! | `openvino` | Intel `OpenVINO`, also loads native `OpenVINO` IR (`.xml`) models |
+//! | `openvino` | Intel `OpenVINO` provider for ONNX models |
+//! | `openvino-native` | Loads native `OpenVINO` IR (`.xml`) models |
 //! | `onednn` | Intel oneDNN |
 //! | `rocm` | AMD `ROCm` |
 //! | `migraphx` | AMD `MIGraphX` |
@@ -420,7 +424,7 @@ pub mod download;
 pub mod io;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod model;
-#[cfg(all(feature = "openvino", not(target_arch = "wasm32")))]
+#[cfg(all(feature = "openvino-native", not(target_arch = "wasm32")))]
 mod openvino;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source;

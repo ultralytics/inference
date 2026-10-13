@@ -86,6 +86,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --all-targets --no-default-features --features annotate,openvino -- -D warnings
 
+      # The native IR tests need no download and skip the model run without an OpenVINO runtime.
+      - name: Clippy and tests (annotate + openvino-native)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo clippy --all-targets --no-default-features --features annotate,openvino-native -- -D warnings
+          cargo test --no-default-features --features annotate,openvino-native
+
       # CoreML is macOS-only — covers issue #148 (GatherElements warmup) and graph_input_cast_0 fix
       - name: Clippy (coreml + annotate)
         if: matrix.os == 'macos-latest'
