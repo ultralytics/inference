@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference-web"
-version = "0.0.52"
+version = "0.0.53"
 edition = "2024"
 rust-version = "1.92"
 description = "Browser/WebAssembly bindings for ultralytics-inference (WebGPU via ort-web)"
