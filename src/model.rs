@@ -800,19 +800,18 @@ impl YOLOModel {
             metadata.task == Task::Depth,
             config.num_threads,
         )?;
-        let dims = ov.input_dims().to_vec();
-        let is_dynamic = dims.len() == 4 && (dims[2] <= 0 || dims[3] <= 0);
-        #[allow(clippy::cast_sign_loss)]
-        let fixed_imgsz = (dims.len() == 4 && dims[2] > 0 && dims[3] > 0)
-            .then(|| (dims[2] as usize, dims[3] as usize));
-        if let (Some(fixed), Some(requested)) = (fixed_imgsz, config.imgsz)
-            && requested != fixed
+        let &[_, _, h, w] = ov.input_dims() else {
+            return Err(InferenceError::ModelLoadError(
+                "OpenVINO models must take an [N, C, H, W] input".to_owned(),
+            ));
+        };
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let imgsz = (h as usize, w as usize);
+        if let Some(requested) = config.imgsz
+            && requested != imgsz
         {
-            warn!("imgsz={requested:?} ignored: this model has a fixed input shape of {fixed:?}.");
+            warn!("imgsz={requested:?} ignored: this model has a fixed input shape of {imgsz:?}.");
         }
-        let imgsz = fixed_imgsz
-            .or(config.imgsz)
-            .unwrap_or_else(|| metadata.imgsz_or_default());
         metadata.imgsz = Some(imgsz);
         // The export fixed the precision, so a requested one that differs cannot apply.
         let quantize = metadata.quantize;
@@ -837,7 +836,7 @@ impl YOLOModel {
             warmed_up: false,
             fp16_input: false,
             execution_provider: "OpenVINO".to_owned(),
-            is_dynamic,
+            is_dynamic: false,
             #[cfg(feature = "cuda-preprocess")]
             cuda_preprocessor: None,
             #[cfg(feature = "cuda-preprocess")]
@@ -2041,19 +2040,8 @@ impl YOLOModel {
             );
             let bufs = tensors
                 .iter()
-                .map(|t| {
-                    let shape = t
-                        .get_shape()
-                        .map_err(|e| InferenceError::InferenceError(e.to_string()))?;
-                    let data = t
-                        .get_data::<f32>()
-                        .map_err(|e| InferenceError::InferenceError(e.to_string()))?;
-                    Ok((
-                        data,
-                        shape.get_dimensions().iter().map(|&d| d as usize).collect(),
-                    ))
-                })
-                .collect::<Result<Vec<(&[f32], Vec<usize>)>>>()?;
+                .map(crate::openvino::view)
+                .collect::<Result<Vec<_>>>()?;
             return Ok(Self::postprocess_batch_results(
                 &bufs,
                 &self.metadata,

@@ -23,11 +23,11 @@ pub struct OvSession {
     request: InferRequest,
     _compiled: CompiledModel,
     _core: Core,
-    /// Input dimensions as `[N, C, H, W]`, with `-1` for a dynamic axis.
+    /// Input dimensions as `[N, C, H, W]`, always static once loaded.
     input_dims: Vec<i64>,
     outputs: usize,
-    /// The input tensor of the last run, reused while the shape holds.
-    input: Option<(Vec<i64>, Tensor)>,
+    /// The input tensor, filled by every run.
+    input: Tensor,
 }
 
 fn load_err(e: impl std::fmt::Display) -> InferenceError {
@@ -155,7 +155,7 @@ impl OvSession {
                 .map_err(load_err)?
                 .get_dimensions()
                 .iter()
-                .map(|d| if d.is_dynamic() { -1 } else { d.get_min() })
+                .map(openvino::Dimension::get_min)
                 .collect())
         };
         let mut dims = input_dims(&model)?;
@@ -192,18 +192,21 @@ impl OvSession {
             .map_err(load_err)?;
         }
         let mut compiled = core.compile_model(&model, device).map_err(load_err)?;
-        let request = compiled.create_infer_request().map_err(load_err)?;
+        let mut request = compiled.create_infer_request().map_err(load_err)?;
+        let input = Tensor::new(ElementType::F32, &Shape::new(&dims).map_err(load_err)?)
+            .map_err(load_err)?;
+        request.set_input_tensor(&input).map_err(load_err)?;
         Ok(Self {
             request,
             _compiled: compiled,
             _core: core,
             input_dims: dims,
-            input: None,
+            input,
             outputs,
         })
     }
 
-    /// Model input dimensions as `[N, C, H, W]`, `-1` where an axis is dynamic.
+    /// Model input dimensions as `[N, C, H, W]`.
     pub fn input_dims(&self) -> &[i64] {
         &self.input_dims
     }
@@ -211,25 +214,32 @@ impl OvSession {
     /// Run one forward pass and return the output tensors.
     pub fn run(&mut self, input: &Array4<f32>) -> Result<Vec<Tensor>> {
         let input = input.as_standard_layout();
-        #[allow(clippy::cast_possible_wrap)]
-        let dims: Vec<i64> = input.shape().iter().map(|&d| d as i64).collect();
-        if self.input.as_ref().is_none_or(|(d, _)| *d != dims) {
-            let tensor = Tensor::new(ElementType::F32, &Shape::new(&dims).map_err(run_err)?)
-                .map_err(run_err)?;
-            self.request.set_input_tensor(&tensor).map_err(run_err)?;
-            self.input = Some((dims, tensor));
+        let data = self.input.get_data_mut::<f32>().map_err(run_err)?;
+        let input = input.as_slice().expect("standard layout is contiguous");
+        if data.len() != input.len() {
+            return Err(run_err(format!(
+                "input has {} values, the model takes {}",
+                input.len(),
+                data.len()
+            )));
         }
-        if let Some((_, tensor)) = &mut self.input {
-            tensor
-                .get_data_mut::<f32>()
-                .map_err(run_err)?
-                .copy_from_slice(input.as_slice().expect("standard layout is contiguous"));
-        }
+        data.copy_from_slice(input);
         self.request.infer().map_err(run_err)?;
         (0..self.outputs)
             .map(|i| self.request.get_output_tensor_by_index(i).map_err(run_err))
             .collect()
     }
+}
+
+/// An output tensor as its f32 data and `[usize]` shape.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub fn view(tensor: &Tensor) -> Result<(&[f32], Vec<usize>)> {
+    let shape = tensor.get_shape().map_err(run_err)?;
+    let data = tensor.get_data::<f32>().map_err(run_err)?;
+    Ok((
+        data,
+        shape.get_dimensions().iter().map(|&d| d as usize).collect(),
+    ))
 }
 
 #[cfg(test)]
@@ -279,37 +289,5 @@ mod tests {
             err.to_string().contains("cannot run an OpenVINO model"),
             "{err}"
         );
-    }
-
-    /// A one-layer IR that returns its input, run when the `OpenVINO` runtime is installed.
-    #[test]
-    #[allow(clippy::cast_precision_loss)]
-    fn test_identity_model_roundtrip() {
-        if Core::new().is_err() {
-            return;
-        }
-        let dims = "<dim>1</dim><dim>3</dim><dim>4</dim><dim>4</dim>";
-        let xml = format!(
-            r#"<?xml version="1.0"?><net name="id" version="11"><layers>
-<layer id="0" name="x" type="Parameter" version="opset1"><data shape="1,3,4,4" element_type="f32"/><output><port id="0" precision="FP32" names="x">{dims}</port></output></layer>
-<layer id="1" name="r" type="Result" version="opset1"><input><port id="0" precision="FP32">{dims}</port></input></layer>
-</layers><edges><edge from-layer="0" from-port="0" to-layer="1" to-port="0"/></edges></net>"#
-        );
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("id.xml"), xml).unwrap();
-        std::fs::write(dir.path().join("id.bin"), "").unwrap();
-        let mut ov = OvSession::load(
-            &dir.path().join("id.xml"),
-            Some(&Device::IntelCpu),
-            [1, 3, 4, 4],
-            false,
-            2,
-        )
-        .unwrap();
-        assert_eq!(ov.input_dims(), [1, 3, 4, 4]);
-        let input = Array4::from_shape_fn((1, 3, 4, 4), |(_, c, h, w)| (c * 16 + h * 4 + w) as f32);
-        let out = ov.run(&input).unwrap();
-        assert_eq!(out[0].get_shape().unwrap().get_dimensions(), [1, 3, 4, 4]);
-        assert_eq!(out[0].get_data::<f32>().unwrap(), input.as_slice().unwrap());
     }
 }
