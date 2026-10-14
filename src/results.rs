@@ -140,19 +140,15 @@ impl DepthMap {
             }
         };
         let (mut lo, mut hi) = ([f32::INFINITY; LANES], [f32::NEG_INFINITY; LANES]);
-        let scan_chunks = |lo: &mut [f32; LANES], hi: &mut [f32; LANES], src: &[f32]| {
-            let (chunks, rest) = src.as_chunks::<LANES>();
-            for chunk in chunks {
-                scan(lo, hi, chunk);
-            }
-            scan(lo, hi, rest);
-        };
-        if let Some(src) = self.data.as_slice() {
-            scan_chunks(&mut lo, &mut hi, src);
-        } else {
-            let values: Vec<f32> = self.data.iter().copied().collect();
-            scan_chunks(&mut lo, &mut hi, &values);
+        let data = self.data.as_standard_layout();
+        let (chunks, rest) = data
+            .as_slice()
+            .expect("standard layout is contiguous")
+            .as_chunks::<LANES>();
+        for chunk in chunks {
+            scan(&mut lo, &mut hi, chunk);
         }
+        scan(&mut lo, &mut hi, rest);
         let lo = lo.into_iter().fold(f32::INFINITY, f32::min);
         let hi = hi.into_iter().fold(f32::NEG_INFINITY, f32::max);
         (lo <= hi).then_some((lo, hi))
