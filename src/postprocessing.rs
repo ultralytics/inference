@@ -1305,10 +1305,10 @@ fn postprocess_obb(
 // Coordinates are in the letterboxed model-input space, so we still scale/pad-correct
 // them back to original-image space. No NMS, no class-score matrix.
 
-/// Walk a sorted end-to-end output and, for each row above the confidence threshold that
+/// Walk an end-to-end output and, for each row above the confidence threshold that
 /// passes the class filter, scale/clip its box and invoke `on_kept(base, [x1,y1,x2,y2],
-/// conf, cls)`. Rows are confidence-descending, so it stops at the first sub-threshold row
-/// and after `cap` kept detections — the shared box-decode of the detect/segment/pose paths.
+/// conf, cls)`. Skip NaN and sub-threshold scores, stopping after `cap` kept detections.
+/// Shared by the detect, segment, pose and OBB paths.
 ///
 /// `normalized_to` names the inference `(height, width)` for heads whose first four columns
 /// are `[cx, cy, w, h]` normalized to the input, as RT-DETR's are; `None` reads them as the
@@ -1324,28 +1324,12 @@ fn decode_end2end(
     normalized_to: Option<(u32, u32)>,
     mut on_kept: impl FnMut(usize, [f32; 4], f32, usize),
 ) {
-    // Stopping at the first sub-threshold row is only sound because every head feeding this
-    // walk emits confidence-descending rows: the YOLO end-to-end and RT-DETR graphs both end
-    // in `TopK(sorted=1)`. Assert it in debug so a head that ever stops sorting trips here
-    // instead of silently dropping the detections behind the first low-scoring row.
-    debug_assert!(
-        (0..num_preds)
-            .map(|i| output[i * feats + 4])
-            .filter(|conf| !conf.is_nan())
-            .collect::<Vec<_>>()
-            .windows(2)
-            .all(|pair| pair[1] <= pair[0]),
-        "decode_end2end expects confidence-descending rows"
-    );
     let mut kept = 0;
     for i in 0..num_preds {
         let base = i * feats;
         let conf = output[base + 4];
-        if conf.is_nan() {
+        if conf.is_nan() || conf < config.confidence_threshold {
             continue;
-        }
-        if conf < config.confidence_threshold {
-            break;
         }
         let cls = output[base + 5] as usize;
         if !config.keep_class(cls) {
@@ -2808,7 +2792,7 @@ mod tests {
         // Row0 above threshold, row1 below -> only one detection kept.
         let output = [
             10.0, 10.0, 50.0, 50.0, 0.9, 0.0, // keep
-            10.0, 10.0, 20.0, 20.0, 0.1, 0.0, // drop (sorted-desc break)
+            10.0, 10.0, 20.0, 20.0, 0.1, 0.0, // drop
         ];
         let r = postprocess_detect_end2end(
             &output,
@@ -2823,7 +2807,7 @@ mod tests {
 
     #[test]
     fn test_postprocess_detect_end2end_ignores_nan_scores() {
-        let output: Vec<_> = [f32::NAN, 0.9, f32::NAN, 0.5, 0.1]
+        let output: Vec<_> = [f32::NAN, 0.9, 0.1, f32::NAN, 0.5]
             .into_iter()
             .flat_map(|conf| [10.0, 10.0, 50.0, 50.0, conf, 0.0])
             .collect();
