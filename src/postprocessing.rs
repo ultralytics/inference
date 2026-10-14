@@ -1796,7 +1796,7 @@ fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> R
     };
     let x_lut: Vec<_> = (0..ow).map(|dx| axis(dx, ow, lw)).collect();
 
-    // Resample every source row to the output width once, then blend neighbouring rows: the
+    // Resample every source row to the output width once, then blend neighboring rows: the
     // scattered reads happen once per source row instead of twice per output pixel.
     let mut wide = vec![0f32; lh * ow];
     wide.par_chunks_mut(ow).enumerate().for_each(|(y, dst)| {

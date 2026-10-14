@@ -596,7 +596,7 @@ ort = { version = "=2.0.0-rc.14", features = ["lax-feature-matching"] }
 **OpenVINO IR 模型：** 启用 `openvino-native` feature（可与 `openvino` 同时启用）后，`--model` 也可以直接使用 `yolo export format=openvino` 导出的 `.xml` 文件或导出文件夹，并通过 OpenVINO 运行时直接推理，而不经过 ONNX Runtime。文件夹中需要 `metadata.yaml` 与 `.xml`、`.bin` 放在一起。需要安装 OpenVINO 运行时（`pip install openvino`、压缩包或系统软件包），并通过 `OPENVINO_INSTALL_DIR` 或库路径让 `libopenvino_c` 可被找到，构建时不需要安装 OpenVINO。安装链接和设置见 [`docs/OPENVINO.md`](docs/OPENVINO.md)。
 
 ```bash
-yolo export model=yolo26n.pt format=openvino                 # FP32，可加 half=True、int8=True、dynamic=True 或 batch=4
+yolo export model=yolo26n.pt format=openvino # FP32，可加 half=True、int8=True、dynamic=True 或 batch=4
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 

@@ -54,13 +54,13 @@ For a pip or archive install, set one of them:
 export LD_LIBRARY_PATH=$(python -c "import openvino, os; print(os.path.dirname(openvino.__file__))")/libs
 
 # archive
-source <extracted folder>/setupvars.sh
+source < extracted folder > /setupvars.sh
 ```
 
 ## Export and run
 
 ```bash
-yolo export model=yolo26n.pt format=openvino   # add half=True, int8=True, dynamic=True or batch=4
+yolo export model=yolo26n.pt format=openvino # add half=True, int8=True, dynamic=True or batch=4
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 
