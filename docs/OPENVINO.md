@@ -28,33 +28,57 @@ Building needs no OpenVINO install. The runtime libraries are loaded when the fi
 
 ## Get OpenVINO
 
-Install the OpenVINO runtime with any method on the [official install page](https://docs.openvino.ai/2026/get-started/install-openvino.html):
+Install the OpenVINO runtime for your system. The [official install page](https://docs.openvino.ai/2026/get-started/install-openvino.html) lists every method, and each system has its own guide: [Linux](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-linux.html), [Windows](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-windows.html) and [macOS](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-macos.html).
 
-| Method  | Where                                                                                                                                                                                                                                                                                                                         |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pip     | `pip install openvino` ([guide](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-pip.html), [PyPI](https://pypi.org/project/openvino/))                                                                                                                                                            |
-| Archive | [Linux](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-linux.html), [Windows](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-windows.html), [macOS](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-macos.html) |
-| Package | [APT](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-apt.html), [YUM](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-yum.html)                                                                                                                                      |
+| System  | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux   | [pip](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-pip.html), [archive](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-linux.html), [APT](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-apt.html), [YUM](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-yum.html), [ZYPPER](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-zypper.html), [Conda](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-conda.html), [Homebrew](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-brew.html), [vcpkg](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-vcpkg.html), [Docker](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-docker-linux.html) |
+| Windows | [pip](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-pip.html), [archive](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-windows.html), [WinGet](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-winget.html), [Conda](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-conda.html), [vcpkg](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-vcpkg.html)                                                                                                                                                                                                                                                                                                                                                                                                     |
+| macOS   | [pip](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-pip.html), [archive](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-macos.html), [Homebrew](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-brew.html), [Conda](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-conda.html), [vcpkg](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-vcpkg.html)                                                                                                                                                                                                                                                                                                                                                                                                       |
 
-Releases are also listed on [GitHub](https://github.com/openvinotoolkit/openvino/releases). The Rust bindings come from [`openvino-rs`](https://github.com/intel/openvino-rs).
+The quickest is `pip install openvino` ([PyPI](https://pypi.org/project/openvino/)). Releases are also listed on [GitHub](https://github.com/openvinotoolkit/openvino/releases). The Rust bindings come from [`openvino-rs`](https://github.com/intel/openvino-rs).
+
+Intel GPU and NPU devices need an Intel GPU or NPU and its driver, on Linux and Windows. On macOS only the CPU device is available.
 
 ## Make the runtime findable
 
-The loader looks for `libopenvino_c` in this order:
+The loader looks for the OpenVINO C library (`libopenvino_c`) in this order:
 
 1. `OPENVINO_INSTALL_DIR`, the OpenVINO install folder
-2. `INTEL_OPENVINO_DIR`, set by the archive's `setupvars.sh`
+2. `INTEL_OPENVINO_DIR`, set by the archive's `setupvars` script
 3. The library path: `LD_LIBRARY_PATH` on Linux, `PATH` on Windows, `DYLD_LIBRARY_PATH` on macOS
 4. Known install locations, so a system APT or YUM package needs no setup
 
 For a pip or archive install, set one of them:
 
+**Linux**
+
 ```bash
-# pip (Linux)
+# pip
 export LD_LIBRARY_PATH=$(python -c "import openvino, os; print(os.path.dirname(openvino.__file__))")/libs
 
 # archive
-source < extracted folder > /setupvars.sh
+source <extracted folder>/setupvars.sh
+```
+
+**Windows**
+
+```bat
+:: pip
+for /f %i in ('python -c "import openvino, os; print(os.path.dirname(openvino.__file__))"') do set PATH=%i\libs;%PATH%
+
+:: archive
+<extracted folder>\setupvars.bat
+```
+
+**macOS**
+
+```bash
+# pip
+export DYLD_LIBRARY_PATH=$(python -c "import openvino, os; print(os.path.dirname(openvino.__file__))")/libs
+
+# archive
+source <extracted folder>/setupvars.sh
 ```
 
 ## Export and run
