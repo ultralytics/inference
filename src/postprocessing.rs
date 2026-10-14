@@ -1338,7 +1338,6 @@ fn decode_end2end(
     for i in 0..num_preds {
         let base = i * feats;
         let conf = output[base + 4];
-        // A NaN score (a driver returning NaN) is not a detection, even at a `0.0` threshold.
         if conf.is_nan() || conf < config.confidence_threshold {
             break;
         }
