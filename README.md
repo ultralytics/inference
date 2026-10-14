@@ -597,14 +597,12 @@ Providers missing from the chosen build are then absent at runtime and inference
 
 > `openvino` uses a prebuilt ONNX Runtime with the OpenVINO provider (Linux x64 and Windows x64). The provider needs the OpenVINO runtime installed on the machine, and a `--device intel:*` run stops with an install hint when it is missing.
 
-**OpenVINO IR models:** with the `openvino-native` feature (it can be combined with `openvino`), `--model` also takes a native OpenVINO export, either the `.xml` file or the folder from `yolo export format=openvino`, and runs it through the OpenVINO runtime directly instead of ONNX Runtime. The folder needs its `metadata.yaml` beside the `.xml` and `.bin`. Install the OpenVINO runtime (`pip install openvino`, an archive, or a system package) and make `libopenvino_c` findable through `OPENVINO_INSTALL_DIR` or the library path; the crate loads it at run time, so building needs no OpenVINO install. Install links and setup are in [`docs/OPENVINO.md`](docs/OPENVINO.md).
+**OpenVINO IR models:** with the `openvino-native` feature (it can be combined with `openvino`), `--model` also takes a native OpenVINO export, the `.xml` file or the folder from `yolo export format=openvino`, and runs it through the OpenVINO runtime instead of ONNX Runtime. Every task (detect, segment, semantic, depth, classify, pose, obb) runs on `intel:cpu`, `intel:gpu` and `intel:npu`, and from Rust with `YOLOModel::load("yolo26n_openvino_model")`. Building needs no OpenVINO install, the runtime is loaded when the first model opens. Setup and details are in [`docs/OPENVINO.md`](docs/OPENVINO.md).
 
 ```bash
 yolo export model=yolo26n.pt format=openvino # FP32, add half=True, int8=True, dynamic=True or batch=4
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
-
-All five tasks (detect, segment, classify, pose, obb) of YOLO11 and YOLO26 load in FP32, FP16, INT8, dynamic, and fixed-batch exports on `intel:cpu`, `intel:gpu` and `intel:npu` with matching detections, and depth loads in FP32, FP16, dynamic and fixed-batch exports. Use it from Rust the same way, `YOLOModel::load("yolo26n_openvino_model")`. A few details: a dynamic export is pinned to `--imgsz` and `--batch` because dynamic shapes run slower on the CPU and make the GPU recompile for each new image shape, and the NPU runs batched and dynamic exports at batch 1 because batching gains nothing there. The precision is fixed by the export, so `--quantize` does not apply and gives a warning, `InferenceConfig::with_threads` sets the CPU inference threads, and `cuda:`, `coreml` and other non-Intel devices are rejected. Depth models skip the graph's final upsample and are resampled on the host, because the NPU computes that upsample wrongly. The NPU still returns depth values that differ from the CPU, an NPU precision limit also seen in Python.
 
 **Available Features:**
 

@@ -593,14 +593,12 @@ ort = { version = "=2.0.0-rc.14", features = ["lax-feature-matching"] }
 
 > `openvino` 使用包含 OpenVINO provider 的预编译 ONNX Runtime（Linux x64 和 Windows x64）。该 provider 需要机器上已安装 OpenVINO 运行时，缺失时 `--device intel:*` 会停止并给出安装提示。
 
-**OpenVINO IR 模型：** 启用 `openvino-native` feature（可与 `openvino` 同时启用）后，`--model` 也可以直接使用 `yolo export format=openvino` 导出的 `.xml` 文件或导出文件夹，并通过 OpenVINO 运行时直接推理，而不经过 ONNX Runtime。文件夹中需要 `metadata.yaml` 与 `.xml`、`.bin` 放在一起。需要安装 OpenVINO 运行时（`pip install openvino`、压缩包或系统软件包），并通过 `OPENVINO_INSTALL_DIR` 或库路径让 `libopenvino_c` 可被找到，构建时不需要安装 OpenVINO。安装链接和设置见 [`docs/OPENVINO.md`](docs/OPENVINO.md)。
+**OpenVINO IR 模型：** 启用 `openvino-native` feature（可与 `openvino` 同时启用）后，`--model` 也可以直接使用 `yolo export format=openvino` 导出的 `.xml` 文件或导出文件夹，并通过 OpenVINO 运行时推理，而不经过 ONNX Runtime。所有任务（detect、segment、semantic、depth、classify、pose、obb）都可在 `intel:cpu`、`intel:gpu` 和 `intel:npu` 上运行，在 Rust 中用 `YOLOModel::load("yolo26n_openvino_model")` 加载。构建时不需要安装 OpenVINO，运行时会在首次打开模型时加载。设置和细节见 [`docs/OPENVINO.md`](docs/OPENVINO.md)。
 
 ```bash
 yolo export model=yolo26n.pt format=openvino # FP32，可加 half=True、int8=True、dynamic=True 或 batch=4
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
-
-YOLO11 和 YOLO26 的五类任务（detect、segment、classify、pose、obb）的 FP32、FP16、INT8、动态和固定 batch 导出都可在 `intel:cpu`、`intel:gpu` 和 `intel:npu` 上加载且检测结果一致，depth 支持 FP32、FP16、动态和固定 batch 导出。在 Rust 中用法相同：`YOLOModel::load("yolo26n_openvino_model")`。几点细节：动态导出会固定为 `--imgsz` 和 `--batch`，因为动态形状在 CPU 上更慢，并且会让 GPU 对每个新的图像尺寸重新编译；NPU 以 batch 1 运行带 batch 和动态的导出，因为批处理在 NPU 上没有收益。精度由导出决定，因此 `--quantize` 不起作用并会给出警告，`InferenceConfig::with_threads` 用于设置 CPU 推理线程数，`cuda:`、`coreml` 等非 Intel 设备会被拒绝。Depth 模型会跳过图中最后的上采样，改在主机上重采样，因为 NPU 计算该上采样是错误的。NPU 返回的深度值仍与 CPU 不同，这是 NPU 的精度限制，Python 中也是如此。
 
 **可用 Features：**
 
