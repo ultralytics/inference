@@ -19,18 +19,11 @@ Building needs no OpenVINO install. The runtime libraries are loaded when the fi
 
 ## Requirements
 
-| Component       | Tested | How to verify                                                                         |
-| --------------- | ------ | ------------------------------------------------------------------------------------- |
-| OpenVINO        | 2026.4 | `python -c "import openvino as ov; print(ov.Core().available_devices)"` (pip install) |
-| Intel GPU setup | -      | `GPU` appears in `available_devices`, see [GPU configuration][gpu]                    |
-| Intel NPU setup | -      | `NPU` appears in `available_devices`, see [NPU configuration][npu]                    |
-| Rust            | 1.92+  | `rustc --version`                                                                     |
+- OpenVINO runtime (tested with 2026.4), installed with the official guide for [Linux](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-linux.html), [Windows](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-windows.html) or [macOS](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-macos.html)
+- For `intel:gpu` or `intel:npu`, an Intel GPU or NPU with its driver ([GPU setup][gpu], [NPU setup][npu]). macOS has the CPU device only.
+- Rust 1.92+
 
-## Get OpenVINO
-
-Install the OpenVINO runtime with the official guide for your system, using any method it offers: [Linux](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-linux.html), [Windows](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-windows.html) or [macOS](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-macos.html). The Rust bindings come from [`openvino-rs`](https://github.com/intel/openvino-rs).
-
-Intel GPU and NPU devices need an Intel GPU or NPU and its driver, on Linux and Windows. On macOS only the CPU device is available.
+`python -c "import openvino as ov; print(ov.Core().available_devices)"` lists the devices OpenVINO can see.
 
 ## Make the runtime findable
 
