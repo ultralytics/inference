@@ -1270,8 +1270,11 @@ impl YOLOModel {
     /// a `[B, H, W] uint8` class map. Lets us skip f32 logits extraction + CPU argmax for semantic segmentation.
     fn has_semantic_mask_output(&self) -> bool {
         #[cfg(feature = "openvino-native")]
-        if matches!(self.backend, Backend::OpenVino(_)) {
-            return false;
+        if let Backend::OpenVino(ov) = &self.backend {
+            return ov
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .mask_output();
         }
         let outs = self.backend.ort().outputs();
         outs.len() == 1
@@ -2017,7 +2020,7 @@ impl YOLOModel {
         // Resolve the output dtype path before the session is mutably borrowed below.
         let semantic_mask_output = self.has_semantic_mask_output();
 
-        // A native OpenVINO model takes f32 only and hands back owned tensors.
+        // A native OpenVINO model takes f32 input and hands back owned tensors.
         #[cfg(feature = "openvino-native")]
         if let Backend::OpenVino(ov) = &mut self.backend {
             let ov = ov
@@ -2034,6 +2037,20 @@ impl YOLOModel {
                 start.elapsed().as_secs_f64() * 1000.0 / images.len() as f64,
                 0.0,
             );
+            if semantic_mask_output {
+                let bufs = tensors
+                    .iter()
+                    .map(crate::openvino::view)
+                    .collect::<Result<Vec<_>>>()?;
+                return Ok(Self::semantic_mask_batch_results(
+                    &bufs,
+                    &self.metadata.names,
+                    image_arrays,
+                    paths,
+                    &speed,
+                    inference_shape,
+                ));
+            }
             let bufs = tensors
                 .iter()
                 .map(crate::openvino::view)

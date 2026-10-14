@@ -26,6 +26,8 @@ pub struct OvSession {
     /// Input dimensions as `[N, C, H, W]`, always static once loaded.
     input_dims: Vec<i64>,
     outputs: usize,
+    /// The only output is a `uint8` class map, as in semantic exports with `ArgMax` baked in.
+    mask_output: bool,
     /// The input tensor, filled by every run.
     input: Tensor,
 }
@@ -98,6 +100,7 @@ impl OvSession {
     /// each) and the CPU runs dynamic shapes about 1.5x slower, so a dynamic model is pinned to
     /// `static_input` (`[N, C, H, W]`) on every device. The NPU always
     /// runs at batch 1, for batched and dynamic exports alike: batching gains nothing there.
+    #[allow(clippy::too_many_lines)]
     pub fn load(
         xml: &Path,
         device: Option<&Device>,
@@ -184,6 +187,12 @@ impl OvSession {
             ));
         }
         let outputs = model.get_outputs_len().map_err(load_err)?;
+        let mask_output = outputs == 1
+            && model
+                .get_output_by_index(0)
+                .and_then(|n| n.get_element_type())
+                .map_err(load_err)?
+                == ElementType::U8;
         if threads > 0 && device == DeviceType::CPU {
             core.set_property(
                 &device,
@@ -204,12 +213,18 @@ impl OvSession {
             input_dims: dims,
             input,
             outputs,
+            mask_output,
         })
     }
 
     /// Model input dimensions as `[N, C, H, W]`.
     pub fn input_dims(&self) -> &[i64] {
         &self.input_dims
+    }
+
+    /// Whether the only output is a `uint8` class map rather than f32 tensors.
+    pub const fn mask_output(&self) -> bool {
+        self.mask_output
     }
 
     /// Run one forward pass and return the output tensors.
@@ -232,17 +247,33 @@ impl OvSession {
     }
 }
 
-/// An output tensor as its f32 data and `[usize]` shape.
+/// Element types an output tensor is read as.
+pub trait Element {
+    /// The matching `OpenVINO` element type.
+    const TYPE: ElementType;
+}
+
+impl Element for f32 {
+    const TYPE: ElementType = ElementType::F32;
+}
+
+impl Element for u8 {
+    const TYPE: ElementType = ElementType::U8;
+}
+
+/// An output tensor as its data and `[usize]` shape. `get_data` reinterprets the raw bytes,
+/// so the element type is checked first.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub fn view(tensor: &Tensor) -> Result<(&[f32], Vec<usize>)> {
+pub fn view<T: Element>(tensor: &Tensor) -> Result<(&[T], Vec<usize>)> {
     let dtype = tensor.get_element_type().map_err(run_err)?;
-    if dtype != ElementType::F32 {
+    if dtype != T::TYPE {
         return Err(run_err(format!(
-            "OpenVINO models must return f32 outputs, not {dtype:?}"
+            "expected a {:?} output, not {dtype:?}",
+            T::TYPE
         )));
     }
     let shape = tensor.get_shape().map_err(run_err)?;
-    let data = tensor.get_data::<f32>().map_err(run_err)?;
+    let data = tensor.get_data::<T>().map_err(run_err)?;
     Ok((
         data,
         shape.get_dimensions().iter().map(|&d| d as usize).collect(),
