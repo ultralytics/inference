@@ -88,14 +88,18 @@ yolo export model=yolo26n.pt format=openvino # add half=True, int8=True, dynamic
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 
-```rust
+```rust,no_run
 use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
 
-let config = InferenceConfig::new()
-    .with_device(Device::IntelNpu) // IntelCpu, IntelGpu or IntelNpu
-    .with_threads(8);              // CPU inference threads
-let mut model = YOLOModel::load_with_config("yolo26n_openvino_model", config)?;
-let results = model.predict("assets/bus.jpg")?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = InferenceConfig::new()
+        .with_device(Device::IntelNpu) // IntelCpu, IntelGpu or IntelNpu
+        .with_threads(8); // CPU inference threads
+    let mut model = YOLOModel::load_with_config("yolo26n_openvino_model", config)?;
+    let results = model.predict("assets/bus.jpg")?;
+    println!("{} results", results.len());
+    Ok(())
+}
 ```
 
 The run prints `Using OpenVINO Runtime` when the native path is active.
