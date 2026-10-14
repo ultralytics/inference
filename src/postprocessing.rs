@@ -1329,14 +1329,17 @@ fn decode_end2end(
     // in `TopK(sorted=1)`. Assert it in debug so a head that ever stops sorting trips here
     // instead of silently dropping the detections behind the first low-scoring row.
     debug_assert!(
-        (1..num_preds).all(|i| output[i * feats + 4] <= output[(i - 1) * feats + 4]),
+        (1..num_preds).all(|i| {
+            output[i * feats + 4].is_nan() || output[i * feats + 4] <= output[(i - 1) * feats + 4]
+        }),
         "decode_end2end expects confidence-descending rows"
     );
     let mut kept = 0;
     for i in 0..num_preds {
         let base = i * feats;
         let conf = output[base + 4];
-        if conf < config.confidence_threshold {
+        // A NaN score (a driver returning NaN) is not a detection, even at a `0.0` threshold.
+        if conf.is_nan() || conf < config.confidence_threshold {
             break;
         }
         let cls = output[base + 5] as usize;
@@ -2811,6 +2814,24 @@ mod tests {
             None,
         );
         assert_eq!(r.boxes.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_postprocess_detect_end2end_ignores_nan_scores() {
+        let output = [10.0, 10.0, 50.0, 50.0, f32::NAN, 0.0];
+        let config = InferenceConfig {
+            confidence_threshold: 0.0,
+            ..InferenceConfig::default()
+        };
+        let r = postprocess_detect_end2end(
+            &output,
+            &[1, 1, 6],
+            &unit_preprocess((100, 100)),
+            &config,
+            results_for(1, (100, 100), (640, 640)),
+            None,
+        );
+        assert!(r.boxes.is_none_or(|b| b.is_empty()));
     }
 
     #[test]
