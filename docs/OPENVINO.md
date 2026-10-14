@@ -58,7 +58,7 @@ For a pip or archive install, set one of them:
 export LD_LIBRARY_PATH=$(python -c "import openvino, os; print(os.path.dirname(openvino.__file__))")/libs
 
 # archive
-source <extracted folder>/setupvars.sh
+source < extracted folder > /setupvars.sh
 ```
 
 **Windows**
@@ -78,7 +78,7 @@ for /f %i in ('python -c "import openvino, os; print(os.path.dirname(openvino.__
 export DYLD_LIBRARY_PATH=$(python -c "import openvino, os; print(os.path.dirname(openvino.__file__))")/libs
 
 # archive
-source <extracted folder>/setupvars.sh
+source < extracted folder > /setupvars.sh
 ```
 
 ## Export and run
