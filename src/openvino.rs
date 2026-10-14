@@ -227,19 +227,28 @@ impl OvSession {
         self.mask_output
     }
 
-    /// Run one forward pass and return the output tensors.
-    pub fn run(&mut self, input: &Array4<f32>) -> Result<Vec<Tensor>> {
-        let input = input.as_standard_layout();
+    /// Run one forward pass over `inputs`, which together fill the model's batch, and return
+    /// the output tensors.
+    pub fn run<'a>(
+        &mut self,
+        inputs: impl IntoIterator<Item = &'a Array4<f32>>,
+    ) -> Result<Vec<Tensor>> {
         let data = self.input.get_data_mut::<f32>().map_err(run_err)?;
-        let input = input.as_slice().expect("standard layout is contiguous");
-        if data.len() != input.len() {
+        let mut filled = 0;
+        for input in inputs {
+            let input = input.as_standard_layout();
+            let src = input.as_slice().expect("standard layout is contiguous");
+            data.get_mut(filled..filled + src.len())
+                .ok_or_else(|| run_err("input is larger than the model input"))?
+                .copy_from_slice(src);
+            filled += src.len();
+        }
+        if filled != data.len() {
             return Err(run_err(format!(
-                "input has {} values, the model takes {}",
-                input.len(),
+                "input has {filled} values, the model takes {}",
                 data.len()
             )));
         }
-        data.copy_from_slice(input);
         self.request.infer().map_err(run_err)?;
         (0..self.outputs)
             .map(|i| self.request.get_output_tensor_by_index(i).map_err(run_err))

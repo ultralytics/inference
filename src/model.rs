@@ -1373,7 +1373,7 @@ impl YOLOModel {
                     .get_mut()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let dummy = ndarray::Array4::zeros((batch, 3, target_size.0, target_size.1));
-                (0..Self::OPENVINO_WARMUP_RUNS).try_for_each(|_| ov.run(&dummy).map(drop))
+                (0..Self::OPENVINO_WARMUP_RUNS).try_for_each(|_| ov.run([&dummy]).map(drop))
             }
         };
 
@@ -2027,10 +2027,7 @@ impl YOLOModel {
                 .get_mut()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let start = Instant::now();
-            let tensors = match preprocessed_results.as_slice() {
-                [single] => ov.run(&single.tensor)?,
-                batch => ov.run(&Self::concat_f32_batch(batch)?)?,
-            };
+            let tensors = ov.run(preprocessed_results.iter().map(|p| &p.tensor))?;
             #[allow(clippy::cast_precision_loss)]
             let speed = Speed::new(
                 preprocess_time,
