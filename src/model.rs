@@ -800,13 +800,9 @@ impl YOLOModel {
             metadata.task == Task::Depth,
             config.num_threads,
         )?;
-        let &[_, _, h, w] = ov.input_dims() else {
-            return Err(InferenceError::ModelLoadError(
-                "OpenVINO models must take an [N, C, H, W] input".to_owned(),
-            ));
-        };
+        let dims = ov.input_dims();
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let imgsz = (h as usize, w as usize);
+        let imgsz = (dims[2] as usize, dims[3] as usize);
         if let Some(requested) = config.imgsz
             && requested != imgsz
         {

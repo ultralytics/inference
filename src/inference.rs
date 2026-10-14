@@ -126,9 +126,9 @@ pub struct InferenceConfig {
     /// If `None`, defaults to 1 (single-image inference).
     pub batch: Option<usize>,
     /// Number of intra-op threads for ONNX Runtime, or inference threads for `OpenVINO` on the CPU.
-    /// Setting this to `0` lets [`YOLOModel::load`](crate::YOLOModel::load) resolve it to
+    /// Setting this to `0` lets ONNX Runtime resolve it to
     /// [`std::thread::available_parallelism`] when it builds the session, falling back to
-    /// `4` if that cannot be determined.
+    /// `4` if that cannot be determined. Native `OpenVINO` uses its runtime default.
     pub num_threads: usize,
     /// Requested inference precision. `None` uses the model's native precision.
     pub quantize: Option<Quantization>,
@@ -315,7 +315,7 @@ impl InferenceConfig {
     ///
     /// # Arguments
     ///
-    /// * `threads` - The number of intra-op threads. Set to `0` to use every available core.
+    /// * `threads` - The number of inference threads. Set to `0` for the backend default.
     ///
     /// # Returns
     ///

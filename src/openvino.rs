@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use ndarray::Array4;
 use openvino::{
-    CompiledModel, Core, DeviceType, ElementType, InferRequest, Model, PartialShape, RwPropertyKey,
-    Shape, Tensor,
+    CompiledModel, Core, DeviceType, ElementType, InferRequest, PartialShape, RwPropertyKey, Shape,
+    Tensor,
 };
 
 use crate::Device;
@@ -148,33 +148,34 @@ impl OvSession {
                 .read_model_from_file(&path(xml), &path(&bin))
                 .map_err(load_err)?,
         };
-        let input_dims = |model: &Model| -> Result<Vec<i64>> {
-            Ok(model
-                .get_input_by_index(0)
-                .and_then(|n| n.get_partial_shape())
-                .map_err(load_err)?
-                .get_dimensions()
-                .iter()
-                .map(openvino::Dimension::get_min)
-                .collect())
-        };
-        let mut dims = input_dims(&model)?;
-        let pinned = if model.is_dynamic() {
+        let shape = model
+            .get_input_by_index(0)
+            .and_then(|n| n.get_partial_shape())
+            .map_err(load_err)?;
+        let mut dims: Vec<i64> = shape
+            .get_dimensions()
+            .iter()
+            .map(openvino::Dimension::get_min)
+            .collect();
+        if dims.len() != 4 {
+            return Err(load_err("OpenVINO models must take an [N, C, H, W] input"));
+        }
+        let pinned = if shape.is_dynamic() {
             let batch = if device == DeviceType::NPU {
                 1
             } else {
                 static_input[0]
             };
             Some([batch, static_input[1], static_input[2], static_input[3]])
-        } else if device == DeviceType::NPU && dims.first().is_some_and(|&n| n > 1) {
+        } else if device == DeviceType::NPU && dims[0] > 1 {
             Some([1, dims[1], dims[2], dims[3]])
         } else {
             None
         };
-        if let Some(shape) = pinned {
-            let shape = PartialShape::new_static(4, &shape).map_err(load_err)?;
+        if let Some(pinned) = pinned {
+            let shape = PartialShape::new_static(4, &pinned).map_err(load_err)?;
             model.reshape_single_input(&shape).map_err(load_err)?;
-            dims = input_dims(&model)?;
+            dims = pinned.to_vec();
         }
         let input = model.get_input_by_index(0).map_err(load_err)?;
         if input.get_element_type().map_err(load_err)? != ElementType::F32 {
@@ -234,6 +235,12 @@ impl OvSession {
 /// An output tensor as its f32 data and `[usize]` shape.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn view(tensor: &Tensor) -> Result<(&[f32], Vec<usize>)> {
+    let dtype = tensor.get_element_type().map_err(run_err)?;
+    if dtype != ElementType::F32 {
+        return Err(run_err(format!(
+            "OpenVINO models must return f32 outputs, not {dtype:?}"
+        )));
+    }
     let shape = tensor.get_shape().map_err(run_err)?;
     let data = tensor.get_data::<f32>().map_err(run_err)?;
     Ok((
