@@ -360,6 +360,8 @@ YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are suppor
 | Webcam      | `0`,`1`                         | Webcam index (0 = default webcam) |
 | URL         | `https://example.com/image.jpg` | Remote image URL                  |
 
+Supported image formats: `.avif`, `.bmp`, `.dng`, `.gif`, `.heic`, `.heif`, `.jp2`, `.jpeg`, `.jpg`, `.mpo`, `.png`, `.tif`, `.tiff` and `.webp`. Images are read by their contents, and AV1 or HEVC coded `.avif`, `.heic` and `.heif` files are not decoded yet.
+
 ### As a Rust Library
 
 Add to your `Cargo.toml` (choose one):
