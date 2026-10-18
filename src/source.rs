@@ -1061,9 +1061,9 @@ mod tests {
         assert!(it.next().is_none());
     }
 
-    /// Every image in COCO12-Formats, one per supported extension, loads. Skips offline.
+    /// One image per supported format (the COCO12-Formats dataset) loads. Skips offline.
     #[test]
-    fn test_coco12_formats_load() {
+    fn test_image_formats_load() {
         let Ok(zip) = crate::download::download_image(
             "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco12-formats.zip",
         ) else {
