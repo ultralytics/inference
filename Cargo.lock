@@ -945,6 +945,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hayro-jpeg2000"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "122c5f834c37a2260b9c851bb8be685cf539b2a8b94b704a931ef7d2525d5835"
+dependencies = [
+ "image",
+ "moxcms",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2519,6 +2529,7 @@ dependencies = [
  "fast_image_resize",
  "ffmpeg-next",
  "half",
+ "hayro-jpeg2000",
  "image",
  "imageproc",
  "jpeg-decoder",

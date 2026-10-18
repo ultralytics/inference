@@ -61,7 +61,7 @@ fn render_scale(width: u32, height: u32) -> (f32, i32) {
 ///
 /// JPEG files are decoded with `jpeg_decoder` directly to avoid a stride mismatch
 /// that can corrupt images decoded through the default image crate backend.
-/// All other formats fall through to `image::open`.
+/// All other files are decoded by their contents with `source::open_image`.
 ///
 /// # Errors
 ///
@@ -98,7 +98,7 @@ pub fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
             }
         }
     }
-    image::open(path)
+    crate::source::open_image(path_obj)
 }
 /// Return the local path to `font`, downloading it from the Ultralytics asset CDN if absent.
 ///

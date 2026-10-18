@@ -5,12 +5,31 @@
 //! This module provides abstractions for various input sources including
 //! images, videos, webcams, and streaming URLs.
 
+use std::io::{BufRead, Cursor, Seek};
 use std::path::{Path, PathBuf};
 
-use image::DynamicImage;
+use image::{DynamicImage, ImageReader};
 use ndarray::Array3;
 
 use crate::error::{InferenceError, Result};
+
+/// Image file extensions read as images: the Ultralytics Python `IMG_FORMATS` plus `gif`.
+const IMAGE_EXTENSIONS: [&str; 14] = [
+    "avif", "bmp", "dng", "gif", "heic", "heif", "jp2", "jpeg", "jpg", "mpo", "png", "tif", "tiff",
+    "webp",
+];
+
+/// Decode an image from its contents rather than its extension, so a `.mpo`, `.dng` or any
+/// mislabeled file holding JPEG, TIFF or JPEG 2000 data still loads.
+fn decode_image<R: BufRead + Seek>(reader: ImageReader<R>) -> image::ImageResult<DynamicImage> {
+    hayro_jpeg2000::integration::register_decoding_hook();
+    reader.with_guessed_format()?.decode()
+}
+
+/// Open and decode the image file at `path`, see [`decode_image`].
+pub(crate) fn open_image(path: &Path) -> image::ImageResult<DynamicImage> {
+    decode_image(ImageReader::open(path)?)
+}
 
 /// Represents different input sources for inference.
 #[derive(Debug, Clone)]
@@ -95,17 +114,7 @@ impl Source {
 
         std::path::Path::new(path_part)
             .extension()
-            .is_some_and(|ext| {
-                let s = ext.to_string_lossy();
-                s.eq_ignore_ascii_case("jpg")
-                    || s.eq_ignore_ascii_case("jpeg")
-                    || s.eq_ignore_ascii_case("png")
-                    || s.eq_ignore_ascii_case("bmp")
-                    || s.eq_ignore_ascii_case("gif")
-                    || s.eq_ignore_ascii_case("webp")
-                    || s.eq_ignore_ascii_case("tiff")
-                    || s.eq_ignore_ascii_case("tif")
-            })
+            .is_some_and(|ext| IMAGE_EXTENSIONS.contains(&&*ext.to_string_lossy()))
     }
 }
 
@@ -544,11 +553,7 @@ impl SourceIterator {
     /// Check if a path is an image file based on extension.
     fn is_image_file(path: &Path) -> bool {
         path.extension().is_some_and(|ext| {
-            let ext = ext.to_string_lossy().to_lowercase();
-            matches!(
-                ext.as_str(),
-                "jpg" | "jpeg" | "png" | "bmp" | "gif" | "webp" | "tiff" | "tif"
-            )
+            IMAGE_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str())
         })
     }
 
@@ -563,7 +568,7 @@ impl SourceIterator {
             InferenceError::ImageError(format!("Failed to read response from {url}: {e}"))
         })?;
 
-        image::load_from_memory(&bytes).map_err(|e| {
+        decode_image(ImageReader::new(Cursor::new(bytes))).map_err(|e| {
             InferenceError::ImageError(format!("Failed to decode image from {url}: {e}"))
         })
     }
@@ -604,7 +609,7 @@ impl SourceIterator {
 
         self.current_frame += 1;
 
-        match image::open(path) {
+        match open_image(path) {
             Ok(img) => Some(Ok((img, meta))),
             Err(e) => Some(Err(InferenceError::ImageError(format!(
                 "Failed to load {}: {e}",

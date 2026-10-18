@@ -1470,8 +1470,8 @@ impl YOLOModel {
         // Warmup first to fail fast before loading/decoding the image
         self.warmup()?;
 
-        // Load image using standard image crate
-        let img = image::open(path).map_err(|e| {
+        // Decode the image from its contents
+        let img = crate::source::open_image(path).map_err(|e| {
             InferenceError::ImageError(format!("Failed to load image {}: {e}", path.display()))
         })?;
 
