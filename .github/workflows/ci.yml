@@ -172,7 +172,7 @@ jobs:
         run: cargo +stable clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@main
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 
@@ -362,7 +362,7 @@ jobs:
         run: cargo clippy -p ultralytics-inference-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@main
+        uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack@0.15.0
 
@@ -407,7 +407,7 @@ jobs:
         run: rustup show
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@main
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 

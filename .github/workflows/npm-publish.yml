@@ -70,7 +70,7 @@ jobs:
           key: wasm
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@main
+        uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack@0.15.0
 
