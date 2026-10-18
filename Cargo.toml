@@ -130,7 +130,7 @@ ort = { version = "=2.0.0-rc.14", default-features = false, features = [
     "tls-native",
     "num-complex",
 ] }
-# Pure-Rust JPEG 2000 (.jp2) decoder, registered as an `image` decoding hook.
+# JPEG 2000 (.jp2) decoding
 hayro-jpeg2000 = { version = "^0.4.1", default-features = false, features = ["image"] }
 ureq = "^3.3.0"
 dirs = "^7.0"
@@ -197,6 +197,7 @@ all = ["annotate", "visualize", "video"]
 [dev-dependencies]
 # Testing dependencies
 tempfile = "3"
+zip = { version = "^9.0", default-features = false, features = ["deflate-flate2"] }
 
 
 [profile.dev]

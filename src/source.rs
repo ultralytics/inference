@@ -13,20 +13,19 @@ use ndarray::Array3;
 
 use crate::error::{InferenceError, Result};
 
-/// Image file extensions read as images: the Ultralytics Python `IMG_FORMATS` plus `gif`.
+/// Image extensions: the Ultralytics Python `IMG_FORMATS` plus `gif`.
 const IMAGE_EXTENSIONS: [&str; 14] = [
     "avif", "bmp", "dng", "gif", "heic", "heif", "jp2", "jpeg", "jpg", "mpo", "png", "tif", "tiff",
     "webp",
 ];
 
-/// Decode an image from its contents rather than its extension, so a `.mpo`, `.dng` or any
-/// mislabeled file holding JPEG, TIFF or JPEG 2000 data still loads.
+/// Decode an image by its contents rather than its extension, with JPEG 2000 support.
 fn decode_image<R: BufRead + Seek>(reader: ImageReader<R>) -> image::ImageResult<DynamicImage> {
     hayro_jpeg2000::integration::register_decoding_hook();
     reader.with_guessed_format()?.decode()
 }
 
-/// Open and decode the image file at `path`, see [`decode_image`].
+/// Open and decode the image file at `path`.
 pub(crate) fn open_image(path: &Path) -> image::ImageResult<DynamicImage> {
     decode_image(ImageReader::open(path)?)
 }
@@ -1085,5 +1084,25 @@ mod tests {
         }
         assert!(decoded >= 1);
         assert!(it.next().is_none());
+    }
+
+    /// Every image in COCO12-Formats, one per supported extension, loads. Skips offline.
+    #[test]
+    fn test_coco12_formats_load() {
+        let Ok(zip) = crate::download::download_image(
+            "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco12-formats.zip",
+        ) else {
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        zip::ZipArchive::new(std::fs::File::open(zip).unwrap())
+            .unwrap()
+            .extract(tmp.path())
+            .unwrap();
+        for split in ["train", "val"] {
+            let dir = tmp.path().join("coco12-formats/images").join(split);
+            let it = SourceIterator::new(Source::Directory(dir)).unwrap();
+            assert_eq!(it.map(Result::unwrap).count(), 6);
+        }
     }
 }

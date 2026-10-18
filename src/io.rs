@@ -506,11 +506,13 @@ impl SaveResults {
                 let filename = format!("{video_stem}_{frame_num}.jpg");
                 (frames_dir, filename)
             } else {
-                let mut filename =
-                    PathBuf::from(Path::new(&meta.path).file_name().unwrap_or_default());
-                // Formats we can read but not write (.heic, .dng, .jp2, ...) are saved as JPEG.
+                let mut filename = Path::new(&meta.path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_os_string();
+                // Formats we can read but not write are saved as JPEG, e.g. photo.jp2.jpg.
                 if !image::ImageFormat::from_path(&filename).is_ok_and(|f| f.writing_enabled()) {
-                    filename.set_extension("jpg");
+                    filename.push(".jpg");
                 }
                 (
                     self.save_dir.clone(),

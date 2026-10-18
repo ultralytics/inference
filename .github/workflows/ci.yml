@@ -73,17 +73,6 @@ jobs:
         if: matrix.os != 'macos-latest'
         run: cargo test --no-default-features --features annotate
 
-      # COCO12-Formats holds one image per supported extension, and all 12 must load.
-      - name: Image formats (COCO12-Formats)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          curl -fsSL https://github.com/ultralytics/assets/releases/download/v0.0.0/coco12-formats.zip -o coco12-formats.zip
-          unzip -q coco12-formats.zip
-          for split in train val; do
-            cargo run -q --no-default-features --features annotate -- predict --source coco12-formats/images/$split --save 2>&1 | tee predict.log
-            test "$(grep -cE '^image [0-9]+/6 ' predict.log)" -eq 6
-          done
-
       - name: Clippy (annotate + cuda + tensorrt)
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --all-targets --no-default-features --features annotate,cuda,tensorrt -- -D warnings
