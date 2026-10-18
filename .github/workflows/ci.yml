@@ -172,7 +172,9 @@ jobs:
         run: cargo +stable clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
 
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked --force
+        uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+        with:
+          tool: cargo-llvm-cov
 
       # One run covers the src/cuda_inference.rs kernel tests, which need a real
       # device, and the GPU inference tests, which are #[ignore]d so that hosted
@@ -273,7 +275,7 @@ jobs:
       - name: Build (annotate + video features)
         run: |
           export RUSTFLAGS="-C link-arg=$(clang --print-file-name=libclang_rt.osx.a)"
-          cargo build --release --features "annotate,video,visualize" --bin ultralytics-inference
+          cargo build --features "annotate,video,visualize" --bin ultralytics-inference
 
   # Windows FFmpeg 8 and 9 video build test
   build-windows-video:
@@ -360,7 +362,9 @@ jobs:
         run: cargo clippy -p ultralytics-inference-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked --force
+        uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+        with:
+          tool: wasm-pack@0.15.0
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -378,7 +382,6 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
-    needs: [test]
     permissions:
       contents: read
       id-token: write
@@ -404,7 +407,9 @@ jobs:
         run: rustup show
 
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked --force
+        uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+        with:
+          tool: cargo-llvm-cov
 
       - name: Coverage
         # Exclude code that host-side unit tests cannot exercise: the minifb viewer

@@ -70,7 +70,9 @@ jobs:
           key: wasm
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack@0.15.0 --locked --force
+        uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+        with:
+          tool: wasm-pack@0.15.0
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
