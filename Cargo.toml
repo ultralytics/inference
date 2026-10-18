@@ -100,7 +100,7 @@ ndarray = { version = "^0.17" }
 
 # Core - FP16 support (required by ort's half feature)
 half = { version = "^2.7", features = ["num-traits"] }
-bytemuck = { version = "^1.25", features = ["derive"] }
+bytemuck = "^1.25"
 
 cudarc = { version = "^0.19.8", optional = true, default-features = false, features = [
     "driver",
@@ -208,6 +208,10 @@ split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Tests run in seconds, so unoptimized dependencies build about 2.5x faster at no real cost.
+[profile.test.package."*"]
+opt-level = 0
 
 [profile.release]
 opt-level = 3
