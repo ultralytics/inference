@@ -30,6 +30,13 @@ pub(crate) fn open_image(path: &Path) -> image::ImageResult<DynamicImage> {
     decode_image(ImageReader::open(path)?)
 }
 
+/// Check if a path is an image file based on extension.
+fn is_image_file(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| {
+        IMAGE_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str())
+    })
+}
+
 /// Represents different input sources for inference.
 #[derive(Debug, Clone)]
 pub enum Source {
@@ -107,13 +114,8 @@ impl Source {
 
     /// Check if a URL points to an image based on extension.
     fn is_image_url(url: &str) -> bool {
-        let url_lower = url.to_lowercase();
         // Remove query parameters if present
-        let path_part = url_lower.split('?').next().unwrap_or(&url_lower);
-
-        std::path::Path::new(path_part)
-            .extension()
-            .is_some_and(|ext| IMAGE_EXTENSIONS.contains(&&*ext.to_string_lossy()))
+        is_image_file(Path::new(url.split('?').next().unwrap_or(url)))
     }
 }
 
@@ -493,7 +495,7 @@ impl SourceIterator {
         let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
             .filter_map(std::result::Result::ok)
             .map(|entry| entry.path())
-            .filter(|path| Self::is_image_file(path))
+            .filter(|path| is_image_file(path))
             .collect();
 
         paths.sort();
@@ -532,7 +534,7 @@ impl SourceIterator {
                 .map(|entry| entry.path())
                 .filter(|path| {
                     ext_filter.as_ref().map_or_else(
-                        || Self::is_image_file(path),
+                        || is_image_file(path),
                         |ext| {
                             path.extension()
                                 .is_some_and(|e| e.to_string_lossy().to_lowercase() == *ext)
@@ -547,13 +549,6 @@ impl SourceIterator {
             // No glob pattern, treat as single file
             Ok(vec![PathBuf::from(pattern)])
         }
-    }
-
-    /// Check if a path is an image file based on extension.
-    fn is_image_file(path: &Path) -> bool {
-        path.extension().is_some_and(|ext| {
-            IMAGE_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str())
-        })
     }
 
     /// Download an image from a URL.

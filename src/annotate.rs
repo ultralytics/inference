@@ -18,7 +18,7 @@ use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use std::fs::{self, File};
-use std::io::{self, BufReader, Read};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 /// Re-exported so `annotate::find_next_run_dir` keeps working; the implementation lives in
@@ -57,48 +57,13 @@ fn render_scale(width: u32, height: u32) -> (f32, i32) {
     (scale_factor, thickness)
 }
 
-/// Load an image from `path`, working around a zune-jpeg stride bug for JPEG files.
-///
-/// JPEG files are decoded with `jpeg_decoder` directly to avoid a stride mismatch
-/// that can corrupt images decoded through the default image crate backend.
-/// All other files are decoded by their contents with `source::open_image`.
+/// Load and decode the image at `path` by its contents.
 ///
 /// # Errors
 ///
 /// Returns an [`image::ImageError`] if the file cannot be opened or decoded.
-#[allow(clippy::missing_errors_doc)]
 pub fn load_image(path: &str) -> image::ImageResult<DynamicImage> {
-    let path_obj = Path::new(path);
-    let ext = path_obj
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_lowercase);
-
-    if let Some("jpg" | "jpeg") = ext.as_deref()
-        && let Ok(file) = File::open(path)
-    {
-        let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
-        if let Ok(pixels) = decoder.decode()
-            && let Some(metadata) = decoder.info()
-        {
-            let width = u32::from(metadata.width);
-            let height = u32::from(metadata.height);
-            match metadata.pixel_format {
-                jpeg_decoder::PixelFormat::RGB24 => {
-                    if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
-                        return Ok(DynamicImage::ImageRgb8(buffer));
-                    }
-                }
-                jpeg_decoder::PixelFormat::L8 => {
-                    if let Some(buffer) = image::ImageBuffer::from_raw(width, height, pixels) {
-                        return Ok(DynamicImage::ImageLuma8(buffer));
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    crate::source::open_image(path_obj)
+    crate::source::open_image(Path::new(path))
 }
 /// Return the local path to `font`, downloading it from the Ultralytics asset CDN if absent.
 ///

@@ -688,7 +688,6 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 | `ort`               | ONNX Runtime bindings           |
 | `ndarray`           | N-dimensional arrays            |
 | `image`             | Image loading/decoding          |
-| `jpeg-decoder`      | JPEG decoding                   |
 | `fast_image_resize` | SIMD-optimized resizing         |
 | `half`              | FP16 support                    |
 | `lru`               | LRU cache for preprocessing LUT |

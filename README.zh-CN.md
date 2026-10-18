@@ -681,7 +681,6 @@ JS/TS 封装与构建说明见 [`web/`](web/README.md)。需要支持 WebGPU 的
 | `ort`               | ONNX Runtime 绑定       |
 | `ndarray`           | N 维数组                |
 | `image`             | 图片加载/解码           |
-| `jpeg-decoder`      | JPEG 解码               |
 | `fast_image_resize` | SIMD 优化 resize        |
 | `half`              | FP16 支持               |
 | `lru`               | 预处理 LUT 的 LRU cache |
