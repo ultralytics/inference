@@ -504,7 +504,7 @@ impl SaveResults {
                 let frames_dir = self.save_dir.join(format!("{video_stem}_frames"));
                 let frame_num = meta.frame_idx + 1;
                 let filename = format!("{video_stem}_{frame_num}.jpg");
-                (frames_dir, filename)
+                (frames_dir, filename.into())
             } else {
                 let mut filename = Path::new(&meta.path)
                     .file_name()
@@ -514,10 +514,7 @@ impl SaveResults {
                 if !image::ImageFormat::from_path(&filename).is_ok_and(|f| f.writing_enabled()) {
                     filename.push(".jpg");
                 }
-                (
-                    self.save_dir.clone(),
-                    filename.to_string_lossy().into_owned(),
-                )
+                (self.save_dir.clone(), filename)
             };
 
             let save_path = save_dir.join(filename);
@@ -688,14 +685,17 @@ mod tests {
         let mut saver = SaveResults::new(tmp.path().to_path_buf(), false);
 
         let img = image::DynamicImage::new_rgb8(8, 8);
-        let meta = SourceMeta {
-            path: "frame.jpg".to_string(),
-            ..SourceMeta::default()
-        };
-
-        saver.save(false, &meta, &img).unwrap();
+        for path in ["frame.jpg", "frame.jp2"] {
+            let meta = SourceMeta {
+                path: path.to_string(),
+                ..SourceMeta::default()
+            };
+            saver.save(false, &meta, &img).unwrap();
+        }
         saver.finish().unwrap();
         assert!(tmp.path().join("frame.jpg").exists());
+        // .jp2 has no encoder, so it is saved as JPEG without overwriting frame.jpg.
+        assert!(tmp.path().join("frame.jp2.jpg").exists());
     }
 
     #[test]
