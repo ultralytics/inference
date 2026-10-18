@@ -359,7 +359,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 | 摄像头     | `0`,`1`                         | 摄像头索引（0 为默认） |
 | URL        | `https://example.com/image.jpg` | 远程图片 URL           |
 
-支持的图片格式：`.avif`、`.bmp`、`.dng`、`.gif`、`.heic`、`.heif`、`.jp2`、`.jpeg`、`.jpg`、`.mpo`、`.png`、`.tif`、`.tiff` 和 `.webp`。图片按文件内容读取，暂不支持解码 AV1 或 HEVC 编码的 `.avif`、`.heic` 和 `.heif` 文件。
+支持的图片格式：`.avif`、`.bmp`、`.dng`、`.gif`、`.heic`、`.heif`、`.jp2`、`.jpeg`、`.jpg`、`.mpo`、`.png`、`.tif`、`.tiff` 和 `.webp`。
 
 ### 作为 Rust 库
 
