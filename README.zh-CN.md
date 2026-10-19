@@ -747,7 +747,7 @@ cargo test
 cargo test -- --nocapture
 
 # 运行指定测试
-cargo test test_boxes_creation
+cargo test test_boxes_xyxy
 ```
 
 ## 📊 性能
