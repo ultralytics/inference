@@ -32,7 +32,9 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
-use ultralytics_inference::postprocessing::{postprocess_semantic_mask, postprocess_with_head};
+use ultralytics_inference::postprocessing::{
+    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head,
+};
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
 };
@@ -583,7 +585,7 @@ impl YoloModel {
             } else {
                 &shape
             };
-            postprocess_semantic_mask(
+            let results = postprocess_semantic_mask(
                 data,
                 img_shape,
                 names,
@@ -591,7 +593,8 @@ impl YoloModel {
                 String::new(),
                 speed(),
                 inference_shape,
-            )
+            );
+            filter_semantic_classes(results, &config)
         } else {
             // Borrow each output's data directly (no copy) and feed it to the shared
             // f32 postprocessor while `outputs` is still alive.
