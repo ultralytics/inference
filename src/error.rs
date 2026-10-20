@@ -70,15 +70,6 @@ mod tests {
     use std::io;
 
     #[test]
-    fn test_error_display() {
-        let err = InferenceError::ModelLoadError("test".to_string());
-        assert_eq!(err.to_string(), "Model load error: test");
-
-        let err = InferenceError::InferenceError("test".to_string());
-        assert_eq!(err.to_string(), "Inference error: test");
-    }
-
-    #[test]
     fn test_error_conversions() {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "file not found");
         let err: InferenceError = io_err.into();
@@ -97,14 +88,19 @@ mod tests {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "source test");
         let err = InferenceError::Io(io_err);
         assert!(std::error::Error::source(&err).is_some());
-
-        let err = InferenceError::ModelLoadError("test".to_string());
-        assert!(std::error::Error::source(&err).is_none());
     }
 
     #[test]
     fn test_error_display_all_variants() {
         let cases = [
+            (
+                InferenceError::ModelLoadError("m".into()),
+                "Model load error: m",
+            ),
+            (
+                InferenceError::InferenceError("m".into()),
+                "Inference error: m",
+            ),
             (InferenceError::ImageError("m".into()), "Image error: m"),
             (InferenceError::ConfigError("m".into()), "Config error: m"),
             (

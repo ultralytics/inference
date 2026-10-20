@@ -754,7 +754,7 @@ cargo test
 cargo test -- --nocapture
 
 # Run specific test
-cargo test test_boxes_creation
+cargo test test_boxes_xyxy
 ```
 
 ## 📊 Performance
