@@ -499,16 +499,6 @@ depth spends the color range on nearby detail rather than the distant background
 objects read warm and a few stray pixels cannot wash out the rest. `metric` colors depth
 directly, linearly between its min and max.
 
-Pose models with 17 keypoints are drawn with the human skeleton, like Ultralytics; other keypoint layouts get one
-color per keypoint and no lines. Pass your own skeleton, radius, or color through `AnnotateOptions`:
-
-```rust
-use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};
-
-let options = AnnotateOptions { skeleton: Some(vec![[0, 1], [1, 2]]), kpt_radius: Some(6), ..AnnotateOptions::default() };
-let annotated = annotate_image_with_options(&image, &results[0], &options);
-```
-
 For runnable programs you can copy and adapt, see the [examples](examples/README.md) directory.
 
 ## 🗂️ Project Structure

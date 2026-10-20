@@ -242,7 +242,7 @@ export interface AnnotateOptions {
   keypoints?: boolean;
   /** Keypoint confidence threshold for drawing. Default `0.25` (matches Ultralytics). */
   keypointThreshold?: number;
-  /** Keypoint radius in pixels (`kpt_radius`). Defaults to a value scaled to the image size. */
+  /** Keypoint radius in pixels (`kpt_radius`). Default `5`, like Ultralytics. */
   keypointRadius?: number;
   /** Draw the lines between keypoints (`kpt_line`). Default `true`. */
   keypointLines?: boolean;
@@ -877,7 +877,7 @@ export async function annotate(
   // and per-keypoint), matching the native/Python renderer.
   if (showKpts && results.keypoints.length) {
     const scheme = poseScheme();
-    const radius = options?.keypointRadius ?? Math.max(2, Math.round(width / 300));
+    const radius = options?.keypointRadius ?? 5;
     const fixed = options?.keypointColor;
     ctx.lineWidth = Math.max(1, Math.round(lineWidth / 1.5));
     for (const kp of results.keypoints) {

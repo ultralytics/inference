@@ -1008,8 +1008,8 @@ struct PoseScheme {
     keypoint_colors: Vec<String>,
     /// Hex color per limb (length 19, aligned with `skeleton`).
     limb_colors: Vec<String>,
-    /// The 20-color Ultralytics palette with channels reversed as Ultralytics shows it, for
-    /// keypoint layouts other than COCO-Pose.
+    /// The 20-color Ultralytics palette with red and blue swapped, the colors Ultralytics
+    /// pictures show for keypoint layouts other than COCO-Pose (OpenCV draws them as BGR).
     palette: Vec<String>,
 }
 

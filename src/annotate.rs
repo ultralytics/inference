@@ -41,8 +41,8 @@ pub struct AnnotateOptions {
     pub depth_viz: DepthViz,
     /// Depth overlay opacity in `0.0..=1.0` (see [`annotate_image_with`]).
     pub depth_alpha: f32,
-    /// Keypoint radius in pixels (`kpt_radius`). `None` scales it with the image size.
-    pub kpt_radius: Option<i32>,
+    /// Keypoint radius in pixels (`kpt_radius`).
+    pub kpt_radius: i32,
     /// Draw the lines between keypoints (`kpt_line`).
     pub kpt_line: bool,
     /// Minimum confidence for drawing a keypoint or a line (`conf_thres`).
@@ -61,7 +61,7 @@ impl Default for AnnotateOptions {
             colormap: Colormap::default(),
             depth_viz: DepthViz::default(),
             depth_alpha: DEPTH_ALPHA,
-            kpt_radius: None,
+            kpt_radius: 5,
             kpt_line: true,
             kpt_conf: 0.25,
             kpt_color: None,
@@ -237,7 +237,7 @@ pub fn annotate_image_with(
 /// // Connect the keypoints of a custom 4-keypoint model and draw them a little larger.
 /// let options = AnnotateOptions {
 ///     skeleton: Some(vec![[0, 1], [1, 2], [2, 3]]),
-///     kpt_radius: Some(6),
+///     kpt_radius: 6,
 ///     ..AnnotateOptions::default()
 /// };
 /// let annotated = annotate_image_with_options(image, result, &options);
@@ -749,10 +749,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
     let (width, height) = img.dimensions();
 
     // Dynamic scale factor and thickness based on image size (reference 640x640)
-    let (scale_factor, thickness) = render_scale(width, height);
-    let radius = options
-        .kpt_radius
-        .unwrap_or_else(|| (3.0 * scale_factor).round() as i32);
+    let (_, thickness) = render_scale(width, height);
 
     if let Some(ref keypoints) = result.keypoints {
         let kpt_data = &keypoints.data;
@@ -777,7 +774,8 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
             None if coco => &SKELETON,
             None => &[],
         };
-        // Ultralytics draws these RGB palette entries onto a BGR image, so they show reversed.
+        // Ultralytics passes these RGB entries to OpenCV, which draws into a BGR image, so its
+        // pictures show them with red and blue swapped; swap them too so the colors match.
         let palette = |i: usize| {
             let Color(r, g, b) = Color::from_index(i);
             Color(b, g, r)
@@ -827,7 +825,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
                     let y = kpt_data[[person_idx, kpt_idx, 1]];
                     let color = kpt_color(kpt_idx);
                     let color = Rgb([color.0, color.1, color.2]);
-                    draw_filled_circle(img, x as i32, y as i32, radius, color);
+                    draw_filled_circle(img, x as i32, y as i32, options.kpt_radius, color);
                 }
             }
         }
