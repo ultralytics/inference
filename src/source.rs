@@ -5,13 +5,14 @@
 //! This module provides abstractions for various input sources including
 //! images, videos, webcams, and streaming URLs.
 
-use std::io::{BufRead, Cursor, Seek};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use image::{DynamicImage, ImageReader};
 use ndarray::Array3;
 
 use crate::error::{InferenceError, Result};
+use crate::utils::decode_image;
 
 /// Image extensions: the Ultralytics Python `IMG_FORMATS` plus `gif`.
 const IMAGE_EXTENSIONS: [&str; 14] = [
@@ -23,12 +24,6 @@ const IMAGE_EXTENSIONS: [&str; 14] = [
 const VIDEO_EXTENSIONS: [&str; 10] = [
     "mp4", "avi", "mov", "mkv", "wmv", "flv", "webm", "m4v", "mpeg", "mpg",
 ];
-
-/// Decode an image by its contents rather than its extension, with JPEG 2000 support.
-fn decode_image<R: BufRead + Seek>(reader: ImageReader<R>) -> image::ImageResult<DynamicImage> {
-    hayro_jpeg2000::integration::register_decoding_hook();
-    reader.with_guessed_format()?.decode()
-}
 
 /// Open and decode the image file at `path`.
 pub(crate) fn open_image(path: &Path) -> image::ImageResult<DynamicImage> {

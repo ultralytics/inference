@@ -19,8 +19,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::sync::Arc;
 
+use image::ImageReader;
 use js_sys::{Float32Array, Uint32Array};
 use ndarray::Array3;
 use ort::AsPointer;
@@ -37,6 +39,7 @@ use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
 };
 use ultralytics_inference::results::Speed;
+use ultralytics_inference::utils::decode_image;
 use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
 use ultralytics_inference::visualizer::skeleton::{
     KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
@@ -376,7 +379,8 @@ impl YoloModel {
         colormap: String,
         depth_viz: String,
     ) -> Result<JsValue, JsError> {
-        let dynimg = image::load_from_memory(&image).map_err(err_ctx("failed to decode image"))?;
+        let dynimg = decode_image(ImageReader::new(Cursor::new(image)))
+            .map_err(err_ctx("failed to decode image"))?;
         self.run(
             dynimg,
             conf,
