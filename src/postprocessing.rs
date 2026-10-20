@@ -1779,52 +1779,44 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], results: Results) -> Re
     let scale_y = crop_h as f32 / oh as f32;
     let lh_minus_1 = lh.saturating_sub(1);
 
-    // Bilinear upsample and argmax directly on CHW data, skipping the transpose.
-    // Reads are strided (one plane apart per class) but avoids transposing 39M floats.
+    // Bilinear upsample and argmax directly on CHW data, skipping the transpose. Each output
+    // row walks one class plane at a time, so its two source rows stay in cache, and keeps
+    // the running best per pixel; the per-pixel math and class order are unchanged.
     let mut buf = vec![0u16; oh * ow];
-    buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
-        let (y0, y1, fy) = bilinear_axis(dy, scale_y, top, lh_minus_1);
-        let fyi = 1.0 - fy;
-
-        let row0_base = y0 * lw;
-        let row1_base = y1 * lw;
-
-        for (dx, cell) in row.iter_mut().enumerate() {
-            let (x0, x1, fxi, fx) = x_lut[dx];
-            let w00 = fyi * fxi;
-            let w10 = fy * fxi;
-            let w01 = fyi * fx;
-            let w11 = fy * fx;
-
-            // Interpolate class `c`'s logit from its four neighbors in that class's plane.
-            let logit = |c: usize| {
-                let base = c * plane;
-                output[base + row1_base + x1].mul_add(
-                    w11,
-                    output[base + row0_base + x1].mul_add(
-                        w01,
-                        output[base + row1_base + x0]
-                            .mul_add(w10, output[base + row0_base + x0] * w00),
-                    ),
-                )
-            };
-
-            *cell = if nc == 1 {
-                u16::from(logit(0) > 0.0)
-            } else {
-                let mut best_cls = 0u16;
-                let mut best_val = f32::NEG_INFINITY;
-                for c in 0..nc {
-                    let v = logit(c);
-                    if v > best_val {
-                        best_val = v;
-                        best_cls = c as u16;
+    buf.par_chunks_mut(ow).enumerate().for_each_with(
+        (vec![0.0f32; ow], vec![[0.0f32; 4]; ow]),
+        |(best_vals, weights), (dy, row)| {
+            let (y0, y1, fy) = bilinear_axis(dy, scale_y, top, lh_minus_1);
+            let fyi = 1.0 - fy;
+            for (w, &(_, _, fxi, fx)) in weights.iter_mut().zip(&x_lut) {
+                *w = [fyi * fxi, fy * fxi, fyi * fx, fy * fx];
+            }
+            best_vals.fill(f32::NEG_INFINITY);
+            for c in 0..nc {
+                let r0 = &output[c * plane + y0 * lw..][..lw];
+                let r1 = &output[c * plane + y1 * lw..][..lw];
+                for (((cell, best), &(x0, x1, _, _)), &[w00, w10, w01, w11]) in row
+                    .iter_mut()
+                    .zip(best_vals.iter_mut())
+                    .zip(&x_lut)
+                    .zip(weights.iter())
+                {
+                    let v =
+                        r1[x1].mul_add(w11, r0[x1].mul_add(w01, r1[x0].mul_add(w10, r0[x0] * w00)));
+                    if v > *best {
+                        *best = v;
+                        *cell = c as u16;
                     }
                 }
-                best_cls
-            };
-        }
-    });
+            }
+            // A single-channel head is a binary mask: foreground where its logit is positive.
+            if nc == 1 {
+                for (cell, &v) in row.iter_mut().zip(best_vals.iter()) {
+                    *cell = u16::from(v > 0.0);
+                }
+            }
+        },
+    );
     finish_semantic_mask(results, buf, oh, ow)
 }
 
