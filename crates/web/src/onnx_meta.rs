@@ -112,10 +112,12 @@ const FLOAT16: u64 = 10;
 /// models are used as-is without a copy.
 pub(crate) fn with_f32_io(model: &[u8]) -> Option<Vec<u8>> {
     let graph = bytes_field(model, 7)?;
-    // `GraphProto.initializer` (5) names; an input backed by one is a weight, not fed at runtime.
+    // `GraphProto.initializer` (5) and `sparse_initializer` (15, named by its `values` tensor)
+    // names; an input backed by one is a weight, not fed at runtime.
     let initializers: HashSet<&[u8]> = fields(graph)
         .filter_map(|(field, value, _)| match value {
             Value::Bytes(tensor) if field == 5 => bytes_field(tensor, 8),
+            Value::Bytes(sparse) if field == 15 => bytes_field(bytes_field(sparse, 1)?, 8),
             _ => None,
         })
         .collect();
