@@ -42,17 +42,13 @@ pub(crate) static SESSION_BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::n
 /// Finalize a CUDA/`TensorRT` EP builder, binding it to the `cuda-preprocess`
 /// compute stream when one is supplied.
 ///
-/// With a stream, `error_on_failure()` is set because we hand ORT a device
-/// pointer: a silent CPU fallback would panic at `bind_input` (#251). The `None`
-/// arm keeps ORT's default multi-EP fallback.
-///
 /// SAFETY: `with_compute_stream` requires the `CudaStreamHandle` to outlive
 /// every `Session` bound to it; `load_with_config` guarantees this.
 #[cfg(any(feature = "cuda", feature = "tensorrt"))]
 macro_rules! bind_compute_stream {
     ($ep:expr, $compute_stream:expr) => {
         match $compute_stream {
-            Some(s) => unsafe { $ep.with_compute_stream(s).build().error_on_failure() },
+            Some(s) => unsafe { $ep.with_compute_stream(s).build() },
             None => $ep.build(),
         }
     };
@@ -355,9 +351,8 @@ impl YOLOModel {
             InferenceError::ModelLoadError(format!("Failed to create session builder: {e}"))
         })?;
 
-        // Register execution providers based on features and device config, as
-        // `(provider, name)` pairs in registration order: the first one registered is the
-        // one ORT will prefer, so it names the session (CPU when none are registered).
+        // Collect execution providers based on features and device config, as
+        // `(provider, name)` pairs in preference order.
         #[allow(unused_mut)]
         let mut eps: Vec<(ort::ep::ExecutionProviderDispatch, &str)> = Vec::new();
 
@@ -399,8 +394,7 @@ impl YOLOModel {
                 crate::Device::MiGraphX(i) => eps.push((
                     ort::ep::MIGraphX::default()
                         .with_device_id(*i as i32)
-                        .build()
-                        .error_on_failure(),
+                        .build(),
                     "MIGraphXExecutionProvider",
                 )),
                 #[cfg(feature = "directml")]
@@ -417,10 +411,8 @@ impl YOLOModel {
                         crate::Device::IntelNpu => "NPU",
                         _ => "CPU",
                     };
-                    // A requested Intel device must not silently run on the plain CPU provider,
-                    // which is what a missing OpenVINO runtime would otherwise do.
                     eps.push((
-                        Self::build_openvino_ep(path, device_type).error_on_failure(),
+                        Self::build_openvino_ep(path, device_type),
                         "OpenVINOExecutionProvider",
                     ));
                 }
@@ -491,61 +483,53 @@ impl YOLOModel {
             ));
         }
 
-        let provider_name = eps
-            .first()
-            .map_or("CPUExecutionProvider", |&(_, name)| name);
+        // Each provider registers on its own, so the session is named after the first one
+        // that actually registered (CPU when none did). A requested device must not silently
+        // run on the CPU instead, and neither may a GPU provider bound to the cuda-preprocess
+        // stream, whose CPU fallback would panic at `bind_input` (#251), so their failure is
+        // an error; the default device skips to the next provider.
+        #[cfg(feature = "cuda-preprocess")]
+        let gpu_stream = cuda_pre_stream.is_some();
+        #[cfg(not(feature = "cuda-preprocess"))]
+        let gpu_stream = false;
+        let mut provider_name = "CPUExecutionProvider";
         // XNNPACK runs its own threadpool whatever its priority, so this is a "registered
         // at all" check rather than "is primary": in the auto path it is registered last
         // and still executes the subgraphs the providers ahead of it decline.
-        let uses_xnnpack = eps
-            .iter()
-            .any(|&(_, name)| name == "XNNPACKExecutionProvider");
-
-        if !eps.is_empty() {
-            crate::info!(
-                "Registering {} execution providers (primary: {})",
-                eps.len(),
-                provider_name
-            );
-            let providers: Vec<_> = eps.into_iter().map(|(ep, _)| ep).collect();
-            session_builder = session_builder
-                .with_execution_providers(providers)
-                .map_err(|e| {
-                    // The GPU EPs are marked `error_on_failure` only on the
-                    // cuda-preprocess fast path (see `build_cuda_ep`), so a dlopen
-                    // failure surfaces here as a clear, actionable error instead of
-                    // silently falling back to CPU and then panicking later at
-                    // `bind_input` with "no data transfer registered" (#251).
-                    let gpu = matches!(
-                        provider_name,
-                        "CUDAExecutionProvider" | "TensorRTExecutionProvider"
-                    );
-                    if provider_name == "OpenVINOExecutionProvider" && config.device.is_some() {
-                        InferenceError::ModelLoadError(format!(
-                            "OpenVINO failed to load: {e}\n\
-                             Hint: the openvino feature needs the OpenVINO runtime installed and on \
-                             the library path (for example `pip install openvino`, then add the \
-                             `openvino/libs` folder to `LD_LIBRARY_PATH`, or install the OpenVINO \
-                             package for your system). See https://docs.openvino.ai/2026/get-started/install-openvino.html"
-                        ))
-                    } else if gpu {
-                        InferenceError::ModelLoadError(format!(
-                            "{provider_name} failed to load, so the cuda-preprocess fast path \
-                         cannot run on the GPU: {e}\n\
-                         Hint: the downloaded ONNX Runtime is built against CUDA 13, so it needs \
-                         a CUDA 13 runtime and cuDNN 9 (plus TensorRT 10 for TensorRt) installed \
-                         and on the library path. On CUDA 12, compile ONNX Runtime for it and \
-                         link that build with `ORT_LIB_PATH`. To use CPU preprocessing instead, \
-                         set `InferenceConfig::with_cuda_preprocess(false)`."
-                        ))
-                    } else {
-                        InferenceError::ModelLoadError(format!(
-                            "Failed to set execution providers: {e}"
-                        ))
+        let mut uses_xnnpack = false;
+        for (ep, name) in eps {
+            let gpu = matches!(name, "CUDAExecutionProvider" | "TensorRTExecutionProvider");
+            match ep.register(&mut session_builder) {
+                Ok(()) => {
+                    if provider_name == "CPUExecutionProvider" {
+                        provider_name = name;
                     }
-                })?;
+                    uses_xnnpack |= name == "XNNPACKExecutionProvider";
+                }
+                Err(e) if config.device.is_none() && !(gpu && gpu_stream) => {
+                    warn!("{name} is unavailable, trying the next provider: {e}");
+                }
+                Err(e) => {
+                    let hint = if gpu {
+                        "\nHint: the downloaded ONNX Runtime is built against CUDA 13, so it needs \
+                         a CUDA 13 runtime and cuDNN 9 (plus TensorRT 10 for TensorRT) installed \
+                         and on the library path. On CUDA 12, compile ONNX Runtime for it and \
+                         link that build with `ORT_LIB_PATH`. To run on the CPU instead, select \
+                         the CPU device (`--device cpu`)."
+                    } else if name == "OpenVINOExecutionProvider" {
+                        "\nHint: the openvino feature needs the OpenVINO runtime installed and on \
+                         the library path (for example `pip install openvino`, then add the \
+                         `openvino/libs` folder to `LD_LIBRARY_PATH`, or install the OpenVINO \
+                         package for your system). See https://docs.openvino.ai/2026/get-started/install-openvino.html"
+                    } else {
+                        ""
+                    };
+                    return Err(InferenceError::ModelLoadError(format!(
+                        "{name} failed to load: {e}{hint}"
+                    )));
+                }
+            }
         }
-        // CPU is the default - no warning needed when no accelerators are registered
 
         // `All` (ORT_ENABLE_ALL), not `Level3` (ORT_ENABLE_LAYOUT), reaches ONNX Runtime's
         // Level 4 pass, where `FuseFp16InitializerToFp32NodeTransformer` folds FP16
