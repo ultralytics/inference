@@ -11,7 +11,7 @@ use crate::results::Results;
 
 /// Pixels handed to one task when blending a full-frame overlay across cores.
 const BLEND_CHUNK: usize = 4096;
-use crate::visualizer::color::{COLORS, Colormap, DEPTH_ALPHA, DepthViz, POSE_COLORS};
+use crate::visualizer::color::{COLORS, Color, Colormap, DEPTH_ALPHA, DepthViz};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb};
@@ -25,8 +25,50 @@ use std::time::{Duration, Instant};
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
 
-/// Minimum keypoint confidence for drawing a keypoint or skeleton limb.
-const KPT_CONF_THRES: f32 = 0.25;
+/// Drawing options for [`annotate_image_with_options`].
+///
+/// The keypoint fields follow the Ultralytics `Results.plot` and `Annotator.kpts` arguments.
+/// Like Ultralytics, a 17-keypoint (COCO-Pose) model is drawn with the pose palette and the
+/// human skeleton, and any other keypoint layout with one palette color per keypoint and no
+/// lines; set [`skeleton`](Self::skeleton) to connect the keypoints of a custom model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotateOptions {
+    /// Maximum number of classification labels to show.
+    pub top_k: usize,
+    /// Depth colormap; only depth results use it.
+    pub colormap: Colormap,
+    /// Depth normalization; only depth results use it.
+    pub depth_viz: DepthViz,
+    /// Depth overlay opacity in `0.0..=1.0` (see [`annotate_image_with`]).
+    pub depth_alpha: f32,
+    /// Keypoint radius in pixels (`kpt_radius`).
+    pub kpt_radius: i32,
+    /// Draw the lines between keypoints (`kpt_line`).
+    pub kpt_line: bool,
+    /// Minimum confidence for drawing a keypoint or a line (`conf_thres`).
+    pub kpt_conf: f32,
+    /// One color for every keypoint and line (`kpt_color`). `None` uses the palette.
+    pub kpt_color: Option<Color>,
+    /// Pairs of keypoint indices to connect. `None` uses the human skeleton for 17-keypoint
+    /// models and draws no lines for other layouts.
+    pub skeleton: Option<Vec<[usize; 2]>>,
+}
+
+impl Default for AnnotateOptions {
+    fn default() -> Self {
+        Self {
+            top_k: 5,
+            colormap: Colormap::default(),
+            depth_viz: DepthViz::default(),
+            depth_alpha: DEPTH_ALPHA,
+            kpt_radius: 5,
+            kpt_line: true,
+            kpt_conf: 0.25,
+            kpt_color: None,
+            skeleton: None,
+        }
+    }
+}
 
 /// Return the RGB color assigned to a class ID.
 ///
@@ -145,13 +187,13 @@ pub fn annotate_image(
     result: &Results,
     top_k: Option<usize>,
 ) -> DynamicImage {
-    annotate_image_with(
+    annotate_image_with_options(
         image,
         result,
-        top_k,
-        Colormap::default(),
-        DepthViz::default(),
-        DEPTH_ALPHA,
+        &AnnotateOptions {
+            top_k: top_k.unwrap_or(5),
+            ..AnnotateOptions::default()
+        },
     )
 }
 
@@ -172,6 +214,41 @@ pub fn annotate_image_with(
     viz: DepthViz,
     depth_alpha: f32,
 ) -> DynamicImage {
+    annotate_image_with_options(
+        image,
+        result,
+        &AnnotateOptions {
+            top_k: top_k.unwrap_or(5),
+            colormap,
+            depth_viz: viz,
+            depth_alpha,
+            ..AnnotateOptions::default()
+        },
+    )
+}
+
+/// Annotate an image like [`annotate_image`], with every drawing option in `options`.
+///
+/// # Example
+///
+/// ```no_run
+/// # use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};
+/// # fn demo(image: &image::DynamicImage, result: &ultralytics_inference::Results) {
+/// // Connect the keypoints of a custom 4-keypoint model and draw them a little larger.
+/// let options = AnnotateOptions {
+///     skeleton: Some(vec![[0, 1], [1, 2], [2, 3]]),
+///     kpt_radius: 6,
+///     ..AnnotateOptions::default()
+/// };
+/// let annotated = annotate_image_with_options(image, result, &options);
+/// # }
+/// ```
+#[must_use]
+pub fn annotate_image_with_options(
+    image: &DynamicImage,
+    result: &Results,
+    options: &AnnotateOptions,
+) -> DynamicImage {
     let mut img = image.to_rgb8();
 
     let unicode = result.boxes.is_some() && result.names.values().any(|n| !n.is_ascii());
@@ -179,11 +256,17 @@ pub fn annotate_image_with(
 
     draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref());
-    draw_pose(&mut img, result);
+    draw_pose(&mut img, result, options);
     draw_obb(&mut img, result, font.as_ref());
-    draw_classification(&mut img, result, font.as_ref(), top_k.unwrap_or(5));
+    draw_classification(&mut img, result, font.as_ref(), options.top_k);
 
-    draw_depth_map(&mut img, result, colormap, viz, depth_alpha);
+    draw_depth_map(
+        &mut img,
+        result,
+        options.colormap,
+        options.depth_viz,
+        options.depth_alpha,
+    );
 
     DynamicImage::ImageRgb8(img)
 }
@@ -656,65 +739,94 @@ fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
     !(r2_left >= r1_right || r2_right <= r1_left || r2_top >= r1_bottom || r2_bottom <= r1_top)
 }
 
-/// Draw pose estimation results (the human pose `SKELETON` and its keypoints).
+/// Draw pose keypoints and the lines between them, styled by the keypoint fields of `options`.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     clippy::cast_possible_wrap
 )]
-fn draw_pose(img: &mut image::RgbImage, result: &Results) {
+fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOptions) {
     let (width, height) = img.dimensions();
 
     // Dynamic scale factor and thickness based on image size (reference 640x640)
-    let (scale_factor, thickness) = render_scale(width, height);
-    let radius = (3.0 * scale_factor).round() as i32;
+    let (_, thickness) = render_scale(width, height);
 
     if let Some(ref keypoints) = result.keypoints {
         let kpt_data = &keypoints.data;
         let n_persons = kpt_data.shape()[0];
         let n_kpts = kpt_data.shape()[1];
-        // A 2-channel export carries no visibility score, so every point counts as seen.
+        // Like Ultralytics, a point is drawn when its score reaches `kpt_conf`; a 2-channel
+        // export carries no score and marks a missing point with (0, 0) instead.
         let has_conf = kpt_data.shape()[2] > 2;
-        let conf_at = |p: usize, k: usize| if has_conf { kpt_data[[p, k, 2]] } else { 1.0 };
+        let visible = |p: usize, k: usize| {
+            if has_conf {
+                kpt_data[[p, k, 2]] >= options.kpt_conf
+            } else {
+                kpt_data[[p, k, 0]] != 0.0 || kpt_data[[p, k, 1]] != 0.0
+            }
+        };
 
-        // Post-processing clips keypoints into the frame, so one sitting exactly on a border
-        // was outside the image and is really "not seen": drawing it anchors a limb to the
-        // edge. Ultralytics drops these the same way (`x % w != 0 and y % h != 0`).
-        #[allow(clippy::cast_precision_loss)]
-        let visible = |x: f32, y: f32, conf: f32| {
-            conf >= KPT_CONF_THRES && x > 0.0 && y > 0.0 && x < width as f32 && y < height as f32
+        // Like Ultralytics, only the 17-keypoint COCO-Pose layout gets the pose palette and the
+        // human skeleton; other layouts take one palette color per keypoint and no lines.
+        let coco = n_kpts == KPT_COLOR_INDICES.len();
+        let skeleton: &[[usize; 2]] = match &options.skeleton {
+            Some(skeleton) => skeleton,
+            None if coco => &SKELETON,
+            None => &[],
+        };
+        // Ultralytics passes these RGB entries to OpenCV, which draws into a BGR image, so its
+        // pictures show them with red and blue swapped; swap them too so the colors match.
+        let palette = |i: usize| {
+            let Color(r, g, b) = Color::from_index(i);
+            Color(b, g, r)
+        };
+        let kpt_color = |k: usize| {
+            options.kpt_color.unwrap_or_else(|| {
+                if coco {
+                    Color::from_pose_index(KPT_COLOR_INDICES[k])
+                } else {
+                    palette(k)
+                }
+            })
+        };
+        let limb_color = |l: usize| {
+            options.kpt_color.unwrap_or_else(|| {
+                if coco && options.skeleton.is_none() {
+                    Color::from_pose_index(LIMB_COLOR_INDICES[l])
+                } else {
+                    palette(l)
+                }
+            })
         };
 
         for person_idx in 0..n_persons {
-            for (limb_idx, &[kpt_a, kpt_b]) in SKELETON.iter().enumerate() {
-                if kpt_a >= n_kpts || kpt_b >= n_kpts {
-                    continue;
-                }
-
-                let x1 = kpt_data[[person_idx, kpt_a, 0]];
-                let y1 = kpt_data[[person_idx, kpt_a, 1]];
-                let conf1 = conf_at(person_idx, kpt_a);
-                let x2 = kpt_data[[person_idx, kpt_b, 0]];
-                let y2 = kpt_data[[person_idx, kpt_b, 1]];
-                let conf2 = conf_at(person_idx, kpt_b);
-
-                if visible(x1, y1, conf1) && visible(x2, y2, conf2) {
-                    let color_idx = LIMB_COLOR_INDICES[limb_idx % LIMB_COLOR_INDICES.len()];
-                    let color = Rgb(POSE_COLORS[color_idx]);
+            if options.kpt_line {
+                for (limb_idx, &[kpt_a, kpt_b]) in skeleton.iter().enumerate() {
+                    if kpt_a >= n_kpts
+                        || kpt_b >= n_kpts
+                        || !visible(person_idx, kpt_a)
+                        || !visible(person_idx, kpt_b)
+                    {
+                        continue;
+                    }
+                    let x1 = kpt_data[[person_idx, kpt_a, 0]];
+                    let y1 = kpt_data[[person_idx, kpt_a, 1]];
+                    let x2 = kpt_data[[person_idx, kpt_b, 0]];
+                    let y2 = kpt_data[[person_idx, kpt_b, 1]];
+                    let color = limb_color(limb_idx);
+                    let color = Rgb([color.0, color.1, color.2]);
                     draw_line_segment(img, x1, y1, x2, y2, color, thickness);
                 }
             }
 
             for kpt_idx in 0..n_kpts {
-                let x = kpt_data[[person_idx, kpt_idx, 0]];
-                let y = kpt_data[[person_idx, kpt_idx, 1]];
-                let conf = conf_at(person_idx, kpt_idx);
-
-                if visible(x, y, conf) {
-                    let color_idx = KPT_COLOR_INDICES[kpt_idx % KPT_COLOR_INDICES.len()];
-                    let color = Rgb(POSE_COLORS[color_idx]);
-                    draw_filled_circle(img, x as i32, y as i32, radius, color);
+                if visible(person_idx, kpt_idx) {
+                    let x = kpt_data[[person_idx, kpt_idx, 0]];
+                    let y = kpt_data[[person_idx, kpt_idx, 1]];
+                    let color = kpt_color(kpt_idx);
+                    let color = Rgb([color.0, color.1, color.2]);
+                    draw_filled_circle(img, x as i32, y as i32, options.kpt_radius, color);
                 }
             }
         }
@@ -1044,6 +1156,38 @@ mod tests {
                 "nothing drawn for {dims} dims"
             );
         }
+    }
+
+    #[test]
+    fn test_annotate_custom_keypoints() {
+        let mut r = base_results(HashMap::from([(0usize, "tiger".to_string())]));
+        // A 12-keypoint layout gets no lines by default; a custom skeleton connects points.
+        let mut kpt = Array3::<f32>::zeros((1, 12, 3));
+        kpt.slice_mut(ndarray::s![0, .., 2]).fill(0.9);
+        kpt[[0, 0, 0]] = 20.0;
+        kpt[[0, 0, 1]] = 64.0;
+        kpt[[0, 1, 0]] = 100.0;
+        kpt[[0, 1, 1]] = 64.0;
+        r.keypoints = Some(Keypoints::new(kpt, (128, 128)));
+        let img = DynamicImage::new_rgb8(128, 128);
+        let mid = |options: &AnnotateOptions| {
+            annotate_image_with_options(&img, &r, options)
+                .to_rgb8()
+                .get_pixel(60, 64)
+                .0
+        };
+        assert_eq!(mid(&AnnotateOptions::default()), [0, 0, 0]);
+        let options = AnnotateOptions {
+            skeleton: Some(vec![[0, 1]]),
+            kpt_color: Some(Color(255, 0, 0)),
+            ..AnnotateOptions::default()
+        };
+        assert_eq!(mid(&options), [255, 0, 0]);
+        let no_lines = AnnotateOptions {
+            kpt_line: false,
+            ..options
+        };
+        assert_eq!(mid(&no_lines), [0, 0, 0]);
     }
 
     #[test]

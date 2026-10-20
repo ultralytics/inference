@@ -26,6 +26,7 @@ interface PoseScheme {
   skeleton: Array<[number, number]>;
   keypoint_colors: string[];
   limb_colors: string[];
+  palette: string[];
 }
 
 let poseSchemeCache: PoseScheme | null = null;
@@ -241,6 +242,17 @@ export interface AnnotateOptions {
   keypoints?: boolean;
   /** Keypoint confidence threshold for drawing. Default `0.25` (matches Ultralytics). */
   keypointThreshold?: number;
+  /** Keypoint radius in pixels (`kpt_radius`). Default `5`, like Ultralytics. */
+  keypointRadius?: number;
+  /** Draw the lines between keypoints (`kpt_line`). Default `true`. */
+  keypointLines?: boolean;
+  /** One CSS color for every keypoint and line (`kpt_color`). Defaults to the palette. */
+  keypointColor?: string;
+  /**
+   * Pairs of keypoint indices to connect. Defaults to the human skeleton for 17-keypoint
+   * (COCO-Pose) models and no lines for other layouts, like Ultralytics.
+   */
+  skeleton?: Array<[number, number]>;
   /**
    * Blend opacity for the depth overlay, `0`..`1`. Default `0.6` (matches the native
    * annotator); `1` shows the raw colorized depth map, `0` shows only the source.
@@ -865,23 +877,33 @@ export async function annotate(
   // Pose keypoints + skeleton, colored with the engine's pose palette (per-limb
   // and per-keypoint), matching the native/Python renderer.
   if (showKpts && results.keypoints.length) {
-    const { skeleton, keypoint_colors, limb_colors } = poseScheme();
-    const radius = Math.max(2, Math.round(width / 300));
+    const scheme = poseScheme();
+    const radius = options?.keypointRadius ?? 5;
+    const fixed = options?.keypointColor;
     ctx.lineWidth = Math.max(1, Math.round(lineWidth / 1.5));
     for (const kp of results.keypoints) {
-      skeleton.forEach(([a, b], li) => {
-        const pa = kp.points[a];
-        const pb = kp.points[b];
-        if (!pa || !pb || pa[2] < kptThresh || pb[2] < kptThresh) return;
-        ctx.strokeStyle = limb_colors[li] ?? kp.color;
-        ctx.beginPath();
-        ctx.moveTo(pa[0], pa[1]);
-        ctx.lineTo(pb[0], pb[1]);
-        ctx.stroke();
-      });
+      // Like Ultralytics, only the 17-keypoint COCO-Pose layout gets the pose palette and the
+      // human skeleton; other layouts take one palette color per keypoint and no lines.
+      const coco = kp.points.length === scheme.keypoint_colors.length;
+      const skeleton = options?.skeleton ?? (coco ? scheme.skeleton : []);
+      const paletteAt = (i: number) => scheme.palette[i % scheme.palette.length];
+      const limbColor = (i: number) => fixed ?? (coco && !options?.skeleton ? scheme.limb_colors[i] : paletteAt(i));
+      const kptColor = (i: number) => fixed ?? (coco ? scheme.keypoint_colors[i] : paletteAt(i));
+      if (options?.keypointLines ?? true) {
+        skeleton.forEach(([a, b], li) => {
+          const pa = kp.points[a];
+          const pb = kp.points[b];
+          if (!pa || !pb || pa[2] < kptThresh || pb[2] < kptThresh) return;
+          ctx.strokeStyle = limbColor(li);
+          ctx.beginPath();
+          ctx.moveTo(pa[0], pa[1]);
+          ctx.lineTo(pb[0], pb[1]);
+          ctx.stroke();
+        });
+      }
       kp.points.forEach(([x, y, c], ki) => {
         if (c < kptThresh) return;
-        ctx.fillStyle = keypoint_colors[ki] ?? kp.color;
+        ctx.fillStyle = kptColor(ki);
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();

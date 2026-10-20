@@ -329,8 +329,9 @@ fn normalize_model_path(path: &Path) -> PathBuf {
     }
 }
 
-/// Attempt to download a model if it matches a known downloadable model.
+/// Resolve a model path, downloading it if it matches a known downloadable model.
 ///
+/// An existing file at the normalized path (e.g. `yolo26n.onnx` for `yolo26n`) is reused as is.
 /// Supports all `YOLO26`, `YOLO11`, and `YOLOv8` ONNX models across sizes (n/s/m/l/x) and
 /// task variants (detect, segment, semantic, depth, classify, pose, obb).
 /// Every supported file resolves to `{ASSETS_BASE_URL}/{filename}`.
@@ -341,6 +342,15 @@ fn normalize_model_path(path: &Path) -> PathBuf {
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
     let normalized = normalize_model_path(path);
+    if normalized.is_file() {
+        return Ok(normalized);
+    }
+    if normalized.exists() {
+        return Err(InferenceError::ModelLoadError(format!(
+            "'{}' exists but is not a model file",
+            normalized.display()
+        )));
+    }
 
     let filename = normalized
         .file_name()
