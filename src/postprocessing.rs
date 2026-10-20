@@ -23,11 +23,11 @@ use wide::f32x8;
 #[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
 use crate::parallel::*;
 use fast_image_resize::images::{Image, ImageRef};
-use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
+use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions};
 use ndarray::{Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip, s};
 
 use crate::inference::InferenceConfig;
-use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
+use crate::preprocessing::{PreprocessResult, clip_coords, resize, scale_coords};
 use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
 use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
@@ -702,7 +702,6 @@ fn apply_mask_proto(
         return;
     };
 
-    let mut resizer = Resizer::new();
     let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
     // Horizontal pass: every prototype row resized to the full output width. Keeping all
@@ -714,7 +713,7 @@ fn apply_mask_proto(
         f64::from(crop_w.max(1.0).min(mw as f32)),
         mh as f64,
     );
-    if resizer.resize(&src_image, &mut rows, &options).is_err() {
+    if resize(&src_image, &mut rows, &options).is_err() {
         return;
     }
 
@@ -731,7 +730,7 @@ fn apply_mask_proto(
         box_w as f64,
         box_h as f64 * row_scale,
     );
-    if resizer.resize(&rows, &mut cols, &options).is_err() {
+    if resize(&rows, &mut cols, &options).is_err() {
         return;
     }
 
