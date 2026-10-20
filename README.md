@@ -595,7 +595,7 @@ ultralytics-inference = { version = "0.0.53", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.14", features = ["lax-feature-matching"] }
 ```
 
-Providers missing from the chosen build are then absent at runtime and inference falls back to CPU. On `aarch64-unknown-linux-gnu` a CUDA, TensorRT and NVRTX build is published for Jetson, Grace Hopper and DGX Spark; other GPU features there still hit this, see [`docs/DGX.md`](docs/DGX.md).
+Providers missing from the chosen build are then absent at runtime: the default device falls back to CPU, and a `--device` that needs one stops with an error. On `aarch64-unknown-linux-gnu` a CUDA, TensorRT and NVRTX build is published for Jetson, Grace Hopper and DGX Spark; other GPU features there still hit this, see [`docs/DGX.md`](docs/DGX.md).
 
 > The CUDA and TensorRT binaries are built against CUDA 13, and no CUDA 12 build is published. To run them on CUDA 12, compile ONNX Runtime yourself and link it with `ORT_LIB_PATH`.
 
