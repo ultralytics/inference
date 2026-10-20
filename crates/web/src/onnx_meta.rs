@@ -9,7 +9,7 @@
 //! graph fields are skipped without being parsed. These helpers are pure
 //! (`&[u8] -> map`) and carry no wasm/JS types.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 /// Read a protobuf base-128 varint at `pos`, advancing it. Returns `None` on a
 /// truncated/oversized value.
@@ -103,22 +103,48 @@ const FLOAT: u64 = 1;
 /// ONNX `TensorProto.DataType` of a float16 tensor.
 const FLOAT16: u64 = 10;
 
-/// Rewrite a model whose graph inputs or outputs are float16 (e.g. an export with FP16
-/// I/O) to take and return float32, converting each such tensor with a `Cast` node at
-/// the graph boundary while the graph itself stays float16.
+/// Rewrite a model whose graph inputs or outputs are float16 (e.g. a `quantize=16` export
+/// made on a GPU) to take and return float32, converting each such tensor with a `Cast` node
+/// at the graph boundary while the graph itself stays float16.
 ///
 /// `ort-web` cannot create or read float16 tensors, so this is what lets such a model
 /// run in the browser. Returns `None` when no input or output is float16, so other
 /// models are used as-is without a copy.
 pub(crate) fn with_f32_io(model: &[u8]) -> Option<Vec<u8>> {
     let graph = bytes_field(model, 7)?;
+    // `GraphProto.initializer` (5) names; an input backed by one is a weight, not fed at runtime.
+    let initializers: HashSet<&[u8]> = fields(graph)
+        .filter_map(|(field, value, _)| match value {
+            Value::Bytes(tensor) if field == 5 => bytes_field(tensor, 8),
+            _ => None,
+        })
+        .collect();
+    // Every value name in the graph (node outputs, inputs, outputs, value infos and
+    // initializers), so a rename cannot clash with one.
+    let mut taken = initializers.clone();
+    for (field, value, _) in fields(graph) {
+        match (field, value) {
+            (1, Value::Bytes(node)) => taken.extend(fields(node).filter_map(|(f, v, _)| match v {
+                Value::Bytes(output) if f == 2 => Some(output),
+                _ => None,
+            })),
+            (11..=13, Value::Bytes(info)) => taken.extend(bytes_field(info, 1)),
+            _ => {}
+        }
+    }
     // `Cast` nodes into the graph go first and out of it last, keeping the node list
     // topologically sorted; every other graph field is copied unchanged.
     let (mut head, mut body, mut tail) = (Vec::new(), Vec::new(), Vec::new());
     for (field, value, raw) in fields(graph) {
         // `GraphProto.input` (11) and `GraphProto.output` (12).
         let rewritten = match value {
-            Value::Bytes(info) if field == 11 || field == 12 => f32_value_info(info),
+            Value::Bytes(info)
+                if field == 12
+                    || field == 11
+                        && !bytes_field(info, 1).is_some_and(|n| initializers.contains(n)) =>
+            {
+                f32_value_info(info, &taken)
+            }
             _ => None,
         };
         let Some((name, renamed, info)) = rewritten else {
@@ -148,9 +174,13 @@ pub(crate) fn with_f32_io(model: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// For a float16 tensor `ValueInfoProto`, return its name, the `{name}_f32` rename, and
-/// a float32 `ValueInfoProto` of the same shape under that rename; `None` otherwise.
-fn f32_value_info(info: &[u8]) -> Option<(&[u8], Vec<u8>, Vec<u8>)> {
+/// For a float16 tensor `ValueInfoProto`, return its name, a `{name}_f32` rename not in
+/// `taken`, and a float32 `ValueInfoProto` of the same shape under that rename; `None`
+/// otherwise.
+fn f32_value_info<'a>(
+    info: &'a [u8],
+    taken: &HashSet<&[u8]>,
+) -> Option<(&'a [u8], Vec<u8>, Vec<u8>)> {
     let name = bytes_field(info, 1)?;
     // `ValueInfoProto.type` (2) -> `TypeProto.tensor_type` (1).
     let tensor = bytes_field(bytes_field(info, 2)?, 1)?;
@@ -165,7 +195,10 @@ fn f32_value_info(info: &[u8]) -> Option<(&[u8], Vec<u8>, Vec<u8>)> {
     }
     let mut type_proto = Vec::new();
     write_bytes(&mut type_proto, 1, &tensor_f32);
-    let renamed = [name, b"_f32"].concat();
+    let mut renamed = [name, b"_f32"].concat();
+    while taken.contains(renamed.as_slice()) {
+        renamed.push(b'_');
+    }
     let mut out = Vec::new();
     write_bytes(&mut out, 1, &renamed);
     write_bytes(&mut out, 2, &type_proto);
