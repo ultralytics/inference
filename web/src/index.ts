@@ -847,10 +847,11 @@ export async function annotate(
     const sin = Math.sin(o.angle);
     const hw = o.w / 2;
     const hh = o.h / 2;
+    // Same corner order as the native `Obb::xyxyxyxy` and Ultralytics `xywhr2xyxyxyxy`.
     const corners: Array<[number, number]> = [
-      [-hw, -hh],
-      [hw, -hh],
       [hw, hh],
+      [hw, -hh],
+      [-hw, -hh],
       [-hw, hh],
     ].map(([dx, dy]) => [o.x + dx * cos - dy * sin, o.y + dx * sin + dy * cos]);
     ctx.beginPath();

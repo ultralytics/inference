@@ -5,30 +5,26 @@
 //! This module provides abstractions for various input sources including
 //! images, videos, webcams, and streaming URLs.
 
-use std::io::{BufRead, Cursor, Seek};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use image::{DynamicImage, ImageReader};
 use ndarray::Array3;
 
 use crate::error::{InferenceError, Result};
+use crate::utils::decode_image;
 
-/// Image extensions: the Ultralytics Python `IMG_FORMATS` plus `gif`.
+/// Image extensions: the Ultralytics Python `IMG_FORMATS` plus `gif`, kept as an image so it works
+/// without the `video` feature.
 const IMAGE_EXTENSIONS: [&str; 14] = [
     "avif", "bmp", "dng", "gif", "heic", "heif", "jp2", "jpeg", "jpg", "mpo", "png", "tif", "tiff",
     "webp",
 ];
 
-/// Video file extensions.
-const VIDEO_EXTENSIONS: [&str; 10] = [
-    "mp4", "avi", "mov", "mkv", "wmv", "flv", "webm", "m4v", "mpeg", "mpg",
+/// Video extensions: the Ultralytics Python `VID_FORMATS` (except `gif`) plus `flv`.
+const VIDEO_EXTENSIONS: [&str; 12] = [
+    "asf", "avi", "flv", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ts", "wmv", "webm",
 ];
-
-/// Decode an image by its contents rather than its extension, with JPEG 2000 support.
-fn decode_image<R: BufRead + Seek>(reader: ImageReader<R>) -> image::ImageResult<DynamicImage> {
-    hayro_jpeg2000::integration::register_decoding_hook();
-    reader.with_guessed_format()?.decode()
-}
 
 /// Open and decode the image file at `path`.
 pub(crate) fn open_image(path: &Path) -> image::ImageResult<DynamicImage> {
@@ -428,7 +424,7 @@ impl SourceIterator {
     /// Returns an error if the source cannot be opened (e.g. directory not found).
     pub fn new(source: Source) -> Result<Self> {
         let image_paths = match &source {
-            Source::Directory(path) => Self::collect_images_from_dir(path, None)?,
+            Source::Directory(path) => Self::collect_images_from_dir(path)?,
             Source::Glob(pattern) => Self::collect_images_from_glob(pattern)?,
             Source::Image(path) => vec![path.clone()],
             // URLs are handled separately via next_image_url
@@ -457,8 +453,8 @@ impl SourceIterator {
         })
     }
 
-    /// Collect sorted image paths from a directory, only with extension `ext` when given.
-    fn collect_images_from_dir(dir: &Path, ext: Option<&str>) -> Result<Vec<PathBuf>> {
+    /// Collect sorted image paths from a directory.
+    fn collect_images_from_dir(dir: &Path) -> Result<Vec<PathBuf>> {
         if !dir.is_dir() {
             return Err(InferenceError::ImageError(format!(
                 "Directory not found: {}",
@@ -469,38 +465,22 @@ impl SourceIterator {
         let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
             .filter_map(std::result::Result::ok)
             .map(|entry| entry.path())
-            .filter(|path| {
-                ext.map_or_else(
-                    || is_image_file(path),
-                    |ext| {
-                        path.extension()
-                            .is_some_and(|e| e.eq_ignore_ascii_case(ext))
-                    },
-                )
-            })
+            .filter(|path| is_image_file(path))
             .collect();
 
         paths.sort();
         Ok(paths)
     }
 
-    /// Collect image paths from a glob pattern.
-    ///
-    /// Note: This is a simplified glob implementation that only supports patterns like "dir/*.jpg"
-    /// For more complex glob patterns, consider adding the `glob` crate.
+    /// Collect sorted image paths matching a glob pattern, with `**` matching any depth.
     fn collect_images_from_glob(pattern: &str) -> Result<Vec<PathBuf>> {
-        let Some(star_pos) = pattern.find('*') else {
-            // No glob pattern, treat as single file
-            return Ok(vec![PathBuf::from(pattern)]);
-        };
-        let dir_part = &pattern[..star_pos];
-        let dir = if dir_part.is_empty() {
-            Path::new(".")
-        } else {
-            Path::new(dir_part.trim_end_matches(['/', '\\']))
-        };
-        // Get extension filter from pattern (e.g., "*.jpg" -> "jpg")
-        Self::collect_images_from_dir(dir, pattern[star_pos..].strip_prefix("*."))
+        let mut paths: Vec<PathBuf> = glob::glob(pattern)
+            .map_err(|e| InferenceError::ImageError(format!("Invalid glob '{pattern}': {e}")))?
+            .filter_map(std::result::Result::ok)
+            .filter(|path| is_image_file(path))
+            .collect();
+        paths.sort();
+        Ok(paths)
     }
 
     /// Download an image from a URL.
@@ -529,7 +509,8 @@ impl SourceIterator {
         let meta = SourceMeta {
             frame_idx: 0,
             total_frames: Some(1),
-            path: url.to_string(),
+            // Drop the query string, so `img.jpg?raw=true` is saved as `img.jpg`.
+            path: url.split('?').next().unwrap_or(url).to_string(),
             fps: None,
         };
 
@@ -685,30 +666,31 @@ impl SourceIterator {
             return None;
         }
 
-        // Initialize decoder if needed (Video/Stream)
+        // The video file or stream URL to decode, and each frame's path so streams save by
+        // name, without a stream's query string (which may hold a token).
+        let (url, path) = match &self.source {
+            Source::Video(p) => (p.to_string_lossy().to_string(), None),
+            Source::Stream(s) => (s.clone(), s.split('?').next()),
+            _ => return None,
+        };
+        let path = path.unwrap_or(&url).to_string();
+
+        // Initialize decoder if needed
         if self.decoder.is_none() {
             if self.video_init_failed {
                 return None;
             }
 
-            let path_str = match &self.source {
-                Source::Video(p) => Some(p.to_string_lossy().to_string()),
-                Source::Stream(s) => Some(s.clone()),
-                _ => None,
-            };
-
-            if let Some(path_str) = path_str {
-                match BilinearVideoDecoder::new(Path::new(&path_str)) {
-                    Ok(d) => {
-                        self.total_frames = d.total_frames;
-                        self.decoder = Some(d);
-                    }
-                    Err(e) => {
-                        self.video_init_failed = true;
-                        return Some(Err(InferenceError::VideoError(format!(
-                            "Failed to create decoder: {e}"
-                        ))));
-                    }
+            match BilinearVideoDecoder::new(Path::new(&url)) {
+                Ok(d) => {
+                    self.total_frames = d.total_frames;
+                    self.decoder = Some(d);
+                }
+                Err(e) => {
+                    self.video_init_failed = true;
+                    return Some(Err(InferenceError::VideoError(format!(
+                        "Failed to create decoder: {e}"
+                    ))));
                 }
             }
         }
@@ -719,11 +701,7 @@ impl SourceIterator {
                     let meta = SourceMeta {
                         frame_idx: self.current_frame,
                         total_frames: self.total_frames,
-                        path: self
-                            .source
-                            .path()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_default(),
+                        path,
                         fps: Some(decoder.fps),
                     };
                     self.current_frame += 1;
@@ -826,7 +804,7 @@ mod tests {
 
     #[test]
     fn test_from_str_video_extensions() {
-        for ext in ["mp4", "avi", "mov", "mkv", "webm", "m4v", "mpeg", "mpg"] {
+        for ext in VIDEO_EXTENSIONS {
             let s = format!("clip.{ext}");
             assert!(
                 matches!(Source::from(s.as_str()), Source::Video(_)),
@@ -899,16 +877,14 @@ mod tests {
         write_image(&tmp.path().join("a.jpg"));
         std::fs::write(tmp.path().join("notes.txt"), b"ignore me").unwrap();
 
-        let paths = SourceIterator::collect_images_from_dir(tmp.path(), None).unwrap();
+        let paths = SourceIterator::collect_images_from_dir(tmp.path()).unwrap();
         // Only the two images, sorted by name.
         assert_eq!(paths.len(), 2);
         assert!(paths[0].ends_with("a.jpg"));
         assert!(paths[1].ends_with("b.png"));
 
         // Non-directory path is an error.
-        assert!(
-            SourceIterator::collect_images_from_dir(Path::new("definitely/missing"), None).is_err()
-        );
+        assert!(SourceIterator::collect_images_from_dir(Path::new("definitely/missing")).is_err());
     }
 
     #[test]
@@ -916,24 +892,23 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         write_image(&tmp.path().join("a.jpg"));
         write_image(&tmp.path().join("b.png"));
+        std::fs::create_dir(tmp.path().join("sub")).unwrap();
+        write_image(&tmp.path().join("sub/c.jpg"));
+        std::fs::write(tmp.path().join("notes.txt"), b"ignore me").unwrap();
+        let glob = |pattern: &str| {
+            SourceIterator::collect_images_from_glob(&format!("{}/{pattern}", tmp.path().display()))
+                .unwrap()
+        };
 
         // Extension-filtered glob picks only the matching extension.
-        let pattern = format!("{}/*.jpg", tmp.path().display());
-        let jpgs = SourceIterator::collect_images_from_glob(&pattern).unwrap();
-        assert_eq!(jpgs.len(), 1);
-        assert!(jpgs[0].ends_with("a.jpg"));
-
-        // Bare `*` (no extension) falls back to any image file.
-        let all_pattern = format!("{}/*", tmp.path().display());
-        let all = SourceIterator::collect_images_from_glob(&all_pattern).unwrap();
-        assert_eq!(all.len(), 2);
-
-        // Missing directory is an error.
-        assert!(SourceIterator::collect_images_from_glob("missing_dir/*.jpg").is_err());
-
-        // No star: treated as a single literal path.
-        let single = SourceIterator::collect_images_from_glob("just/a/file.jpg").unwrap();
-        assert_eq!(single, vec![PathBuf::from("just/a/file.jpg")]);
+        assert_eq!(glob("*.jpg"), vec![tmp.path().join("a.jpg")]);
+        assert_eq!(glob("a*"), vec![tmp.path().join("a.jpg")]);
+        // Bare `*` keeps image files only.
+        assert_eq!(glob("*").len(), 2);
+        // `**` matches any depth, like Python's `glob(recursive=True)`.
+        assert_eq!(glob("**/*.jpg").len(), 2);
+        // No match yields nothing.
+        assert_eq!(glob("missing_dir/*.jpg"), Vec::<PathBuf>::new());
     }
 
     #[test]
@@ -994,6 +969,15 @@ mod tests {
                 .unwrap();
         }
         writer.finish().unwrap();
+
+        // A stream URL names its frames, so saved output gets a file name.
+        let url = path.to_string_lossy().to_string();
+        let (_, meta) = SourceIterator::new(Source::Stream(url.clone()))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(meta.path, url);
 
         let src = Source::Video(path);
         assert!(src.is_video());
