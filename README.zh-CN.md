@@ -497,6 +497,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 细节而非远处背景，因此近处呈暖色，且少量离群像素不会冲淡其余部分；`metric` 则直接对深度在其
 最小值与最大值之间做线性着色。
 
+**姿态绘制：**
+
+`annotate_image_with_options` 接受与 Ultralytics `Results.plot` 相同的关键点选项。17 个关键点（COCO-Pose）的模型
+绘制人体骨架，其他关键点布局为每个关键点使用一种调色板颜色且不连线，`skeleton` 可为自定义模型连接关键点：
+
+```rust
+use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};
+
+let options = AnnotateOptions {
+    kpt_radius: 5,
+    kpt_conf: 0.25,
+    skeleton: Some(vec![[0, 1], [1, 2]]),
+    ..Default::default()
+};
+let annotated = annotate_image_with_options(&image, &results[0], &options);
+```
+
 可复制并修改的可运行程序，请参见 [examples](examples/README.md) 目录。
 
 ## 🗂️ 项目结构
@@ -600,7 +617,7 @@ ort = { version = "=2.0.0-rc.14", features = ["lax-feature-matching"] }
 **OpenVINO IR 模型：** 启用 `openvino-native` feature（可与 `openvino` 同时启用）后，`--model` 也可以直接使用 `yolo export format=openvino` 导出的 `.xml` 文件或导出文件夹，并通过 OpenVINO 运行时推理，而不经过 ONNX Runtime。所有任务（detect、segment、semantic、depth、classify、pose、obb）都可在 `intel:cpu`、`intel:gpu` 和 `intel:npu` 上运行，在 Rust 中用 `YOLOModel::load("yolo26n_openvino_model")` 加载。构建时不需要安装 OpenVINO，运行时会在首次打开模型时加载。设置和细节见 [`docs/OPENVINO.md`](docs/OPENVINO.md)。
 
 ```bash
-yolo export model=yolo26n.pt format=openvino # FP32，可加 half=True、int8=True、dynamic=True 或 batch=4
+yolo export model=yolo26n.pt format=openvino # FP32，可加 quantize=16、quantize=8、dynamic=True 或 batch=4
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 

@@ -174,6 +174,13 @@ const results = await model.predict(img, { colormap: "spectral", depthViz: "metr
 await annotate(canvas, img, results, { depthAlpha: 0.6 });
 ```
 
+For pose, `annotate()` takes the Ultralytics `plot()` keypoint options: `keypointRadius` (default `5`),
+`keypointThreshold`, `keypointLines`, `keypointColor`, and `skeleton` to connect the keypoints of a custom layout:
+
+```ts
+await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
+```
+
 ## ⚙️ Requirements & Notes
 
 - **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure
@@ -210,6 +217,9 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   > `half=True` / `int8=True` flags. For ONNX the supported values are
   > `32`/`fp32` (default), `16`/`fp16`, and `8`/`int8`; the old flags still work
   > but emit a deprecation warning.
+
+  FP16 exports made on a GPU have float16 inputs and outputs. `YOLO.load` casts them to float32 at the graph edges,
+  so they run like FP16 exports made on a CPU.
 
 - **Runtime assets**: on first load, `ort-web` fetches the ONNX Runtime Web wasm
   bundle (~25 MB, browser-cached afterward) from `cdn.pyke.io`. If you set a

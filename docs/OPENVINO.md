@@ -69,7 +69,7 @@ source "/path/to/extracted-folder/setupvars.sh"
 ## Export and run
 
 ```bash
-yolo export model=yolo26n.pt format=openvino # add half=True, int8=True, dynamic=True or batch=4
+yolo export model=yolo26n.pt format=openvino # add quantize=16, quantize=8, dynamic=True or batch=4
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 

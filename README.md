@@ -501,6 +501,24 @@ depth spends the color range on nearby detail rather than the distant background
 objects read warm and a few stray pixels cannot wash out the rest. `metric` colors depth
 directly, linearly between its min and max.
 
+**Pose Drawing:**
+
+`annotate_image_with_options` takes the keypoint options of Ultralytics `Results.plot`. A 17-keypoint (COCO-Pose)
+model draws the human skeleton, any other layout draws one palette color per keypoint and no lines, and `skeleton`
+connects the keypoints of a custom model:
+
+```rust
+use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};
+
+let options = AnnotateOptions {
+    kpt_radius: 5,
+    kpt_conf: 0.25,
+    skeleton: Some(vec![[0, 1], [1, 2]]),
+    ..Default::default()
+};
+let annotated = annotate_image_with_options(&image, &results[0], &options);
+```
+
 For runnable programs you can copy and adapt, see the [examples](examples/README.md) directory.
 
 ## 🗂️ Project Structure
@@ -604,7 +622,7 @@ Providers missing from the chosen build are then absent at runtime: the default 
 **OpenVINO IR models:** with the `openvino-native` feature (it can be combined with `openvino`), `--model` also takes a native OpenVINO export, the `.xml` file or the folder from `yolo export format=openvino`, and runs it through the OpenVINO runtime instead of ONNX Runtime. Every task (detect, segment, semantic, depth, classify, pose, obb) runs on `intel:cpu`, `intel:gpu` and `intel:npu`, and from Rust with `YOLOModel::load("yolo26n_openvino_model")`. Building needs no OpenVINO install, the runtime is loaded when the first model opens. Setup and details are in [`docs/OPENVINO.md`](docs/OPENVINO.md).
 
 ```bash
-yolo export model=yolo26n.pt format=openvino # FP32, add half=True, int8=True, dynamic=True or batch=4
+yolo export model=yolo26n.pt format=openvino # FP32, add quantize=16, quantize=8, dynamic=True or batch=4
 ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --device intel:gpu
 ```
 

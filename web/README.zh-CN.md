@@ -167,6 +167,13 @@ const results = await model.predict(img, { colormap: "spectral", depthViz: "metr
 await annotate(canvas, img, results, { depthAlpha: 0.6 });
 ```
 
+对于 pose 任务，`annotate()` 接受 Ultralytics `plot()` 的关键点选项：`keypointRadius`（默认 `5`）、
+`keypointThreshold`、`keypointLines`、`keypointColor`，以及用于连接自定义布局关键点的 `skeleton`：
+
+```ts
+await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
+```
+
 ## ⚙️ 环境要求与注意事项
 
 - **WebGPU**（Chrome/Edge，或启用了 WebGPU 的 Firefox）配合**安全上下文**（`https://` 或
@@ -197,6 +204,9 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
   > Ultralytics ≥8.4 使用 `quantize` 参数，取代已弃用的 `half=True` / `int8=True` 标志。
   > 对于 ONNX，支持的取值为 `32`/`fp32`（默认）、`16`/`fp16` 和 `8`/`int8`；旧标志
   > 仍可使用，但会触发弃用警告。
+
+  在 GPU 上导出的 FP16 模型的输入和输出为 float16。`YOLO.load` 会在图的输入输出处将其转换为 float32，
+  因此它们与在 CPU 上导出的 FP16 模型一样可以运行。
 
 - **运行时资源**：首次加载时，`ort-web` 会从 `cdn.pyke.io` 获取 ONNX Runtime Web 的 wasm 包
   （约 25 MB，之后由浏览器缓存）。如果你设置了 Content-Security-Policy，请在
