@@ -138,13 +138,22 @@ fn probiou_prepared(p1: &ProbIouBox, p2: &ProbIouBox) -> f32 {
 /// far apart to overlap above it. The `ProbIoU` distance is at least `|d|^2 / (4 * trace)` of the
 /// summed covariances, and the overlap exceeds the threshold only when that distance is below
 /// `-ln(1 - (1 - iou_threshold)^2)`, so the skipped pairs never decide a suppression.
+///
+/// The bound ignores the `1e-7` stabilizers in [`probiou_prepared`], which only matter for tiny
+/// or degenerate boxes, so pairs whose summed covariance determinant is below 1 (boxes of about
+/// 2 px or less) and thresholds of 0.99 and above always take the full computation.
 fn probiou_for_nms(iou_threshold: f32) -> impl Fn(&ProbIouBox, &ProbIouBox) -> f32 {
     // 1% margin over the bound so float rounding in the full computation cannot matter.
     let gap = 1.0 - iou_threshold;
-    let limit = -gap.mul_add(-gap, 1.0).ln() * 4.04;
+    let limit = if iou_threshold < 0.99 {
+        -gap.mul_add(-gap, 1.0).ln() * 4.04
+    } else {
+        f32::INFINITY
+    };
     move |p, q| {
         let d2 = (p.x - q.x).mul_add(p.x - q.x, (p.y - q.y).powi(2));
-        if d2 > limit * (p.a + p.b + q.a + q.b) {
+        let det = (p.a + q.a).mul_add(p.b + q.b, -(p.c + q.c).powi(2));
+        if det >= 1.0 && d2 > limit * (p.a + p.b + q.a + q.b) {
             0.0
         } else {
             probiou_prepared(p, q)
