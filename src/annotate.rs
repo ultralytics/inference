@@ -19,6 +19,7 @@ use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_m
 use imageproc::rect::Rect;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
@@ -89,6 +90,20 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
     Some(font_path)
 }
 
+/// The label font, read once per process: every annotated frame needs it, and the Unicode
+/// face non-ASCII class names pick is about 23 MB. `None` when it cannot be downloaded.
+fn font_bytes(unicode: bool) -> Option<&'static [u8]> {
+    static ARIAL: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    static ARIAL_UNICODE: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    let (font, name) = if unicode {
+        (&ARIAL_UNICODE, "Arial.Unicode.ttf")
+    } else {
+        (&ARIAL, "Arial.ttf")
+    };
+    font.get_or_init(|| check_font(name).and_then(|path| fs::read(path).ok()))
+        .as_deref()
+}
+
 /// Overlay inference results onto `image` and return the annotated copy.
 ///
 /// Draws whichever result types are present: detection boxes with instance masks,
@@ -136,18 +151,8 @@ pub fn annotate_image_with(
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
 
-    let font_name = if result.boxes.is_some() && result.names.values().any(|n| !n.is_ascii()) {
-        "Arial.Unicode.ttf"
-    } else {
-        "Arial.ttf"
-    };
-
-    let font_path = check_font(font_name);
-    let font_data = font_path.and_then(|path| fs::read(path).ok());
-
-    let font = font_data
-        .as_ref()
-        .and_then(|data| FontRef::try_from_slice(data).ok());
+    let unicode = result.boxes.is_some() && result.names.values().any(|n| !n.is_ascii());
+    let font = font_bytes(unicode).and_then(|data| FontRef::try_from_slice(data).ok());
 
     draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref());

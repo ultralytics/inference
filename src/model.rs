@@ -19,7 +19,9 @@ use ort::session::Session;
 use ort::value::TensorElementType;
 use ort::value::TensorRef;
 use ort::value::ValueType;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use rayon::slice::ParallelSliceMut;
 
 use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_download_model};
@@ -1120,8 +1122,9 @@ impl YOLOModel {
         inference_shape: (u32, u32),
     ) -> Vec<Vec<Results>> {
         let start_postprocess = Instant::now();
+        // Each image decodes independently, so a batch fans out across cores.
         let batch_results = image_arrays
-            .into_iter()
+            .into_par_iter()
             .zip(preprocessed)
             .enumerate()
             .map(|(i, (orig_img, pre))| {
@@ -1156,7 +1159,7 @@ impl YOLOModel {
     ) -> Vec<Vec<Results>> {
         let start_postprocess = Instant::now();
         let batch_results = image_arrays
-            .into_iter()
+            .into_par_iter()
             .enumerate()
             .map(|(i, orig_img)| {
                 let (data, shape) = &Self::slice_batch_output(outputs, i)[0];
