@@ -730,20 +730,22 @@ fn center_crop_image(
     let scale_y = target_h as f32 / src_h as f32;
     let scale = scale_x.max(scale_y);
 
+    // The `f32` product can truncate one pixel short of the target on a near-square image
+    // (99x99 at 224 gives 223), so the covering extent never drops below it.
     let (new_w, new_h) = if scale_x >= scale_y {
         #[allow(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
             clippy::cast_precision_loss
         )]
-        (target_w, (src_h as f32 * scale_x) as u32)
+        (target_w, ((src_h as f32 * scale_x) as u32).max(target_h))
     } else {
         #[allow(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
             clippy::cast_precision_loss
         )]
-        ((src_w as f32 * scale_y) as u32, target_h)
+        (((src_w as f32 * scale_y) as u32).max(target_w), target_h)
     };
 
     // Resize first. Borrow the source samples when the image is already RGB8 (the common
@@ -790,14 +792,11 @@ fn center_crop_image(
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let crop_y = crop_y_float.round_ties_even() as u32;
 
-    // Clamped to the resized image like `crop_imm`.
-    let crop_x = crop_x.min(safe_new_w);
-    let crop_y = crop_y.min(safe_new_h);
     let crop = (
         crop_x as usize,
         crop_y as usize,
-        target_w.min(safe_new_w - crop_x) as usize,
-        target_h.min(safe_new_h - crop_y) as usize,
+        target_size.1,
+        target_size.0,
     );
 
     (resized_rgb, crop, (scale, scale))
