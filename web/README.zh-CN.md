@@ -174,6 +174,9 @@ await annotate(canvas, img, results, { depthAlpha: 0.6 });
 await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
 ```
 
+`annotate()` 还接受 `lineWidth` 和 `font` 用于设置框线宽度和标签字体，以及 `labels: false` 或
+`keypoints: false` 用于隐藏标签或关键点。
+
 ## ⚙️ 环境要求与注意事项
 
 - **WebGPU**（Chrome/Edge，或启用了 WebGPU 的 Firefox）配合**安全上下文**（`https://` 或
@@ -215,7 +218,8 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
   const model = await YOLO.load("/models/yolo26n.onnx", { ortBaseUrl: "/ort/" });
   ```
   该目录需包含 ONNX Runtime Web 的入口脚本（`ort.webgpu.min.js`，以及 CPU 回退所需的
-  `ort.wasm.min.js`）和 `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` 二进制文件。
+  `ort.wasm.min.js`）和 `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` 二进制文件。如果打包工具没有提供本包自带的
+  `ultralytics_inference_web_bg.wasm`，可通过 `wasmUrl` 传入其 URL。
 - **遥测**：`ort-web` 可以在首次创建会话时向 pyke 上报页面域名。本包已将其关闭，不会发送任何数据。
   上报内容见 [ort-web 文档](https://ort.pyke.io/backends/web)。
 

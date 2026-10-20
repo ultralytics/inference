@@ -181,6 +181,9 @@ For pose, `annotate()` takes the Ultralytics `plot()` keypoint options: `keypoin
 await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
 ```
 
+`annotate()` also takes `lineWidth` and `font` to set the box width and label font, and `labels: false` or
+`keypoints: false` to hide labels or keypoints.
+
 ## ⚙️ Requirements & Notes
 
 - **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure
@@ -230,7 +233,8 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
   ```
   The folder must contain the ONNX Runtime Web entry scripts (`ort.webgpu.min.js`
   and `ort.wasm.min.js` for the CPU fallback) plus the
-  `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` binaries.
+  `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` binaries. If your bundler does not serve this package's
+  own `ultralytics_inference_web_bg.wasm`, pass its URL as `wasmUrl`.
 - **Telemetry**: `ort-web` can report the page domain to pyke on first session
   creation. This package turns that off, so nothing is sent. See the
   [ort-web docs](https://ort.pyke.io/backends/web) for what it would send.

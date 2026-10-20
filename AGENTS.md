@@ -57,7 +57,7 @@ cd web && npm ci && npm run build
 cargo run -- predict
 ```
 
-- CI matrix (`ci.yml`): `test` on ubuntu/macos/windows (ubuntu also lints and tests `annotate,cuda,tensorrt` and lints `annotate,openvino`); `cuda` on the self-hosted GPU runner (same-repo PRs only; lints `annotate,cuda-preprocess` and runs coverage with `--include-ignored`); `test-video` in FFmpeg 7.1/8.0/9.0 Linux containers (`--features annotate,video`); video builds on macOS (Homebrew FFmpeg 9) and Windows (FFmpeg 8.1/9.0); `wasm`; `coverage` (nightly) uploads to Codecov.
+- CI matrix (`ci.yml`): `test` on ubuntu/macos/windows (ubuntu also lints and tests `annotate,cuda,tensorrt` and `annotate,openvino-native`, and lints `annotate,openvino`); `cuda` on the self-hosted GPU runner (same-repo PRs only; lints `annotate,cuda-preprocess` and runs coverage with `--include-ignored`); `test-video` in FFmpeg 7.1/8.0/9.0 Linux containers (`--features annotate,video`); video builds on macOS (Homebrew FFmpeg 9) and Windows (FFmpeg 8.1/9.0); `wasm`; `coverage` (nightly) uploads to Codecov.
 - First native build downloads ONNX Runtime binaries (ort `download-binaries` feature), so builds need network once.
 
 ## Architecture
