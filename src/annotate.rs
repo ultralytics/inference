@@ -18,7 +18,7 @@ use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Re-exported so `annotate::find_next_run_dir` keeps working; the implementation lives in
@@ -87,39 +87,11 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
     }
 
     let url = format!("{ASSETS_URL}/{font_name}");
-    println!("Downloading {url} to {}", font_path.display());
-
-    match ureq::get(&url).call() {
-        Ok(response) => {
-            // Stage in a unique temp file and rename it into place, so an interrupted or
-            // concurrent download never leaves a truncated font for the `exists()` check to reuse.
-            let tmp_path = crate::download::part_path(&font_path);
-            let mut file = match File::create(&tmp_path) {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("Failed to create font file: {e}");
-                    return None;
-                }
-            };
-
-            let copied = io::copy(&mut response.into_body().into_reader(), &mut file);
-            drop(file);
-            if let Err(e) = copied.and_then(|_| fs::rename(&tmp_path, &font_path)) {
-                let _ = fs::remove_file(&tmp_path);
-                // A concurrent caller may have already renamed its complete copy into place.
-                if !font_path.exists() {
-                    eprintln!("Failed to download font: {e}");
-                    return None;
-                }
-            }
-
-            Some(font_path)
-        }
-        Err(e) => {
-            eprintln!("Failed to download font from {url}: {e}");
-            None
-        }
+    if let Err(e) = crate::download::download_file(&url, &font_path) {
+        eprintln!("Failed to download font: {e}");
+        return None;
     }
+    Some(font_path)
 }
 
 /// Overlay inference results onto `image` and return the annotated copy.

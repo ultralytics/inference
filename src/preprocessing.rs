@@ -511,35 +511,13 @@ pub fn calculate_rect_size(
     target_size: (usize, usize),
     stride: u32,
 ) -> (usize, usize) {
-    let (target_h, target_w) = target_size;
-
-    #[allow(clippy::cast_precision_loss)]
-    let orig_h = orig_height as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let orig_w = orig_width as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let target_h_f = target_h as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let target_w_f = target_w as f32;
-
-    // Calculate scale to fit within target while maintaining aspect ratio
-    let scale = (target_h_f / orig_h).min(target_w_f / orig_w);
-
-    // New dimensions after scaling
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let new_h = (orig_h * scale).round() as usize;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let new_w = (orig_w * scale).round() as usize;
-
-    // Round up to nearest multiple of stride. A degenerate source rounds an extent to zero
-    // (a zero-width image, or an aspect ratio past what the target can represent), which would
-    // hand the model a zero-width input and the CUDA preprocess a zero-sized kernel grid, so
-    // keep at least one stride step on each axis.
+    // Round the letterboxed extents up to the stride. A degenerate source rounds an extent to
+    // zero (a zero-width image), which would hand the model a zero-width input and the CUDA
+    // preprocess a zero-sized kernel grid, so keep at least one stride step on each axis.
+    let (geom, _) = LetterboxGeometry::compute(orig_width, orig_height, target_size, false);
     let stride = stride as usize;
-    let rect_h = (((new_h + stride - 1) / stride) * stride).max(stride);
-    let rect_w = (((new_w + stride - 1) / stride) * stride).max(stride);
-
-    (rect_h, rect_w)
+    let round_up = |extent: u32| (extent as usize).div_ceil(stride).max(1) * stride;
+    (round_up(geom.new_h), round_up(geom.new_w))
 }
 
 /// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.

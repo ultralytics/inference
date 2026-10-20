@@ -193,7 +193,7 @@ pub(crate) fn part_path(dest: &Path) -> PathBuf {
     clippy::cast_sign_loss
 )]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn download_file(url: &str, dest: &Path) -> Result<()> {
+pub(crate) fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut last_err = InferenceError::ModelLoadError(String::new());
 
     for attempt in 1..=MAX_RETRIES {
