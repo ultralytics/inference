@@ -998,14 +998,15 @@ impl YOLOModel {
     /// Build the `OpenVINO` execution provider for `device_type` (`CPU`, `GPU` or `NPU`) with a
     /// compiled-model cache, mirroring the `TensorRT` engine cache.
     ///
-    /// The cache (`.ov_cache/`) lets repeat loads skip kernel recompilation, which is the
-    /// dominant GPU model-load cost. Precision, streams, and thread count are intentionally left to
-    /// `OpenVINO`'s defaults, which already pick the optimal low-latency configuration for a
-    /// single-stream batch-1 workload (GPU runs FP16, one stream, auto thread scheduling). Forcing
-    /// those knobs was measured to be a no-op at best and a regression on hybrid CPUs at worst.
+    /// The cache (`.ov_cache/`) lets repeat NPU loads skip about a second of compilation. The GPU
+    /// gets none: a GPU model loaded from the cache drops end2end detections, and the GPU driver
+    /// keeps its own kernel cache, so reloads are fast without it. Precision, streams, and thread
+    /// count are intentionally left to `OpenVINO`'s defaults, which already pick the optimal
+    /// low-latency configuration for a single-stream batch-1 workload (GPU runs FP16, one stream,
+    /// auto thread scheduling). Forcing those knobs was measured to be a no-op at best and a
+    /// regression on hybrid CPUs at worst.
     ///
-    /// The cache is only passed once its directory is writable, since the GPU plugin fails
-    /// compilation on a `CACHE_DIR` it cannot write.
+    /// The cache is only passed once its directory is writable.
     #[cfg(feature = "openvino")]
     fn build_openvino_ep(
         model_path: &Path,
@@ -1020,7 +1021,7 @@ impl YOLOModel {
             .join(".ov_cache")
             .join(format!("{stem}_{}", device_type.to_ascii_lowercase()));
         let mut ep = ort::ep::OpenVINO::default().with_device_type(device_type);
-        if crate::io::is_writable_dir(&cache_dir) {
+        if device_type != "GPU" && crate::io::is_writable_dir(&cache_dir) {
             ep = ep.with_cache_dir(cache_dir.to_string_lossy());
         }
         ep.build()
