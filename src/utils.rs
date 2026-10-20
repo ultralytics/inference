@@ -203,18 +203,11 @@ fn nms_by_class<T>(
 ///
 /// # Returns
 ///
-/// Indices of boxes to keep
+/// Indices of boxes to keep, at most `max_det` of them. Suppression stops once `max_det`
+/// boxes are kept, since going on would only order boxes that get discarded: on a full
+/// `8400`-prediction head that is the difference between roughly 26 ms and 2 ms.
 #[must_use]
-pub fn nms_per_class(boxes: &[([f32; 4], f32, usize)], iou_threshold: f32) -> Vec<usize> {
-    nms_by_class(boxes, iou_threshold, usize::MAX, calculate_iou)
-}
-
-/// [`nms_per_class`], stopping once `max_det` boxes are kept.
-///
-/// Callers cap the result at `max_det` anyway, so suppressing past that point only orders
-/// boxes that get discarded. On a full `8400`-prediction head that is the difference
-/// between roughly 26 ms and 2 ms.
-pub(crate) fn nms_per_class_capped(
+pub fn nms_per_class(
     boxes: &[([f32; 4], f32, usize)],
     iou_threshold: f32,
     max_det: usize,
@@ -235,20 +228,9 @@ pub(crate) fn nms_per_class_capped(
 ///
 /// # Returns
 ///
-/// Indices of boxes to keep
+/// Indices of boxes to keep, at most `max_det` of them (see [`nms_per_class`]).
 #[must_use]
-pub fn nms_rotated_per_class(boxes: &[([f32; 5], f32, usize)], iou_threshold: f32) -> Vec<usize> {
-    nms_by_class(
-        &ProbIouBox::prepare_all(boxes),
-        iou_threshold,
-        usize::MAX,
-        probiou_prepared,
-    )
-}
-
-/// [`nms_rotated_per_class`], stopping once `max_det` boxes are kept. See
-/// [`nms_per_class_capped`] for why that is not an approximation.
-pub(crate) fn nms_rotated_per_class_capped(
+pub fn nms_rotated_per_class(
     boxes: &[([f32; 5], f32, usize)],
     iou_threshold: f32,
     max_det: usize,
@@ -384,14 +366,14 @@ mod tests {
             ([1.0, 1.0, 11.0, 11.0], 0.8, 1),
             ([100.0, 100.0, 110.0, 110.0], 0.95, 0),
         ];
-        assert_eq!(nms_per_class(&boxes, 0.5).len(), 3);
+        assert_eq!(nms_per_class(&boxes, 0.5, usize::MAX).len(), 3);
 
         // Overlapping within one class: the lower score is suppressed.
         let boxes = vec![
             ([0.0, 0.0, 10.0, 10.0], 0.9, 0),
             ([1.0, 1.0, 11.0, 11.0], 0.8, 0),
         ];
-        let keep = nms_per_class(&boxes, 0.5);
+        let keep = nms_per_class(&boxes, 0.5, usize::MAX);
         assert_eq!(keep, vec![0]);
 
         // A zero cap keeps nothing, matching the `truncate(max_det)` this replaced.
@@ -399,15 +381,15 @@ mod tests {
             ([0.0, 0.0, 10.0, 10.0], 0.9, 0),
             ([50.0, 50.0, 60.0, 60.0], 0.8, 0),
         ];
-        assert_eq!(nms_per_class_capped(&boxes, 0.5, 0), Vec::<usize>::new());
-        assert_eq!(nms_per_class_capped(&boxes, 0.5, 1), vec![0]);
+        assert_eq!(nms_per_class(&boxes, 0.5, 0), Vec::<usize>::new());
+        assert_eq!(nms_per_class(&boxes, 0.5, 1), vec![0]);
 
         // A NaN score used to panic in the sort comparator.
         let boxes = vec![
             ([0.0, 0.0, 10.0, 10.0], f32::NAN, 0),
             ([100.0, 100.0, 110.0, 110.0], 0.9, 0),
         ];
-        assert_eq!(nms_per_class(&boxes, 0.5).len(), 2);
+        assert_eq!(nms_per_class(&boxes, 0.5, usize::MAX).len(), 2);
 
         // A NaN-scored box overlapping a valid one of the same class must not outrank it and
         // suppress it: the real detection is processed first and survives.
@@ -415,7 +397,7 @@ mod tests {
             ([0.0, 0.0, 10.0, 10.0], f32::NAN, 0),
             ([1.0, 1.0, 11.0, 11.0], 0.9, 0),
         ];
-        assert_eq!(nms_per_class(&boxes, 0.5), vec![1]);
+        assert_eq!(nms_per_class(&boxes, 0.5, usize::MAX), vec![1]);
     }
 
     #[test]
@@ -425,17 +407,14 @@ mod tests {
             ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
             ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 1),
         ];
-        assert_eq!(nms_rotated_per_class(&across, 0.5).len(), 2);
+        assert_eq!(nms_rotated_per_class(&across, 0.5, usize::MAX).len(), 2);
 
         let within = vec![
             ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
             ([5.0, 5.0, 4.0, 2.0, 0.0], 0.8, 0),
         ];
-        assert_eq!(nms_rotated_per_class(&within, 0.5), vec![0]);
-        assert_eq!(
-            nms_rotated_per_class_capped(&within, 0.5, 0),
-            Vec::<usize>::new()
-        );
+        assert_eq!(nms_rotated_per_class(&within, 0.5, usize::MAX), vec![0]);
+        assert_eq!(nms_rotated_per_class(&within, 0.5, 0), Vec::<usize>::new());
     }
 
     #[test]

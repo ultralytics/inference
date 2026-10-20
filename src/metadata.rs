@@ -55,38 +55,6 @@ pub struct ModelMetadata {
 }
 
 impl ModelMetadata {
-    /// Parse metadata from ONNX model custom metadata properties.
-    ///
-    /// # Arguments
-    ///
-    /// * `metadata_map` - The custom metadata from the ONNX model session.
-    ///
-    /// # Returns
-    ///
-    /// * A new `ModelMetadata` instance.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the metadata is missing or malformed.
-    pub fn from_onnx_metadata(metadata_map: &HashMap<String, String>) -> Result<Self> {
-        // The metadata is typically stored under a single key containing YAML
-        // Try common key names used by Ultralytics
-        let yaml_str = metadata_map
-            .get("metadata")
-            .or_else(|| metadata_map.get("model_metadata"))
-            .or_else(|| {
-                // If no standard key, check if all metadata is in one value
-                metadata_map.values().find(|v| v.contains("task:"))
-            })
-            .ok_or_else(|| {
-                InferenceError::ModelLoadError(
-                    "No metadata found in ONNX model. Ensure the model was exported with Ultralytics.".to_string()
-                )
-            })?;
-
-        Self::from_yaml_str(yaml_str)
-    }
-
     /// Parse metadata from a YAML string.
     ///
     /// # Arguments
@@ -644,23 +612,6 @@ channels: 3
         assert!(ModelMetadata::from_yaml_str("task: notarealtask").is_err());
         assert!(ModelMetadata::from_yaml_str("task: detect\nstride: abc").is_err());
         assert!(ModelMetadata::from_yaml_str("task: detect\nbatch: xyz").is_err());
-    }
-
-    #[test]
-    fn test_from_onnx_metadata_keys_and_error() {
-        // Standard "metadata" key.
-        let map = HashMap::from([("metadata".to_string(), SAMPLE_METADATA.to_string())]);
-        let m = ModelMetadata::from_onnx_metadata(&map).unwrap();
-        assert_eq!(m.task, Task::Detect);
-
-        // Fallback: any value containing "task:".
-        let map = HashMap::from([("whatever".to_string(), "task: pose\nstride: 32".to_string())]);
-        let m = ModelMetadata::from_onnx_metadata(&map).unwrap();
-        assert_eq!(m.task, Task::Pose);
-
-        // No usable metadata -> error.
-        let map = HashMap::from([("unrelated".to_string(), "no yaml here".to_string())]);
-        assert!(ModelMetadata::from_onnx_metadata(&map).is_err());
     }
 
     #[test]

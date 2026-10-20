@@ -68,19 +68,6 @@ pub enum Source {
 }
 
 impl Source {
-    /// Check if this source is a single image.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the source is an image type (file, buffer, array, URL).
-    #[must_use]
-    pub const fn is_image(&self) -> bool {
-        matches!(
-            self,
-            Self::Image(_) | Self::ImageBuffer(_) | Self::Array(_) | Self::ImageUrl(_)
-        )
-    }
-
     /// Check if this source is a video or stream.
     ///
     /// # Returns
@@ -89,19 +76,6 @@ impl Source {
     #[must_use]
     pub const fn is_video(&self) -> bool {
         matches!(self, Self::Video(_) | Self::Webcam(_) | Self::Stream(_))
-    }
-
-    /// Check if this source is a directory or glob pattern.
-    ///
-    /// # Returns
-    ///
-    /// * `true` if the source represents a batch of images.
-    #[must_use]
-    pub const fn is_batch(&self) -> bool {
-        matches!(
-            self,
-            Self::Directory(_) | Self::Glob(_) | Self::ImageList(_)
-        )
     }
 
     /// Get the path if this source has one.
@@ -825,16 +799,8 @@ mod tests {
 
     #[test]
     fn test_source_checks() {
-        let img = Source::Image(PathBuf::from("test.jpg"));
-        assert!(img.is_image());
-        assert!(!img.is_video());
-
-        let vid = Source::Video(PathBuf::from("test.mp4"));
-        assert!(!vid.is_image());
-        assert!(vid.is_video());
-
-        let dir = Source::Directory(PathBuf::from("./images"));
-        assert!(dir.is_batch());
+        assert!(!Source::Image(PathBuf::from("test.jpg")).is_video());
+        assert!(Source::Video(PathBuf::from("test.mp4")).is_video());
     }
 
     #[test]

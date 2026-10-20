@@ -30,59 +30,12 @@ use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, scale_coords};
 use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
-use crate::utils::{nms_per_class_capped, nms_rotated_per_class_capped, xywh_to_xyxy};
+use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
 
-/// Post-process raw model output based on task type.
+/// Post-process raw model output into [`Results`] for `task`, selecting the RT-DETR decode
+/// when `rtdetr` is set.
 ///
-/// # Arguments
-///
-/// * `outputs` - Vector of raw model outputs (data, shape).
-/// * `task` - The task type (detect, segment, pose, etc.).
-/// * `preprocess` - Preprocessing result containing scale/padding info.
-/// * `config` - Inference configuration.
-/// * `names` - Class ID to name mapping.
-/// * `orig_img` - Original image as HWC array.
-/// * `path` - Source image path.
-/// * `speed` - Timing information.
-/// * `inference_shape` - The inference tensor shape (height, width) after letterboxing.
-///
-/// # Returns
-///
-/// Processed Results object.
-#[must_use]
-#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
-pub fn postprocess(
-    outputs: Vec<(&[f32], Vec<usize>)>,
-    task: Task,
-    preprocess: &PreprocessResult,
-    config: &InferenceConfig,
-    names: Arc<HashMap<usize, String>>,
-    orig_img: Array3<u8>,
-    path: String,
-    speed: Speed,
-    inference_shape: (u32, u32),
-    end2end: bool,
-    kpt_shape: Option<(usize, usize)>,
-) -> Results {
-    postprocess_with_head(
-        outputs,
-        task,
-        preprocess,
-        config,
-        names,
-        orig_img,
-        path,
-        speed,
-        inference_shape,
-        end2end,
-        kpt_shape,
-        false,
-    )
-}
-
-/// Post-process raw model output, selecting the RT-DETR decode when `rtdetr` is set.
-///
-/// Same as [`postprocess`], plus `rtdetr`: RT-DETR shares the `[1, max_det, 6]` tensor shape
+/// RT-DETR shares the `[1, max_det, 6]` tensor shape
 /// of the NMS-free YOLO head but reports `[cx, cy, w, h]` normalized to the input, so the two
 /// cannot be told apart from the tensors alone and the caller has to say which it holds.
 #[must_use]
@@ -420,7 +373,7 @@ fn decode_nms(
         rows.push(i);
     }
 
-    let keep = nms_per_class_capped(&candidates, config.iou_threshold, config.max_det);
+    let keep = nms_per_class(&candidates, config.iou_threshold, config.max_det);
     let mut boxes = Array2::zeros((keep.len(), 6));
     for (out_idx, &k) in keep.iter().enumerate() {
         let (bbox, score, class) = &candidates[k];
@@ -1208,8 +1161,7 @@ fn postprocess_obb(
 
     // Rotated NMS with ProbIoU (Hellinger distance), since axis-aligned IoU misjudges the
     // overlap of rotated boxes.
-    let keep_indices =
-        nms_rotated_per_class_capped(&candidates, config.iou_threshold, config.max_det);
+    let keep_indices = nms_rotated_per_class(&candidates, config.iou_threshold, config.max_det);
 
     // Output rows: [cx, cy, w, h, rotation, conf, cls]
     let mut obb_data = Array2::zeros((keep_indices.len(), 7));
