@@ -2,7 +2,6 @@
 
 //! Integration tests for the inference library
 
-use std::path::Path;
 use tempfile::tempdir;
 #[cfg(any(feature = "coreml", feature = "cuda"))]
 use ultralytics_inference::Device;
@@ -14,11 +13,11 @@ use ultralytics_inference::cli::predict::run_prediction;
 use ultralytics_inference::task::Task;
 
 /// CLI arguments for an end-to-end run on the bus.jpg sample.
-fn predict_args(model_path: &Path, task: Option<Task>, save_json: bool) -> PredictArgs {
+fn predict_args(model: &str, task: Option<Task>, save_json: bool) -> PredictArgs {
     PredictArgs {
-        model: Some(model_path.to_string_lossy().into_owned()),
+        model: Some(model.to_string()),
         task,
-        source: Some("https://ultralytics.com/images/bus.jpg".to_string()),
+        source: Some(BUS.to_string()),
         conf: 0.25,
         iou: 0.45,
         max_det: 300,
@@ -37,11 +36,9 @@ fn predict_args(model_path: &Path, task: Option<Task>, save_json: bool) -> Predi
     }
 }
 
-/// Downloads the bus.jpg sample and returns its local path.
-fn load_bus_image() -> String {
-    ultralytics_inference::download::download_image("https://ultralytics.com/images/bus.jpg")
-        .expect("bus.jpg should download")
-}
+/// The bus.jpg sample shipped in the repo. Models load from the repo root like the unit tests
+/// do, so each one downloads once and a `TensorRT` engine cache next to it is reused.
+const BUS: &str = "assets/bus.jpg";
 
 /// Runs a native `OpenVINO` export end to end: set `OPENVINO_TEST_MODEL` to a detect model folder
 /// from `yolo export format=openvino` and install the `OpenVINO` runtime.
@@ -68,12 +65,9 @@ fn test_openvino_model_predicts() {
 #[test]
 #[ignore = "downloads a YOLO model; requires CoreML (macOS only)"]
 fn test_coreml_model_loads_and_warms_up() {
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n.onnx");
-
     let config = InferenceConfig::new().with_device(Device::CoreMl);
-    let mut model = YOLOModel::load_with_config(model_path.to_string_lossy().as_ref(), config)
-        .expect("CoreML model should load");
+    let mut model =
+        YOLOModel::load_with_config("yolo26n.onnx", config).expect("CoreML model should load");
 
     // warmup() must succeed: graph_input_cast_0 errors are gone (static-shape MLProgram path)
     // and GatherElements out-of-range is tolerated (issue #148 fix).
@@ -83,10 +77,10 @@ fn test_coreml_model_loads_and_warms_up() {
 #[test]
 #[ignore = "downloads a YOLO model and sample image"]
 fn test_run_prediction_e2e() {
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n.onnx");
-
-    let args = predict_args(&model_path, None, false);
+    let args = PredictArgs {
+        source: Some("https://ultralytics.com/images/bus.jpg".to_string()),
+        ..predict_args("yolo26n.onnx", None, false)
+    };
 
     run_prediction(&args);
 }
@@ -114,10 +108,9 @@ fn test_auto_download_semantic_and_depth_models() {
 #[test]
 #[ignore = "downloads a YOLO semantic model and sample image"]
 fn test_run_prediction_e2e_semantic() {
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n-sem.onnx");
+    let model_path = "yolo26n-sem.onnx";
 
-    let args = predict_args(&model_path, Some(Task::Semantic), false);
+    let args = predict_args(model_path, Some(Task::Semantic), false);
 
     run_prediction(&args);
 }
@@ -125,10 +118,9 @@ fn test_run_prediction_e2e_semantic() {
 #[test]
 #[ignore = "downloads a YOLO semantic model and sample image; writes class-map PNG to runs/"]
 fn test_semantic_save_class_map() {
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n-sem.onnx");
+    let model_path = "yolo26n-sem.onnx";
 
-    let args = predict_args(&model_path, Some(Task::Semantic), true);
+    let args = predict_args(model_path, Some(Task::Semantic), true);
 
     run_prediction(&args);
 
@@ -153,10 +145,9 @@ fn test_semantic_save_class_map() {
 #[test]
 #[ignore = "downloads a YOLO depth model and sample image"]
 fn test_run_prediction_e2e_depth() {
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+    let model_path = "yolo26n-depth.onnx";
 
-    let args = predict_args(&model_path, Some(Task::Depth), false);
+    let args = predict_args(model_path, Some(Task::Depth), false);
 
     run_prediction(&args);
 }
@@ -166,15 +157,13 @@ fn test_run_prediction_e2e_depth() {
 fn test_depth_results_has_map() {
     use ultralytics_inference::YOLOModel;
 
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+    let model_path = "yolo26n-depth.onnx";
 
-    let mut model =
-        YOLOModel::load(model_path.to_string_lossy().as_ref()).expect("depth model should load");
+    let mut model = YOLOModel::load(model_path).expect("depth model should load");
     assert_eq!(model.task(), Task::Depth);
     // `predict` takes a filesystem path, so fetch the sample image first.
-    let source = load_bus_image();
-    let results = model.predict(&source).expect("prediction should succeed");
+    let source = BUS;
+    let results = model.predict(source).expect("prediction should succeed");
 
     let depth = results[0]
         .depth
@@ -193,17 +182,15 @@ fn test_depth_annotation_blends_over_image() {
     use ultralytics_inference::YOLOModel;
     use ultralytics_inference::annotate::{annotate_image, load_image};
 
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
+    let model_path = "yolo26n-depth.onnx";
 
     // Pinned to CPU so the assertion is about the annotator, not the build's EPs.
     let cfg = InferenceConfig::new().with_device(ultralytics_inference::Device::Cpu);
-    let mut model = YOLOModel::load_with_config(model_path.to_string_lossy().as_ref(), cfg)
-        .expect("depth model should load");
-    let source = load_bus_image();
-    let results = model.predict(&source).expect("prediction should succeed");
+    let mut model = YOLOModel::load_with_config(model_path, cfg).expect("depth model should load");
+    let source = BUS;
+    let results = model.predict(source).expect("prediction should succeed");
 
-    let image = load_image(&source).expect("sample image should decode");
+    let image = load_image(source).expect("sample image should decode");
     let annotated = annotate_image(&image, &results[0], None);
     // The depth overlay is blended in place, so the annotation keeps the source size
     // (a side-by-side composition would double the width).
@@ -220,15 +207,13 @@ fn test_depth_annotation_blends_over_image() {
 fn test_depth_cpu_matches_cuda() {
     use ultralytics_inference::{Device, InferenceConfig, YOLOModel};
 
-    let temp_dir = tempdir().expect("temp dir should be created");
-    let model_path = temp_dir.path().join("yolo26n-depth.onnx");
-    let model_path = model_path.to_string_lossy().into_owned();
-    let source = load_bus_image();
+    let model_path = "yolo26n-depth.onnx";
+    let source = BUS;
 
     let depth_map = |device: Device| {
         let cfg = InferenceConfig::new().with_device(device);
-        let mut model = YOLOModel::load_with_config(&model_path, cfg).expect("model should load");
-        let results = model.predict(&source).expect("prediction should succeed");
+        let mut model = YOLOModel::load_with_config(model_path, cfg).expect("model should load");
+        let results = model.predict(source).expect("prediction should succeed");
         results[0]
             .depth
             .as_ref()
@@ -280,10 +265,10 @@ fn test_cuda_predict_bus_has_detections() {
     let config = InferenceConfig::new().with_device(Device::Cuda(0));
     let mut model =
         YOLOModel::load_with_config("yolo26n.onnx", config).expect("CUDA model should load");
-    let image = load_bus_image();
+    let image = BUS;
 
     let results = model
-        .predict(&image)
+        .predict(image)
         .expect("CUDA prediction should succeed");
     let boxes = results
         .first()
@@ -305,7 +290,7 @@ fn test_cuda_predict_bus_has_detections() {
 #[test]
 #[ignore = "requires NVIDIA GPU; run on GPU CI"]
 fn test_cuda_cpu_detection_parity() {
-    let image = load_bus_image();
+    let image = BUS;
 
     let mut cuda_model = YOLOModel::load_with_config(
         "yolo26n.onnx",
@@ -314,7 +299,7 @@ fn test_cuda_cpu_detection_parity() {
             .with_cuda_preprocess(false),
     )
     .expect("CUDA model should load");
-    let cuda = cuda_model.predict(&image).expect("CUDA prediction");
+    let cuda = cuda_model.predict(image).expect("CUDA prediction");
     let cuda_boxes = cuda
         .first()
         .and_then(|r| r.boxes.as_ref())
@@ -325,7 +310,7 @@ fn test_cuda_cpu_detection_parity() {
         InferenceConfig::new().with_device(Device::Cpu),
     )
     .expect("CPU model should load");
-    let cpu = cpu_model.predict(&image).expect("CPU prediction");
+    let cpu = cpu_model.predict(image).expect("CPU prediction");
     let cpu_boxes = cpu
         .first()
         .and_then(|r| r.boxes.as_ref())
@@ -360,7 +345,7 @@ fn test_cuda_cpu_detection_parity() {
 #[test]
 #[ignore = "requires NVIDIA GPU; run on GPU CI"]
 fn test_cuda_preprocess_on_off_parity() {
-    let image = load_bus_image();
+    let image = BUS;
 
     let mut fused = YOLOModel::load_with_config(
         "yolo26n.onnx",
@@ -369,7 +354,7 @@ fn test_cuda_preprocess_on_off_parity() {
             .with_cuda_preprocess(true),
     )
     .expect("model with fused GPU preprocess should load");
-    let fused_res = fused.predict(&image).expect("fused prediction");
+    let fused_res = fused.predict(image).expect("fused prediction");
     let fused_boxes = fused_res
         .first()
         .and_then(|r| r.boxes.as_ref())
@@ -382,7 +367,7 @@ fn test_cuda_preprocess_on_off_parity() {
             .with_cuda_preprocess(false),
     )
     .expect("model with CPU preprocess should load");
-    let cpu_pre_res = cpu_pre.predict(&image).expect("cpu-preprocess prediction");
+    let cpu_pre_res = cpu_pre.predict(image).expect("cpu-preprocess prediction");
     let cpu_pre_boxes = cpu_pre_res
         .first()
         .and_then(|r| r.boxes.as_ref())
