@@ -495,6 +495,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 细节而非远处背景，因此近处呈暖色，且少量离群像素不会冲淡其余部分；`metric` 则直接对深度在其
 最小值与最大值之间做线性着色。
 
+17 个关键点的姿态模型会像 Ultralytics 一样绘制人体骨架；其他关键点布局每个关键点使用一种颜色，不绘制连线。可通过 `AnnotateOptions` 传入自定义骨架、半径或颜色：
+
+```rust
+use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};
+
+let options = AnnotateOptions { skeleton: Some(vec![[0, 1], [1, 2]]), kpt_radius: Some(6), ..AnnotateOptions::default() };
+let annotated = annotate_image_with_options(&image, &results[0], &options);
+```
+
 可复制并修改的可运行程序，请参见 [examples](examples/README.md) 目录。
 
 ## 🗂️ 项目结构

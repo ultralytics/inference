@@ -37,7 +37,7 @@ use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
 };
 use ultralytics_inference::results::Speed;
-use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
+use ultralytics_inference::visualizer::color::{COLORS, Color, Colormap, DepthViz};
 use ultralytics_inference::visualizer::skeleton::{
     KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
 };
@@ -1008,6 +1008,9 @@ struct PoseScheme {
     keypoint_colors: Vec<String>,
     /// Hex color per limb (length 19, aligned with `skeleton`).
     limb_colors: Vec<String>,
+    /// The 20-color Ultralytics palette with channels reversed as Ultralytics shows it, for
+    /// keypoint layouts other than COCO-Pose.
+    palette: Vec<String>,
 }
 
 /// Return the Ultralytics pose skeleton + keypoint/limb colors (constant). The
@@ -1026,6 +1029,12 @@ pub fn pose_palette() -> Result<JsValue, JsError> {
         limb_colors: LIMB_COLOR_INDICES
             .iter()
             .map(|&i| Color::from_pose_index(i).to_hex())
+            .collect(),
+        palette: (0..COLORS.len())
+            .map(|i| {
+                let Color(r, g, b) = Color::from_index(i);
+                Color(b, g, r).to_hex()
+            })
             .collect(),
     };
     to_js(&scheme, "pose palette")

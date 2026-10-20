@@ -174,6 +174,20 @@ const results = await model.predict(img, { colormap: "spectral", depthViz: "metr
 await annotate(canvas, img, results, { depthAlpha: 0.6 });
 ```
 
+Pose models with 17 keypoints get the human skeleton, and other keypoint layouts get one color per keypoint and no
+lines, like Ultralytics. `annotate()` takes `skeleton`, `keypointRadius`, `keypointLines` and `keypointColor` to change
+that:
+
+```ts
+await annotate(canvas, img, results, {
+  skeleton: [
+    [0, 1],
+    [1, 2],
+  ],
+  keypointRadius: 6,
+});
+```
+
 ## ⚙️ Requirements & Notes
 
 - **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure

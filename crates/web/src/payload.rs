@@ -152,14 +152,22 @@ impl JsResults {
 
         let keypoints = r.keypoints.as_ref().map_or_else(Vec::new, |k| {
             let (n, npt) = (k.data.shape()[0], k.data.shape()[1]);
-            // A 2-channel export carries no visibility score, so every point counts as seen.
+            // A 2-channel export carries no visibility score and marks a missing point with
+            // (0, 0), like Ultralytics, so only that point counts as not seen.
             let has_conf = k.data.shape()[2] > 2;
             (0..n)
                 .map(|i| JsKeypoints {
                     points: (0..npt)
                         .map(|j| {
-                            let conf = if has_conf { k.data[[i, j, 2]] } else { 1.0 };
-                            [k.data[[i, j, 0]], k.data[[i, j, 1]], conf]
+                            let (x, y) = (k.data[[i, j, 0]], k.data[[i, j, 1]]);
+                            let conf = if has_conf {
+                                k.data[[i, j, 2]]
+                            } else if x != 0.0 || y != 0.0 {
+                                1.0
+                            } else {
+                                0.0
+                            };
+                            [x, y, conf]
                         })
                         .collect(),
                     // Skeleton uses the matching detection's color.
