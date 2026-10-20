@@ -19,7 +19,8 @@ use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_m
 use imageproc::rect::Rect;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 /// Assets URL for downloading fonts
 const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/download/v0.0.0";
@@ -99,13 +100,16 @@ fn font_path(font: &str) -> Option<PathBuf> {
 /// The label font, read once per process: every annotated frame needs it, and the Unicode
 /// face non-ASCII class names pick is about 23 MB. `None` while it is not available.
 ///
-/// The download runs at most once per process, with concurrent first calls waiting for it,
-/// because retrying it on every frame would wait out its retries and backoff each time (about
-/// 6 s per frame without network). Later calls still read a font file that appears on disk.
+/// A failed download is retried at most once a minute, with calls arriving during an attempt
+/// waiting for it: retrying on every frame would wait out the download's retries and backoff
+/// each time (about 6 s per frame without network). A font file that appears on disk is read
+/// on the next call.
+#[allow(clippy::significant_drop_tightening)] // the lock is held so others wait for the download
 fn font_bytes(unicode: bool) -> Option<&'static [u8]> {
-    static ARIAL: (OnceLock<Vec<u8>>, OnceLock<()>) = (OnceLock::new(), OnceLock::new());
-    static ARIAL_UNICODE: (OnceLock<Vec<u8>>, OnceLock<()>) = (OnceLock::new(), OnceLock::new());
-    let ((bytes, downloaded), name) = if unicode {
+    type Font = (OnceLock<Vec<u8>>, Mutex<Option<Instant>>);
+    static ARIAL: Font = (OnceLock::new(), Mutex::new(None));
+    static ARIAL_UNICODE: Font = (OnceLock::new(), Mutex::new(None));
+    let ((bytes, last_download), name) = if unicode {
         (&ARIAL_UNICODE, "Arial.Unicode.ttf")
     } else {
         (&ARIAL, "Arial.ttf")
@@ -113,11 +117,13 @@ fn font_bytes(unicode: bool) -> Option<&'static [u8]> {
     if let Some(bytes) = bytes.get() {
         return Some(bytes);
     }
-    // The read below finds the file whether this download made it or it appeared later.
-    downloaded.get_or_init(|| {
+    let path = font_path(name)?;
+    let mut last = last_download.lock().unwrap_or_else(PoisonError::into_inner);
+    if !path.exists() && last.is_none_or(|t| t.elapsed() >= Duration::from_mins(1)) {
+        *last = Some(Instant::now());
         let _ = check_font(name);
-    });
-    let data = fs::read(font_path(name)?).ok()?;
+    }
+    let data = fs::read(path).ok()?;
     Some(bytes.get_or_init(|| data))
 }
 
