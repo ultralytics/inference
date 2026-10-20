@@ -367,11 +367,12 @@ impl YOLOModel {
                 )),
                 #[cfg(feature = "coreml")]
                 crate::Device::CoreMl => {
-                    if matches!(Self::macos_version(), Some((major, _)) if major >= 11) {
-                        eps.push((Self::build_coreml_ep(path), "CoreMLExecutionProvider"));
-                    } else {
-                        warn!("CoreML requires macOS 11+; falling back to CPU.");
+                    if !matches!(Self::macos_version(), Some((major, _)) if major >= 11) {
+                        return Err(InferenceError::ModelLoadError(
+                            "CoreML requires macOS 11+; use --device cpu.".to_string(),
+                        ));
                     }
+                    eps.push((Self::build_coreml_ep(path), "CoreMLExecutionProvider"));
                 }
                 #[cfg(feature = "tensorrt")]
                 crate::Device::TensorRt(i) => eps.push((
