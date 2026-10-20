@@ -65,10 +65,7 @@ pub(crate) fn is_writable_dir(path: &Path) -> bool {
     if ensure_dir(path).is_err() {
         return false;
     }
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    let probe = path.join(format!(".write-probe-{}-{nonce}", std::process::id()));
+    let probe = crate::download::part_path(&path.join(".write-probe"));
     if std::fs::File::options()
         .create_new(true)
         .write(true)

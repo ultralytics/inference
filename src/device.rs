@@ -59,20 +59,17 @@ impl FromStr for Device {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_lowercase();
-        if let Some(rest) = s.strip_prefix("cuda") {
-            return Ok(Self::Cuda(parse_device_index(rest, &s)?));
-        }
-        if let Some(rest) = s.strip_prefix("directml") {
-            return Ok(Self::DirectMl(parse_device_index(rest, &s)?));
-        }
-        if let Some(rest) = s.strip_prefix("tensorrt") {
-            return Ok(Self::TensorRt(parse_device_index(rest, &s)?));
-        }
-        if let Some(rest) = s.strip_prefix("rocm") {
-            return Ok(Self::Rocm(parse_device_index(rest, &s)?));
-        }
-        if let Some(rest) = s.strip_prefix("migraphx") {
-            return Ok(Self::MiGraphX(parse_device_index(rest, &s)?));
+        let indexed = [
+            ("cuda", Self::Cuda as fn(usize) -> Self),
+            ("directml", Self::DirectMl),
+            ("tensorrt", Self::TensorRt),
+            ("rocm", Self::Rocm),
+            ("migraphx", Self::MiGraphX),
+        ];
+        for (prefix, device) in indexed {
+            if let Some(rest) = s.strip_prefix(prefix) {
+                return Ok(device(parse_device_index(rest, &s)?));
+            }
         }
         match s.as_str() {
             "cpu" => Ok(Self::Cpu),

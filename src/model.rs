@@ -1077,28 +1077,34 @@ impl YOLOModel {
         })
     }
 
-    /// Concatenate per-image FP32 input tensors along the batch axis.
-    fn concat_f32_batch(
+    /// Run one forward pass over the per-image input tensors `tensor` picks, joined along
+    /// the batch axis. A batch of one is the common case (single image, video, webcam) and
+    /// there is nothing to join: `concatenate` would allocate and copy the whole NCHW tensor
+    /// to reproduce the one already preprocessed, so that one is fed instead.
+    ///
+    /// Associated fn (not method) so callers can split-borrow other fields of `YOLOModel`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn run_batch<'s, T>(
+        session: &'s mut Session,
+        input_name: &str,
         preprocessed: &[crate::preprocessing::PreprocessResult],
-    ) -> Result<ndarray::Array4<f32>> {
-        let arrays: Vec<_> = preprocessed.iter().map(|r| r.tensor.view()).collect();
-        Self::concat_views(&arrays, "FP32")
-    }
-
-    /// Concatenate per-image FP16 input tensors along the batch axis.
-    fn concat_f16_batch(
-        preprocessed: &[crate::preprocessing::PreprocessResult],
-    ) -> Result<ndarray::Array4<f16>> {
-        let arrays: Vec<_> = preprocessed
-            .iter()
-            .map(|r| {
-                r.tensor_f16
-                    .as_ref()
-                    .expect("FP16 tensor should be available")
-                    .view()
-            })
-            .collect();
-        Self::concat_views(&arrays, "FP16")
+        tensor: impl Fn(&crate::preprocessing::PreprocessResult) -> &ndarray::Array4<T>,
+        label: &str,
+    ) -> Result<(ort::session::SessionOutputs<'s>, f64)>
+    where
+        T: ort::value::PrimitiveTensorElementType
+            + std::fmt::Debug
+            + Copy
+            + Send
+            + Sync
+            + Default
+            + 'static,
+    {
+        if let [single] = preprocessed {
+            return Self::run_input(session, input_name, tensor(single));
+        }
+        let views: Vec<_> = preprocessed.iter().map(|r| tensor(r).view()).collect();
+        Self::run_input(session, input_name, &Self::concat_views(&views, label)?)
     }
 
     /// Build per-image results from a batched f32 model output, decoding each image's slice
@@ -1494,23 +1500,6 @@ impl YOLOModel {
         let paths = [path];
         let mut results = self.predict_internal(&images, &paths)?;
         let results = results.pop().unwrap_or_default();
-        Self::log_first_result(&results);
-        Ok(results)
-    }
-
-    /// Whether rectangular inference applies: requested in the config and supported by
-    /// the model. Fixed-shape models must letterbox to their own input size, and RT-DETR and
-    /// depth scale-fill their square input, so neither leaves a rectangle to trim.
-    fn rect_enabled(&self) -> bool {
-        self.config.rect
-            && self.is_dynamic
-            && !self.metadata.scale_fill()
-            && self.metadata.task != Task::Classify
-    }
-
-    /// Log the standard `image 1/1 ...` verbose line for the first result (no-op when
-    /// empty), shared by both the CPU and cuda-preprocess arms of [`Self::predict_image`].
-    fn log_first_result(results: &[Results]) {
         if let Some(result) = results.first() {
             let shape = result.inference_shape();
             verbose!(
@@ -1522,6 +1511,17 @@ impl YOLOModel {
                 result.speed.inference.unwrap_or(0.0)
             );
         }
+        Ok(results)
+    }
+
+    /// Whether rectangular inference applies: requested in the config and supported by
+    /// the model. Fixed-shape models must letterbox to their own input size, and RT-DETR and
+    /// depth scale-fill their square input, so neither leaves a rectangle to trim.
+    fn rect_enabled(&self) -> bool {
+        self.config.rect
+            && self.is_dynamic
+            && !self.metadata.scale_fill()
+            && self.metadata.task != Task::Classify
     }
 
     /// Memory descriptor for the GPU the preprocessor runs on.
@@ -2066,30 +2066,23 @@ impl YOLOModel {
 
         // One forward pass, whatever the input precision: the batch tensor only lives
         // long enough to be uploaded, while the outputs outlive it.
-        // A batch of one is the common case (single image, video, webcam) and there is
-        // nothing to join: `concatenate` would allocate and copy the whole NCHW tensor to
-        // reproduce the one already sitting in `preprocessed_results`, so feed that instead.
+        let session = self.backend.ort_mut();
         let (outputs, inference_ms_total) = if self.fp16_input {
-            match preprocessed_results.as_slice() {
-                [single] => {
-                    let tensor = single.tensor_f16.as_ref().expect("fp16 tensor");
-                    Self::run_input(self.backend.ort_mut(), &self.input_name, tensor)?
-                }
-                batch => {
-                    let batch_tensor = Self::concat_f16_batch(batch)?;
-                    Self::run_input(self.backend.ort_mut(), &self.input_name, &batch_tensor)?
-                }
-            }
+            Self::run_batch(
+                session,
+                &self.input_name,
+                &preprocessed_results,
+                |r| r.tensor_f16.as_ref().expect("fp16 tensor"),
+                "FP16",
+            )?
         } else {
-            match preprocessed_results.as_slice() {
-                [single] => {
-                    Self::run_input(self.backend.ort_mut(), &self.input_name, &single.tensor)?
-                }
-                batch => {
-                    let batch_tensor = Self::concat_f32_batch(batch)?;
-                    Self::run_input(self.backend.ort_mut(), &self.input_name, &batch_tensor)?
-                }
-            }
+            Self::run_batch(
+                session,
+                &self.input_name,
+                &preprocessed_results,
+                |r| &r.tensor,
+                "FP32",
+            )?
         };
         #[allow(clippy::cast_precision_loss)]
         let speed = Speed::new(
@@ -2114,10 +2107,7 @@ impl YOLOModel {
         )
     }
 
-    /// Run the ORT session, returning outputs and measured inference time in ms.
-    ///
     /// Run a single forward pass for warmup, discarding outputs.
-    ///
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn run_warmup(
         session: &mut Session,
@@ -2446,8 +2436,20 @@ mod tests {
             ]
         };
         // two images stacked on the batch axis
-        assert_eq!(YOLOModel::concat_f32_batch(&pair()).unwrap().dim().0, 2);
-        assert_eq!(YOLOModel::concat_f16_batch(&pair()).unwrap().dim().0, 2);
+        let pair = pair();
+        let f32_views: Vec<_> = pair.iter().map(|r| r.tensor.view()).collect();
+        let f16_views: Vec<_> = pair
+            .iter()
+            .map(|r| r.tensor_f16.as_ref().unwrap().view())
+            .collect();
+        assert_eq!(
+            YOLOModel::concat_views(&f32_views, "FP32").unwrap().dim().0,
+            2
+        );
+        assert_eq!(
+            YOLOModel::concat_views(&f16_views, "FP16").unwrap().dim().0,
+            2
+        );
     }
 
     #[test]

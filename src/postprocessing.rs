@@ -386,47 +386,47 @@ fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
         .unwrap_or((0, f32::NEG_INFINITY))
 }
 
-/// Decode row `i` of a `[preds, features]` head into a detection candidate.
+/// Decode a `[preds, features]` head, run per-class NMS and return the kept detections as
+/// `[x1, y1, x2, y2, score, class]` rows, plus the head row each came from so the caller can
+/// read its extra columns (mask coefficients, keypoints).
 ///
-/// Picks the best of the `num_classes` class scores and, when it clears the confidence
-/// threshold and the class filter, returns the box scaled back to the original image and
-/// clipped to it, with its score and class. `None` means the row is dropped.
-fn decode_row(
+/// A row is a candidate when its best of the `num_classes` class scores clears the
+/// confidence threshold and the class filter; its box is scaled back to the original image
+/// and clipped to it.
+fn decode_nms(
     output_2d: &Array2<f32>,
-    i: usize,
     num_classes: usize,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-) -> Option<([f32; 4], f32, usize)> {
-    let (best_class, best_score) = best_class_score(&output_2d.slice(s![i, 4..4 + num_classes]));
-    if best_score < config.confidence_threshold || !config.keep_class(best_class) {
-        return None;
+) -> (Array2<f32>, Vec<usize>) {
+    let mut rows = Vec::new();
+    let mut candidates = Vec::new();
+    for i in 0..output_2d.nrows() {
+        let (best_class, best_score) =
+            best_class_score(&output_2d.slice(s![i, 4..4 + num_classes]));
+        if best_score < config.confidence_threshold || !config.keep_class(best_class) {
+            continue;
+        }
+        let bbox = scale_and_clip_box(
+            &xywh_to_xyxy(
+                output_2d[[i, 0]],
+                output_2d[[i, 1]],
+                output_2d[[i, 2]],
+                output_2d[[i, 3]],
+            ),
+            preprocess,
+        );
+        candidates.push((bbox, best_score, best_class));
+        rows.push(i);
     }
-    let bbox = scale_and_clip_box(
-        &xywh_to_xyxy(
-            output_2d[[i, 0]],
-            output_2d[[i, 1]],
-            output_2d[[i, 2]],
-            output_2d[[i, 3]],
-        ),
-        preprocess,
-    );
-    Some((bbox, best_score, best_class))
-}
 
-/// Run per-class NMS over `(bbox, score, class, extra)` candidates and return the kept
-/// indices, capped at `max_det`. The `extra` payload (mask index, keypoints, ...) is
-/// ignored here and looked up by the caller via the returned indices.
-fn nms_keep_indices<T>(
-    candidates: &[([f32; 4], f32, usize, T)],
-    iou_threshold: f32,
-    max_det: usize,
-) -> Vec<usize> {
-    let nms_candidates: Vec<_> = candidates
-        .iter()
-        .map(|(bbox, score, class, _)| (*bbox, *score, *class))
-        .collect();
-    nms_per_class_capped(&nms_candidates, iou_threshold, max_det)
+    let keep = nms_per_class_capped(&candidates, config.iou_threshold, config.max_det);
+    let mut boxes = Array2::zeros((keep.len(), 6));
+    for (out_idx, &k) in keep.iter().enumerate() {
+        let (bbox, score, class) = &candidates[k];
+        write_box_row(&mut boxes, out_idx, bbox, *score, *class);
+    }
+    (boxes, keep.iter().map(|&k| rows[k]).collect())
 }
 
 /// Write one `[x1, y1, x2, y2, score, class]` detection row into a `(_, 6)` boxes array.
@@ -491,7 +491,7 @@ struct Candidate {
 ///
 /// Key optimizations:
 /// - SIMD-accelerated candidate extraction (f32x8)
-/// - Parallel Bitmask NMS (IoU 1 vs 8)
+/// - SIMD bitmask NMS (IoU 1 vs 8)
 /// - Struct-of-Arrays (SoA) layout for NMS cache locality
 /// - Direct unsafe indexing for performance
 #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
@@ -925,35 +925,16 @@ fn postprocess_segment(
         return results;
     }
 
-    // Filter and NMS. The original row index is kept to look the coefficients up later.
-    let candidates: Vec<([f32; 4], f32, usize, usize)> = (0..num_preds)
-        .filter_map(|i| {
-            decode_row(&output_2d, i, nc, preprocess, config)
-                .map(|(bbox, score, class)| (bbox, score, class, i))
-        })
-        .collect();
-
-    if candidates.is_empty() {
+    let (boxes_data, kept_rows) = decode_nms(&output_2d, nc, preprocess, config);
+    if kept_rows.is_empty() {
         return results;
     }
 
-    // Prepare candidates for NMS (bbox, score, class)
-    let keep_indices = nms_keep_indices(&candidates, config.iou_threshold, config.max_det);
-    let num_kept = keep_indices.len();
-
-    let mut boxes_data = Array2::zeros((num_kept, 6));
-    let mut mask_coeffs = Array2::zeros((num_kept, num_masks));
-
-    for (out_idx, &keep_idx) in keep_indices.iter().enumerate() {
-        let (bbox, score, class, orig_idx) = &candidates[keep_idx];
-        write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
-
-        // Extract coefficients: [orig_idx, 4+nc..]
-        let start = 4 + nc;
-        let coeffs = output_2d.slice(s![*orig_idx, start..start + num_masks]);
-        for m in 0..num_masks {
-            mask_coeffs[[out_idx, m]] = coeffs[m];
-        }
+    // Each kept row's mask coefficients follow its class scores.
+    let start = 4 + nc;
+    let mut mask_coeffs = Array2::zeros((kept_rows.len(), num_masks));
+    for (mut coeffs, &row) in mask_coeffs.outer_iter_mut().zip(&kept_rows) {
+        coeffs.assign(&output_2d.slice(s![row, start..start + num_masks]));
     }
 
     // Protos: [1, 32, 160, 160] -> [32, 25600]
@@ -996,13 +977,13 @@ fn postprocess_segment(
     results
 }
 
-/// Derive `(num_preds, is_transposed)` from a pose/OBB output shape.
+/// Derive `(num_preds, is_transposed)` from a segment, pose or OBB output shape.
 ///
 /// A `[1, features, preds]` layout is detected when the feature axis equals
 /// `expected_features`, or is the smaller axis while still holding at least
-/// `min_transposed_features` (pose passes `4 + kpt_features`, OBB passes `6`); otherwise
-/// the output is treated as the transposed `[1, preds, features]`. 2D shapes pick the
-/// larger axis as the prediction count; anything else yields `(0, false)`.
+/// `min_transposed_features` (segment passes `expected_features`, pose `4 + kpt_features`,
+/// OBB `6`); otherwise the output is treated as the transposed `[1, preds, features]`. 2D
+/// shapes pick the larger axis as the prediction count; anything else yields `(0, false)`.
 const fn parse_transposed_shape(
     shape: &[usize],
     expected_features: usize,
@@ -1088,26 +1069,15 @@ fn postprocess_pose(
         return results;
     }
 
-    // Filter and NMS. The original row index is kept to decode keypoints for kept rows only.
-    let candidates: Vec<([f32; 4], f32, usize, usize)> = (0..num_preds)
-        .filter_map(|i| {
-            decode_row(&output_2d, i, num_classes, preprocess, config)
-                .map(|(bbox, score, class)| (bbox, score, class, i))
-        })
-        .collect();
-
-    let keep_indices = nms_keep_indices(&candidates, config.iou_threshold, config.max_det);
-    let num_kept = keep_indices.len();
-
-    let mut boxes_data = Array2::zeros((num_kept, 6));
+    // Keypoints are decoded for kept rows only.
+    let (boxes_data, kept_rows) = decode_nms(&output_2d, num_classes, preprocess, config);
+    let num_kept = kept_rows.len();
     let mut flat_kpts: Vec<f32> = Vec::with_capacity(num_kept * kpt_features);
     let kpt_start = 4 + num_classes;
 
-    for (out_idx, &keep_idx) in keep_indices.iter().enumerate() {
-        let (bbox, score, class, row) = &candidates[keep_idx];
-        write_box_row(&mut boxes_data, out_idx, bbox, *score, *class);
+    for &row in &kept_rows {
         push_keypoints(
-            &output_2d.slice(s![*row, kpt_start..]),
+            &output_2d.slice(s![row, kpt_start..]),
             num_keypoints,
             kpt_dim,
             preprocess,
@@ -1220,80 +1190,51 @@ fn postprocess_obb(
         return results;
     }
 
-    // Derive number of classes from features: features = 4 + nc + 1
-    let derived_classes = actual_features.saturating_sub(5); // 4 bbox + 1 angle
-    let num_classes = derived_classes.max(1);
+    // The head's own width sets the class count: features = 4 + nc + 1 (angle).
+    let num_classes = actual_features.saturating_sub(5).max(1);
 
-    // Filter and NMS - store candidates with angle
-    // [cx, cy, w, h, angle], conf, class
+    // Candidates as ([cx, cy, w, h, angle], conf, class); the angle (radians) is the last column.
     let mut candidates: Vec<([f32; 5], f32, usize)> = Vec::with_capacity(256);
-
     for i in 0..num_preds {
-        // Get class scores
-        let class_scores = output_2d.slice(s![i, 4..4 + num_classes]);
-        let (best_class, best_score) = best_class_score(&class_scores);
-
-        if best_score < config.confidence_threshold {
+        let (best_class, best_score) =
+            best_class_score(&output_2d.slice(s![i, 4..4 + num_classes]));
+        if best_score < config.confidence_threshold || !config.keep_class(best_class) {
             continue;
         }
-
-        // Extract OBB: xywh + rotation
-        let cx = output_2d[[i, 0]];
-        let cy = output_2d[[i, 1]];
-        let w = output_2d[[i, 2]];
-        let h = output_2d[[i, 3]];
-        let angle = output_2d[[i, 4 + num_classes]]; // Last value is rotation angle (radians)
-
-        // Scale center to original image space and clip to bounds.
-        let (clipped_cx, clipped_cy) = scale_keypoint(cx, cy, preprocess);
-
-        // Scale width and height (note: don't apply padding, just scale)
-        let scaled_w = w / preprocess.scale.1;
-        let scaled_h = h / preprocess.scale.0;
-
-        // Filter by class if specified
-        if !config.keep_class(best_class) {
-            continue;
-        }
-
-        candidates.push((
-            [clipped_cx, clipped_cy, scaled_w, scaled_h, angle],
-            best_score,
-            best_class,
-        ));
+        let row = output_2d.row(i);
+        let [cx, cy, w, h] = scale_xywh(row[0], row[1], row[2], row[3], preprocess);
+        candidates.push(([cx, cy, w, h, row[4 + num_classes]], best_score, best_class));
     }
 
-    if candidates.is_empty() {
-        results.obb = Some(Obb::new(Array2::zeros((0, 7)), preprocess.orig_shape));
-        return results;
-    }
-
-    // Apply Rotated NMS for precise suppression using ProbIoU (Hellinger distance).
-    // This ensures that overlapping rotated boxes are correctly filtered based on their
-    // actual geometric overlap, which standard axis-aligned IoU cannot handle.
+    // Rotated NMS with ProbIoU (Hellinger distance), since axis-aligned IoU misjudges the
+    // overlap of rotated boxes.
     let keep_indices =
         nms_rotated_per_class_capped(&candidates, config.iou_threshold, config.max_det);
-    let num_kept = keep_indices.len();
 
-    // Build output array: [cx, cy, w, h, rotation, conf, cls]
-    let mut obb_data = Array2::zeros((num_kept, 7));
-
-    for (out_idx, &keep_idx) in keep_indices.iter().take(num_kept).enumerate() {
-        let (xywhr, score, class) = &candidates[keep_idx];
-        obb_data[[out_idx, 0]] = xywhr[0]; // cx
-        obb_data[[out_idx, 1]] = xywhr[1]; // cy
-        obb_data[[out_idx, 2]] = xywhr[2]; // w
-        obb_data[[out_idx, 3]] = xywhr[3]; // h
-        obb_data[[out_idx, 4]] = xywhr[4]; // rotation (radians)
-        obb_data[[out_idx, 5]] = *score;
+    // Output rows: [cx, cy, w, h, rotation, conf, cls]
+    let mut obb_data = Array2::zeros((keep_indices.len(), 7));
+    for (mut out, &k) in obb_data.outer_iter_mut().zip(&keep_indices) {
+        let (xywhr, score, class) = &candidates[k];
         #[allow(clippy::cast_precision_loss)]
-        let class_f32 = *class as f32;
-        obb_data[[out_idx, 6]] = class_f32;
+        out.assign(&ArrayView1::from(&[
+            xywhr[0],
+            xywhr[1],
+            xywhr[2],
+            xywhr[3],
+            xywhr[4],
+            *score,
+            *class as f32,
+        ]));
     }
-
     results.obb = Some(Obb::new(obb_data, preprocess.orig_shape));
-
     results
+}
+
+/// Scale an OBB `[cx, cy, w, h]` from letterboxed inference space to the original image: the
+/// center is shifted, scaled and clipped like a keypoint, the size is only scaled.
+fn scale_xywh(cx: f32, cy: f32, w: f32, h: f32, preprocess: &PreprocessResult) -> [f32; 4] {
+    let (cx, cy) = scale_keypoint(cx, cy, preprocess);
+    [cx, cy, w / preprocess.scale.1, h / preprocess.scale.0]
 }
 
 // Postprocessing for the YOLO26 NMS-free one-to-one head (`nms=False`) and
@@ -1563,7 +1504,6 @@ fn postprocess_obb_end2end(
         let max_det = output_shape[1];
         let feats = output_shape[2];
         if feats >= 7 && max_det > 0 {
-            let (scale_y, scale_x) = preprocess.scale;
             let user_cap = config.max_det.min(max_det);
             flat.reserve(user_cap * 7);
 
@@ -1578,16 +1518,14 @@ fn postprocess_obb_end2end(
                 user_cap,
                 None,
                 |base, _bbox, conf, cls| {
-                    let (cx, cy) = scale_keypoint(output[base], output[base + 1], preprocess);
-                    flat.extend_from_slice(&[
-                        cx,
-                        cy,
-                        output[base + 2] / scale_x,
-                        output[base + 3] / scale_y,
-                        output[base + 6],
-                        conf,
-                        cls as f32,
-                    ]);
+                    let [cx, cy, w, h] = scale_xywh(
+                        output[base],
+                        output[base + 1],
+                        output[base + 2],
+                        output[base + 3],
+                        preprocess,
+                    );
+                    flat.extend_from_slice(&[cx, cy, w, h, output[base + 6], conf, cls as f32]);
                 },
             );
         }

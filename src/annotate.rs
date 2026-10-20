@@ -18,7 +18,7 @@ use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// Re-exported so `annotate::find_next_run_dir` keeps working; the implementation lives in
@@ -176,12 +176,7 @@ pub fn annotate_image_with(
     };
 
     let font_path = check_font(font_name);
-    let font_data = font_path.and_then(|path| {
-        let mut file = File::open(path).ok()?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).ok()?;
-        Some(buffer)
-    });
+    let font_data = font_path.and_then(|path| fs::read(path).ok());
 
     let font = font_data
         .as_ref()
@@ -189,7 +184,7 @@ pub fn annotate_image_with(
 
     draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref());
-    draw_pose(&mut img, result, None, None, None);
+    draw_pose(&mut img, result);
     draw_obb(&mut img, result, font.as_ref());
     draw_classification(&mut img, result, font.as_ref(), top_k.unwrap_or(5));
 
@@ -665,38 +660,14 @@ fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
     !(r2_left >= r1_right || r2_right <= r1_left || r2_top >= r1_bottom || r2_bottom <= r1_top)
 }
 
-/// Draw pose estimation results (skeleton and keypoints)
-///
-/// # Arguments
-///
-/// * `img` - The image to draw on
-/// * `result` - The inference results containing keypoints
-/// * `skeleton` - Pairs of keypoint indices; `None` uses the human pose `SKELETON`.
-/// * `limb_colors` - Color indices for limbs; `None` uses `LIMB_COLOR_INDICES`.
-/// * `kpt_colors` - Color indices for keypoints; `None` uses `KPT_COLOR_INDICES`.
-///
-/// # Examples
-///
-/// ```ignore
-/// // All `None` draws the default human pose.
-/// draw_pose(&mut img, result, None, None, None);
-///
-/// // Or supply a custom skeleton, for animal keypoints say.
-/// draw_pose(&mut img, result, Some(&SKELETON), Some(&LIMBS), Some(&KPTS));
-/// ```
+/// Draw pose estimation results (the human pose `SKELETON` and its keypoints).
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     clippy::cast_possible_wrap
 )]
-fn draw_pose(
-    img: &mut image::RgbImage,
-    result: &Results,
-    skeleton: Option<&[[usize; 2]]>,
-    limb_colors: Option<&[usize]>,
-    kpt_colors: Option<&[usize]>,
-) {
+fn draw_pose(img: &mut image::RgbImage, result: &Results) {
     let (width, height) = img.dimensions();
 
     // Dynamic scale factor and thickness based on image size (reference 640x640)
@@ -704,11 +675,6 @@ fn draw_pose(
     let radius = (3.0 * scale_factor).round() as i32;
 
     if let Some(ref keypoints) = result.keypoints {
-        // Use provided parameters or defaults
-        let skeleton = skeleton.unwrap_or(&SKELETON);
-        let limb_colors = limb_colors.unwrap_or(&LIMB_COLOR_INDICES);
-        let kpt_colors = kpt_colors.unwrap_or(&KPT_COLOR_INDICES);
-
         let kpt_data = &keypoints.data;
         let n_persons = kpt_data.shape()[0];
         let n_kpts = kpt_data.shape()[1];
@@ -725,7 +691,7 @@ fn draw_pose(
         };
 
         for person_idx in 0..n_persons {
-            for (limb_idx, &[kpt_a, kpt_b]) in skeleton.iter().enumerate() {
+            for (limb_idx, &[kpt_a, kpt_b]) in SKELETON.iter().enumerate() {
                 if kpt_a >= n_kpts || kpt_b >= n_kpts {
                     continue;
                 }
@@ -738,7 +704,7 @@ fn draw_pose(
                 let conf2 = conf_at(person_idx, kpt_b);
 
                 if visible(x1, y1, conf1) && visible(x2, y2, conf2) {
-                    let color_idx = limb_colors[limb_idx % limb_colors.len()];
+                    let color_idx = LIMB_COLOR_INDICES[limb_idx % LIMB_COLOR_INDICES.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_line_segment(img, x1, y1, x2, y2, color, thickness);
                 }
@@ -750,7 +716,7 @@ fn draw_pose(
                 let conf = conf_at(person_idx, kpt_idx);
 
                 if visible(x, y, conf) {
-                    let color_idx = kpt_colors[kpt_idx % kpt_colors.len()];
+                    let color_idx = KPT_COLOR_INDICES[kpt_idx % KPT_COLOR_INDICES.len()];
                     let color = Rgb(POSE_COLORS[color_idx]);
                     draw_filled_circle(img, x as i32, y as i32, radius, color);
                 }
@@ -773,8 +739,7 @@ fn draw_pose(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
-    clippy::cast_possible_wrap,
-    clippy::manual_clamp
+    clippy::cast_possible_wrap
 )]
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
@@ -880,8 +845,7 @@ fn draw_transparent_rect(
 
 /// Draw top-k classification probabilities onto `img` with a semi-transparent backing box.
 ///
-/// Classes with a score below 0.01 are omitted. The list is rendered at the top-left
-/// corner with a 40% opacity black background to keep text readable over any image content.
+/// The list is rendered at the top-left corner with a 40% opacity black background to keep text readable over any image content.
 ///
 /// # Arguments
 ///
@@ -893,8 +857,7 @@ fn draw_transparent_rect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
-    clippy::cast_possible_wrap,
-    clippy::manual_clamp
+    clippy::cast_possible_wrap
 )]
 fn draw_classification(
     img: &mut image::RgbImage,
@@ -908,7 +871,7 @@ fn draw_classification(
 
         if let Some(ref f) = font {
             // Adaptive font scale based on image width
-            let scale_factor = (width as f32 / 600.0).max(0.6).min(2.0);
+            let scale_factor = (width as f32 / 600.0).clamp(0.6, 2.0);
             let base_size = 30.0;
             let scale = PxScale::from(base_size * scale_factor);
             let line_height = (scale.y * 1.2) as i32;

@@ -35,8 +35,7 @@ const DEFAULT_OBB_IMAGES: &[&str] = &[crate::download::DEFAULT_OBB_IMAGE];
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::missing_panics_doc,
-    clippy::redundant_clone
+    clippy::missing_panics_doc
 )]
 pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments - use default model if not specified
@@ -52,7 +51,6 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     });
     #[cfg(feature = "visualize")]
-    #[cfg_attr(not(feature = "visualize"), allow(unused_mut))]
     let mut show = args.show;
     if model_is_default && verbose {
         warn!("'model' argument is missing. Using default '--model={model_path}'.");
@@ -72,20 +70,17 @@ pub fn run_prediction(args: &PredictArgs) {
         }
     };
 
-    if let Some(task) = args.task {
-        if model_is_default {
-            // Model was auto-selected from --task, so metadata will always agree.
-            // set_task is a no-op here but kept for explicitness.
-            model.set_task(task);
-        } else if task != model.task() {
-            error!(
-                "'--task={task}' conflicts with task '{}' detected from model metadata. \
-                 Provide a model that matches the requested task, or omit --task.",
-                model.task()
-            );
-            process::exit(1);
-        }
-        // task == model.task(): explicit model, matching task; nothing to do.
+    // A default model was picked from --task, so only an explicit one can disagree with it.
+    if let Some(task) = args.task
+        && !model_is_default
+        && task != model.task()
+    {
+        error!(
+            "'--task={task}' conflicts with task '{}' detected from model metadata. \
+             Provide a model that matches the requested task, or omit --task.",
+            model.task()
+        );
+        process::exit(1);
     }
 
     // Determine source
@@ -220,9 +215,8 @@ pub fn run_prediction(args: &PredictArgs) {
     let (sender, receiver) = std::sync::mpsc::sync_channel(channel_capacity);
 
     // Spawn producer thread for frame decoding
-    let source_clone = source.clone();
     std::thread::spawn(move || {
-        let iter = match crate::source::SourceIterator::new(source_clone) {
+        let iter = match crate::source::SourceIterator::new(source) {
             Ok(iter) => iter,
             Err(e) => {
                 error!("Error initializing source in thread: {e}");

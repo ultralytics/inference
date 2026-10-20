@@ -5,7 +5,7 @@
 //! This module provides Ultralytics-compatible result classes with an
 //! API for easy migration and consistent usage patterns.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
@@ -334,23 +334,14 @@ pub struct Results {
 ///
 /// Entries are sorted by class ID, names are pluralized via [`crate::utils::pluralize`] when
 /// the count is above 1, and unknown IDs fall back to `"object"`. Empty when `count` is 0.
-fn format_class_counts(
-    cls: &ArrayView1<'_, f32>,
-    count: usize,
-    names: &HashMap<usize, String>,
-) -> String {
-    if count == 0 {
-        return String::new();
-    }
-    let mut counts: HashMap<usize, usize> = HashMap::new();
-    for i in 0..count {
+fn format_class_counts(cls: &ArrayView1<'_, f32>, names: &HashMap<usize, String>) -> String {
+    let mut counts: BTreeMap<usize, usize> = BTreeMap::new();
+    for &c in cls {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let class_id = cls[i] as usize;
+        let class_id = c as usize;
         *counts.entry(class_id).or_insert(0) += 1;
     }
-    let mut sorted: Vec<(usize, usize)> = counts.into_iter().collect();
-    sorted.sort_by_key(|(id, _)| *id);
-    sorted
+    counts
         .iter()
         .map(|(id, n)| {
             let name = names.get(id).map_or("object", String::as_str);
@@ -491,9 +482,9 @@ impl Results {
 
         #[allow(clippy::option_if_let_else)]
         let summary = if let Some(ref boxes) = self.boxes {
-            format_class_counts(&boxes.cls(), boxes.len(), &self.names)
+            format_class_counts(&boxes.cls(), &self.names)
         } else if let Some(ref obb) = self.obb {
-            format_class_counts(&obb.cls(), obb.len(), &self.names)
+            format_class_counts(&obb.cls(), &self.names)
         } else if let Some(ref probs) = self.probs {
             probs
                 .top5()
@@ -551,14 +542,11 @@ impl Results {
         }
 
         if let Some(ref boxes) = self.boxes {
-            let (h, w) = if normalize {
-                #[allow(clippy::cast_precision_loss)]
-                (self.orig_shape.0 as f32, self.orig_shape.1 as f32)
+            let xyxy = if normalize {
+                boxes.xyxyn()
             } else {
-                (1.0, 1.0)
+                boxes.xyxy().to_owned()
             };
-
-            let xyxy = boxes.xyxy();
             let conf = boxes.conf();
             let cls = boxes.cls();
 
@@ -568,10 +556,10 @@ impl Results {
                 let mut entry = entry_for(class_id, conf[i]);
 
                 let mut box_coords = HashMap::new();
-                box_coords.insert("x1".to_string(), SummaryValue::Float(xyxy[[i, 0]] / w));
-                box_coords.insert("y1".to_string(), SummaryValue::Float(xyxy[[i, 1]] / h));
-                box_coords.insert("x2".to_string(), SummaryValue::Float(xyxy[[i, 2]] / w));
-                box_coords.insert("y2".to_string(), SummaryValue::Float(xyxy[[i, 3]] / h));
+                box_coords.insert("x1".to_string(), SummaryValue::Float(xyxy[[i, 0]]));
+                box_coords.insert("y1".to_string(), SummaryValue::Float(xyxy[[i, 1]]));
+                box_coords.insert("x2".to_string(), SummaryValue::Float(xyxy[[i, 2]]));
+                box_coords.insert("y2".to_string(), SummaryValue::Float(xyxy[[i, 3]]));
                 entry.insert("box".to_string(), SummaryValue::Box(box_coords));
 
                 results.push(entry);

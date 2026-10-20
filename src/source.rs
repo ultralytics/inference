@@ -19,6 +19,11 @@ const IMAGE_EXTENSIONS: [&str; 14] = [
     "webp",
 ];
 
+/// Video file extensions.
+const VIDEO_EXTENSIONS: [&str; 10] = [
+    "mp4", "avi", "mov", "mkv", "wmv", "flv", "webm", "m4v", "mpeg", "mpg",
+];
+
 /// Decode an image by its contents rather than its extension, with JPEG 2000 support.
 fn decode_image<R: BufRead + Seek>(reader: ImageReader<R>) -> image::ImageResult<DynamicImage> {
     hayro_jpeg2000::integration::register_decoding_hook();
@@ -156,15 +161,10 @@ impl From<&str> for Source {
             return Self::Directory(path);
         }
 
-        // Check file extension for video
-        if let Some(ext) = path.extension() {
-            let ext = ext.to_string_lossy().to_lowercase();
-            if matches!(
-                ext.as_str(),
-                "mp4" | "avi" | "mov" | "mkv" | "wmv" | "flv" | "webm" | "m4v" | "mpeg" | "mpg"
-            ) {
-                return Self::Video(path);
-            }
+        if path.extension().is_some_and(|ext| {
+            VIDEO_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str())
+        }) {
+            return Self::Video(path);
         }
 
         // Default to image
@@ -559,10 +559,7 @@ impl SourceIterator {
             fps: None,
         };
 
-        match Self::download_image(url) {
-            Ok(img) => Some(Ok((img, meta))),
-            Err(e) => Some(Err(e)),
-        }
+        Some(Self::download_image(url).map(|img| (img, meta)))
     }
 
     /// Get the next image from the source.
@@ -581,13 +578,9 @@ impl SourceIterator {
 
         self.current_frame += 1;
 
-        match open_image(path) {
-            Ok(img) => Some(Ok((img, meta))),
-            Err(e) => Some(Err(InferenceError::ImageError(format!(
-                "Failed to load {}: {e}",
-                path.display()
-            )))),
-        }
+        Some(open_image(path).map(|img| (img, meta)).map_err(|e| {
+            InferenceError::ImageError(format!("Failed to load {}: {e}", path.display()))
+        }))
     }
 
     /// Open webcam `idx` and store its decoder, using the platform's capture backend.
@@ -796,26 +789,18 @@ impl Iterator for SourceIterator {
                 self.next_image_url(&url)
             }
             Source::ImageBuffer(img) => {
-                if self.current_frame == 0 {
-                    self.current_frame = 1;
-                    let meta = SourceMeta::default();
-                    Some(Ok((img.clone(), meta)))
-                } else {
-                    None
+                if self.current_frame > 0 {
+                    return None;
                 }
+                self.current_frame = 1;
+                Some(Ok((img.clone(), SourceMeta::default())))
             }
             Source::Array(arr) => {
-                if self.current_frame == 0 {
-                    self.current_frame = 1;
-                    let meta = SourceMeta::default();
-                    // Convert array to image
-                    match crate::utils::array_to_image(arr) {
-                        Ok(img) => Some(Ok((img, meta))),
-                        Err(e) => Some(Err(e)),
-                    }
-                } else {
-                    None
+                if self.current_frame > 0 {
+                    return None;
                 }
+                self.current_frame = 1;
+                Some(crate::utils::array_to_image(arr).map(|img| (img, SourceMeta::default())))
             }
             Source::Video(_) | Source::Webcam(_) | Source::Stream(_) => self.next_video_frame(),
         }
