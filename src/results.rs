@@ -1531,6 +1531,11 @@ mod tests {
         assert_eq!(raw.len(), 1);
         assert!(matches!(raw[0].get("name"), Some(SummaryValue::String(s)) if s == "person"));
         assert!(matches!(raw[0].get("box"), Some(SummaryValue::Box(_))));
+        let norm = r.summary(true);
+        let Some(SummaryValue::Box(b)) = norm[0].get("box") else {
+            panic!("expected a box entry");
+        };
+        assert!(matches!(b.get("x2"), Some(SummaryValue::Float(x)) if (x - 0.5).abs() < 1e-6));
 
         // Probs summary returns a single top-1 entry.
         let mut rp = Results::new(
