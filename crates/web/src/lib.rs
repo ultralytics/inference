@@ -324,6 +324,7 @@ impl YoloModel {
         let want = Device::parse(&device);
         ensure_backend(ort_base_url, want.accelerated()).await?;
         let metadata = build_metadata(&bytes)?;
+        let bytes = onnx_meta::with_f32_io(&bytes).unwrap_or(bytes);
         if want != Device::Cpu
             && let Ok(session) = Self::commit(&bytes, want).await
         {
