@@ -38,7 +38,7 @@ cargo build
 cargo test --no-default-features --features annotate
 
 # Run one test by name filter (add -- --ignored --exact for the network e2e tests)
-cargo test --no-default-features --features annotate test_boxes_creation
+cargo test --no-default-features --features annotate test_boxes_xyxy
 
 # Lint exactly as CI (ci.yml `test` job; macOS swaps in "coreml,annotate")
 cargo clippy --all-targets --no-default-features --features annotate -- -D warnings

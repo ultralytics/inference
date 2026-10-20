@@ -1492,6 +1492,39 @@ mod tests {
             (4, 4),
         ));
         assert_eq!(r.detection_summary(), "2 persons, 1 bus");
+
+        // Single box, unknown class falls back to "object", empty boxes.
+        r.boxes = Some(Boxes::new(array![[0.0, 0.0, 1.0, 1.0, 0.9, 0.0]], (4, 4)));
+        assert_eq!(r.detection_summary(), "1 person");
+        r.boxes = Some(Boxes::new(array![[0.0, 0.0, 1.0, 1.0, 0.9, 99.0]], (4, 4)));
+        assert_eq!(r.detection_summary(), "1 object");
+        r.boxes = Some(Boxes::new(Array2::zeros((0, 6)), (4, 4)));
+        assert_eq!(r.detection_summary(), "(no detections)");
+
+        // OBB counts, then empty OBB.
+        r.boxes = None;
+        r.obb = Some(Obb::new(
+            array![
+                [2.0, 2.0, 2.0, 1.0, 0.5, 0.9, 5.0],
+                [2.0, 2.0, 1.0, 1.0, 0.3, 0.8, 5.0]
+            ],
+            (4, 4),
+        ));
+        assert_eq!(r.detection_summary(), "2 buses");
+        r.obb = Some(Obb::new(Array2::zeros((0, 7)), (4, 4)));
+        assert_eq!(r.detection_summary(), "(no detections)");
+
+        // Classification lists top-5 names with scores.
+        r.obb = None;
+        r.probs = Some(Probs::new(array![0.3, 0.0, 0.0, 0.0, 0.0, 0.7]));
+        assert_eq!(
+            r.detection_summary(),
+            "bus 0.70, person 0.30, unknown 0.00, unknown 0.00, unknown 0.00"
+        );
+
+        // Semantic masks list the classes present.
+        r.semantic_mask = Some(SemanticMask::new(array![[0u16, 5], [5, 5]], (2, 2)));
+        assert_eq!(r.detection_summary(), "person, bus");
     }
 
     #[test]
