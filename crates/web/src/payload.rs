@@ -253,13 +253,12 @@ fn build_mask_overlay(r: &Results) -> Vec<u8> {
         return buf;
     }
 
-    let mut buf = vec![0u8; w * h * 4];
-
     // Semantic: per-pixel class map, blended 50/50 like the native renderer.
     if let Some(sem) = &r.semantic_mask {
         if sem.data.dim() != (h, w) {
             return Vec::new();
         }
+        let mut buf = vec![0u8; w * h * 4];
         for y in 0..h {
             for x in 0..w {
                 // Filtered-out classes carry the IGNORE sentinel; leave transparent.

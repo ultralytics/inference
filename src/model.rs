@@ -27,10 +27,7 @@ use crate::error::{InferenceError, Result};
 use crate::inference::{InferenceConfig, Quantization};
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess_with_head;
-use crate::preprocessing::{
-    calculate_rect_size, image_to_array, preprocess_image_center_crop, preprocess_image_stretch,
-    preprocess_image_with_precision,
-};
+use crate::preprocessing::{calculate_rect_size, image_to_array, preprocess_for_task};
 use crate::results::{Results, Speed};
 use crate::task::Task;
 use crate::{verbose, warn};
@@ -1997,14 +1994,14 @@ impl YOLOModel {
                     target_size
                 };
 
-                let quantize = fp16_input.then_some(Quantization::Fp16);
-                if task == Task::Classify {
-                    preprocess_image_center_crop(image, current_target_size, quantize)
-                } else if scale_fill {
-                    preprocess_image_stretch(image, current_target_size, quantize)
-                } else {
-                    preprocess_image_with_precision(image, current_target_size, stride, quantize)
-                }
+                preprocess_for_task(
+                    image,
+                    current_target_size,
+                    stride,
+                    task,
+                    scale_fill,
+                    fp16_input.then_some(Quantization::Fp16),
+                )
             })
             .collect();
         #[allow(clippy::cast_precision_loss)]

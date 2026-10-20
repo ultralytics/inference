@@ -31,6 +31,7 @@ use lru::LruCache;
 use ndarray::{Array3, Array4};
 
 use crate::inference::Quantization;
+use crate::task::Task;
 
 /// Converts current and legacy preprocessing precision arguments to `quantize`.
 #[doc(hidden)]
@@ -518,6 +519,28 @@ pub fn calculate_rect_size(
     let stride = stride as usize;
     let round_up = |extent: u32| (extent as usize).div_ceil(stride).max(1) * stride;
     (round_up(geom.new_h), round_up(geom.new_w))
+}
+
+/// Preprocess `image` for a `task` model at `target`.
+///
+/// Classification center-crops, a scale-fill head (RT-DETR, depth) stretches to the target,
+/// and every other task letterboxes. Shared by the native and browser pipelines.
+#[must_use]
+pub fn preprocess_for_task(
+    image: &DynamicImage,
+    target: (usize, usize),
+    stride: u32,
+    task: Task,
+    scale_fill: bool,
+    quantize: Option<Quantization>,
+) -> PreprocessResult {
+    if task == Task::Classify {
+        preprocess_image_center_crop(image, target, quantize)
+    } else if scale_fill {
+        preprocess_image_stretch(image, target, quantize)
+    } else {
+        preprocess_image_with_precision(image, target, stride, quantize)
+    }
 }
 
 /// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.

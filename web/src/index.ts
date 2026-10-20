@@ -1,12 +1,12 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 /**
- * Browser bindings for Ultralytics YOLO inference on WebGPU.
+ * Browser bindings for Ultralytics YOLO inference on WebGPU or CPU.
  *
  * Thin TypeScript wrapper around the WebAssembly module compiled from the
- * `ultralytics-inference` Rust crate. Inference runs on the GPU through ONNX
- * Runtime Web (bridged by `ort-web`); this module hides the wasm init, GPU
- * setup, and image encoding behind a small `YOLO` class:
+ * `ultralytics-inference` Rust crate. `.onnx` models run through ONNX Runtime Web
+ * (bridged by `ort-web`) and `.tflite` models through LiteRT.js; this module hides
+ * the wasm init, device setup, and image encoding behind a small `YOLO` class:
  *
  * ```ts
  * import { YOLO } from "@ultralytics/yolo";
@@ -263,7 +263,6 @@ export type ImageInput =
 
 let initialized = false;
 
-/** Initialize the wasm module exactly once. */
 /**
  * `ort-web` 0.4.0 reads tensor dims as 64-bit integers, but ONNX Runtime Web returns plain
  * numbers, which the wasm glue then rejects with "Cannot convert 1 to a BigInt". Accept number
@@ -276,6 +275,7 @@ function allowNumberDims(): void {
   };
 }
 
+/** Initialize the wasm module exactly once. */
 async function ensureInit(wasmUrl?: string | URL): Promise<void> {
   if (initialized) return;
   allowNumberDims();
@@ -597,12 +597,9 @@ class LiteRtEngine implements Engine {
   private async runDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
     const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
-    // Flatten shapes as [rank, dims..., rank, dims...] for the wasm boundary.
-    const flatShapes: number[] = [];
-    for (const s of shapes) flatShapes.push(s.length, ...s);
     return this.pipeline.postprocess(
       outputs,
-      new Uint32Array(flatShapes),
+      shapes.map((s) => new Uint32Array(s)),
       inferenceMs,
       p.conf,
       p.iou,
