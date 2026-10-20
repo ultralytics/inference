@@ -266,13 +266,14 @@ fn draw_line_segment(
     let mut y = y1;
 
     loop {
-        // Draw a thick point
+        // Draw a thick point, skipping pixels outside the image so off-frame parts are clipped
         let half_t = thickness / 2;
         for tx in -half_t..=half_t {
             for ty in -half_t..=half_t {
-                let px = (x as i32 + tx).max(0).min(width as i32 - 1) as u32;
-                let py = (y as i32 + ty).max(0).min(height as i32 - 1) as u32;
-                img.put_pixel(px, py, color);
+                let (px, py) = (x as i32 + tx, y as i32 + ty);
+                if px >= 0 && py >= 0 && px < width as i32 && py < height as i32 {
+                    img.put_pixel(px as u32, py as u32, color);
+                }
             }
         }
 

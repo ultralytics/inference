@@ -1096,13 +1096,9 @@ impl Obb {
             let hw = w / 2.0;
             let hh = h / 2.0;
 
-            // Corner offsets relative to center (before rotation)
-            let corners_rel = [
-                (-hw, -hh), // top-left
-                (hw, -hh),  // top-right
-                (hw, hh),   // bottom-right
-                (-hw, hh),  // bottom-left
-            ];
+            // Corner offsets relative to center (before rotation), in the order of
+            // Ultralytics `xywhr2xyxyxyxy`.
+            let corners_rel = [(hw, hh), (hw, -hh), (-hw, -hh), (-hw, hh)];
 
             // Apply rotation and translate to absolute coordinates
             for (j, (dx, dy)) in corners_rel.iter().enumerate() {
@@ -1117,7 +1113,7 @@ impl Obb {
     }
 
     /// Get axis-aligned bounding box containing each OBB.
-    /// Returns array of shape (N, 4) with [x1, y1, x2, y2] for each OBB.
+    /// Returns array of shape (N, 4) with [x1, y1, x2, y2] for each OBB, not clipped to the image.
     ///
     /// # Returns
     ///
@@ -1143,13 +1139,10 @@ impl Obb {
                 max_y = max_y.max(y);
             }
 
-            // Clip to image bounds
-            #[allow(clippy::cast_precision_loss)]
-            let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
-            xyxy[[i, 0]] = min_x.max(0.0).min(w);
-            xyxy[[i, 1]] = min_y.max(0.0).min(h);
-            xyxy[[i, 2]] = max_x.max(0.0).min(w);
-            xyxy[[i, 3]] = max_y.max(0.0).min(h);
+            xyxy[[i, 0]] = min_x;
+            xyxy[[i, 1]] = min_y;
+            xyxy[[i, 2]] = max_x;
+            xyxy[[i, 3]] = max_y;
         }
 
         xyxy
