@@ -134,15 +134,46 @@ fn probiou_prepared(p1: &ProbIouBox, p2: &ProbIouBox) -> f32 {
     1.0 - hd
 }
 
+/// [`probiou_prepared`] for NMS at `iou_threshold`, returning 0 for a pair whose centers are too
+/// far apart to overlap above it. The `ProbIoU` distance is at least `|d|^2 / (4 * trace)` of the
+/// summed covariances, and the overlap exceeds the threshold only when that distance is below
+/// `-ln(1 - (1 - iou_threshold)^2)`, so the skipped pairs never decide a suppression.
+///
+/// The bound ignores the `1e-7` stabilizers in [`probiou_prepared`], which only matter for tiny
+/// or degenerate boxes, so pairs whose summed covariance determinant is below 1 (boxes of about
+/// 2 px or less) and thresholds of 0.99 and above always take the full computation.
+fn probiou_for_nms(iou_threshold: f32) -> impl Fn(&ProbIouBox, &ProbIouBox) -> f32 {
+    // 1% margin over the bound so float rounding in the full computation cannot matter.
+    let gap = 1.0 - iou_threshold;
+    let limit = if iou_threshold < 0.99 {
+        -gap.mul_add(-gap, 1.0).ln() * 4.04
+    } else {
+        f32::INFINITY
+    };
+    move |p, q| {
+        let d2 = (p.x - q.x).mul_add(p.x - q.x, (p.y - q.y).powi(2));
+        let det = (p.a + q.a).mul_add(p.b + q.b, -(p.c + q.c).powi(2));
+        if det >= 1.0 && d2 > limit * (p.a + p.b + q.a + q.b) {
+            0.0
+        } else {
+            probiou_prepared(p, q)
+        }
+    }
+}
+
 /// Shared per-class NMS implementation used by axis-aligned and rotated boxes.
 ///
 /// `overlap` computes the IoU-like suppression score for the task-specific box type.
 /// The public wrappers keep task-specific signatures while sharing the score sorting,
 /// class filtering, and suppression loop.
+///
+/// `fast` runs Fast-NMS, where a suppressed box still suppresses the boxes below it, as
+/// Ultralytics does for rotated boxes. Otherwise only kept boxes suppress (greedy NMS).
 fn nms_by_class<T>(
     boxes: &[(T, f32, usize)],
     iou_threshold: f32,
     max_det: usize,
+    fast: bool,
     overlap: impl Fn(&T, &T) -> f32,
 ) -> Vec<usize> {
     // `max_det == 0` is reachable through `with_max_det(0)` and `--max-det 0`, and the cap
@@ -167,14 +198,15 @@ fn nms_by_class<T>(
     let mut suppressed = vec![false; boxes.len()];
 
     for (pos, &i) in indices.iter().enumerate() {
-        if suppressed[i] {
+        if !suppressed[i] {
+            keep.push(i);
+            // Callers cap the result at `max_det`, so suppression past that point only decides
+            // the order of boxes that are dropped. Stopping here is not an approximation.
+            if keep.len() >= max_det {
+                break;
+            }
+        } else if !fast {
             continue;
-        }
-        keep.push(i);
-        // Callers cap the result at `max_det`, so suppression past that point only decides
-        // the order of boxes that are dropped. Stopping here is not an approximation.
-        if keep.len() >= max_det {
-            break;
         }
 
         let class_i = boxes[i].2;
@@ -212,14 +244,16 @@ pub fn nms_per_class(
     iou_threshold: f32,
     max_det: usize,
 ) -> Vec<usize> {
-    nms_by_class(boxes, iou_threshold, max_det, calculate_iou)
+    nms_by_class(boxes, iou_threshold, max_det, false, calculate_iou)
 }
 
 /// Rotated Per-class Non-Maximum Suppression (NMS) using `ProbIoU`
 ///
 /// This function performs NMS specifically for Oriented Bounding Boxes (OBB).
 /// Instead of standard `IoU`, it uses `ProbIoU` (Hellinger distance) to determine overlap,
-/// which correctly handles the rotation angle of the boxes.
+/// which correctly handles the rotation angle of the boxes. Like Ultralytics, it runs Fast-NMS:
+/// a box overlapping any higher-scoring box of its class is dropped, even one that was dropped
+/// itself.
 ///
 /// # Arguments
 ///
@@ -239,7 +273,8 @@ pub fn nms_rotated_per_class(
         &ProbIouBox::prepare_all(boxes),
         iou_threshold,
         max_det,
-        probiou_prepared,
+        true,
+        probiou_for_nms(iou_threshold),
     )
 }
 
@@ -415,6 +450,15 @@ mod tests {
         ];
         assert_eq!(nms_rotated_per_class(&within, 0.5, usize::MAX), vec![0]);
         assert_eq!(nms_rotated_per_class(&within, 0.5, 0), Vec::<usize>::new());
+
+        // A chain where box 1 overlaps both neighbors but box 0 and box 2 do not overlap:
+        // Fast-NMS drops box 2 through the suppressed box 1, as Ultralytics does.
+        let chain = vec![
+            ([5.0, 5.0, 4.0, 2.0, 0.0], 0.9, 0),
+            ([6.0, 5.0, 4.0, 2.0, 0.0], 0.8, 0),
+            ([7.0, 5.0, 4.0, 2.0, 0.0], 0.7, 0),
+        ];
+        assert_eq!(nms_rotated_per_class(&chain, 0.5, usize::MAX), vec![0]);
     }
 
     #[test]
