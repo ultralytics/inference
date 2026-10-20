@@ -345,6 +345,12 @@ pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     if normalized.is_file() {
         return Ok(normalized);
     }
+    if normalized.exists() {
+        return Err(InferenceError::ModelLoadError(format!(
+            "'{}' exists but is not a model file",
+            normalized.display()
+        )));
+    }
 
     let filename = normalized
         .file_name()
