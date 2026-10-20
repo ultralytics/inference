@@ -671,12 +671,14 @@ impl SourceIterator {
             return None;
         }
 
-        // The video file or stream URL to decode, also each frame's path so streams save by name.
-        let path = match &self.source {
-            Source::Video(p) => p.to_string_lossy().to_string(),
-            Source::Stream(s) => s.clone(),
+        // The video file or stream URL to decode, and each frame's path so streams save by
+        // name, without a stream's query string (which may hold a token).
+        let (url, path) = match &self.source {
+            Source::Video(p) => (p.to_string_lossy().to_string(), None),
+            Source::Stream(s) => (s.clone(), s.split('?').next()),
             _ => return None,
         };
+        let path = path.unwrap_or(&url).to_string();
 
         // Initialize decoder if needed
         if self.decoder.is_none() {
@@ -684,7 +686,7 @@ impl SourceIterator {
                 return None;
             }
 
-            match BilinearVideoDecoder::new(Path::new(&path)) {
+            match BilinearVideoDecoder::new(Path::new(&url)) {
                 Ok(d) => {
                     self.total_frames = d.total_frames;
                     self.decoder = Some(d);
