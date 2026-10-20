@@ -342,7 +342,7 @@ fn normalize_model_path(path: &Path) -> PathBuf {
 pub fn try_download_model<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path.as_ref();
     let normalized = normalize_model_path(path);
-    if normalized.exists() {
+    if normalized.is_file() {
         return Ok(normalized);
     }
 
