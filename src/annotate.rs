@@ -91,17 +91,21 @@ pub fn check_font(font: &str) -> Option<PathBuf> {
 }
 
 /// The label font, read once per process: every annotated frame needs it, and the Unicode
-/// face non-ASCII class names pick is about 23 MB. `None` when it cannot be downloaded.
+/// face non-ASCII class names pick is about 23 MB. `None` when it cannot be downloaded; only a
+/// successful load is kept, so the next frame tries again after a failure.
 fn font_bytes(unicode: bool) -> Option<&'static [u8]> {
-    static ARIAL: OnceLock<Option<Vec<u8>>> = OnceLock::new();
-    static ARIAL_UNICODE: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    static ARIAL: OnceLock<Vec<u8>> = OnceLock::new();
+    static ARIAL_UNICODE: OnceLock<Vec<u8>> = OnceLock::new();
     let (font, name) = if unicode {
         (&ARIAL_UNICODE, "Arial.Unicode.ttf")
     } else {
         (&ARIAL, "Arial.ttf")
     };
-    font.get_or_init(|| check_font(name).and_then(|path| fs::read(path).ok()))
-        .as_deref()
+    if let Some(bytes) = font.get() {
+        return Some(bytes);
+    }
+    let bytes = check_font(name).and_then(|path| fs::read(path).ok())?;
+    Some(font.get_or_init(|| bytes))
 }
 
 /// Overlay inference results onto `image` and return the annotated copy.
