@@ -120,15 +120,15 @@ pub(crate) fn with_f32_io(model: &[u8]) -> Option<Vec<u8>> {
         })
         .collect();
     // Every value name in the graph (node outputs, inputs, outputs, value infos and
-    // initializers), so a rename cannot clash with one.
-    let mut taken = initializers.clone();
+    // initializers), so a rename cannot clash with one; each rename joins it as it is made.
+    let mut taken: HashSet<Vec<u8>> = initializers.iter().map(|n| n.to_vec()).collect();
     for (field, value, _) in fields(graph) {
         match (field, value) {
             (1, Value::Bytes(node)) => taken.extend(fields(node).filter_map(|(f, v, _)| match v {
-                Value::Bytes(output) if f == 2 => Some(output),
+                Value::Bytes(output) if f == 2 => Some(output.to_vec()),
                 _ => None,
             })),
-            (11..=13, Value::Bytes(info)) => taken.extend(bytes_field(info, 1)),
+            (11..=13, Value::Bytes(info)) => taken.extend(bytes_field(info, 1).map(<[u8]>::to_vec)),
             _ => {}
         }
     }
@@ -143,7 +143,7 @@ pub(crate) fn with_f32_io(model: &[u8]) -> Option<Vec<u8>> {
                     || field == 11
                         && !bytes_field(info, 1).is_some_and(|n| initializers.contains(n)) =>
             {
-                f32_value_info(info, &taken)
+                f32_value_info(info, &mut taken)
             }
             _ => None,
         };
@@ -175,11 +175,11 @@ pub(crate) fn with_f32_io(model: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// For a float16 tensor `ValueInfoProto`, return its name, a `{name}_f32` rename not in
-/// `taken`, and a float32 `ValueInfoProto` of the same shape under that rename; `None`
-/// otherwise.
+/// `taken` (and add it there), and a float32 `ValueInfoProto` of the same shape under that
+/// rename; `None` otherwise.
 fn f32_value_info<'a>(
     info: &'a [u8],
-    taken: &HashSet<&[u8]>,
+    taken: &mut HashSet<Vec<u8>>,
 ) -> Option<(&'a [u8], Vec<u8>, Vec<u8>)> {
     let name = bytes_field(info, 1)?;
     // `ValueInfoProto.type` (2) -> `TypeProto.tensor_type` (1).
@@ -196,7 +196,7 @@ fn f32_value_info<'a>(
     let mut type_proto = Vec::new();
     write_bytes(&mut type_proto, 1, &tensor_f32);
     let mut renamed = [name, b"_f32"].concat();
-    while taken.contains(renamed.as_slice()) {
+    while !taken.insert(renamed.clone()) {
         renamed.push(b'_');
     }
     let mut out = Vec::new();
