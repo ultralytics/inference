@@ -25,6 +25,7 @@ use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use fast_image_resize::{IntoImageView, IntoImageViewMut, ResizeError, ResizeOptions, Resizer};
 use half::f16;
 use image::{DynamicImage, GenericImageView, RgbImage};
 use lru::LruCache;
@@ -60,6 +61,10 @@ pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
 const SCALE_BITS: i32 = 11;
 const SCALE_INT: i32 = 1 << SCALE_BITS;
 
+/// Pixels per resize chunk: both letterbox passes stay in stack buffers, so the vertical pass
+/// vectorizes.
+const CHUNK: usize = 64;
+
 /// Normalized letterbox padding color (114/255 ≈ 0.447).
 const LETTERBOX_NORM: f32 = 114.0 / 255.0;
 
@@ -77,6 +82,20 @@ type XLutKey = (u32, u32);
 thread_local! {
     static X_LUT_CACHE: RefCell<LruCache<XLutKey, Arc<Vec<XLutEntry>>>> =
         RefCell::new(LruCache::new(NonZeroUsize::new(LUT_CACHE_SIZE).unwrap()));
+    static RESIZER: RefCell<Resizer> = RefCell::new(Resizer::new());
+}
+
+/// Resize with this thread's [`Resizer`], which keeps its CPU detection and buffers between
+/// calls. A nested call, from a rayon task run while `resize` waits, gets a fresh one.
+pub(crate) fn resize(
+    src: &impl IntoImageView,
+    dst: &mut impl IntoImageViewMut,
+    options: &ResizeOptions,
+) -> Result<(), ResizeError> {
+    RESIZER.with(|resizer| match resizer.try_borrow_mut() {
+        Ok(mut resizer) => resizer.resize(src, dst, options),
+        Err(_) => Resizer::new().resize(src, dst, options),
+    })
 }
 
 /// Result of preprocessing an image, containing the tensor and transform info.
@@ -184,11 +203,7 @@ fn build_preprocess_result(
         fused_zerocopy_preprocess(rgb.as_raw(), orig_width, orig_height, target_size, &geom)
     };
 
-    let tensor_f16 = if quantize == Some(Quantization::Fp16) {
-        Some(tensor_f32_to_f16(&tensor))
-    } else {
-        None
-    };
+    let tensor_f16 = (quantize == Some(Quantization::Fp16)).then(|| tensor_f32_to_f16(&tensor));
 
     PreprocessResult {
         tensor,
@@ -366,19 +381,17 @@ fn fused_zerocopy_preprocess(
     (0..dst_h).into_par_iter().for_each(|dy| {
         let data_ptr = atomic_ptr.load(Ordering::Relaxed);
         unsafe {
-            // Calculate row pointers for R, G, B channels
-
-            let r_row = data_ptr.add(dy * dst_w);
-            let g_row = data_ptr.add(channel_size + dy * dst_w);
-            let b_row = data_ptr.add(2 * channel_size + dy * dst_w);
+            // This output row in each of the R, G and B planes.
+            let rows = [0, 1, 2].map(|c| data_ptr.add(c * channel_size + dy * dst_w));
+            let fill = |from: usize, to: usize| {
+                for row in rows {
+                    std::slice::from_raw_parts_mut(row.add(from), to - from).fill(LETTERBOX_NORM);
+                }
+            };
 
             // Vertical padding (top/bottom rows)
             if dy < pad_top_usize || dy >= pad_top_usize + new_height_usize {
-                for dx in 0..dst_w {
-                    *r_row.add(dx) = LETTERBOX_NORM;
-                    *g_row.add(dx) = LETTERBOX_NORM;
-                    *b_row.add(dx) = LETTERBOX_NORM;
-                }
+                fill(0, dst_w);
                 return;
             }
 
@@ -397,45 +410,47 @@ fn fused_zerocopy_preprocess(
             let row0_off = y0c * src_stride;
             let row1_off = y1c * src_stride;
 
-            // Left padding
-            for dx in 0..pad_left_usize {
-                *r_row.add(dx) = LETTERBOX_NORM;
-                *g_row.add(dx) = LETTERBOX_NORM;
-                *b_row.add(dx) = LETTERBOX_NORM;
-            }
+            // Left and right padding
+            fill(0, pad_left_usize);
+            fill(pad_left_usize + new_width_usize, dst_w);
 
             // Inner image pixels - OpenCV's two-pass fixed-point bilinear: an exact horizontal
-            // pass per source row, then the vertical pass of `VResizeLinear<uchar>`, which
-            // truncates each term before the final rounding shift:
+            // pass per source row, stored `>> 4` in i16 like OpenCV, then the vertical pass of
+            // `VResizeLinear<uchar>`, which truncates each term before the final rounding shift:
             //   result = (((h0 >> 4) * fy_inv >> 16) + ((h1 >> 4) * fy >> 16) + 2) >> 2
-            let mut img_dx = 0usize;
-            let src_ptr = src_raw.as_ptr();
-
-            while img_dx < new_width_usize {
-                let (x0_off, x1_off, fx_inv, fx) = *x_lut.get_unchecked(img_dx);
-                let p0 = src_ptr.add(row0_off);
-                let p1 = src_ptr.add(row1_off);
-                let blend = |c: usize| {
-                    let h0 = i32::from(*p0.add(x0_off + c)) * fx_inv
-                        + i32::from(*p0.add(x1_off + c)) * fx;
-                    let h1 = i32::from(*p1.add(x0_off + c)) * fx_inv
-                        + i32::from(*p1.add(x1_off + c)) * fx;
-                    ((((h0 >> 4) * fy_inv) >> 16) + (((h1 >> 4) * fy) >> 16) + 2) >> 2
-                };
-
-                let out_x = pad_left_usize + img_dx;
-                *r_row.add(out_x) = blend(0) as f32 * INV_255;
-                *g_row.add(out_x) = blend(1) as f32 * INV_255;
-                *b_row.add(out_x) = blend(2) as f32 * INV_255;
-
-                img_dx += 1;
-            }
-
-            // Right padding
-            for dx in (pad_left_usize + new_width_usize)..dst_w {
-                *r_row.add(dx) = LETTERBOX_NORM;
-                *g_row.add(dx) = LETTERBOX_NORM;
-                *b_row.add(dx) = LETTERBOX_NORM;
+            let p0 = src_raw.as_ptr().add(row0_off);
+            // Like Python, an image already at the resized extent is copied, not resampled; the
+            // formula above gives the source pixel back exactly in that case.
+            if new_width == src_w && new_height == src_h {
+                for (c, row) in rows.into_iter().enumerate() {
+                    let out =
+                        std::slice::from_raw_parts_mut(row.add(pad_left_usize), new_width_usize);
+                    for (x, o) in out.iter_mut().enumerate() {
+                        *o = f32::from(*p0.add(3 * x + c)) * INV_255;
+                    }
+                }
+            } else {
+                let p1 = src_raw.as_ptr().add(row1_off);
+                for (chunk, lut) in x_lut.chunks(CHUNK).enumerate() {
+                    let mut h = [[[0i16; CHUNK]; 3]; 2];
+                    for (i, &(x0_off, x1_off, fx_inv, fx)) in lut.iter().enumerate() {
+                        for (planes, p) in h.iter_mut().zip([p0, p1]) {
+                            for (c, plane) in planes.iter_mut().enumerate() {
+                                plane[i] = ((i32::from(*p.add(x0_off + c)) * fx_inv
+                                    + i32::from(*p.add(x1_off + c)) * fx)
+                                    >> 4) as i16;
+                            }
+                        }
+                    }
+                    let start = pad_left_usize + chunk * CHUNK;
+                    for (c, row) in rows.into_iter().enumerate() {
+                        let out = std::slice::from_raw_parts_mut(row.add(start), lut.len());
+                        for ((o, &a), &b) in out.iter_mut().zip(&h[0][c]).zip(&h[1][c]) {
+                            let v = ((i32::from(a) * fy_inv) >> 16) + ((i32::from(b) * fy) >> 16);
+                            *o = ((v + 2) >> 2) as f32 * INV_255;
+                        }
+                    }
+                }
             }
         }
     });
@@ -510,31 +525,37 @@ pub fn preprocess_for_task(
     }
 }
 
-/// Convert an RGB image to a normalized NCHW tensor, planar (CHW) layout.
+/// Convert the `(x, y, w, h)` region of an RGB image to a normalized NCHW tensor, planar (CHW)
+/// layout.
 ///
-/// Allocates the `(1, 3, H, W)` tensor, splits it into per-channel slices, and fills each
+/// Allocates the `(1, 3, h, w)` tensor, splits it into per-channel slices, and fills each
 /// pixel with `convert` applied to the source byte. The caller supplies the element type's
 /// zero value and the per-byte conversion, so the f32 and f16 callers each keep their exact
 /// arithmetic (the f16 one hoists its scale constant into the closure).
 fn image_to_tensor<T: Clone>(
     image: &RgbImage,
+    (left, top, width, height): (usize, usize, usize, usize),
     zero: T,
     mut convert: impl FnMut(u8) -> T,
 ) -> Array4<T> {
-    let (width, height) = image.dimensions();
-    let (w, h) = (width as usize, height as usize);
+    let stride = image.width() as usize * 3;
     let pixels = image.as_raw();
 
-    let mut tensor = Array4::from_elem((1, 3, h, w), zero);
+    let mut tensor = Array4::from_elem((1, 3, height, width), zero);
 
     // Get mutable slices for each channel for faster access
-    let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(h * w);
-    let (g_slice, b_slice) = rest.split_at_mut(h * w);
+    let (r_slice, rest) = tensor.as_slice_mut().unwrap().split_at_mut(height * width);
+    let (g_slice, b_slice) = rest.split_at_mut(height * width);
 
-    for (i, chunk) in pixels.as_chunks::<3>().0.iter().enumerate() {
-        r_slice[i] = convert(chunk[0]);
-        g_slice[i] = convert(chunk[1]);
-        b_slice[i] = convert(chunk[2]);
+    for row in 0..height {
+        let start = (top + row) * stride + left * 3;
+        let src = pixels[start..start + 3 * width].as_chunks::<3>().0;
+        for (i, chunk) in src.iter().enumerate() {
+            let o = row * width + i;
+            r_slice[o] = convert(chunk[0]);
+            g_slice[o] = convert(chunk[1]);
+            b_slice[o] = convert(chunk[2]);
+        }
     }
 
     tensor
@@ -629,15 +650,15 @@ pub fn preprocess_image_center_crop(
     let orig_shape = (orig_height, orig_width);
 
     // Perform center crop resize
-    let (cropped, scale) = center_crop_image(image, target_size);
+    let (resized, crop, scale) = center_crop_image(image, target_size);
 
     // Convert to normalized NCHW tensor
-    let tensor = image_to_tensor(&cropped, 0.0, |v| f32::from(v) / 255.0);
+    let tensor = image_to_tensor(&resized, crop, 0.0, |v| f32::from(v) / 255.0);
 
     // Optionally compute FP16 tensor, converting u8 straight to f16 with a hoisted 1/255.
     let tensor_f16 = (quantize == Some(Quantization::Fp16)).then(|| {
         let scale = f16::from_f32(1.0 / 255.0);
-        image_to_tensor(&cropped, f16::ZERO, move |v| {
+        image_to_tensor(&resized, crop, f16::ZERO, move |v| {
             f16::from_f32(f32::from(v)) * scale
         })
     });
@@ -669,12 +690,16 @@ pub fn preprocess_image_center_crop(
 /// # Returns
 ///
 /// Tuple containing:
-/// 1. `cropped`: The processed `RgbImage`.
-/// 2. `scale`: Scale factors applied (same for x and y).
+/// 1. `resized`: The resized `RgbImage`.
+/// 2. `crop`: The centered `(x, y, w, h)` region of `resized` to keep.
+/// 3. `scale`: Scale factors applied (same for x and y).
 #[allow(clippy::similar_names)]
-fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbImage, (f32, f32)) {
+fn center_crop_image(
+    image: &DynamicImage,
+    target_size: (usize, usize),
+) -> (RgbImage, (usize, usize, usize, usize), (f32, f32)) {
     use fast_image_resize::{
-        PixelType, ResizeAlg, ResizeOptions, Resizer,
+        PixelType, ResizeAlg,
         images::{Image, ImageRef},
     };
 
@@ -686,6 +711,7 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     let blank = || {
         (
             RgbImage::from_pixel(target_w, target_h, image::Rgb(LETTERBOX_COLOR)),
+            (0, 0, target_size.1, target_size.0),
             (1.0, 1.0),
         )
     };
@@ -704,20 +730,22 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     let scale_y = target_h as f32 / src_h as f32;
     let scale = scale_x.max(scale_y);
 
+    // The `f32` product can truncate one pixel short of the target on a near-square image
+    // (99x99 at 224 gives 223), so the covering extent never drops below it.
     let (new_w, new_h) = if scale_x >= scale_y {
         #[allow(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
             clippy::cast_precision_loss
         )]
-        (target_w, (src_h as f32 * scale_x) as u32)
+        (target_w, ((src_h as f32 * scale_x) as u32).max(target_h))
     } else {
         #[allow(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
             clippy::cast_precision_loss
         )]
-        ((src_w as f32 * scale_y) as u32, target_h)
+        (((src_w as f32 * scale_y) as u32).max(target_w), target_h)
     };
 
     // Resize first. Borrow the source samples when the image is already RGB8 (the common
@@ -740,14 +768,10 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
 
     let mut dst_image = Image::new(safe_new_w, safe_new_h, PixelType::U8x3);
 
-    let mut resizer = Resizer::new();
     let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(
         fast_image_resize::FilterType::Bilinear,
     ));
-    if resizer
-        .resize(&src_image, &mut dst_image, Some(&options))
-        .is_err()
-    {
+    if resize(&src_image, &mut dst_image, &options).is_err() {
         return blank();
     }
 
@@ -768,10 +792,14 @@ fn center_crop_image(image: &DynamicImage, target_size: (usize, usize)) -> (RgbI
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let crop_y = crop_y_float.round_ties_even() as u32;
 
-    let cropped =
-        image::imageops::crop_imm(&resized_rgb, crop_x, crop_y, target_w, target_h).to_image();
+    let crop = (
+        crop_x as usize,
+        crop_y as usize,
+        target_size.1,
+        target_size.0,
+    );
 
-    (cropped, (scale, scale))
+    (resized_rgb, crop, (scale, scale))
 }
 
 #[allow(clippy::similar_names)]
