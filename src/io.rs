@@ -418,8 +418,23 @@ impl SaveResults {
     ///
     /// * `is_video` - Whether the source is a video/stream.
     /// * `meta` - Source metadata (path, frame index, fps).
-    /// * `annotated` - The annotated image to save, taken by value so queuing it does not
-    ///   copy the pixels.
+    /// * `annotated` - The annotated image to save.
+    ///
+    /// # Errors
+    ///
+    /// Writing is queued, so a failed image or video write is reported by [`Self::finish`].
+    /// This returns an error only if the output directory cannot be created or the writer
+    /// has already stopped.
+    pub fn save(
+        &mut self,
+        is_video: bool,
+        meta: &crate::source::SourceMeta,
+        annotated: &image::DynamicImage,
+    ) -> Result<()> {
+        self.save_owned(is_video, meta, annotated.clone())
+    }
+
+    /// Like [`Self::save`], but takes the image by value so queuing it does not copy the pixels.
     ///
     /// # Errors
     ///
@@ -672,7 +687,7 @@ mod tests {
                 path: path.to_string(),
                 ..SourceMeta::default()
             };
-            saver.save_owned(false, &meta, img.clone()).unwrap();
+            saver.save(false, &meta, &img).unwrap();
         }
         saver.finish().unwrap();
         assert!(tmp.path().join("frame.jpg").exists());
@@ -690,7 +705,7 @@ mod tests {
         };
 
         saver
-            .save_owned(false, &meta, image::DynamicImage::new_rgb8(8, 8))
+            .save(false, &meta, &image::DynamicImage::new_rgb8(8, 8))
             .unwrap();
         drop(saver);
         assert!(tmp.path().join("frame.jpg").exists());
@@ -708,7 +723,7 @@ mod tests {
         };
 
         saver
-            .save_owned(false, &meta, image::DynamicImage::new_rgb8(8, 8))
+            .save(false, &meta, &image::DynamicImage::new_rgb8(8, 8))
             .unwrap();
         assert!(saver.finish().is_err());
     }
@@ -752,7 +767,7 @@ mod tests {
             ..SourceMeta::default()
         };
 
-        saver.save_owned(true, &meta, img).unwrap();
+        saver.save(true, &meta, &img).unwrap();
         saver.finish().unwrap();
         assert!(tmp.path().join("clip_frames").join("clip_1.jpg").exists());
     }
@@ -771,8 +786,8 @@ mod tests {
             fps: Some(10.0),
             ..SourceMeta::default()
         };
-        saver.save_owned(true, &meta, img.clone()).unwrap();
-        saver.save_owned(true, &meta, img).unwrap();
+        saver.save(true, &meta, &img).unwrap();
+        saver.save(true, &meta, &img).unwrap();
         saver.finish().unwrap();
         assert!(tmp.path().join("movie.mp4").exists());
     }
