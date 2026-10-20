@@ -316,10 +316,30 @@ pub(crate) fn pluralize(word: &str) -> String {
     }
 }
 
-use image::DynamicImage;
+use std::io::{BufRead, Seek};
+
+use image::{DynamicImage, ImageDecoder, ImageReader};
 use ndarray::Array3;
 
 use crate::error::{InferenceError, Result};
+
+/// Decode an image by its contents rather than its extension, upright per its EXIF
+/// orientation (matching `cv2.imread` and browsers), with JPEG 2000 support on native targets.
+///
+/// # Errors
+///
+/// Returns an error if the format is unrecognized or the image cannot be decoded.
+pub fn decode_image<R: BufRead + Seek>(reader: ImageReader<R>) -> image::ImageResult<DynamicImage> {
+    #[cfg(not(target_arch = "wasm32"))]
+    hayro_jpeg2000::integration::register_decoding_hook();
+    let mut decoder = reader.with_guessed_format()?.into_decoder()?;
+    // `ImageReader::decode` checks the buffer size against the default limit; keep that check.
+    image::Limits::default().reserve(decoder.total_bytes())?;
+    let orientation = decoder.orientation()?;
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    Ok(img)
+}
 
 /// Convert an HWC u8 array to a `DynamicImage`.
 ///
@@ -491,6 +511,31 @@ mod tests {
         let slow = array_to_image(&permuted).unwrap().to_rgb8();
         assert_eq!(fast.dimensions(), (3, 2));
         assert_eq!(fast.as_raw(), slow.as_raw());
+    }
+
+    #[test]
+    fn test_decode_image_applies_exif_orientation() {
+        use image::ImageEncoder;
+        // Little-endian TIFF header with a single IFD entry: Orientation (0x0112) = 6 (rotate 90 CW).
+        let exif = b"II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0".to_vec();
+        let mut png = Vec::new();
+        let mut encoder = image::codecs::png::PngEncoder::new(&mut png);
+        encoder.set_exif_metadata(exif).unwrap();
+        // 2x1 stored pixels: red, green.
+        encoder
+            .write_image(
+                &[255, 0, 0, 0, 255, 0],
+                2,
+                1,
+                image::ExtendedColorType::Rgb8,
+            )
+            .unwrap();
+
+        let rgb = decode_image(ImageReader::new(std::io::Cursor::new(png)))
+            .unwrap()
+            .to_rgb8();
+        assert_eq!(rgb.dimensions(), (1, 2));
+        assert_eq!(rgb.as_raw(), &[255, 0, 0, 0, 255, 0]);
     }
 
     #[test]

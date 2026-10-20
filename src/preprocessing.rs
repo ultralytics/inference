@@ -60,13 +60,6 @@ pub const LETTERBOX_COLOR: [u8; 3] = [114, 114, 114];
 const SCALE_BITS: i32 = 11;
 const SCALE_INT: i32 = 1 << SCALE_BITS;
 
-/// Double scale bits for single-pass bilinear interpolation.
-const SCALE_BITS_2X: i32 = 2 * SCALE_BITS;
-
-/// Rounding bias for fixed-point bilinear, added before the final right-shift
-/// to achieve round-to-nearest behavior matching `OpenCV`'s `saturate_cast`.
-const ROUND_BIAS: i32 = 1 << (SCALE_BITS_2X - 1);
-
 /// Normalized letterbox padding color (114/255 ≈ 0.447).
 const LETTERBOX_NORM: f32 = 114.0 / 255.0;
 
@@ -112,9 +105,10 @@ pub(crate) struct LetterboxGeometry {
 
 impl LetterboxGeometry {
     /// Letterbox geometry for fitting `(orig_w, orig_h)` into `target` = `(height, width)`:
-    /// a uniform scale (`min` over both axes), rounded resized extents, and centered
-    /// padding. The returned `scale` is that uniform gain, used for coordinate
-    /// back-projection.
+    /// a uniform scale (`min` over both axes), resized extents rounded half-to-even like
+    /// Python's `round`, and centered padding. The returned `(y, x)` scale is each axis's
+    /// effective gain (resized extent over original), used for coordinate back-projection
+    /// as in Ultralytics `scale_boxes`.
     ///
     /// The single source of this math for both the CPU letterbox and the `cuda-preprocess`
     /// kernel, so the two can never disagree on where a pixel lands.
@@ -129,51 +123,43 @@ impl LetterboxGeometry {
         target: (usize, usize),
         stretch: bool,
     ) -> (Self, (f32, f32)) {
-        // Scale-fill: the source covers the target exactly, so each axis keeps its own gain
-        // and there is no padding. A zero-extent axis has no gain to report and yields 1.0,
-        // keeping back-projection finite instead of dividing coordinates by infinity.
-        if stretch {
-            let gain = |extent: usize, orig: u32| {
+        // Scale-fill: the source covers the target exactly, with no padding.
+        let (new_w, new_h) = if stretch {
+            (target.1 as u32, target.0 as u32)
+        } else {
+            // f64 like Python, so a half-pixel extent (1280x853 at 640 gives 426.5) rounds to
+            // even exactly as `LetterBox` does.
+            let scale =
+                (target.0 as f64 / f64::from(orig_h)).min(target.1 as f64 / f64::from(orig_w));
+            // Rounding can collapse an extreme aspect ratio to zero: a 10000x1 source at imgsz
+            // 640 scales its height to 0.064, which would letterbox the entire tensor and throw
+            // the image away. Keep at least one pixel per axis, leaving an empty source at 0.
+            let extent = |orig: u32| {
                 if orig == 0 {
-                    1.0
+                    0
                 } else {
-                    extent as f32 / orig as f32
+                    ((f64::from(orig) * scale).round_ties_even() as u32).max(1)
                 }
             };
-            let geom = Self {
-                new_w: target.1 as u32,
-                new_h: target.0 as u32,
-                pad_left: 0,
-                pad_top: 0,
-            };
-            return (geom, (gain(target.0, orig_h), gain(target.1, orig_w)));
-        }
-        let (target_h, target_w) = (target.0 as f32, target.1 as f32);
-        let (orig_hf, orig_wf) = (orig_h as f32, orig_w as f32);
-        let scale = (target_h / orig_hf).min(target_w / orig_wf);
-        // Rounding can collapse an extreme aspect ratio to zero: a 10000x1 source at imgsz 640
-        // scales its height to 0.064, which would letterbox the entire tensor and throw the
-        // image away. Keep at least one pixel per axis, leaving a genuinely empty source at 0.
-        let extent = |orig_extent: f32, orig: u32| {
+            (extent(orig_w), extent(orig_h))
+        };
+        // A zero-extent axis has no gain to report and yields 1.0, keeping back-projection
+        // finite instead of dividing coordinates by infinity.
+        let gain = |extent: u32, orig: u32| {
             if orig == 0 {
-                0
+                1.0
             } else {
-                ((orig_extent * scale).round() as u32).max(1)
+                extent as f32 / orig as f32
             }
         };
-        let new_w = extent(orig_wf, orig_w);
-        let new_h = extent(orig_hf, orig_h);
-        let pad_left = (target.1 as u32).saturating_sub(new_w) / 2;
-        let pad_top = (target.0 as u32).saturating_sub(new_h) / 2;
-        (
-            Self {
-                new_w,
-                new_h,
-                pad_left,
-                pad_top,
-            },
-            (scale, scale),
-        )
+        // Centered padding: the floor half matches Python's `round(dw - 0.1)` on the left/top.
+        let geom = Self {
+            new_w,
+            new_h,
+            pad_left: (target.1 as u32).saturating_sub(new_w) / 2,
+            pad_top: (target.0 as u32).saturating_sub(new_h) / 2,
+        };
+        (geom, (gain(new_h, orig_h), gain(new_w, orig_w)))
     }
 }
 
@@ -188,8 +174,6 @@ fn build_preprocess_result(
     stretch: bool,
 ) -> PreprocessResult {
     let (orig_width, orig_height) = image.dimensions();
-    // A letterbox uses one uniform `gain` on both axes for coordinate back-projection; per-axis
-    // gains from the rounded extents can diverge slightly, shifting boxes and changing NMS.
     let (geom, scale) = LetterboxGeometry::compute(orig_width, orig_height, target_size, stretch);
 
     // Borrow the samples of an RGB8 image; any other layout converts a copy, dropped here.
@@ -289,8 +273,9 @@ pub fn preprocess_image_stretch(
 /// Uses 11-bit fixed-point weights matching `OpenCV`'s `INTER_LINEAR` coordinate mapping:
 /// `src_x = (dst_x + 0.5) * (src_w / dst_w) - 0.5`
 ///
-/// Weight computation matches `OpenCV`'s `resize.cpp`:
-/// `cbuf[0] = saturate_cast<short>((1-fx) * 2048); cbuf[1] = 2048 - cbuf[0];`
+/// Weight computation matches `OpenCV`'s `resize.cpp`: the ratio is `1 / (dst_w / src_w)` in
+/// f64, the source position is cast to f32, and `cbuf[0] = saturate_cast<short>((1-fx) * 2048)`
+/// rounds half-to-even, with `cbuf[1] = 2048 - cbuf[0]`.
 fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Arc<Vec<XLutEntry>> {
     let key = (src_w, dst_w);
 
@@ -301,18 +286,18 @@ fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Arc<Vec<XLutEntry>> {
             return Arc::clone(lut);
         }
 
-        let scale_x = src_w as f32 / dst_w as f32;
+        let scale_x = 1.0 / (f64::from(dst_w) / f64::from(src_w));
         let src_w_max = (src_w - 1) as i32;
 
         let lut: Arc<Vec<XLutEntry>> = Arc::new(
             (0..dst_w)
                 .map(|dx| {
-                    let sx = ((dx as f32 + 0.5) * scale_x - 0.5).max(0.0);
+                    let sx = (((f64::from(dx) + 0.5) * scale_x - 0.5) as f32).max(0.0);
                     let x0 = sx.floor() as i32;
                     // Match OpenCV: cbuf[0] = saturate_cast<short>((1-fx)*SCALE),
                     //               cbuf[1] = SCALE - cbuf[0]
                     let fx_f = sx - x0 as f32;
-                    let fx_inv = ((1.0 - fx_f) * SCALE_INT as f32 + 0.5) as i32;
+                    let fx_inv = ((1.0 - fx_f) * SCALE_INT as f32).round_ties_even() as i32;
                     let fx = SCALE_INT - fx_inv;
                     let x0c = x0.clamp(0, src_w_max) as usize * 3;
                     let x1c = (x0 + 1).clamp(0, src_w_max) as usize * 3;
@@ -369,7 +354,7 @@ fn fused_zerocopy_preprocess(
     let atomic_ptr = AtomicPtr::new(out_ptr);
 
     let x_lut = get_or_compute_x_lut(src_w, new_width);
-    let scale_y = src_h as f32 / new_height as f32;
+    let scale_y = 1.0 / (f64::from(new_height) / f64::from(src_h));
     let src_h_max = (src_h - 1) as i32;
 
     let pad_top_usize = pad_top as usize;
@@ -398,12 +383,13 @@ fn fused_zerocopy_preprocess(
             }
 
             // Image row calculations - 11-bit fixed-point bilinear matching
-            // OpenCV's INTER_LINEAR (INTER_RESIZE_COEF_BITS = 11).
+            // OpenCV's INTER_LINEAR (INTER_RESIZE_COEF_BITS = 11). Unlike x, OpenCV keeps `fy`
+            // above the top edge and only clamps the row indices.
             let img_dy = dy - pad_top_usize;
-            let sy = ((img_dy as f32 + 0.5) * scale_y - 0.5).max(0.0);
+            let sy = ((img_dy as f64 + 0.5) * scale_y - 0.5) as f32;
             let y0 = sy.floor() as i32;
             let fy_f = sy - y0 as f32;
-            let fy_inv = ((1.0 - fy_f) * SCALE_INT as f32 + 0.5) as i32;
+            let fy_inv = ((1.0 - fy_f) * SCALE_INT as f32).round_ties_even() as i32;
             let fy = SCALE_INT - fy_inv;
 
             let y0c = y0.clamp(0, src_h_max) as usize;
@@ -418,48 +404,29 @@ fn fused_zerocopy_preprocess(
                 *b_row.add(dx) = LETTERBOX_NORM;
             }
 
-            // Inner image pixels - fixed-point bilinear with rounding.
-            // Uses untruncated weights (w = fx * fy, range [0, 2048^2]) and a
-            // single shift with rounding bias, matching OpenCV's saturate_cast:
-            //   result = (sum + ROUND_BIAS) >> 22
-            // Max intermediate: 255 * 2048^2 + 2^21 ≈ 1.07B < i32::MAX.
+            // Inner image pixels - OpenCV's two-pass fixed-point bilinear: an exact horizontal
+            // pass per source row, then the vertical pass of `VResizeLinear<uchar>`, which
+            // truncates each term before the final rounding shift:
+            //   result = (((h0 >> 4) * fy_inv >> 16) + ((h1 >> 4) * fy >> 16) + 2) >> 2
             let mut img_dx = 0usize;
             let src_ptr = src_raw.as_ptr();
 
             while img_dx < new_width_usize {
                 let (x0_off, x1_off, fx_inv, fx) = *x_lut.get_unchecked(img_dx);
-                let w00 = fx_inv * fy_inv;
-                let w10 = fx * fy_inv;
-                let w01 = fx_inv * fy;
-                let w11 = fx * fy;
-
-                let p00 = src_ptr.add(row0_off + x0_off);
-                let p10 = src_ptr.add(row0_off + x1_off);
-                let p01 = src_ptr.add(row1_off + x0_off);
-                let p11 = src_ptr.add(row1_off + x1_off);
+                let p0 = src_ptr.add(row0_off);
+                let p1 = src_ptr.add(row1_off);
+                let blend = |c: usize| {
+                    let h0 = i32::from(*p0.add(x0_off + c)) * fx_inv
+                        + i32::from(*p0.add(x1_off + c)) * fx;
+                    let h1 = i32::from(*p1.add(x0_off + c)) * fx_inv
+                        + i32::from(*p1.add(x1_off + c)) * fx;
+                    ((((h0 >> 4) * fy_inv) >> 16) + (((h1 >> 4) * fy) >> 16) + 2) >> 2
+                };
 
                 let out_x = pad_left_usize + img_dx;
-                *r_row.add(out_x) = ((*p00 as i32 * w00
-                    + *p10 as i32 * w10
-                    + *p01 as i32 * w01
-                    + *p11 as i32 * w11
-                    + ROUND_BIAS)
-                    >> SCALE_BITS_2X) as f32
-                    * INV_255;
-                *g_row.add(out_x) = ((*p00.add(1) as i32 * w00
-                    + *p10.add(1) as i32 * w10
-                    + *p01.add(1) as i32 * w01
-                    + *p11.add(1) as i32 * w11
-                    + ROUND_BIAS)
-                    >> SCALE_BITS_2X) as f32
-                    * INV_255;
-                *b_row.add(out_x) = ((*p00.add(2) as i32 * w00
-                    + *p10.add(2) as i32 * w10
-                    + *p01.add(2) as i32 * w01
-                    + *p11.add(2) as i32 * w11
-                    + ROUND_BIAS)
-                    >> SCALE_BITS_2X) as f32
-                    * INV_255;
+                *r_row.add(out_x) = blend(0) as f32 * INV_255;
+                *g_row.add(out_x) = blend(1) as f32 * INV_255;
+                *b_row.add(out_x) = blend(2) as f32 * INV_255;
 
                 img_dx += 1;
             }
@@ -881,6 +848,12 @@ mod tests {
         let (geom, _) = LetterboxGeometry::compute(1280, 720, (640, 640), false);
         assert!(geom.new_w <= 640 && geom.new_h <= 640);
         assert_eq!(geom.pad_left, 0);
+
+        // A half-pixel extent rounds to even like Python's `LetterBox` (853 * 0.5 = 426.5 ->
+        // 426), with the odd padding pixel at the bottom and per-axis back-projection gains.
+        let (geom, scale) = LetterboxGeometry::compute(1280, 853, (640, 640), false);
+        assert_eq!((geom.new_w, geom.new_h, geom.pad_top), (640, 426, 107));
+        assert_eq!(scale, (426.0 / 853.0, 0.5));
 
         // Tall input is the mirror case: padded left/right, not top/bottom.
         let (geom, _) = LetterboxGeometry::compute(480, 640, (640, 640), false);

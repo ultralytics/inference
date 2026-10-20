@@ -136,6 +136,8 @@ ort = { version = "=2.0.0-rc.14", default-features = false, features = [
 hayro-jpeg2000 = { version = "^0.4.1", default-features = false, features = ["image"] }
 ureq = "^3.3.0"
 dirs = "^7.0"
+# Glob sources such as `images/**/*.jpg`
+glob = "^0.3.3"
 rayon = "^1.12"
 clap = { version = "^4.6.1", features = ["derive"] }
 # rayon-backed parallelism for ndarray and fast_image_resize, native only.

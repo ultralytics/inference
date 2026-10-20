@@ -362,6 +362,8 @@ YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are suppor
 
 Supported image formats: `.avif`, `.bmp`, `.dng`, `.gif`, `.heic`, `.heif`, `.jp2`, `.jpeg`, `.jpg`, `.mpo`, `.png`, `.tif`, `.tiff` and `.webp`.
 
+Supported video formats (`video` feature): `.asf`, `.avi`, `.flv`, `.m4v`, `.mkv`, `.mov`, `.mp4`, `.mpeg`, `.mpg`, `.ts`, `.wmv` and `.webm`.
+
 ### As a Rust Library
 
 Add to your `Cargo.toml` (choose one):
