@@ -361,6 +361,8 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 
 支持的图片格式：`.avif`、`.bmp`、`.dng`、`.gif`、`.heic`、`.heif`、`.jp2`、`.jpeg`、`.jpg`、`.mpo`、`.png`、`.tif`、`.tiff` 和 `.webp`。
 
+支持的视频格式（`video` 特性）：`.asf`、`.avi`、`.flv`、`.m4v`、`.mkv`、`.mov`、`.mp4`、`.mpeg`、`.mpg`、`.ts`、`.wmv` 和 `.webm`。
+
 ### 作为 Rust 库
 
 添加到 `Cargo.toml`（二选一）：
