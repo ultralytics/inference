@@ -421,12 +421,12 @@ impl YOLOModel {
                     ort::ep::XNNPACK::default().build(),
                     "XNNPACKExecutionProvider",
                 )),
-                // Handle cases where feature is disabled but enum variant exists
+                // A device whose feature this build lacks must not run on the CPU instead.
                 #[allow(unreachable_patterns)]
                 _ => {
-                    warn!(
-                        "Device '{device}' requested but feature not enabled or supported. Falling back to available providers."
-                    );
+                    return Err(InferenceError::ModelLoadError(format!(
+                        "Device '{device}' is not supported by this build; enable its feature or use --device cpu."
+                    )));
                 }
             }
         } else {
@@ -485,9 +485,9 @@ impl YOLOModel {
 
         // Each provider registers on its own, so the session is named after the first one
         // that actually registered (CPU when none did). A requested device must not silently
-        // run on the CPU instead, and neither may a GPU provider bound to the cuda-preprocess
-        // stream, whose CPU fallback would panic at `bind_input` (#251), so their failure is
-        // an error; the default device skips to the next provider.
+        // run on the CPU instead, so its failure is an error; the default device skips to the
+        // next provider, and fails only when the cuda-preprocess stream is bound and no GPU
+        // provider registered, since a CPU fallback would panic at `bind_input` (#251).
         #[cfg(feature = "cuda-preprocess")]
         let gpu_stream = cuda_pre_stream.is_some();
         #[cfg(not(feature = "cuda-preprocess"))]
@@ -497,8 +497,27 @@ impl YOLOModel {
         // at all" check rather than "is primary": in the auto path it is registered last
         // and still executes the subgraphs the providers ahead of it decline.
         let mut uses_xnnpack = false;
+        let is_gpu =
+            |name: &str| matches!(name, "CUDAExecutionProvider" | "TensorRTExecutionProvider");
+        let load_error = |name: &str, e: ort::Error| {
+            let hint = if is_gpu(name) {
+                "\nHint: the downloaded ONNX Runtime is built against CUDA 13, so it needs \
+                         a CUDA 13 runtime and cuDNN 9 (plus TensorRT 10 for TensorRT) installed \
+                         and on the library path. On CUDA 12, compile ONNX Runtime for it and \
+                         link that build with `ORT_LIB_PATH`. To run on the CPU instead, select \
+                         the CPU device (`--device cpu`)."
+            } else if name == "OpenVINOExecutionProvider" {
+                "\nHint: the openvino feature needs the OpenVINO runtime installed and on \
+                         the library path (for example `pip install openvino`, then add the \
+                         `openvino/libs` folder to `LD_LIBRARY_PATH`, or install the OpenVINO \
+                         package for your system). See https://docs.openvino.ai/2026/get-started/install-openvino.html"
+            } else {
+                ""
+            };
+            InferenceError::ModelLoadError(format!("{name} failed to load: {e}{hint}"))
+        };
+        let mut gpu_error = None;
         for (ep, name) in eps {
-            let gpu = matches!(name, "CUDAExecutionProvider" | "TensorRTExecutionProvider");
             match ep.register(&mut session_builder) {
                 Ok(()) => {
                     if provider_name == "CPUExecutionProvider" {
@@ -506,29 +525,20 @@ impl YOLOModel {
                     }
                     uses_xnnpack |= name == "XNNPACKExecutionProvider";
                 }
-                Err(e) if config.device.is_none() && !(gpu && gpu_stream) => {
-                    warn!("{name} is unavailable, trying the next provider: {e}");
-                }
+                Err(e) if config.device.is_some() => return Err(load_error(name, e)),
                 Err(e) => {
-                    let hint = if gpu {
-                        "\nHint: the downloaded ONNX Runtime is built against CUDA 13, so it needs \
-                         a CUDA 13 runtime and cuDNN 9 (plus TensorRT 10 for TensorRT) installed \
-                         and on the library path. On CUDA 12, compile ONNX Runtime for it and \
-                         link that build with `ORT_LIB_PATH`. To run on the CPU instead, select \
-                         the CPU device (`--device cpu`)."
-                    } else if name == "OpenVINOExecutionProvider" {
-                        "\nHint: the openvino feature needs the OpenVINO runtime installed and on \
-                         the library path (for example `pip install openvino`, then add the \
-                         `openvino/libs` folder to `LD_LIBRARY_PATH`, or install the OpenVINO \
-                         package for your system). See https://docs.openvino.ai/2026/get-started/install-openvino.html"
-                    } else {
-                        ""
-                    };
-                    return Err(InferenceError::ModelLoadError(format!(
-                        "{name} failed to load: {e}{hint}"
-                    )));
+                    warn!("{name} is unavailable, trying the next provider: {e}");
+                    if is_gpu(name) {
+                        gpu_error = Some(load_error(name, e));
+                    }
                 }
             }
+        }
+        if gpu_stream
+            && !is_gpu(provider_name)
+            && let Some(e) = gpu_error
+        {
+            return Err(e);
         }
 
         // `All` (ORT_ENABLE_ALL), not `Level3` (ORT_ENABLE_LAYOUT), reaches ONNX Runtime's
