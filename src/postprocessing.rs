@@ -343,9 +343,9 @@ fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
 /// `[x1, y1, x2, y2, score, class]` rows, plus the head row each came from so the caller can
 /// read its extra columns (mask coefficients, keypoints).
 ///
-/// A row is a candidate when its best of the `num_classes` class scores clears the
-/// confidence threshold and the class filter; its box is scaled back to the original image
-/// and clipped to it.
+/// A row is a candidate when its best of the `num_classes` class scores is above the
+/// confidence threshold and passes the class filter; its box is scaled back to the original
+/// image. NMS runs on the unclipped boxes, as for detect, and the kept boxes are clipped.
 fn decode_nms(
     output_2d: &Array2<f32>,
     num_classes: usize,
@@ -357,17 +357,18 @@ fn decode_nms(
     for i in 0..output_2d.nrows() {
         let (best_class, best_score) =
             best_class_score(&output_2d.slice(s![i, 4..4 + num_classes]));
-        if best_score < config.confidence_threshold || !config.keep_class(best_class) {
+        if best_score <= config.confidence_threshold || !config.keep_class(best_class) {
             continue;
         }
-        let bbox = scale_and_clip_box(
+        let bbox = scale_coords(
             &xywh_to_xyxy(
                 output_2d[[i, 0]],
                 output_2d[[i, 1]],
                 output_2d[[i, 2]],
                 output_2d[[i, 3]],
             ),
-            preprocess,
+            preprocess.scale,
+            preprocess.padding,
         );
         candidates.push((bbox, best_score, best_class));
         rows.push(i);
@@ -377,7 +378,8 @@ fn decode_nms(
     let mut boxes = Array2::zeros((keep.len(), 6));
     for (out_idx, &k) in keep.iter().enumerate() {
         let (bbox, score, class) = &candidates[k];
-        write_box_row(&mut boxes, out_idx, bbox, *score, *class);
+        let bbox = clip_coords(bbox, preprocess.orig_shape);
+        write_box_row(&mut boxes, out_idx, &bbox, *score, *class);
     }
     (boxes, keep.iter().map(|&k| rows[k]).collect())
 }
@@ -1151,7 +1153,7 @@ fn postprocess_obb(
     for i in 0..num_preds {
         let (best_class, best_score) =
             best_class_score(&output_2d.slice(s![i, 4..4 + num_classes]));
-        if best_score < config.confidence_threshold || !config.keep_class(best_class) {
+        if best_score <= config.confidence_threshold || !config.keep_class(best_class) {
             continue;
         }
         let row = output_2d.row(i);
@@ -1200,7 +1202,8 @@ fn scale_xywh(cx: f32, cy: f32, w: f32, h: f32, preprocess: &PreprocessResult) -
 
 /// Walk an end-to-end output and, for each row above the confidence threshold that
 /// passes the class filter, scale/clip its box and invoke `on_kept(base, [x1,y1,x2,y2],
-/// conf, cls)`. Skip NaN and sub-threshold scores, stopping after `cap` kept detections.
+/// conf, cls)`. Skip NaN scores and scores at or below the threshold, stopping after `cap` kept
+/// detections.
 /// Shared by the detect, segment, pose and OBB paths.
 ///
 /// `normalized_to` names the inference `(height, width)` for heads whose first four columns
@@ -1221,7 +1224,7 @@ fn decode_end2end(
     for i in 0..num_preds {
         let base = i * feats;
         let conf = output[base + 4];
-        if conf.is_nan() || conf < config.confidence_threshold {
+        if conf.is_nan() || conf <= config.confidence_threshold {
             continue;
         }
         let cls = output[base + 5] as usize;
@@ -2679,14 +2682,16 @@ mod tests {
 
     #[test]
     fn test_postprocess_detect_end2end_thresholds() {
-        // Row0 above threshold, row1 below -> only one detection kept.
+        // Row0 above threshold, row1 below and row2 equal to it -> only one detection kept,
+        // since Ultralytics keeps scores strictly above the threshold.
         let output = [
             10.0, 10.0, 50.0, 50.0, 0.9, 0.0, // keep
             10.0, 10.0, 20.0, 20.0, 0.1, 0.0, // drop
+            60.0, 60.0, 90.0, 90.0, 0.25, 0.0, // drop
         ];
         let r = postprocess_detect_end2end(
             &output,
-            &[1, 2, 6],
+            &[1, 3, 6],
             &unit_preprocess((100, 100)),
             &InferenceConfig::default(), // conf threshold 0.25
             results_for(1, (100, 100), (640, 640)),
