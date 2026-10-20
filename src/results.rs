@@ -508,6 +508,11 @@ impl Results {
 
     /// Convert results to a list of dictionaries (summary format).
     ///
+    /// Mirrors Ultralytics Python `Results.summary()`: classification yields one entry per
+    /// top-5 class, semantic segmentation one `{name, class, pixel_ratio}` entry per class
+    /// present, and detection, segmentation, pose and OBB one entry per instance with a `box`
+    /// of corner points (`x1..y2`, or `x1..y4` for OBB) plus `track_id` when tracking.
+    ///
     /// # Arguments
     ///
     /// * `normalize` - Whether to normalize coordinates to [0, 1] range.
@@ -517,10 +522,9 @@ impl Results {
     /// * A vector of hashmaps representing the detections.
     #[must_use]
     pub fn summary(&self, normalize: bool) -> Vec<HashMap<String, SummaryValue>> {
-        let mut results = Vec::new();
-
-        // One `{name, class, confidence}` entry, the shared head of every summary row.
-        let entry_for = |class_id: usize, confidence: f32| {
+        // One `{name, class, <score>}` entry, the shared head of every summary row, where the
+        // score is `confidence`, or `pixel_ratio` for semantic segmentation.
+        let entry_for = |class_id: usize, score: &str, value: f32| {
             HashMap::from([
                 (
                     "name".to_string(),
@@ -532,38 +536,80 @@ impl Results {
                     ),
                 ),
                 ("class".to_string(), SummaryValue::Int(class_id)),
-                ("confidence".to_string(), SummaryValue::Float(confidence)),
+                (score.to_string(), SummaryValue::Float(value)),
             ])
         };
 
         if let Some(ref probs) = self.probs {
-            results.push(entry_for(probs.top1(), probs.top1conf()));
-            return results;
+            return probs
+                .top5()
+                .into_iter()
+                .map(|i| entry_for(i, "confidence", probs.data[i]))
+                .collect();
         }
 
-        if let Some(ref boxes) = self.boxes {
-            let xyxy = if normalize {
-                boxes.xyxyn()
-            } else {
-                boxes.xyxy().to_owned()
-            };
-            let conf = boxes.conf();
-            let cls = boxes.cls();
-
-            for i in 0..boxes.len() {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let class_id = cls[i] as usize;
-                let mut entry = entry_for(class_id, conf[i]);
-
-                let mut box_coords = HashMap::new();
-                box_coords.insert("x1".to_string(), SummaryValue::Float(xyxy[[i, 0]]));
-                box_coords.insert("y1".to_string(), SummaryValue::Float(xyxy[[i, 1]]));
-                box_coords.insert("x2".to_string(), SummaryValue::Float(xyxy[[i, 2]]));
-                box_coords.insert("y2".to_string(), SummaryValue::Float(xyxy[[i, 3]]));
-                entry.insert("box".to_string(), SummaryValue::Box(box_coords));
-
-                results.push(entry);
+        if let Some(ref sm) = self.semantic_mask {
+            let mut counts = vec![0_usize; usize::from(u16::MAX) + 1];
+            for &v in &sm.data {
+                counts[usize::from(v)] += 1;
             }
+            #[allow(clippy::cast_precision_loss)]
+            let total = sm.data.len() as f32;
+            let binary = self.names.len() == 1;
+            return counts
+                .into_iter()
+                .enumerate()
+                .filter(|&(_, n)| n > 0)
+                .filter_map(|(id, n)| match (binary, id) {
+                    // Binary maps store the single class as foreground 1 over background 0.
+                    (true, 1) => Some((0, n)),
+                    (false, _) if self.names.contains_key(&id) => Some((id, n)),
+                    _ => None,
+                })
+                .map(|(id, n)| {
+                    #[allow(clippy::cast_precision_loss)]
+                    entry_for(id, "pixel_ratio", n as f32 / total)
+                })
+                .collect();
+        }
+
+        // Corner points (N, P, 2) plus the per-row conf, class and optional track id.
+        let (corners, conf, cls, ids) = if let Some(ref obb) = self.obb {
+            (obb.xyxyxyxy(), obb.conf(), obb.cls(), obb.id())
+        } else if let Some(ref boxes) = self.boxes {
+            let xyxy = boxes.xyxy();
+            let corners =
+                Array3::from_shape_fn((boxes.len(), 2, 2), |(i, j, k)| xyxy[[i, 2 * j + k]]);
+            (corners, boxes.conf(), boxes.cls(), boxes.id())
+        } else {
+            return Vec::new();
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let (h, w) = if normalize {
+            (self.orig_shape.0 as f32, self.orig_shape.1 as f32)
+        } else {
+            (1.0, 1.0)
+        };
+
+        let mut results = Vec::with_capacity(corners.len_of(Axis(0)));
+        for (i, points) in corners.outer_iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let class_id = cls[i] as usize;
+            let mut entry = entry_for(class_id, "confidence", conf[i]);
+
+            let mut box_coords = HashMap::new();
+            for (j, p) in points.outer_iter().enumerate() {
+                box_coords.insert(format!("x{}", j + 1), SummaryValue::Float(p[0] / w));
+                box_coords.insert(format!("y{}", j + 1), SummaryValue::Float(p[1] / h));
+            }
+            entry.insert("box".to_string(), SummaryValue::Box(box_coords));
+
+            if let Some(ref ids) = ids {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                entry.insert("track_id".to_string(), SummaryValue::Int(ids[i] as usize));
+            }
+
+            results.push(entry);
         }
 
         results
@@ -1096,13 +1142,9 @@ impl Obb {
             let hw = w / 2.0;
             let hh = h / 2.0;
 
-            // Corner offsets relative to center (before rotation)
-            let corners_rel = [
-                (-hw, -hh), // top-left
-                (hw, -hh),  // top-right
-                (hw, hh),   // bottom-right
-                (-hw, hh),  // bottom-left
-            ];
+            // Corner offsets relative to center (before rotation), in the order of
+            // Ultralytics `xywhr2xyxyxyxy`.
+            let corners_rel = [(hw, hh), (hw, -hh), (-hw, -hh), (-hw, hh)];
 
             // Apply rotation and translate to absolute coordinates
             for (j, (dx, dy)) in corners_rel.iter().enumerate() {
@@ -1117,7 +1159,7 @@ impl Obb {
     }
 
     /// Get axis-aligned bounding box containing each OBB.
-    /// Returns array of shape (N, 4) with [x1, y1, x2, y2] for each OBB.
+    /// Returns array of shape (N, 4) with [x1, y1, x2, y2] for each OBB, not clipped to the image.
     ///
     /// # Returns
     ///
@@ -1143,13 +1185,10 @@ impl Obb {
                 max_y = max_y.max(y);
             }
 
-            // Clip to image bounds
-            #[allow(clippy::cast_precision_loss)]
-            let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
-            xyxy[[i, 0]] = min_x.max(0.0).min(w);
-            xyxy[[i, 1]] = min_y.max(0.0).min(h);
-            xyxy[[i, 2]] = max_x.max(0.0).min(w);
-            xyxy[[i, 3]] = max_y.max(0.0).min(h);
+            xyxy[[i, 0]] = min_x;
+            xyxy[[i, 1]] = min_y;
+            xyxy[[i, 2]] = max_x;
+            xyxy[[i, 3]] = max_y;
         }
 
         xyxy
@@ -1537,7 +1576,60 @@ mod tests {
         };
         assert!(matches!(b.get("x2"), Some(SummaryValue::Float(x)) if (x - 0.5).abs() < 1e-6));
 
-        // Probs summary returns a single top-1 entry.
+        // Tracked boxes add `track_id`.
+        r.boxes = Some(Boxes::new(
+            array![[0.0, 0.0, 5.0, 5.0, 3.0, 0.9, 0.0]],
+            (10, 10),
+        ));
+        let tracked = r.summary(false);
+        assert!(matches!(
+            tracked[0].get("track_id"),
+            Some(SummaryValue::Int(3))
+        ));
+
+        // OBB rows carry all four corners as x1..y4.
+        r.boxes = None;
+        r.obb = Some(Obb::new(
+            array![[5.0, 5.0, 4.0, 2.0, 0.0, 0.8, 0.0]],
+            (10, 10),
+        ));
+        let obb = r.summary(false);
+        let Some(SummaryValue::Box(b)) = obb[0].get("box") else {
+            panic!("expected a box entry");
+        };
+        assert_eq!(b.len(), 8);
+        assert!(matches!(b.get("x4"), Some(SummaryValue::Float(x)) if (x - 3.0).abs() < 1e-6));
+        assert!(matches!(b.get("y4"), Some(SummaryValue::Float(y)) if (y - 6.0).abs() < 1e-6));
+        assert!(!obb[0].contains_key("track_id"));
+
+        // Binary semantic maps report foreground 1 as the single class 0.
+        r.obb = None;
+        r.semantic_mask = Some(SemanticMask::new(array![[1, 1, 1, 0]], (1, 4)));
+        let sem = r.summary(false);
+        assert_eq!(sem.len(), 1);
+        assert!(matches!(sem[0].get("class"), Some(SummaryValue::Int(0))));
+        assert!(
+            matches!(sem[0].get("pixel_ratio"), Some(SummaryValue::Float(p)) if (p - 0.75).abs() < 1e-6)
+        );
+        assert!(!sem[0].contains_key("confidence"));
+
+        // Multi-class maps yield per-class ratios in class order, skipping unnamed labels.
+        r.names = Arc::new(HashMap::from([
+            (0, "bg".to_string()),
+            (1, "road".to_string()),
+        ]));
+        r.semantic_mask = Some(SemanticMask::new(
+            array![[1, 1, 0, SemanticMask::IGNORE]],
+            (1, 4),
+        ));
+        let sem = r.summary(false);
+        assert_eq!(sem.len(), 2);
+        assert!(matches!(sem[1].get("name"), Some(SummaryValue::String(s)) if s == "road"));
+        assert!(
+            matches!(sem[1].get("pixel_ratio"), Some(SummaryValue::Float(p)) if (p - 0.5).abs() < 1e-6)
+        );
+
+        // Probs summary returns one entry per top-5 class, best first.
         let mut rp = Results::new(
             Array3::zeros((4, 4, 3)),
             String::new(),
@@ -1547,8 +1639,9 @@ mod tests {
         );
         rp.probs = Some(Probs::new(array![0.1, 0.9]));
         let ps = rp.summary(true);
-        assert_eq!(ps.len(), 1);
+        assert_eq!(ps.len(), 2);
         assert!(matches!(ps[0].get("class"), Some(SummaryValue::Int(1))));
+        assert!(matches!(ps[1].get("name"), Some(SummaryValue::String(s)) if s == "person"));
     }
 
     #[cfg(feature = "annotate")]

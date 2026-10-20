@@ -2494,6 +2494,7 @@ dependencies = [
  "dirs",
  "fast_image_resize",
  "ffmpeg-next",
+ "glob",
  "half",
  "hayro-jpeg2000",
  "image",

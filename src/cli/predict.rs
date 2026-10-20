@@ -366,7 +366,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
         // Main thread: consume frames from channel and run inference. One unreadable file must
         // not abandon the rest of the source, so skip it and carry on like Ultralytics does.
-        let mut skipped = 0usize;
+        let (mut read, mut skipped) = (0usize, 0usize);
         for item in receiver {
             let (img, meta) = match item {
                 Ok(val) => val,
@@ -376,9 +376,18 @@ pub fn run_prediction(args: &PredictArgs) {
                     continue;
                 }
             };
+            read += 1;
             batch_processor.add(img, meta.path.clone(), meta);
         }
         batch_processor.flush();
+        // Like Ultralytics, a source with nothing to predict on is an error, not an empty run.
+        if read == 0 {
+            error!(
+                "No images or videos found in '{}'",
+                source_path.as_deref().unwrap_or_default()
+            );
+            process::exit(1);
+        }
         if skipped > 0 {
             warn!("Skipped {skipped} unreadable input(s) in the source");
         }

@@ -652,14 +652,12 @@ impl YOLOModel {
             _ => None,
         });
 
-        if let (Some(fixed), Some(requested)) = (fixed_imgsz, config.imgsz)
-            && requested != fixed
-        {
-            warn!("imgsz={requested:?} ignored: this model has a fixed input shape of {fixed:?}.");
-        }
         let resolved_imgsz = fixed_imgsz
-            .or(config.imgsz)
+            .or_else(|| config.imgsz.map(|sz| stride_imgsz(sz, metadata.stride)))
             .unwrap_or_else(|| metadata.imgsz_or_default());
+        if let Some(requested) = config.imgsz {
+            warn_imgsz(requested, resolved_imgsz, metadata.stride);
+        }
 
         let quantize = if provider_name == "TensorRTExecutionProvider" {
             Some(if config.quantize == Some(Quantization::Fp16) {
@@ -706,16 +704,12 @@ impl YOLOModel {
         // opened we always finalize the preprocessor; `predict_image`'s runtime gate
         // keeps it unused for Classify / fp16-input models.
         //
-        // The buffer is sized to the resolved (possibly non-square) model input rounded
-        // up to the stride, which is the largest target `rect` can ask for:
-        // `calculate_rect_size` shrinks the short axis but rounds each axis *up* to the
-        // stride, so a non-stride-aligned `imgsz` (e.g. 1000 -> 1024) exceeds the model
-        // input itself.
+        // The buffer is sized to the resolved (possibly non-square) model input, the largest
+        // target `rect` can ask for: a dynamic model's size is already a stride multiple, so
+        // `calculate_rect_size` never rounds an axis past it.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
-            let stride = metadata.stride as usize;
-            let round_up = |v: usize| v.div_ceil(stride) * stride;
-            let (dst_h, dst_w) = (round_up(resolved_imgsz.0), round_up(resolved_imgsz.1));
+            let (dst_h, dst_w) = resolved_imgsz;
             // One slot per image the model's input accepts, so a batched run fills
             // `[N, 3, H, W]` on the device instead of concatenating on the host.
             let slots = Self::fixed_batch(&session)
@@ -789,7 +783,10 @@ impl YOLOModel {
             ))
         })?;
         let mut metadata = ModelMetadata::from_yaml_str(&yaml)?;
-        let (h, w) = config.imgsz.unwrap_or_else(|| metadata.imgsz_or_default());
+        let (h, w) = config.imgsz.map_or_else(
+            || metadata.imgsz_or_default(),
+            |sz| stride_imgsz(sz, metadata.stride),
+        );
         #[allow(clippy::cast_possible_wrap)]
         let static_input = [config.batch.unwrap_or(1) as i64, 3, h as i64, w as i64];
         let ov = crate::openvino::OvSession::load(
@@ -802,10 +799,8 @@ impl YOLOModel {
         let dims = ov.input_dims();
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let imgsz = (dims[2] as usize, dims[3] as usize);
-        if let Some(requested) = config.imgsz
-            && requested != imgsz
-        {
-            warn!("imgsz={requested:?} ignored: this model has a fixed input shape of {imgsz:?}.");
+        if let Some(requested) = config.imgsz {
+            warn_imgsz(requested, imgsz, metadata.stride);
         }
         metadata.imgsz = Some(imgsz);
         // The export fixed the precision, so a requested one that differs cannot apply.
@@ -1156,6 +1151,7 @@ impl YOLOModel {
         paths: &[String],
         speed: &Speed,
         inference_shape: (u32, u32),
+        config: &InferenceConfig,
     ) -> Vec<Vec<Results>> {
         let start_postprocess = Instant::now();
         let batch_results = image_arrays
@@ -1163,7 +1159,7 @@ impl YOLOModel {
             .enumerate()
             .map(|(i, orig_img)| {
                 let (data, shape) = &Self::slice_batch_output(outputs, i)[0];
-                vec![crate::postprocessing::postprocess_semantic_mask(
+                let results = crate::postprocessing::postprocess_semantic_mask(
                     data,
                     &shape[1..],
                     Arc::clone(names),
@@ -1171,6 +1167,9 @@ impl YOLOModel {
                     paths.get(i).cloned().unwrap_or_default(),
                     speed.clone(),
                     inference_shape,
+                );
+                vec![crate::postprocessing::filter_semantic_classes(
+                    results, config,
                 )]
             })
             .collect();
@@ -1222,6 +1221,7 @@ impl YOLOModel {
                 paths,
                 speed,
                 inference_shape,
+                config,
             ));
         }
         let bufs = output_names
@@ -1951,20 +1951,6 @@ impl YOLOModel {
         // Get target size from config or metadata
         let target_size = self.imgsz();
 
-        // Check if target_size is divisible by stride (one-time warning logic per batch call)
-        // We only warn if the configured size itself is not divisible.
-        // If rect adjusts it, that's expected.
-        let stride = self.metadata.stride as usize;
-        if target_size.0 % stride != 0 || target_size.1 % stride != 0 {
-            warn!(
-                "imgsz=[{:?}] must be multiple of max stride {}, updating to [{}, {}]",
-                target_size,
-                stride,
-                (target_size.0 as f32 / stride as f32).ceil() as usize * stride,
-                (target_size.1 as f32 / stride as f32).ceil() as usize * stride
-            );
-        }
-
         // Preprocess all images
         let start_preprocess = Instant::now();
 
@@ -2053,6 +2039,7 @@ impl YOLOModel {
                     paths,
                     &speed,
                     inference_shape,
+                    &self.config,
                 ));
             }
             let bufs = tensors
@@ -2279,6 +2266,30 @@ fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
         && msg.contains("Out of range")
 }
 
+/// Round `(h, w)` up to a multiple of `stride`, at least one stride, as the Ultralytics
+/// Python `check_imgsz` does, so a dynamic model's feature maps line up.
+fn stride_imgsz((h, w): (usize, usize), stride: u32) -> (usize, usize) {
+    let stride = stride as usize;
+    let round_up = |v: usize| v.div_ceil(stride).max(1) * stride;
+    (round_up(h), round_up(w))
+}
+
+/// Warn when a model runs at `used` instead of the `requested` size: rounded up to the stride
+/// (worded like Python's `check_imgsz`), or pinned by a fixed input shape.
+fn warn_imgsz(requested: (usize, usize), used: (usize, usize), stride: u32) {
+    if used == requested {
+        return;
+    }
+    if used == stride_imgsz(requested, stride) {
+        warn!(
+            "imgsz=[{}, {}] must be multiple of max stride {stride}, updating to [{}, {}]",
+            requested.0, requested.1, used.0, used.1
+        );
+    } else {
+        warn!("imgsz={requested:?} ignored: this model has a fixed input shape of {used:?}.");
+    }
+}
+
 /// Convert an ONNX Runtime tensor shape (`i64` dims) to `usize` for indexing.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 fn shape_to_usize(shape: &[i64]) -> Vec<usize> {
@@ -2309,6 +2320,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = YOLOModel::load(dir.path()).err().unwrap().to_string();
         assert!(err.contains("`openvino-native` feature"), "{err}");
+    }
+
+    #[test]
+    fn test_stride_imgsz_rounds_up_to_stride() {
+        assert_eq!(stride_imgsz((640, 640), 32), (640, 640));
+        assert_eq!(stride_imgsz((650, 641), 32), (672, 672));
+        assert_eq!(stride_imgsz((480, 650), 32), (480, 672));
+        assert_eq!(stride_imgsz((0, 1), 32), (32, 32));
     }
 
     #[test]
@@ -2469,7 +2488,8 @@ mod tests {
 
     #[test]
     fn test_semantic_mask_batch_results_builds_per_image() {
-        // Baked-in ArgMax semantic output: one 2x2 uint8 class map for one image.
+        // Baked-in ArgMax semantic output: one 2x2 uint8 class map for one image, with a
+        // `classes` filter that keeps only class 1 so class-0 pixels become IGNORE.
         let names = Arc::new(HashMap::from([
             (0usize, "bg".to_string()),
             (1, "road".to_string()),
@@ -2487,6 +2507,7 @@ mod tests {
             &paths,
             &Speed::new(1.0, 10.0, 0.0),
             (32, 32),
+            &InferenceConfig::new().with_classes(vec![1]),
         );
         assert_eq!(batch.len(), 1);
         let results = &batch[0][0];
@@ -2494,7 +2515,8 @@ mod tests {
             .semantic_mask
             .as_ref()
             .expect("semantic mask present");
-        assert_eq!(sm.data.shape(), [2, 2]);
+        let ignore = crate::results::SemanticMask::IGNORE;
+        assert_eq!(sm.data.as_slice().unwrap(), [ignore, 1, 1, ignore]);
         assert!(results.speed.postprocess.is_some());
     }
 }

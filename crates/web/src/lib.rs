@@ -19,8 +19,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::sync::Arc;
 
+use image::ImageReader;
 use js_sys::{Float32Array, Uint32Array};
 use ndarray::Array3;
 use ort::AsPointer;
@@ -32,11 +34,14 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
-use ultralytics_inference::postprocessing::{postprocess_semantic_mask, postprocess_with_head};
+use ultralytics_inference::postprocessing::{
+    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head,
+};
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
 };
 use ultralytics_inference::results::Speed;
+use ultralytics_inference::utils::decode_image;
 use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
 use ultralytics_inference::visualizer::skeleton::{
     KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
@@ -377,7 +382,8 @@ impl YoloModel {
         colormap: String,
         depth_viz: String,
     ) -> Result<JsValue, JsError> {
-        let dynimg = image::load_from_memory(&image).map_err(err_ctx("failed to decode image"))?;
+        let dynimg = decode_image(ImageReader::new(Cursor::new(image)))
+            .map_err(err_ctx("failed to decode image"))?;
         self.run(
             dynimg,
             conf,
@@ -584,7 +590,7 @@ impl YoloModel {
             } else {
                 &shape
             };
-            postprocess_semantic_mask(
+            let results = postprocess_semantic_mask(
                 data,
                 img_shape,
                 names,
@@ -592,7 +598,8 @@ impl YoloModel {
                 String::new(),
                 speed(),
                 inference_shape,
-            )
+            );
+            filter_semantic_classes(results, &config)
         } else {
             // Borrow each output's data directly (no copy) and feed it to the shared
             // f32 postprocessor while `outputs` is still alive.

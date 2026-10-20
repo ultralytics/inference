@@ -90,22 +90,7 @@ pub fn postprocess_with_head(
         }
         Task::Semantic => {
             let (output, shape) = &outputs[0];
-            let n_classes = results.names.len();
-            let mut results = postprocess_semantic(output, shape, results);
-            // Adapt the `classes` filter to semantic segmentation: pixels whose
-            // class is not kept become IGNORE. Only meaningful for multi-class
-            // models, matching Ultralytics.
-            if n_classes > 1
-                && config.classes.is_some()
-                && let Some(sm) = results.semantic_mask.as_mut()
-            {
-                for px in &mut sm.data {
-                    if !config.keep_class(usize::from(*px)) {
-                        *px = SemanticMask::IGNORE;
-                    }
-                }
-            }
-            results
+            filter_semantic_classes(postprocess_semantic(output, shape, results), config)
         }
         Task::Depth => {
             let (output, shape) = &outputs[0];
@@ -1500,6 +1485,24 @@ fn finish_semantic_mask(mut results: Results, buf: Vec<u16>, oh: usize, ow: usiz
     results
 }
 
+/// Adapt the `classes` filter to semantic segmentation: pixels whose class `config` does not
+/// keep become [`SemanticMask::IGNORE`]. Only meaningful for multi-class models, matching
+/// Ultralytics.
+#[must_use]
+pub fn filter_semantic_classes(mut results: Results, config: &InferenceConfig) -> Results {
+    if results.names.len() > 1
+        && config.classes.is_some()
+        && let Some(sm) = results.semantic_mask.as_mut()
+    {
+        for px in &mut sm.data {
+            if !config.keep_class(usize::from(*px)) {
+                *px = SemanticMask::IGNORE;
+            }
+        }
+    }
+    results
+}
+
 /// Compute the centered-letterbox crop bounds in model-output (lh, lw) space that
 /// cover the original image (oh, ow).
 ///
@@ -1618,7 +1621,8 @@ pub fn postprocess_semantic_mask(
         return finish_semantic_mask(results, buf, oh, ow);
     }
 
-    // Slow path: crop centered letterbox padding in semantic-mask space, then NN upsample.
+    // Slow path: crop centered letterbox padding in semantic-mask space, then NN upsample,
+    // sampling source index `floor(d * scale)` like torch's `F.interpolate(mode="nearest")`.
     let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
         return results;
     };
@@ -1628,13 +1632,13 @@ pub fn postprocess_semantic_mask(
     let crop_h_minus_1 = crop_h.saturating_sub(1);
     let crop_w_minus_1 = crop_w.saturating_sub(1);
     let x_lut: Vec<usize> = (0..ow)
-        .map(|dx| ((dx as f32 + 0.5) * scale_x) as usize)
+        .map(|dx| (dx as f32 * scale_x) as usize)
         .map(|sx| sx.min(crop_w_minus_1) + left)
         .collect();
 
     let mut buf = vec![0u16; oh * ow];
     buf.par_chunks_mut(ow).enumerate().for_each(|(dy, row)| {
-        let sy = (((dy as f32 + 0.5) * scale_y) as usize).min(crop_h_minus_1) + top;
+        let sy = ((dy as f32 * scale_y) as usize).min(crop_h_minus_1) + top;
         let src_row_base = sy * lw;
         for (dx, cell) in row.iter_mut().enumerate() {
             *cell = u16::from(output[src_row_base + x_lut[dx]]);
