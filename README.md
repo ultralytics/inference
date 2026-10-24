@@ -612,7 +612,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 ```toml
 [dependencies]
 ultralytics-inference = { version = "0.0.54", features = ["coreml", "xnnpack"] }
-ort = { version = "=2.0.0-rc.14", features = ["lax-feature-matching"] }
+ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 
 Providers missing from the chosen build are then absent at runtime: the default device falls back to CPU, and a `--device` that needs one stops with an error. On `aarch64-unknown-linux-gnu` a CUDA, TensorRT and NVRTX build is published for Jetson, Grace Hopper and DGX Spark; other GPU features there still hit this, see [`docs/DGX.md`](docs/DGX.md).

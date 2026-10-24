@@ -428,7 +428,7 @@ impl YoloModel {
 
 /// Append the WebGPU execution provider to `builder`, failing if it cannot be registered.
 ///
-/// `ort-web` 0.4.0 only recognizes the short provider name `WebGPU`, while `ort` 2.0.0-rc.14
+/// `ort-web` 0.5.0 only recognizes the short provider name `WebGPU`, while `ort` 2.0.0-rc.15
 /// sends `WebGpuExecutionProvider`, so `ort::ep::WebGPU` is rejected and every load would fall
 /// back to the CPU. Appending by the short name works until `ort-web` accepts both.
 #[allow(unsafe_code)]
@@ -561,7 +561,7 @@ impl YoloModel {
         let run_options = RunOptions::new().map_err(map_ort)?;
         let mut outputs = self
             .session
-            .run_async(ort::inputs![input.view()], &run_options)
+            .run_async(ort::inputs![input], &run_options)
             .await
             .map_err(err_ctx("inference failed"))?;
         // Outputs live in the ONNX Runtime wasm context; copy them back to Rust.
