@@ -57,7 +57,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
           key: xcode-${{ env.XCODE_VER }}
@@ -155,7 +155,7 @@ jobs:
           toolchain: ${{ env.NIGHTLY }}
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
           key: cuda
@@ -221,7 +221,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
           # Key on ffmpeg version so each container gets its own cache
@@ -264,7 +264,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
           key: ffmpeg-${{ env.FFMPEG_VERSION }}-xcode-${{ env.XCODE_VER }}
@@ -320,7 +320,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
 
@@ -346,7 +346,7 @@ jobs:
           components: clippy
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
           key: wasm
@@ -399,7 +399,7 @@ jobs:
 
       # Nightly toolchain version in rustc -V already gives this job a unique cache key
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
 
