@@ -1738,29 +1738,31 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], results: Results) -> Re
         return results;
     }
 
-    // Model output is already at orig_img resolution (no resize, no padding).
-    // Avoids the CHW->HWC transpose and bilinear interpolation entirely: just argmax over
-    // the class channel for each pixel. Hits when the export bakes a full-res upsample
-    // into the ONNX graph and the input was the model's native rect shape.
-    if lh == oh && lw == ow {
-        let plane = lh * lw;
+    let plane = lh * lw;
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
+        return results;
+    };
+
+    // If cropping removes the padding without resizing, argmax the source pixels directly.
+    if crop_h == oh && crop_w == ow {
         let mut buf = vec![0u16; oh * ow];
         // Load one source row per class at a time so each row fits in cache.
         // Scratch buffer shared across all rows a given thread processes; one allocation per thread.
         buf.par_chunks_mut(ow).enumerate().for_each_with(
-            vec![0.0f32; lw],
+            vec![0.0f32; ow],
             |best_vals, (dy, row)| {
+                let offset = (top + dy) * lw + left;
                 if nc == 1 {
-                    let src = &output[dy * lw..(dy + 1) * lw];
+                    let src = &output[offset..offset + ow];
                     for (cell, &v) in row.iter_mut().zip(src.iter()) {
                         *cell = u16::from(v > 0.0);
                     }
                 } else {
                     // Seed best_vals with class 0; row is already zeroed (best_cls = 0).
-                    let src0 = &output[dy * lw..(dy + 1) * lw];
+                    let src0 = &output[offset..offset + ow];
                     best_vals.copy_from_slice(src0);
                     for c in 1..nc {
-                        let src_c = &output[c * plane + dy * lw..c * plane + (dy + 1) * lw];
+                        let src_c = &output[c * plane + offset..c * plane + offset + ow];
                         for ((cell, best), &v) in
                             row.iter_mut().zip(best_vals.iter_mut()).zip(src_c.iter())
                         {
@@ -1777,10 +1779,6 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], results: Results) -> Re
     }
 
     // Crop centered letterbox padding, then bilinear-upsample crop to (oh, ow).
-    let plane = lh * lw;
-    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
-        return results;
-    };
     let x_lut = bilinear_x_lut(ow, lw, left, crop_w);
     let scale_y = crop_h as f32 / oh as f32;
     let lh_minus_1 = lh.saturating_sub(1);
@@ -2350,6 +2348,28 @@ mod tests {
             sm.data.iter().copied().collect::<Vec<u16>>(),
             [1, 0, 1, 0, 0]
         );
+    }
+
+    #[test]
+    fn test_postprocess_semantic_fast_path_crops_padding() {
+        // Both portrait and landscape letterboxes: padded pixels must never win argmax.
+        for (oh, ow, top, left) in [(2, 4, 1, 0), (4, 2, 0, 1)] {
+            let mut output = vec![0.0f32; 3 * 16];
+            output[2 * 16..].fill(10.0);
+            for y in 0..oh {
+                for x in 0..ow {
+                    let i = (top + y) * 4 + left + x;
+                    output[2 * 16 + i] = -1.0;
+                    output[(x % 2) * 16 + i] = 1.0;
+                }
+            }
+            let result =
+                postprocess_semantic(&output, &[1, 3, 4, 4], results_for(3, (oh, ow), (4, 4)));
+            let mask = result.semantic_mask.unwrap();
+            for ((_, x), &class) in mask.data.indexed_iter() {
+                assert_eq!(class, (x % 2) as u16);
+            }
+        }
     }
 
     #[test]

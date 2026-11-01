@@ -297,11 +297,5 @@ fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8
     if depth.data.dim() != (h, w) {
         return Vec::new();
     }
-    let mut buf = vec![0u8; w * h * 4];
-    // `buf` is exactly `w * h` RGBA pixels, so the trailing partial chunk is always empty.
-    let (pixels, _) = buf.as_chunks_mut::<4>();
-    for (px, rgb) in pixels.iter_mut().zip(depth.colorize(colormap, viz)) {
-        *px = [rgb[0], rgb[1], rgb[2], 255];
-    }
-    buf
+    depth.colorize_rgba(colormap, viz)
 }

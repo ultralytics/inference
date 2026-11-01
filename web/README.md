@@ -194,13 +194,9 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
   WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
   actually ran.
 - **RT-DETR**: supported for detection. An RT-DETR `.onnx` runs on WebGPU like any other
-  model. An RT-DETR `.tflite` is routed to CPU/wasm under the default `device: "auto"`: its
-  deformable-attention decoder reshapes to rank 5 and indexes with `int64`, which the LiteRT
-  WebGPU delegate rejected on every driver tested (Linux/Vulkan and Apple Metal-3). An
-  explicit `device: "webgpu"` is still attempted rather than overridden, so the delegate can
-  be re-tested as it gains ops; on current drivers that attempt fails and LiteRT falls back
-  to CPU/wasm, and `model.device` reports what ran. Export one yourself, since no RT-DETR
-  ONNX or LiteRT model is published.
+  model. LiteRT models that cannot be fully delegated to WebGPU run on CPU/wasm;
+  `model.device` reports the selected device. Export an RT-DETR model yourself, since
+  no ONNX or LiteRT model is published.
 - **Model format**: export your model to ONNX with Ultralytics `>=8.4.142` so the metadata
   (task, class names, `imgsz`) is embedded:
 
@@ -302,18 +298,13 @@ Notes:
   embedded metadata) ships in
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) and
   later. Earlier versions emit the legacy TFLite format and won't load here.
-- **Keep the one-to-many head for WebGPU** (`nms=None`): the NMS-free YOLO26 head, exported
-  with `nms=False`, has `int64` / `gather_nd` ops the LiteRT **WebGPU** delegate cannot
-  run, so those exports fall back to CPU/wasm. Use Ultralytics `>=8.4.142` for this recipe; it exports
-  the one-to-many head by default, so NMS runs in this package's Rust and inference stays
-  on WebGPU:
+- **NMS-free models**: recent YOLO26 LiteRT exports use GPU-compatible operators. Older
+  exports contain operations that may prevent full WebGPU delegation; those run on CPU/wasm.
+  Alternatively, export the one-to-many head to run NMS in Rust:
 
   ```bash
   yolo export model=yolo26n.pt format=litert nms=None
   ```
-
-  If you load an NMS-free `.tflite`, the backend auto-switches it to wasm
-  (slower) and logs a warning rather than returning empty results.
 
 - **Tasks**: detect, segment, semantic, depth, classify, pose, and obb are all supported.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
@@ -336,8 +327,7 @@ ONNX Runtime Web (`.onnx`):
 
 Apple M4, Chrome 153, `@ultralytics/yolo` 0.0.48 (ONNX Runtime Web 1.27, LiteRT.js 2.5.3). FP32 640×640 models
 exported with Ultralytics 8.4.163 (`nms=None`), cycling through the 128 COCO128 images after warmup (128 timed runs on
-WebGPU, 50 on CPU). NMS-free exports (`nms=False`) run at the same speed on ONNX Runtime Web, but LiteRT.js falls back
-to CPU/wasm for them, so keep `nms=None` for WebGPU.
+WebGPU, 50 on CPU). Recent NMS-free LiteRT exports (`nms=False`) can also run on WebGPU.
 
 ## 🔨 Building From Source
 

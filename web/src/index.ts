@@ -271,43 +271,35 @@ export type ImageInput =
   | HTMLImageElement
   | HTMLCanvasElement
   | HTMLVideoElement
+  | OffscreenCanvas
   | ImageBitmap;
 
-let initialized = false;
-
-/**
- * `ort-web` 0.4.0 reads tensor dims as 64-bit integers, but ONNX Runtime Web returns plain
- * numbers, which the wasm glue then rejects with "Cannot convert 1 to a BigInt". Accept number
- * arrays in `BigUint64Array.set`, which only ever threw for them before.
- */
-function allowNumberDims(): void {
-  const set = BigUint64Array.prototype.set;
-  BigUint64Array.prototype.set = function (src: ArrayLike<bigint>, offset?: number): void {
-    set.call(this, Array.isArray(src) ? src.map((v) => BigInt(v)) : src, offset);
-  };
-}
+let initialized: Promise<void> | undefined;
 
 /** Initialize the wasm module exactly once. */
-async function ensureInit(wasmUrl?: string | URL): Promise<void> {
-  if (initialized) return;
-  allowNumberDims();
-  await init(wasmUrl ? { module_or_path: wasmUrl } : undefined);
-  start();
-  initialized = true;
+function ensureInit(wasmUrl?: string | URL): Promise<void> {
+  initialized ??= init(wasmUrl ? { module_or_path: wasmUrl } : undefined)
+    .then(() => start())
+    .catch((error) => {
+      initialized = undefined;
+      throw error;
+    });
+  return initialized;
 }
 
 /** Encoded-image inputs (decoded by the wasm side via the `image` crate). */
 type EncodedInput = string | URL | Blob | ArrayBuffer | Uint8Array;
 /** Drawable inputs that can be read as raw pixels without re-encoding. */
-type DrawableInput = ImageData | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | ImageBitmap;
+type DrawableInput = ImageData | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | OffscreenCanvas | ImageBitmap;
 
 function isDrawable(input: ImageInput): input is DrawableInput {
   return (
-    input instanceof ImageData ||
-    input instanceof HTMLImageElement ||
-    input instanceof HTMLCanvasElement ||
-    input instanceof HTMLVideoElement ||
-    input instanceof ImageBitmap
+    (typeof ImageData !== "undefined" && input instanceof ImageData) ||
+    (typeof HTMLImageElement !== "undefined" && input instanceof HTMLImageElement) ||
+    (typeof HTMLCanvasElement !== "undefined" && input instanceof HTMLCanvasElement) ||
+    (typeof HTMLVideoElement !== "undefined" && input instanceof HTMLVideoElement) ||
+    (typeof OffscreenCanvas !== "undefined" && input instanceof OffscreenCanvas) ||
+    (typeof ImageBitmap !== "undefined" && input instanceof ImageBitmap)
   );
 }
 
@@ -329,14 +321,18 @@ async function toBytes(input: EncodedInput, what: string): Promise<Uint8Array> {
 
 /** Read a drawable source as raw RGBA pixels (the fast path, no re-encoding). */
 function toImageData(input: DrawableInput): { data: Uint8Array; width: number; height: number } {
-  if (input instanceof ImageData) {
-    return { data: new Uint8Array(input.data.buffer), width: input.width, height: input.height };
+  if (typeof ImageData !== "undefined" && input instanceof ImageData) {
+    return {
+      data: new Uint8Array(input.data.buffer, input.data.byteOffset, input.data.byteLength),
+      width: input.width,
+      height: input.height,
+    };
   }
   let width: number;
   let height: number;
-  if (input instanceof HTMLImageElement) {
+  if (typeof HTMLImageElement !== "undefined" && input instanceof HTMLImageElement) {
     [width, height] = [input.naturalWidth, input.naturalHeight];
-  } else if (input instanceof HTMLVideoElement) {
+  } else if (typeof HTMLVideoElement !== "undefined" && input instanceof HTMLVideoElement) {
     [width, height] = [input.videoWidth, input.videoHeight];
   } else {
     [width, height] = [input.width, input.height];
@@ -345,7 +341,7 @@ function toImageData(input: DrawableInput): { data: Uint8Array; width: number; h
   const ctx = get2d(canvas, { willReadFrequently: true });
   ctx.drawImage(input as CanvasImageSource, 0, 0, width, height);
   const img = ctx.getImageData(0, 0, width, height);
-  return { data: new Uint8Array(img.data.buffer), width, height };
+  return { data: new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength), width, height };
 }
 
 function makeCanvas(width: number, height: number): HTMLCanvasElement | OffscreenCanvas {
@@ -380,6 +376,8 @@ interface LiteRtTensor {
   delete?(): void;
 }
 interface LiteRtCompiledModel {
+  readonly options: { accelerator: "webgpu" | "wasm" };
+  readonly isFullyAccelerated: boolean;
   run(input: LiteRtTensor | LiteRtTensor[]): Promise<LiteRtTensor[]>;
   // The compiled model knows its real input shape; the metadata only claims one.
   getInputDetails?(): readonly { readonly shape: Int32Array | number[] }[];
@@ -478,40 +476,51 @@ class LiteRtBackend {
   static async load(tflite: Uint8Array, wasmUrl: string, accelerator: "webgpu" | "wasm"): Promise<LiteRtBackend> {
     const litert = await importLiteRt();
     await ensureLiteRtRuntime(litert, wasmUrl);
+    let model: LiteRtCompiledModel;
     try {
-      const model = await litert.loadAndCompile(tflite, { accelerator });
-      return new LiteRtBackend(litert, model, accelerator);
+      model = await litert.loadAndCompile(tflite, { accelerator });
     } catch (e) {
       if (accelerator === "wasm") throw e;
-      const model = await litert.loadAndCompile(tflite, { accelerator: "wasm" });
-      return new LiteRtBackend(litert, model, "wasm");
+      model = await litert.loadAndCompile(tflite, { accelerator: "wasm" });
     }
+    // This runtime is loaded without JSPI. A partially delegated model needs it to
+    // switch between GPU and CPU, even when the browser itself supports JSPI.
+    if (model.options.accelerator === "webgpu" && !model.isFullyAccelerated) {
+      model.delete?.();
+      model = await litert.loadAndCompile(tflite, { accelerator: "wasm" });
+    }
+    return new LiteRtBackend(litert, model, model.options.accelerator);
   }
 
   /** Upload the input tensor, run, and read every output back to the CPU. */
-  async run(
+  async run<T>(
     input: Float32Array,
     shape: number[],
-  ): Promise<{ outputs: Float32Array[]; shapes: number[][]; inferenceMs: number }> {
+    postprocess: (outputs: Float32Array[], shapes: number[][], inferenceMs: number) => T,
+  ): Promise<T> {
     const t0 = performance.now();
     const cpuIn = new this.litert.Tensor(input, shape);
     let gpuIn: LiteRtTensor | undefined;
     try {
       gpuIn = this.device === "wasm" ? cpuIn : await cpuIn.moveTo("webgpu");
       const tensors = await this.model.run(gpuIn);
-      const outputs: Float32Array[] = [];
-      const shapes: number[][] = [];
-      for (const t of tensors) {
-        const host = await t.moveTo("wasm");
-        // Copy out before deleting; toTypedArray() may view the freed buffer.
-        outputs.push(new Float32Array(host.toTypedArray() as Float32Array));
-        shapes.push(Array.from(host.type.layout.dimensions));
-        host.delete?.();
-        // moveTo("wasm") returns the same tensor when it is already on wasm; only
-        // delete the original separately when it is a distinct GPU tensor.
-        if (t !== host) t.delete?.();
+      const hosts: LiteRtTensor[] = [];
+      try {
+        const outputs: Float32Array[] = [];
+        const shapes: number[][] = [];
+        for (const tensor of tensors) {
+          const host = await tensor.moveTo("wasm");
+          hosts.push(host);
+          const data = host.toTypedArray();
+          outputs.push(data instanceof Float32Array ? data : new Float32Array(data));
+          shapes.push(Array.from(host.type.layout.dimensions));
+        }
+        return postprocess(outputs, shapes, performance.now() - t0);
+      } finally {
+        // Keep host tensors alive through postprocessing in case their arrays are views.
+        for (const host of hosts) if (!tensors.includes(host)) host.delete?.();
+        for (const tensor of tensors) tensor.delete?.();
       }
-      return { outputs, shapes, inferenceMs: performance.now() - t0 };
     } finally {
       // Free the input tensors on both success and failure (per-frame loops leak fast).
       if (gpuIn && gpuIn !== cpuIn) gpuIn.delete?.();
@@ -568,11 +577,6 @@ class OrtEngine implements Engine {
 
 /** LiteRT.js engine: Rust preprocess → LiteRT inference → Rust postprocess. */
 class LiteRtEngine implements Engine {
-  // `YoloPipeline` keeps exactly one pending frame in wasm state between
-  // `preprocess_rgba` and `postprocess`, so predictions must not interleave.
-  // Serialize them: a new call waits for the in-flight one to finish.
-  private queue: Promise<unknown> = Promise.resolve();
-
   constructor(
     private readonly pipeline: YoloPipeline,
     private readonly backend: LiteRtBackend,
@@ -590,45 +594,34 @@ class LiteRtEngine implements Engine {
   }
 
   predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
-    return this.serialize(() => this.runDrawable(data, width, height, p));
+    return this.runDrawable(data, width, height, p);
   }
 
   /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
-  predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown> {
-    return this.serialize(async () => {
-      const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
-      try {
-        const { data, width, height } = toImageData(bitmap);
-        return await this.runDrawable(data, width, height, p);
-      } finally {
-        bitmap.close();
-      }
-    });
+  async predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown> {
+    const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
+    try {
+      const { data, width, height } = toImageData(bitmap);
+      return await this.runDrawable(data, width, height, p);
+    } finally {
+      bitmap.close();
+    }
   }
 
   private async runDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
-    const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
-    return this.pipeline.postprocess(
-      outputs,
-      shapes.map((s) => new Uint32Array(s)),
-      inferenceMs,
-      p.conf,
-      p.iou,
-      p.classes,
-      p.colormap,
-      p.depthViz,
+    return this.backend.run(input, Array.from(this.pipeline.inputShape), (outputs, shapes, inferenceMs) =>
+      this.pipeline.postprocess(
+        outputs,
+        shapes.map((s) => new Uint32Array(s)),
+        inferenceMs,
+        p.conf,
+        p.iou,
+        p.classes,
+        p.colormap,
+        p.depthViz,
+      ),
     );
-  }
-
-  /** Chain `fn` after any in-flight prediction so wasm frame state is never shared. */
-  private serialize<T>(fn: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(fn, fn);
-    this.queue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
   }
 
   free(): void {
@@ -642,6 +635,9 @@ class LiteRtEngine implements Engine {
  * of a constructor.
  */
 export class YOLO {
+  // The wasm models keep mutable per-frame state; run one prediction per model at a time.
+  private queue: Promise<unknown> = Promise.resolve();
+
   private constructor(private readonly engine: Engine) {}
 
   /**
@@ -673,29 +669,7 @@ export class YOLO {
     const wasmUrl = options?.litertWasmUrl ? options.litertWasmUrl.toString() : DEFAULT_LITERT_WASM;
     // Honor `device` including `"auto"`, which feature-detects WebGPU (so a
     // browser without it goes straight to wasm instead of a failed compile).
-    let accelerator: "webgpu" | "wasm" = (await resolveDevice(options?.device)) === "webgpu" ? "webgpu" : "wasm";
-    // NMS-free exports (YOLO26, `nms=False`) do top-k selection with int64 + gather_nd ops the
-    // LiteRT WebGPU delegate cannot run: it fails to invoke and returns zeros.
-    // Force CPU/wasm so the model works. For WebGPU speed, re-export the model
-    // with Ultralytics >=8.4.142 and `nms=None` for the one-to-many head (NMS in Rust).
-    if (accelerator === "webgpu" && pipeline.end2end) {
-      accelerator = "wasm";
-      console.warn(
-        "LiteRT: this is an NMS-free model; its WebGPU delegate can't run the int64 ops, so it runs on CPU/wasm. Re-export with Ultralytics >=8.4.142 and `nms=None` for WebGPU.",
-      );
-    }
-    // RT-DETR's deformable-attention decoder reshapes to rank 5 and indexes with int64,
-    // which the LiteRT WebGPU delegate rejects: Vulkan logs a RESHAPE error per offending
-    // node and falls back per-op, Metal-3 fails the compile outright. `"auto"` therefore
-    // goes straight to wasm and skips the noise and the wasted GPU compile. An explicit
-    // `device: "webgpu"` is still honored, so this can be re-tested when the delegate
-    // grows the missing ops, without patching the library.
-    if (accelerator === "webgpu" && pipeline.rtdetr && options?.device !== "webgpu") {
-      accelerator = "wasm";
-      console.warn(
-        'LiteRT: RT-DETR\'s decoder uses rank-5 reshapes and int64 indices that the WebGPU delegate could not run on the drivers tested, so it runs on CPU/wasm. Pass device: "webgpu" to try it anyway.',
-      );
-    }
+    const accelerator: "webgpu" | "wasm" = (await resolveDevice(options?.device)) === "webgpu" ? "webgpu" : "wasm";
     const backend = await LiteRtBackend.load(tflite, wasmUrl, accelerator);
     // The compiled model outranks the metadata: `pipeline.inputShape` is what sizes the
     // input tensor below, so a stale `imgsz` would build one the model rejects.
@@ -725,7 +699,7 @@ export class YOLO {
    * Run inference on an image.
    *
    * Drawable sources (`ImageData`, `HTMLImageElement`, `HTMLCanvasElement`,
-   * `HTMLVideoElement`, `ImageBitmap`) take a fast path that reads raw pixels
+   * `HTMLVideoElement`, `OffscreenCanvas`, `ImageBitmap`) take a fast path that reads raw pixels
    * with no re-encoding, ideal for webcam/video. URLs, `Blob`s, and raw bytes
    * are decoded (in wasm for `ort`, via a canvas for `litert`).
    *
@@ -742,12 +716,20 @@ export class YOLO {
       colormap: options?.colormap ?? "",
       depthViz: options?.depthViz ?? "",
     };
+    let predict: () => Promise<unknown>;
     if (isDrawable(image)) {
       const { data, width, height } = toImageData(image);
-      return decodeResults(await this.engine.predictDrawable(data, width, height, p));
+      predict = () => this.engine.predictDrawable(data, width, height, p);
+    } else {
+      const bytes = await toBytes(image, "image");
+      predict = () => this.engine.predictEncoded(bytes, p);
     }
-    const bytes = await toBytes(image, "image");
-    return decodeResults(await this.engine.predictEncoded(bytes, p));
+    const result = this.queue.then(async () => decodeResults(await predict()));
+    this.queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   /** Release the underlying wasm model/engine. Call when you are done with it. */
