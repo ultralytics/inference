@@ -694,7 +694,7 @@ impl YOLOModel {
         let mut metadata = metadata;
         metadata.imgsz = Some(resolved_imgsz);
 
-        // Finalize the GPU preprocessor now that we know the model's batch limit.
+        // Finalize the GPU preprocessor after the execution provider is initialized.
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
         // has been wired into the EPs above - dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
@@ -702,17 +702,7 @@ impl YOLOModel {
         // keeps it unused for Classify / fp16-input models.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
-            // One slot per image the model's input accepts, so a batched run fills
-            // `[N, 3, H, W]` on the device instead of concatenating on the host.
-            let slots = Self::fixed_batch(&session)
-                .or(config.batch)
-                .unwrap_or(1)
-                .max(1);
-            match crate::cuda_inference::CudaPreprocessor::finalize(
-                handle,
-                slots,
-                metadata.scale_fill(),
-            ) {
+            match crate::cuda_inference::CudaPreprocessor::finalize(handle, metadata.scale_fill()) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     return Err(InferenceError::ModelLoadError(format!(
@@ -1725,8 +1715,7 @@ impl YOLOModel {
 
         // One letterbox target for the whole batch, chosen the way the CPU path chooses it so
         // both feed the model identical pixels: `rect` applies only when every image shares a
-        // shape, since a mixed batch cannot share one padded target. Computed from the model
-        // input, not the (stride-rounded) device buffer.
+        // shape, since a mixed batch cannot share one padded target.
         let imgsz = self.imgsz();
         let (w, h) = images[0].dimensions();
         let target = if self.rect_enabled() && images.iter().all(|i| i.dimensions() == (w, h)) {
@@ -1956,13 +1945,9 @@ impl YOLOModel {
         // the tasks in `cuda_pre_task` with f32 input (the kernel writes f32, not f16). The
         // CLI takes it too, because `BatchProcessor` always calls `predict_batch`, and so
         // does every image of a CUDA graph model, which is pinned to batch 1 and chunked
-        // above. `predict_batch` is public and its length is not tied to `config.batch`, so
-        // a batch above that limit uses the CPU path. Semantic models take it one image at a time.
+        // above. Semantic models take it one image at a time.
         #[cfg(feature = "cuda-preprocess")]
-        if self
-            .cuda_preprocessor
-            .as_ref()
-            .is_some_and(|p| images.len() <= p.slots())
+        if self.cuda_preprocessor.is_some()
             && !self.fp16_input
             && Self::cuda_pre_task(self.metadata.task)
             && (images.len() == 1 || self.metadata.task != Task::Semantic)

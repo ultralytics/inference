@@ -160,7 +160,7 @@ impl CudaStreamHandle {
 /// Built in two phases at model load time: [`CudaStreamHandle::open`] runs
 /// *before* the ORT session is constructed (so the stream can be plumbed
 /// into the TRT/CUDA EPs), then [`Self::finalize`] runs *after* the session
-/// commit (so the model batch limit is known).
+/// commit (so the execution provider is initialized).
 /// Per-frame work happens in [`Self::preprocess`].
 pub(crate) struct CudaPreprocessor {
     /// Kept alive so the stream below outlives every session bound to it.
@@ -181,8 +181,6 @@ pub(crate) struct CudaPreprocessor {
 
     /// Fill the input by stretching each axis instead of letterboxing, for RT-DETR.
     stretch: bool,
-    /// Maximum batch supported by the model's GPU path.
-    batch: usize,
     /// CUDA device the context, stream and buffers live on.
     device_id: usize,
 }
@@ -190,7 +188,7 @@ pub(crate) struct CudaPreprocessor {
 impl CudaPreprocessor {
     /// Phase-2 init: NVRTC-compile the preprocess kernel and reuse the
     /// context+stream from [`CudaStreamHandle::open`].
-    pub(crate) fn finalize(handle: CudaStreamHandle, batch: usize, stretch: bool) -> Result<Self> {
+    pub(crate) fn finalize(handle: CudaStreamHandle, stretch: bool) -> Result<Self> {
         let CudaStreamHandle {
             ctx,
             stream,
@@ -231,7 +229,6 @@ impl CudaPreprocessor {
             frame_host,
             uploaded,
             stretch,
-            batch,
             device_id,
         })
     }
@@ -246,11 +243,6 @@ impl CudaPreprocessor {
     /// Whether uploads go through the pinned staging buffer, which only a discrete GPU uses.
     pub(crate) const fn stages_upload(&self) -> bool {
         self.frame_host.is_some()
-    }
-
-    /// Number of images supported by the model's device input.
-    pub(crate) const fn slots(&self) -> usize {
-        self.batch
     }
 
     /// Initialize the graph's dummy input on the shared inference stream.
@@ -320,11 +312,6 @@ impl CudaPreprocessor {
     ) -> Result<PreGeom> {
         let (src_h, src_w) = src;
         let (dst_h, dst_w) = dst;
-        debug_assert!(
-            slot < self.batch,
-            "slot {slot} exceeds the model's batch limit {}",
-            self.batch
-        );
         let needed = (src_h as usize) * (src_w as usize) * 3;
         if frame_hwc.len() != needed {
             return Err(InferenceError::InferenceError(format!(
@@ -456,7 +443,7 @@ mod tests {
         stretch: bool,
     ) -> (CudaPreprocessor, CudaSlice<f32>, u64) {
         let handle = CudaStreamHandle::open(0).expect("open CUDA device 0");
-        let pre = CudaPreprocessor::finalize(handle, 1, stretch).expect("finalize preprocessor");
+        let pre = CudaPreprocessor::finalize(handle, stretch).expect("finalize preprocessor");
         let input = pre.stream.alloc_zeros::<f32>(3 * dst_h * dst_w).unwrap();
         let ptr = {
             let (ptr, _guard) = input.device_ptr(&pre.stream);
@@ -689,7 +676,18 @@ mod tests {
         // padded axis (`round(271 * scale) != 271 * scale`) while 270x480 divides exactly.
         // Only the rounding case distinguishes the CPU's `src / resized` ratio from a
         // uniform `1 / letterbox-scale`, so it must stay in the list.
-        for (src_h, src_w) in [(271usize, 481usize), (270, 480), (481, 271)] {
+        let sources = [(271usize, 481usize), (270, 480), (481, 271)];
+        let dst = (192usize, 320usize);
+        let n = 3 * dst.0 * dst.1;
+        let handle = CudaStreamHandle::open(0).expect("open CUDA device 0");
+        let mut pre = CudaPreprocessor::finalize(handle, false).expect("finalize preprocessor");
+        let input = pre.stream.alloc_zeros::<f32>(sources.len() * n).unwrap();
+        let ptr = {
+            let (ptr, _guard) = input.device_ptr(&pre.stream);
+            ptr
+        };
+        let mut expected = Vec::with_capacity(sources.len() * n);
+        for (slot, (src_h, src_w)) in sources.into_iter().enumerate() {
             let mut frame = Vec::with_capacity(src_h * src_w * 3);
             for y in 0..src_h {
                 for x in 0..src_w {
@@ -701,28 +699,27 @@ mod tests {
                 }
             }
 
-            // A rect target, so this also covers the non-square letterbox `rect` produces.
-            let dst = (192usize, 320usize);
-            let (mut pre, input, ptr) = preprocessor(dst.0, dst.1);
-            unsafe { pre.preprocess(&frame, (src_h as u32, src_w as u32), false, dst, ptr, 0) }
+            // All images share a rect target and occupy separate slots of one batch tensor.
+            unsafe { pre.preprocess(&frame, (src_h as u32, src_w as u32), false, dst, ptr, slot) }
                 .expect("gpu preprocess");
-            let gpu = readback(&pre, &input);
 
             let img = image::DynamicImage::ImageRgb8(
                 image::RgbImage::from_raw(src_w as u32, src_h as u32, frame).expect("rgb image"),
             );
             let cpu = crate::preprocessing::preprocess_image_with_precision(&img, dst, 32, None);
-            let cpu = cpu.tensor.as_slice().expect("contiguous cpu tensor");
-
-            let n = 3 * dst.0 * dst.1;
-            let max_diff = (0..n).fold(0.0f32, |m, i| m.max((gpu[i] - cpu[i]).abs()));
-            // 1/255 == 0.0039: anything above one input quantization step is a real
-            // resampling mismatch, not float noise (the CPU uses OpenCV's 11-bit
-            // fixed-point weights, the kernel f32).
-            assert!(
-                max_diff < 1.0 / 255.0,
-                "gpu letterbox deviates from cpu by {max_diff} at {src_h}x{src_w}"
-            );
+            expected.extend_from_slice(cpu.tensor.as_slice().expect("contiguous cpu tensor"));
         }
+        let gpu = readback(&pre, &input);
+        let max_diff = gpu
+            .iter()
+            .zip(expected)
+            .fold(0.0f32, |m, (g, c)| m.max((g - c).abs()));
+        // 1/255 == 0.0039: anything above one input quantization step is a real
+        // resampling mismatch, not float noise (the CPU uses OpenCV's 11-bit
+        // fixed-point weights, the kernel f32).
+        assert!(
+            max_diff < 1.0 / 255.0,
+            "gpu batch letterbox deviates from cpu by {max_diff}"
+        );
     }
 }
