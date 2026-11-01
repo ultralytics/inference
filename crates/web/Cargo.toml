@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference-web"
-version = "0.0.54"
+version = "0.0.55"
 edition = "2024"
 rust-version = "1.92"
 description = "Browser/WebAssembly bindings for ultralytics-inference (WebGPU via ort-web)"
@@ -28,18 +28,19 @@ ultralytics-inference = { path = "../..", default-features = false }
 # `download-binaries` ort under Cargo feature unification) and never tries to
 # build the browser-only crates for the host.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# The browser runtime is whatever ort-web pins (0.4.0 pins ONNX Runtime 1.30), so it can
+# The browser runtime is whatever ort-web pins (0.5.0 pins ONNX Runtime 1.30), so it can
 # trail the native crate by a minor version until a matching ort-web is published. Uses
 # `alternative-backend` so ort bridges to ort-web instead of linking the native runtime.
-ort = { version = "=2.0.0-rc.14", default-features = false, features = [
+ort = { version = "=2.0.0-rc.15", default-features = false, features = [
     "std",
     "ndarray",
     "alternative-backend",
     "half",
 ] }
-ort-web = "0.4.0"
+ort-web = "0.5.0"
 wasm-bindgen = "0.2.126"
 wasm-bindgen-futures = "0.4"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
@@ -49,7 +50,7 @@ serde_json = "1"
 miniz_oxide = "0.9"
 console_error_panic_hook = "0.1"
 ndarray = "0.17"
-web-sys = { version = "0.3", features = ["Window", "Performance"] }
+web-sys = { version = "0.3", features = ["Performance"] }
 # Decode JPEG/PNG image bytes handed in from JavaScript.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 

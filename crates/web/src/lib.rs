@@ -35,12 +35,12 @@ use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{
-    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head,
+    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head_masks,
 };
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
 };
-use ultralytics_inference::results::Speed;
+use ultralytics_inference::results::{Results, Speed};
 use ultralytics_inference::utils::decode_image;
 use ultralytics_inference::visualizer::color::{COLORS, Color, Colormap, DepthViz};
 use ultralytics_inference::visualizer::skeleton::{
@@ -94,19 +94,18 @@ impl Device {
 /// High-resolution timestamp in milliseconds (`performance.now()`), for the
 /// per-stage `speed` breakdown. Falls back to 0 if unavailable.
 fn now_ms() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
+    js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("performance"))
+        .ok()
+        .and_then(|p| p.dyn_into::<web_sys::Performance>().ok())
         .map_or(0.0, |p| p.now())
 }
 
+/// ONNX Runtime Web sessions share runtime state during creation and execution.
+static ORT_LOCK: futures_util::lock::Mutex<()> = futures_util::lock::Mutex::new(());
+
 thread_local! {
-    /// The backend the page's ort API was installed with: `(webgpu_runtime,
-    /// self-hosted base URL)`. `ort::set_api` installs the ONNX Runtime
-    /// process-globally and only once, so every model on a page shares it. We
-    /// record the choice so a later load that asks for a different one is
-    /// rejected rather than silently reusing the first. Wasm is single-threaded,
-    /// so a thread-local is a sufficient guard.
-    static BACKEND: RefCell<Option<(bool, Option<String>)>> = const { RefCell::new(None) };
+    /// Backend choice and its shared initialization, including while it is in flight.
+    static BACKEND: RefCell<Option<(bool, Option<String>, js_sys::Promise)>> = const { RefCell::new(None) };
     /// The ONNX Runtime environment built once the backend is installed. Every session on
     /// the page is created under it.
     static ENV: RefCell<Option<Environment>> = const { RefCell::new(None) };
@@ -128,29 +127,50 @@ thread_local! {
 async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<(), JsError> {
     let requested = (webgpu, ort_base_url.filter(|s| !s.is_empty()));
 
-    if let Some(active) = BACKEND.with(|b| b.borrow().clone()) {
-        if active == requested {
-            return Ok(());
+    let active = BACKEND.with(|b| b.borrow().clone());
+    let init = if let Some((active_gpu, active_url, init)) = active {
+        if (active_gpu, &active_url) != (requested.0, &requested.1) {
+            let label = |w: bool| if w { "WebGPU" } else { "CPU (wasm)" };
+            let detail = if active_gpu == requested.0 {
+                format!(
+                    "runtime source cannot change (already loaded from {})",
+                    active_url.as_deref().unwrap_or("the default CDN")
+                )
+            } else {
+                format!(
+                    "backend {} cannot change to {}",
+                    label(active_gpu),
+                    label(requested.0)
+                )
+            };
+            return Err(JsError::new(&format!(
+                "the ONNX Runtime is initialized once per page and shared by every model: \
+                 {detail}. Load all models with the same options, or reload the page to switch."
+            )));
         }
-        let label = |w: bool| if w { "WebGPU" } else { "CPU (wasm)" };
-        let detail = if active.0 == requested.0 {
-            format!(
-                "runtime source cannot change (already loaded from {})",
-                active.1.as_deref().unwrap_or("the default CDN")
-            )
-        } else {
-            format!(
-                "backend {} cannot change to {}",
-                label(active.0),
-                label(requested.0)
-            )
-        };
-        return Err(JsError::new(&format!(
-            "the ONNX Runtime is initialized once per page and shared by every model: \
-             {detail}. Load all models with the same options, or reload the page to switch."
-        )));
-    }
+        init
+    } else {
+        let args = requested.clone();
+        let init = wasm_bindgen_futures::future_to_promise(async move {
+            let result = initialize_backend(args).await;
+            if result.is_err() {
+                BACKEND.with(|b| *b.borrow_mut() = None);
+            }
+            result.map(|()| JsValue::UNDEFINED).map_err(JsValue::from)
+        });
+        BACKEND.with(|b| *b.borrow_mut() = Some((requested.0, requested.1, init.clone())));
+        init
+    };
 
+    wasm_bindgen_futures::JsFuture::from(init)
+        .await
+        .map(|_| ())
+        .map_err(|e| JsError::new(&String::from(js_sys::Error::from(e).message())))
+}
+
+/// Load the shared ONNX Runtime and create its environment.
+async fn initialize_backend(requested: (bool, Option<String>)) -> Result<(), JsError> {
+    let webgpu = requested.0;
     let api = match &requested.1 {
         // Self-hosted: pick the entrypoint + binary for the chosen build. The
         // wrapper (.mjs) name defaults to the binary with `.wasm` -> `.mjs`.
@@ -182,7 +202,6 @@ async fn ensure_backend(ort_base_url: Option<String>, webgpu: bool) -> Result<()
         .build()
         .map_err(err_ctx("failed to create the ONNX Runtime environment"))?;
     ENV.with(|e| *e.borrow_mut() = Some(env));
-    BACKEND.with(|b| *b.borrow_mut() = Some(requested));
     Ok(())
 }
 
@@ -428,7 +447,7 @@ impl YoloModel {
 
 /// Append the WebGPU execution provider to `builder`, failing if it cannot be registered.
 ///
-/// `ort-web` 0.4.0 only recognizes the short provider name `WebGPU`, while `ort` 2.0.0-rc.14
+/// `ort-web` 0.5.0 only recognizes the short provider name `WebGPU`, while `ort` 2.0.0-rc.15
 /// sends `WebGpuExecutionProvider`, so `ort::ep::WebGPU` is rejected and every load would fall
 /// back to the CPU. Appending by the short name works until `ort-web` accepts both.
 #[allow(unsafe_code)]
@@ -455,6 +474,7 @@ impl YoloModel {
     /// catches to fall back to CPU) instead of a silent downgrade we would
     /// mislabel.
     async fn commit(bytes: &[u8], device: Device) -> Result<Session, JsError> {
+        let _guard = ORT_LOCK.lock().await;
         let env = ENV
             .with(|e| e.borrow().clone())
             .ok_or_else(|| JsError::new("the ONNX Runtime backend is not initialized"))?;
@@ -522,10 +542,9 @@ impl YoloModel {
     /// Core async predict: decode -> preprocess -> `run_async` -> sync -> postprocess.
     ///
     /// The three timed stages mirror the Ultralytics `speed` breakdown:
-    /// `preprocess` = JPEG/PNG decode + letterbox/normalize; `inference` =
-    /// `run_async` + cross-context output sync; `postprocess` = NMS, decoding,
-    /// and coordinate scaling. (Image *download* happens in JS before this and is
-    /// not counted here.)
+    /// `preprocess` = letterbox/normalize; `inference` = `run_async` + cross-context
+    /// output sync; `postprocess` = decoding, overlay construction, and serialization.
+    /// Image download and decoding happen before this and are not counted here.
     async fn run(
         &mut self,
         dynimg: image::DynamicImage,
@@ -556,29 +575,33 @@ impl YoloModel {
 
         // Upload the NCHW f32 tensor into the ORT (WebGPU) context and run. Postprocessing
         // reads only the letterbox geometry from `pre`, so the tensor moves instead of cloning.
+        let pre_ms = now_ms() - t_pre;
+        let guard = ORT_LOCK.lock().await;
         let t_inf = now_ms();
         let input = Tensor::from_array(std::mem::take(&mut pre.tensor)).map_err(map_ort)?;
         let run_options = RunOptions::new().map_err(map_ort)?;
         let mut outputs = self
             .session
-            .run_async(ort::inputs![input.view()], &run_options)
+            .run_async(ort::inputs![input], &run_options)
             .await
             .map_err(err_ctx("inference failed"))?;
         // Outputs live in the ONNX Runtime wasm context; copy them back to Rust.
         sync_outputs(&mut outputs)
             .await
             .map_err(err_ctx("failed to sync outputs"))?;
+        drop(guard);
 
         let t_post = now_ms();
         let config = make_config(conf, iou, classes);
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         // Postprocess is timed after it returns (below), the same as the `YoloPipeline`
         // path: building the `Speed` here would only measure the setup above it.
-        let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, 0.0);
+        let speed = || Speed::new(pre_ms, t_post - t_inf, 0.0);
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
-        let mut results = if semantic_baked {
+        let mut overlay = Vec::new();
+        let results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
                 .try_extract_tensor::<u8>()
@@ -613,7 +636,7 @@ impl YoloModel {
                         })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
-            postprocess_with_head(
+            postprocess_with_head_masks(
                 views,
                 self.metadata.task,
                 &pre,
@@ -626,11 +649,10 @@ impl YoloModel {
                 self.metadata.end2end,
                 self.metadata.kpt_shape,
                 self.metadata.is_rtdetr(),
+                &mut |mask, box_data| payload::put_instance_mask(&mut overlay, mask, box_data),
             )
         };
-        results.speed.postprocess = Some(now_ms() - t_post);
-        let payload = JsResults::from_results(&results, self.metadata.task, colormap, viz);
-        to_js(&payload, "results")
+        results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
     }
 }
 
@@ -688,18 +710,14 @@ impl YoloPipeline {
         self.metadata.task.as_str().to_owned()
     }
 
-    /// Whether this is an NMS-free export, e.g. YOLO26 with `nms=False`. Its head runs
-    /// top-k selection with `int64`/`gather_nd` ops that the LiteRT WebGPU delegate
-    /// cannot execute, so such models must run on the CPU (wasm) accelerator.
+    /// Whether this is an NMS-free export, e.g. YOLO26 with `nms=False`.
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn end2end(&self) -> bool {
         self.metadata.end2end
     }
 
-    /// Whether this is an RT-DETR export. Its deformable-attention decoder reshapes to
-    /// rank 5 and indexes with `int64`, neither of which the LiteRT WebGPU delegate
-    /// supports, so such models must run on the CPU (wasm) accelerator.
+    /// Whether this is an RT-DETR export.
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn rtdetr(&self) -> bool {
@@ -875,7 +893,8 @@ impl YoloPipeline {
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        let mut results = postprocess_with_head(
+        let mut overlay = Vec::new();
+        let results = postprocess_with_head_masks(
             views,
             self.metadata.task,
             &pending.pre,
@@ -888,15 +907,16 @@ impl YoloPipeline {
             self.metadata.end2end,
             self.metadata.kpt_shape,
             self.metadata.is_rtdetr(),
+            &mut |mask, box_data| payload::put_instance_mask(&mut overlay, mask, box_data),
         );
-        results.speed.postprocess = Some(now_ms() - t_post);
-        let payload = JsResults::from_results(
+        results_to_js(
             &results,
             self.metadata.task,
             colormap.parse().unwrap_or_default(),
             depth_viz.parse().unwrap_or_default(),
-        );
-        to_js(&payload, "results")
+            overlay,
+            t_post,
+        )
     }
 }
 
@@ -990,6 +1010,30 @@ fn err_ctx<E: std::fmt::Display>(context: &'static str) -> impl FnOnce(E) -> JsE
 fn to_js<T: Serialize>(value: &T, what: &str) -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(value)
         .map_err(|e| JsError::new(&format!("failed to serialize {what}: {e}")))
+}
+
+/// Include overlay construction and serialization in the browser's postprocess time.
+fn results_to_js(
+    results: &Results,
+    task: Task,
+    colormap: Colormap,
+    viz: DepthViz,
+    overlay: Vec<u8>,
+    t_post: f64,
+) -> Result<JsValue, JsError> {
+    let value = to_js(
+        &JsResults::from_results(results, task, colormap, viz, overlay),
+        "results",
+    )?;
+    let speed = js_sys::Reflect::get(&value, &JsValue::from_str("speed"))
+        .map_err(|_| JsError::new("failed to read results speed"))?;
+    js_sys::Reflect::set(
+        &speed,
+        &JsValue::from_str("postprocess"),
+        &JsValue::from_f64(now_ms() - t_post),
+    )
+    .map_err(|_| JsError::new("failed to update results speed"))?;
+    Ok(value)
 }
 
 /// The class id -> name map as a plain JS object (`{"0": "person", ...}`), which is

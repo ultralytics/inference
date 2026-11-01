@@ -345,8 +345,6 @@ fn test_cuda_cpu_detection_parity() {
 #[test]
 #[ignore = "requires NVIDIA GPU; run on GPU CI"]
 fn test_cuda_preprocess_on_off_parity() {
-    let image = BUS;
-
     let mut fused = YOLOModel::load_with_config(
         "yolo26n.onnx",
         InferenceConfig::new()
@@ -354,12 +352,6 @@ fn test_cuda_preprocess_on_off_parity() {
             .with_cuda_preprocess(true),
     )
     .expect("model with fused GPU preprocess should load");
-    let fused_res = fused.predict(image).expect("fused prediction");
-    let fused_boxes = fused_res
-        .first()
-        .and_then(|r| r.boxes.as_ref())
-        .expect("fused boxes");
-
     let mut cpu_pre = YOLOModel::load_with_config(
         "yolo26n.onnx",
         InferenceConfig::new()
@@ -367,17 +359,57 @@ fn test_cuda_preprocess_on_off_parity() {
             .with_cuda_preprocess(false),
     )
     .expect("model with CPU preprocess should load");
-    let cpu_pre_res = cpu_pre.predict(image).expect("cpu-preprocess prediction");
-    let cpu_pre_boxes = cpu_pre_res
-        .first()
-        .and_then(|r| r.boxes.as_ref())
-        .expect("cpu-preprocess boxes");
+    for image in [BUS, "assets/zidane.jpg", BUS] {
+        let fused_res = fused.predict(image).expect("fused prediction");
+        let fused_boxes = fused_res
+            .first()
+            .and_then(|r| r.boxes.as_ref())
+            .expect("fused boxes");
+        let cpu_pre_res = cpu_pre.predict(image).expect("cpu-preprocess prediction");
+        let cpu_pre_boxes = cpu_pre_res
+            .first()
+            .and_then(|r| r.boxes.as_ref())
+            .expect("cpu-preprocess boxes");
 
-    let diff = fused_boxes.len().abs_diff(cpu_pre_boxes.len());
-    assert!(
-        diff <= 1,
-        "detection count mismatch: fused={}, cpu-preprocess={}",
-        fused_boxes.len(),
-        cpu_pre_boxes.len()
-    );
+        let diff = fused_boxes.len().abs_diff(cpu_pre_boxes.len());
+        assert!(
+            diff <= 1,
+            "detection count mismatch for {image}: fused={}, cpu-preprocess={}",
+            fused_boxes.len(),
+            cpu_pre_boxes.len()
+        );
+    }
+}
+
+/// Replaying a `TensorRT` graph must read the current frame, not the image bound at load time.
+#[cfg(feature = "cuda-preprocess")]
+#[test]
+#[ignore = "requires NVIDIA GPU; run on GPU CI"]
+fn test_tensorrt_input_changes_between_frames() {
+    let mut model = YOLOModel::load_with_config(
+        "yolo26n.onnx",
+        InferenceConfig::new()
+            .with_device(Device::TensorRt(0))
+            .with_cuda_preprocess(true),
+    )
+    .expect("TensorRT model should load");
+    let first = model.predict(BUS).expect("first prediction");
+    let other = model
+        .predict("assets/zidane.jpg")
+        .expect("second prediction");
+    let again = model.predict(BUS).expect("repeated prediction");
+    let boxes = |results: &[ultralytics_inference::Results]| {
+        results[0].boxes.as_ref().expect("boxes").xyxy().to_owned()
+    };
+    let (first, other, again) = (boxes(&first), boxes(&other), boxes(&again));
+    assert!(first.nrows() > 0 && other.nrows() > 0);
+    assert_ne!(first, other, "different frames must not reuse stale output");
+    assert_eq!(first.shape(), again.shape());
+    for (a, b) in first.iter().zip(again.iter()) {
+        assert!(
+            (a - b).abs() < 1.0,
+            "repeated frame changed by {}px",
+            (a - b).abs()
+        );
+    }
 }

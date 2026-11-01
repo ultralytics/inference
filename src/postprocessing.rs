@@ -32,6 +32,8 @@ use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, Sem
 use crate::task::Task;
 use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
 
+type MaskSink<'a> = dyn for<'b> FnMut(ArrayView2<'b, f32>, ArrayView1<'b, f32>) + 'a;
+
 /// Post-process raw model output into [`Results`] for `task`, selecting the RT-DETR decode
 /// when `rtdetr` is set.
 ///
@@ -39,11 +41,7 @@ use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
 /// of the NMS-free YOLO head but reports `[cx, cy, w, h]` normalized to the input, so the two
 /// cannot be told apart from the tensors alone and the caller has to say which it holds.
 #[must_use]
-#[allow(
-    clippy::too_many_arguments,
-    clippy::similar_names,
-    clippy::implicit_hasher
-)]
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub fn postprocess_with_head(
     outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,
@@ -57,6 +55,79 @@ pub fn postprocess_with_head(
     end2end: bool,
     kpt_shape: Option<(usize, usize)>,
     rtdetr: bool,
+) -> Results {
+    postprocess_with_head_impl(
+        outputs,
+        task,
+        preprocess,
+        config,
+        names,
+        orig_img,
+        path,
+        speed,
+        inference_shape,
+        end2end,
+        kpt_shape,
+        rtdetr,
+        None,
+    )
+}
+
+/// Post-process for the browser without retaining a full-resolution mask per detection.
+///
+/// The `on_mask` callback receives the original-resolution mask and its
+/// `[x1, y1, x2, y2, confidence, class]` box in detection order; streamed masks
+/// are not stored in [`Results::masks`].
+#[cfg(target_arch = "wasm32")]
+#[must_use]
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
+pub fn postprocess_with_head_masks(
+    outputs: Vec<(&[f32], Vec<usize>)>,
+    task: Task,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+    end2end: bool,
+    kpt_shape: Option<(usize, usize)>,
+    rtdetr: bool,
+    on_mask: &mut MaskSink<'_>,
+) -> Results {
+    postprocess_with_head_impl(
+        outputs,
+        task,
+        preprocess,
+        config,
+        names,
+        orig_img,
+        path,
+        speed,
+        inference_shape,
+        end2end,
+        kpt_shape,
+        rtdetr,
+        Some(on_mask),
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::similar_names)]
+fn postprocess_with_head_impl(
+    outputs: Vec<(&[f32], Vec<usize>)>,
+    task: Task,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+    end2end: bool,
+    kpt_shape: Option<(usize, usize)>,
+    rtdetr: bool,
+    on_mask: Option<&mut MaskSink<'_>>,
 ) -> Results {
     let results = Results::new(orig_img, path, names, speed, inference_shape);
     match task {
@@ -83,9 +154,9 @@ pub fn postprocess_with_head(
                 .get(1)
                 .and_then(|(_, s)| if s.len() == 4 { Some(s[1]) } else { None });
             if end2end || is_end2end_segment_shape(&outputs[0].1, proto_channels) {
-                postprocess_segment_end2end(outputs, preprocess, config, results)
+                postprocess_segment_end2end(outputs, preprocess, config, results, on_mask)
             } else {
-                postprocess_segment(outputs, preprocess, config, results)
+                postprocess_segment(outputs, preprocess, config, results, on_mask)
             }
         }
         Task::Semantic => {
@@ -652,6 +723,7 @@ fn extract_detect_boxes(
 /// gets the same crop and destination size along its axis as a single full-frame resize,
 /// so `fast_image_resize` computes the same coefficients, the same f32 intermediate rows,
 /// and the output is exactly the same.
+/// Returns the inclusive bounds of the pixels written, if any.
 #[allow(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
@@ -670,18 +742,18 @@ fn apply_mask_proto(
     crop_y: f32,
     crop_w: f32,
     crop_h: f32,
-) {
+) -> Option<(usize, usize, usize, usize)> {
     let x1 = box_data[0].max(0.0).min(ow as f32);
     let y1 = box_data[1].max(0.0).min(oh as f32);
     let x2 = box_data[2].max(0.0).min(ow as f32);
     let y2 = box_data[3].max(0.0).min(oh as f32);
 
     if ow == 0 || oh == 0 {
-        return;
+        return None;
     }
 
-    // Only pixels inside the box are ever written and `mask_out` arrives zeroed from the
-    // caller's `Array3::zeros`, so walk the box instead of testing every pixel in the frame.
+    // Only pixels inside the box are ever written and `mask_out` arrives zeroed,
+    // so walk the box instead of testing every pixel in the frame.
     // The bounds are the integer pixels satisfying the old `x >= x1 && x <= x2` test; a
     // degenerate box gives an empty range and writes nothing, as before.
     let x_start = x1.ceil() as usize;
@@ -690,7 +762,7 @@ fn apply_mask_proto(
     let y_end = (y2.floor() as usize).min(oh as usize - 1);
 
     if x_start > x_end || y_start > y_end {
-        return;
+        return None;
     }
 
     let f32_data: Vec<f32> = mask_flat
@@ -698,9 +770,7 @@ fn apply_mask_proto(
         .map(|&v| 1.0 / (1.0 + (-v).exp()))
         .collect();
     let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-    let Ok(src_image) = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32) else {
-        return;
-    };
+    let src_image = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32).ok()?;
 
     let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
@@ -713,9 +783,7 @@ fn apply_mask_proto(
         f64::from(crop_w.max(1.0).min(mw as f32)),
         mh as f64,
     );
-    if resize(&src_image, &mut rows, &options).is_err() {
-        return;
-    }
+    resize(&src_image, &mut rows, &options).ok()?;
 
     // Vertical pass over the box only: just the output rows inside the box are resized, from
     // the matching source rows at the same scale. An integer left edge and unchanged width
@@ -730,9 +798,7 @@ fn apply_mask_proto(
         box_w as f64,
         box_h as f64 * row_scale,
     );
-    if resize(&rows, &mut cols, &options).is_err() {
-        return;
-    }
+    resize(&rows, &mut cols, &options).ok()?;
 
     let cols_slice: &[f32] = bytemuck::cast_slice(cols.buffer());
     let src =
@@ -740,6 +806,12 @@ fn apply_mask_proto(
     mask_out
         .slice_mut(s![y_start..=y_end, x_start..=x_end])
         .assign(&src);
+    Some((x_start, y_start, x_end, y_end))
+}
+
+enum BuiltMasks {
+    Full(Array3<f32>),
+    Streamed,
 }
 
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
@@ -758,7 +830,8 @@ fn build_instance_masks(
     boxes_data: &Array2<f32>,
     preprocess: &PreprocessResult,
     inference_shape: (u32, u32),
-) -> Option<Array3<f32>> {
+    on_mask: Option<&mut MaskSink<'_>>,
+) -> Option<BuiltMasks> {
     // Protos: [1, num_masks, mh, mw] -> [num_masks, mh*mw]
     let protos = match ArrayView2::from_shape((num_masks, mh * mw), protos_data) {
         Ok(view) => view,
@@ -781,22 +854,41 @@ fn build_instance_masks(
     let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
     let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
 
+    let apply =
+        |mask_out: ArrayViewMut2<f32>, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
+            apply_mask_proto(
+                mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+            )
+        };
+    if let Some(on_mask) = on_mask {
+        let (h, w) = (oh as usize, ow as usize);
+        let mut mask = Array2::<f32>::zeros((h, w));
+        for (mask_flat, box_data) in masks_flat.outer_iter().zip(boxes_data.outer_iter()) {
+            let bounds = apply(mask.view_mut(), mask_flat, box_data);
+            on_mask(mask.view(), box_data);
+            if let Some((x_start, y_start, x_end, y_end)) = bounds {
+                mask.slice_mut(s![y_start..=y_end, x_start..=x_end])
+                    .fill(0.0);
+            }
+        }
+        return Some(BuiltMasks::Streamed);
+    }
+
     let mut masks_data = Array3::zeros((boxes_data.nrows(), oh as usize, ow as usize));
     let zip = Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
         .and(boxes_data.outer_iter());
-    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
-        apply_mask_proto(
-            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-        );
-    };
     // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
     #[cfg(not(target_arch = "wasm32"))]
-    zip.par_for_each(apply);
+    zip.par_for_each(|mask, coeffs, bbox| {
+        let _ = apply(mask, coeffs, bbox);
+    });
     #[cfg(target_arch = "wasm32")]
-    zip.for_each(apply);
+    zip.for_each(|mask, coeffs, bbox| {
+        let _ = apply(mask, coeffs, bbox);
+    });
 
-    Some(masks_data)
+    Some(BuiltMasks::Full(masks_data))
 }
 
 /// Post-process segmentation model output.
@@ -826,6 +918,7 @@ fn postprocess_segment(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     mut results: Results,
+    on_mask: Option<&mut MaskSink<'_>>,
 ) -> Results {
     let nc = results.names.len();
     let inference_shape = results.inference_shape();
@@ -907,9 +1000,10 @@ fn postprocess_segment(
         &boxes_data,
         preprocess,
         inference_shape,
+        on_mask,
     );
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
-    if let Some(masks_data) = masks_data {
+    if let Some(BuiltMasks::Full(masks_data)) = masks_data {
         results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
     }
 
@@ -1296,6 +1390,7 @@ fn postprocess_segment_end2end(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     mut results: Results,
+    on_mask: Option<&mut MaskSink<'_>>,
 ) -> Results {
     let inference_shape = results.inference_shape();
     if outputs.len() < 2 {
@@ -1360,12 +1455,15 @@ fn postprocess_segment_end2end(
         &boxes_data,
         preprocess,
         inference_shape,
+        on_mask,
     ) else {
         return results;
     };
 
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
-    results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
+    if let BuiltMasks::Full(masks_data) = masks_data {
+        results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
+    }
     results
 }
 
@@ -1738,29 +1836,31 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], results: Results) -> Re
         return results;
     }
 
-    // Model output is already at orig_img resolution (no resize, no padding).
-    // Avoids the CHW->HWC transpose and bilinear interpolation entirely: just argmax over
-    // the class channel for each pixel. Hits when the export bakes a full-res upsample
-    // into the ONNX graph and the input was the model's native rect shape.
-    if lh == oh && lw == ow {
-        let plane = lh * lw;
+    let plane = lh * lw;
+    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
+        return results;
+    };
+
+    // If cropping removes the padding without resizing, argmax the source pixels directly.
+    if crop_h == oh && crop_w == ow {
         let mut buf = vec![0u16; oh * ow];
         // Load one source row per class at a time so each row fits in cache.
         // Scratch buffer shared across all rows a given thread processes; one allocation per thread.
         buf.par_chunks_mut(ow).enumerate().for_each_with(
-            vec![0.0f32; lw],
+            vec![0.0f32; ow],
             |best_vals, (dy, row)| {
+                let offset = (top + dy) * lw + left;
                 if nc == 1 {
-                    let src = &output[dy * lw..(dy + 1) * lw];
+                    let src = &output[offset..offset + ow];
                     for (cell, &v) in row.iter_mut().zip(src.iter()) {
                         *cell = u16::from(v > 0.0);
                     }
                 } else {
                     // Seed best_vals with class 0; row is already zeroed (best_cls = 0).
-                    let src0 = &output[dy * lw..(dy + 1) * lw];
+                    let src0 = &output[offset..offset + ow];
                     best_vals.copy_from_slice(src0);
                     for c in 1..nc {
-                        let src_c = &output[c * plane + dy * lw..c * plane + (dy + 1) * lw];
+                        let src_c = &output[c * plane + offset..c * plane + offset + ow];
                         for ((cell, best), &v) in
                             row.iter_mut().zip(best_vals.iter_mut()).zip(src_c.iter())
                         {
@@ -1777,10 +1877,6 @@ fn postprocess_semantic(output: &[f32], shape: &[usize], results: Results) -> Re
     }
 
     // Crop centered letterbox padding, then bilinear-upsample crop to (oh, ow).
-    let plane = lh * lw;
-    let Some((top, left, crop_h, crop_w)) = letterbox_crop_bounds(lh, lw, oh, ow) else {
-        return results;
-    };
     let x_lut = bilinear_x_lut(ow, lw, left, crop_w);
     let scale_y = crop_h as f32 / oh as f32;
     let lh_minus_1 = lh.saturating_sub(1);
@@ -1879,6 +1975,45 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_streamed_instance_masks_match_dense_masks() {
+        let coeffs = ndarray::array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.5], [1.0, 1.0]];
+        let protos: Vec<f32> = (0..32u16).map(|i| (f32::from(i) - 15.0) / 4.0).collect();
+        let boxes = ndarray::array![
+            [0.0, 0.0, 5.5, 5.5, 0.9, 0.0],
+            [2.0, 1.5, 7.0, 7.0, 0.8, 1.0],
+            [-1.0, 4.0, 3.0, 9.0, 0.7, 2.0],
+            [3.5, 3.5, 3.5, 3.5, 0.6, 3.0]
+        ];
+        let pre = unit_preprocess((8, 8));
+        let Some(BuiltMasks::Full(full)) =
+            build_instance_masks(&coeffs, &protos, 2, 4, 4, &boxes, &pre, (8, 8), None)
+        else {
+            panic!("dense masks should be built");
+        };
+        let mut index = 0;
+        let mut sink = |mask: ArrayView2<'_, f32>, bbox: ArrayView1<'_, f32>| {
+            assert_eq!(mask, full.index_axis(ndarray::Axis(0), index));
+            assert_eq!(bbox, boxes.row(index));
+            index += 1;
+        };
+        assert!(matches!(
+            build_instance_masks(
+                &coeffs,
+                &protos,
+                2,
+                4,
+                4,
+                &boxes,
+                &pre,
+                (8, 8),
+                Some(&mut sink)
+            ),
+            Some(BuiltMasks::Streamed)
+        ));
+        assert_eq!(index, boxes.nrows());
     }
 
     /// Class names `class0..class{nc-1}`.
@@ -2350,6 +2485,28 @@ mod tests {
             sm.data.iter().copied().collect::<Vec<u16>>(),
             [1, 0, 1, 0, 0]
         );
+    }
+
+    #[test]
+    fn test_postprocess_semantic_fast_path_crops_padding() {
+        // Both portrait and landscape letterboxes: padded pixels must never win argmax.
+        for (oh, ow, top, left) in [(2, 4, 1, 0), (4, 2, 0, 1)] {
+            let mut output = vec![0.0f32; 3 * 16];
+            output[2 * 16..].fill(10.0);
+            for y in 0..oh {
+                for x in 0..ow {
+                    let i = (top + y) * 4 + left + x;
+                    output[2 * 16 + i] = -1.0;
+                    output[(x % 2) * 16 + i] = 1.0;
+                }
+            }
+            let result =
+                postprocess_semantic(&output, &[1, 3, 4, 4], results_for(3, (oh, ow), (4, 4)));
+            let mask = result.semantic_mask.unwrap();
+            for ((_, x), &class) in mask.data.indexed_iter() {
+                assert_eq!(class, (x % 2) as u16);
+            }
+        }
     }
 
     #[test]

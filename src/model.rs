@@ -150,6 +150,12 @@ fn gpu_work() -> std::sync::RwLockReadGuard<'static, ()> {
 /// println!("Found {} detections", results.len());
 /// ```
 pub struct YOLOModel {
+    /// Bindings and their input must drop before the session and its CUDA stream.
+    #[cfg(feature = "cuda-preprocess")]
+    graph_io: Option<std::sync::Mutex<GraphIo>>,
+    /// Runtime-owned device input, reused while its inference shape stays the same.
+    #[cfg(feature = "cuda-preprocess")]
+    cuda_input: Option<ort::value::Tensor<f32>>,
     /// Inference engine: an ONNX Runtime session, or a native `OpenVINO` IR model.
     backend: Backend,
     /// Model metadata (task, classes, etc.).
@@ -176,10 +182,6 @@ pub struct YOLOModel {
     /// standard CPU preprocess path runs.
     #[cfg(feature = "cuda-preprocess")]
     cuda_preprocessor: Option<crate::cuda_inference::CudaPreprocessor>,
-    /// CUDA graph I/O for the single-image `TensorRT` path; see [`GraphIo`]. The `Mutex`
-    /// keeps the model `Sync`; it is only reached through `&mut self`, so it never blocks.
-    #[cfg(feature = "cuda-preprocess")]
-    graph_io: Option<std::sync::Mutex<GraphIo>>,
 }
 
 #[allow(
@@ -692,32 +694,15 @@ impl YOLOModel {
         let mut metadata = metadata;
         metadata.imgsz = Some(resolved_imgsz);
 
-        // Finalize the GPU preprocessor now that we know the model input edge.
+        // Finalize the GPU preprocessor using the model metadata.
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
         // has been wired into the EPs above - dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
         // opened we always finalize the preprocessor; `predict_image`'s runtime gate
         // keeps it unused for Classify / fp16-input models.
-        //
-        // The buffer is sized to the resolved (possibly non-square) model input, the largest
-        // target `rect` can ask for: a dynamic model's size is already a stride multiple, so
-        // `calculate_rect_size` never rounds an axis past it.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
-            let (dst_h, dst_w) = resolved_imgsz;
-            // One slot per image the model's input accepts, so a batched run fills
-            // `[N, 3, H, W]` on the device instead of concatenating on the host.
-            let slots = Self::fixed_batch(&session)
-                .or(config.batch)
-                .unwrap_or(1)
-                .max(1);
-            match crate::cuda_inference::CudaPreprocessor::finalize(
-                handle,
-                dst_h,
-                dst_w,
-                slots,
-                metadata.scale_fill(),
-            ) {
+            match crate::cuda_inference::CudaPreprocessor::finalize(handle, metadata.scale_fill()) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     return Err(InferenceError::ModelLoadError(format!(
@@ -745,6 +730,8 @@ impl YOLOModel {
             cuda_preprocessor,
             #[cfg(feature = "cuda-preprocess")]
             graph_io: None,
+            #[cfg(feature = "cuda-preprocess")]
+            cuda_input: None,
         };
         // Warmup inference to trigger JIT compilation and memory allocation. A graph model
         // captures here, and reloads without the graph if that fails.
@@ -826,6 +813,8 @@ impl YOLOModel {
             cuda_preprocessor: None,
             #[cfg(feature = "cuda-preprocess")]
             graph_io: None,
+            #[cfg(feature = "cuda-preprocess")]
+            cuda_input: None,
         };
         model.warmup()?;
         Ok(model)
@@ -1534,7 +1523,8 @@ impl YOLOModel {
         let device_id = self
             .cuda_preprocessor
             .as_ref()
-            .map_or(0, crate::cuda_inference::CudaPreprocessor::device_id);
+            .expect("cuda_memory invariant: cuda_preprocessor.is_some()")
+            .device_id();
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         MemoryInfo::new(
             AllocationDevice::CUDA,
@@ -1545,23 +1535,40 @@ impl YOLOModel {
         .map_err(|e| InferenceError::InferenceError(format!("cuda meminfo: {e}")))
     }
 
-    /// Bind the preprocessor's device buffer, shaped `shape`, as the session input and every
-    /// output to host memory, for the `cuda-preprocess` paths to run.
-    ///
-    /// The input is described on the GPU the preprocessor opened. Naming device 0 for a
-    /// session running on another GPU hands ORT a pointer it cannot read.
+    /// Allocate the input on the session's GPU and reuse it until its shape changes.
     #[cfg(feature = "cuda-preprocess")]
-    #[allow(unsafe_code)]
-    fn device_binding(&self, shape: &[i64]) -> Result<ort::session::IoBinding> {
+    fn prepare_cuda_input(&mut self, shape: &[i64]) -> Result<()> {
+        use ort::memory::Allocator;
+        use ort::value::Tensor;
+
+        if self.cuda_input.as_ref().is_some_and(|input| {
+            input
+                .dtype()
+                .tensor_shape()
+                .is_some_and(|current| current.iter().copied().eq(shape.iter().copied()))
+        }) {
+            return Ok(());
+        }
+        let allocator = Allocator::new(self.backend.ort(), self.cuda_memory()?)
+            .map_err(|e| InferenceError::InferenceError(format!("input allocator: {e}")))?;
+        let shape = shape_to_usize(shape);
+        let input = Tensor::<f32>::new(&allocator, shape)
+            .map_err(|e| InferenceError::InferenceError(format!("device input: {e}")))?;
+        self.cuda_input = Some(input);
+        Ok(())
+    }
+
+    /// Bind the runtime-owned GPU input and every output to host memory.
+    #[cfg(feature = "cuda-preprocess")]
+    fn device_binding(&self) -> Result<ort::session::IoBinding> {
         use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
 
         let err =
             |what: &str, e: ort::Error| InferenceError::InferenceError(format!("{what}: {e}"));
-        let pre = self
-            .cuda_preprocessor
+        let input = self
+            .cuda_input
             .as_ref()
-            .expect("device_binding invariant: cuda_preprocessor.is_some()");
-        let cuda_mem = self.cuda_memory()?;
+            .expect("device_binding invariant: cuda_input.is_some()");
         let cpu_mem = MemoryInfo::new(
             AllocationDevice::CPU,
             0,
@@ -1569,25 +1576,13 @@ impl YOLOModel {
             MemoryType::Default,
         )
         .map_err(|e| err("cpu meminfo", e))?;
-        // The preprocessor owns the buffer for the model's lifetime, and the binding keeps
-        // the tensor alive until it drops.
-        // SAFETY: the pointer holds `shape`'s element count of f32 on the CUDA device `cuda_mem`
-        // names, and the preprocessor keeps it alive for as long as the binding is used.
-        let input = unsafe {
-            ort::value::TensorRefMut::<f32>::from_raw(
-                cuda_mem,
-                pre.input_dev_ptr() as *mut core::ffi::c_void,
-                ort::value::Shape::from(shape),
-            )
-        }
-        .map_err(|e| err("device input", e))?;
         let mut binding = self
             .backend
             .ort()
             .create_binding()
             .map_err(|e| err("create_binding", e))?;
         binding
-            .bind_input(&self.input_name, &input)
+            .bind_input(&self.input_name, input)
             .map_err(|e| err("bind_input", e))?;
         for n in &self.output_names {
             binding
@@ -1645,17 +1640,32 @@ impl YOLOModel {
 
     /// Bind the fixed device I/O every graph replay uses; see [`GraphIo`].
     #[cfg(feature = "cuda-preprocess")]
-    fn build_graph_io(&self) -> Result<GraphIo> {
+    #[allow(unsafe_code)]
+    fn build_graph_io(&mut self) -> Result<GraphIo> {
         use ort::memory::Allocator;
         use ort::value::Tensor;
 
+        let _gpu = gpu_work();
         let err =
             |what: &str, e: ort::Error| InferenceError::ModelLoadError(format!("{what}: {e}"));
         let shape = |dtype: &ort::value::ValueType| {
             dtype.tensor_shape().map(|s| s.to_vec()).unwrap_or_default()
         };
         // Outputs are rebound to device tensors, since a replay skips the copy to host.
-        let mut binding = self.device_binding(&shape(self.backend.ort().inputs()[0].dtype()))?;
+        let input_shape = shape(self.backend.ort().inputs()[0].dtype());
+        self.prepare_cuda_input(&input_shape)?;
+        // Graph warmup bypasses preprocessing, so initialize its dummy input here.
+        let input = self.cuda_input.as_mut().expect("graph input was allocated");
+        unsafe {
+            self.cuda_preprocessor
+                .as_ref()
+                .expect("graph has a CUDA preprocessor")
+                .zero_input(
+                    input.data_ptr_mut() as u64,
+                    shape_to_usize(&input_shape).iter().product(),
+                )?;
+        }
+        let mut binding = self.device_binding()?;
         let allocator = Allocator::new(self.backend.ort(), self.cuda_memory()?)
             .map_err(|e| err("allocator", e))?;
         let mut outputs = Vec::with_capacity(self.output_names.len());
@@ -1683,6 +1693,7 @@ impl YOLOModel {
     /// that buffer with [`Self::device_binding`], or replays the CUDA graph of a batch-1
     /// static model, then post-processes with the shared pipeline.
     #[cfg(feature = "cuda-preprocess")]
+    #[allow(unsafe_code)]
     #[allow(clippy::cast_precision_loss)]
     fn predict_cuda_pre(
         &mut self,
@@ -1704,8 +1715,7 @@ impl YOLOModel {
 
         // One letterbox target for the whole batch, chosen the way the CPU path chooses it so
         // both feed the model identical pixels: `rect` applies only when every image shares a
-        // shape, since a mixed batch cannot share one padded target. Computed from the model
-        // input, not the (stride-rounded) device buffer.
+        // shape, since a mixed batch cannot share one padded target.
         let imgsz = self.imgsz();
         let (w, h) = images[0].dimensions();
         let target = if self.rect_enabled() && images.iter().all(|i| i.dimensions() == (w, h)) {
@@ -1713,6 +1723,14 @@ impl YOLOModel {
         } else {
             imgsz
         };
+        if self.graph_io.is_none() {
+            self.prepare_cuda_input(&[images.len() as i64, 3, target.0 as i64, target.1 as i64])?;
+        }
+        let input_ptr = self
+            .cuda_input
+            .as_mut()
+            .expect("predict_cuda_pre invariant: cuda_input.is_some()")
+            .data_ptr_mut() as u64;
 
         let pre = self
             .cuda_preprocessor
@@ -1737,7 +1755,8 @@ impl YOLOModel {
                     .or_else(|| image.as_rgb8())
                     .expect("an image is either RGB8 or converted to it");
                 let (w, h) = rgb.dimensions();
-                pre.preprocess(rgb.as_raw(), h, w, false, target, slot)
+                // `cuda_input` owns this batch tensor until inference completes.
+                unsafe { pre.preprocess(rgb.as_raw(), (h, w), false, target, input_ptr, slot) }
             })
             .collect::<Result<Vec<_>>>()?;
         let frames: Vec<(Vec<u8>, u32, u32)> = images
@@ -1773,9 +1792,7 @@ impl YOLOModel {
             )?;
             None
         } else {
-            // The buffer was sized for `slots >= images.len()` at load, checked before dispatch.
-            let shape = [images.len() as i64, 3, dst_h as i64, dst_w as i64];
-            binding = self.device_binding(&shape)?;
+            binding = self.device_binding()?;
             start_inference = Instant::now();
             let outputs = self
                 .backend
@@ -1928,14 +1945,9 @@ impl YOLOModel {
         // the tasks in `cuda_pre_task` with f32 input (the kernel writes f32, not f16). The
         // CLI takes it too, because `BatchProcessor` always calls `predict_batch`, and so
         // does every image of a CUDA graph model, which is pinned to batch 1 and chunked
-        // above. `predict_batch` is public and its length is not tied to `config.batch`, so
-        // a batch larger than the buffer was sized for falls back to the CPU path rather
-        // than indexing past the last slot. Semantic models take it one image at a time.
+        // above. Semantic models take it one image at a time.
         #[cfg(feature = "cuda-preprocess")]
-        if self
-            .cuda_preprocessor
-            .as_ref()
-            .is_some_and(|p| images.len() <= p.slots())
+        if self.cuda_preprocessor.is_some()
             && !self.fp16_input
             && Self::cuda_pre_task(self.metadata.task)
             && (images.len() == 1 || self.metadata.task != Task::Semantic)
@@ -2366,6 +2378,48 @@ mod tests {
             assert!(debug_str.contains("task"));
             assert!(debug_str.contains("num_classes"));
         }
+    }
+
+    #[cfg(feature = "cuda-preprocess")]
+    #[test]
+    #[ignore = "requires NVIDIA GPU; run on GPU CI"]
+    fn test_cuda_input_reuses_and_changes_shape() {
+        let _guard = SESSION_BUILD_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut model = YOLOModel::load_with_config(
+            "yolo26n.onnx",
+            InferenceConfig::new().with_device(crate::Device::Cuda(0)),
+        )
+        .expect("CUDA model should load");
+        let first = [1, 3, 640, 640];
+        model.prepare_cuda_input(&first).expect("input allocation");
+        let ptr = model.cuda_input.as_ref().unwrap().data_ptr();
+        model.prepare_cuda_input(&first).expect("input reuse");
+        assert_eq!(ptr, model.cuda_input.as_ref().unwrap().data_ptr());
+        let resized = [1, 3, 384, 640];
+        model.prepare_cuda_input(&resized).expect("input resize");
+        assert!(
+            model
+                .cuda_input
+                .as_ref()
+                .unwrap()
+                .dtype()
+                .tensor_shape()
+                .unwrap()
+                .iter()
+                .copied()
+                .eq(resized)
+        );
+        let results = model
+            .predict("assets/bus.jpg")
+            .expect("prediction after resize");
+        assert!(
+            results[0]
+                .boxes
+                .as_ref()
+                .is_some_and(|boxes| !boxes.is_empty())
+        );
     }
 
     // Only the `CoreML` GatherElements warmup error may be swallowed; everything else must

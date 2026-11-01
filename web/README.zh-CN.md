@@ -184,13 +184,11 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
   `YOLO.load` 会自动回退到通用的 **CPU/wasm** 构建，随处可用。可通过
   `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` 指定设备（默认 `"auto"`）。若 WebGPU
   无法启用，加载会回退到 CPU；`model.device` 会报告实际使用的设备。
-- **RT-DETR**：支持检测任务。RT-DETR 的 `.onnx` 可以像其他模型一样在 WebGPU 上运行；而
-  RT-DETR 的 `.tflite` 在默认的 `device: "auto"` 下会被路由到 CPU/wasm，因为它的可变形注意力
-  解码器会 reshape 到 5 维并使用 `int64` 索引，目前测试过的所有驱动（Linux/Vulkan 与 Apple
-  Metal-3）上 LiteRT 的 WebGPU delegate 都会拒绝这些算子。显式指定 `device: "webgpu"` 仍会
-  尝试使用 delegate，而不会被强制覆盖，便于在 delegate 补齐算子后重新测试；在当前驱动上该
-  尝试会失败，LiteRT 会回退到 CPU/wasm，`model.device` 会报告实际使用的设备。官方没有发布
-  RT-DETR 的 ONNX 或 LiteRT 模型，需要自行导出。
+- **Worker**：LiteRT 图像输入和计时支持 worker 环境，但仍须满足 LiteRT 自身的 worker 资源加载要求。
+  ONNX Runtime Web 加载器需要浏览器窗口。
+- **RT-DETR**：支持检测任务。RT-DETR 的 `.onnx` 可以像其他模型一样在 WebGPU 上运行。
+  无法完全委托给 WebGPU 的 LiteRT 模型会在 CPU/wasm 上运行，`model.device` 会报告实际使用的设备。
+  官方没有发布 RT-DETR 的 ONNX 或 LiteRT 模型，需要自行导出。
 - **模型格式**：请使用 Ultralytics `>=8.4.142` 导出为 ONNX，以便元数据（任务、类别名称、`imgsz`）被嵌入模型：
 
   ```python
@@ -280,16 +278,12 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 - **现有模型兼容性**：带内嵌元数据的单文件 LiteRT 导出自
   [v8.4.83](https://github.com/ultralytics/ultralytics/releases/tag/v8.4.83) 起提供。更早的版本
   会导出旧版 TFLite 格式，无法在这里加载。
-- **为 WebGPU 保留一对多检测头**（`nms=None`）：以 `nms=False` 导出的 YOLO26 无 NMS 检测头包含
-  `int64` / `gather_nd` 算子，无法在 LiteRT 的 **WebGPU** delegate 上运行，因此这类导出会
-  回退到 CPU/wasm。以下命令需要 Ultralytics `>=8.4.142`，默认导出一对多检测头，NMS 由本包的 Rust 代码执行，
-  推理得以保持在 WebGPU 上：
+- **无 NMS 模型**：较新的 YOLO26 LiteRT 导出使用兼容 GPU 的算子。旧版导出可能包含无法完全委托给
+  WebGPU 的算子，此时模型会在 CPU/wasm 上运行。也可以导出一对多检测头，由 Rust 执行 NMS：
 
   ```bash
   yolo export model=yolo26n.pt format=litert nms=None
   ```
-
-  如果加载了无 NMS 的 `.tflite`，后端会自动切换到 wasm（较慢）并打印警告，而不是返回空结果。
 
 - **支持的任务**：detect、segment、semantic、depth、classify、pose 和 obb 均已支持。
 - **跨源隔离**：LiteRT 的多线程 wasm 需要 `SharedArrayBuffer`，因此请以
@@ -312,8 +306,7 @@ Web（`.onnx`）：
 
 测试环境：Apple M4、Chrome 153、`@ultralytics/yolo` 0.0.48（ONNX Runtime Web 1.27、LiteRT.js 2.5.3）。模型为使用
 Ultralytics 8.4.163 导出的 FP32 640×640 模型（`nms=None`），预热后循环使用 COCO128 的 128 张图像（WebGPU 计时 128 次，CPU
-计时 50 次）。无 NMS 导出（`nms=False`）在 ONNX Runtime Web 上速度相同，但 LiteRT.js 会回退到 CPU/wasm 运行，因此 WebGPU
-请保持 `nms=None`。
+计时 50 次）。较新的无 NMS LiteRT 导出（`nms=False`）也可以在 WebGPU 上运行。
 
 ## 🔨 从源码构建
 

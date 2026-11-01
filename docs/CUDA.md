@@ -17,6 +17,7 @@
 | NVIDIA driver          | 580+        | `nvidia-smi`                                                                                                             |
 | CUDA toolkit           | 11.4 – 13.3 | `nvcc --version` _(toolkit only required for `cuda-preprocess`; `cuda` and `tensorrt` ship their EP libs through `ort`)_ |
 | TensorRT               | 10.x        | `ldconfig -p \| grep libnvinfer` (only for `tensorrt` / `cuda-preprocess`)                                               |
+| cuRAND                 | 10.x        | `libcurand.so.10` must be on the loader path for the CUDA execution provider                                             |
 | GPU compute capability | sm_70+      | `nvidia-smi --query-gpu=compute_cap --format=csv`                                                                        |
 
 > **Prebuilt EP binaries are CUDA 13.** ONNX Runtime deprecated CUDA 12, and the pinned `ort`
@@ -30,7 +31,7 @@
 > **Blackwell and Jetson.** The prebuilt CUDA binaries cover RTX 50xx (Blackwell) cards on x64, which the GPU CI job
 > runs on, and `aarch64` builds cover Jetson Orin and Thor, Grace Hopper and Blackwell, and DGX Spark.
 
-`cuda-preprocess` only needs `libcudart.so` and `libnvrtc.so` at **runtime**. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
+The `cuda-preprocess` kernel uses `libcudart.so` and `libnvrtc.so` at **runtime**, in addition to the inference provider's dependencies. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
 
 ## Enable in your project
 
@@ -38,9 +39,9 @@ Add the feature you need in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.54", features = ["tensorrt"] }
+ultralytics-inference = { version = "0.0.55", features = ["tensorrt"] }
 # or, for the fastest path:
-ultralytics-inference = { version = "0.0.54", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.55", features = ["cuda-preprocess"] }
 ```
 
 Then `cargo build --release`: no extra flags needed.
@@ -70,7 +71,7 @@ If you need to pin a specific version at compile time instead, override the cuda
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.54", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.55", features = ["cuda-preprocess"] }
 # Replace the default feature with a pinned one (e.g. CUDA 12.8):
 cudarc = { version = "0.19", default-features = false, features = ["driver", "nvrtc", "dynamic-loading", "cuda-12080"] }
 ```
@@ -196,8 +197,7 @@ the CPU path runs and the flag is silently ignored:
 `predict_batch` and the multi-image path use the same kernel, writing each image
 into its own slot of one `[N, 3, H, W]` device buffer, so a batch is uploaded
 without a host-side concatenation. A batch of more than one image keeps the CPU path
-for `Semantic` models, and for a batch larger than the device buffer, which is sized
-at load for the model's pinned batch or the configured `batch`.
+for `Semantic` models.
 
 The source frame goes to the GPU as 8-bit RGB, a third of the bytes of the f32 tensor. On a
 discrete GPU it is first copied into a reused pinned host buffer, so the upload runs as an async
@@ -240,6 +240,7 @@ last image, so `--batch 1` on it still pays for 16.
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).                                                                                                                                    |
 | `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.                                                                                                                                 |
+| `libcurand.so.10: cannot open shared object file`                          | Install cuRAND with the CUDA runtime libraries and expose its library directory to the loader. NVIDIA's `nvidia-curand` wheel is available for pip-based installations.                                                  |
 | `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                                                                                                                                          |
 | TRT engine build is slow on first run                                      | Expected: engines are cached under `.trt_cache/`. Subsequent runs reuse them.                                                                                                                                            |
 | Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.                                                                                                                                   |
