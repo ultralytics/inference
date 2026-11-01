@@ -694,19 +694,14 @@ impl YOLOModel {
         let mut metadata = metadata;
         metadata.imgsz = Some(resolved_imgsz);
 
-        // Finalize the GPU preprocessor now that we know the model input edge.
+        // Finalize the GPU preprocessor now that we know the model's batch limit.
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
         // has been wired into the EPs above - dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
         // opened we always finalize the preprocessor; `predict_image`'s runtime gate
         // keeps it unused for Classify / fp16-input models.
-        //
-        // The buffer is sized to the resolved (possibly non-square) model input, the largest
-        // target `rect` can ask for: a dynamic model's size is already a stride multiple, so
-        // `calculate_rect_size` never rounds an axis past it.
         #[cfg(feature = "cuda-preprocess")]
         let cuda_preprocessor = if let Some(handle) = cuda_pre_stream {
-            let (dst_h, dst_w) = resolved_imgsz;
             // One slot per image the model's input accepts, so a batched run fills
             // `[N, 3, H, W]` on the device instead of concatenating on the host.
             let slots = Self::fixed_batch(&session)
@@ -715,8 +710,6 @@ impl YOLOModel {
                 .max(1);
             match crate::cuda_inference::CudaPreprocessor::finalize(
                 handle,
-                dst_h,
-                dst_w,
                 slots,
                 metadata.scale_fill(),
             ) {
@@ -1554,7 +1547,6 @@ impl YOLOModel {
 
     /// Allocate the input on the session's GPU and reuse it until its shape changes.
     #[cfg(feature = "cuda-preprocess")]
-    #[allow(unsafe_code)]
     fn prepare_cuda_input(&mut self, shape: &[i64]) -> Result<()> {
         use ort::memory::Allocator;
         use ort::value::Tensor;
@@ -1570,16 +1562,8 @@ impl YOLOModel {
         let allocator = Allocator::new(self.backend.ort(), self.cuda_memory()?)
             .map_err(|e| InferenceError::InferenceError(format!("input allocator: {e}")))?;
         let shape = shape_to_usize(shape);
-        let elements = shape.iter().product();
-        let mut input = Tensor::<f32>::new(&allocator, shape)
+        let input = Tensor::<f32>::new(&allocator, shape)
             .map_err(|e| InferenceError::InferenceError(format!("device input: {e}")))?;
-        // The newly allocated input lives on the preprocessor's CUDA device.
-        unsafe {
-            self.cuda_preprocessor
-                .as_ref()
-                .expect("prepare_cuda_input invariant: cuda_preprocessor.is_some()")
-                .zero_input(input.data_ptr_mut() as u64, elements)?;
-        }
         self.cuda_input = Some(input);
         Ok(())
     }
@@ -1666,10 +1650,12 @@ impl YOLOModel {
 
     /// Bind the fixed device I/O every graph replay uses; see [`GraphIo`].
     #[cfg(feature = "cuda-preprocess")]
+    #[allow(unsafe_code)]
     fn build_graph_io(&mut self) -> Result<GraphIo> {
         use ort::memory::Allocator;
         use ort::value::Tensor;
 
+        let _gpu = gpu_work();
         let err =
             |what: &str, e: ort::Error| InferenceError::ModelLoadError(format!("{what}: {e}"));
         let shape = |dtype: &ort::value::ValueType| {
@@ -1678,6 +1664,17 @@ impl YOLOModel {
         // Outputs are rebound to device tensors, since a replay skips the copy to host.
         let input_shape = shape(self.backend.ort().inputs()[0].dtype());
         self.prepare_cuda_input(&input_shape)?;
+        // Graph warmup bypasses preprocessing, so initialize its dummy input here.
+        let input = self.cuda_input.as_mut().expect("graph input was allocated");
+        unsafe {
+            self.cuda_preprocessor
+                .as_ref()
+                .expect("graph has a CUDA preprocessor")
+                .zero_input(
+                    input.data_ptr_mut() as u64,
+                    shape_to_usize(&input_shape).iter().product(),
+                )?;
+        }
         let mut binding = self.device_binding()?;
         let allocator = Allocator::new(self.backend.ort(), self.cuda_memory()?)
             .map_err(|e| err("allocator", e))?;
@@ -1960,8 +1957,7 @@ impl YOLOModel {
         // CLI takes it too, because `BatchProcessor` always calls `predict_batch`, and so
         // does every image of a CUDA graph model, which is pinned to batch 1 and chunked
         // above. `predict_batch` is public and its length is not tied to `config.batch`, so
-        // a batch larger than the buffer was sized for falls back to the CPU path rather
-        // than indexing past the last slot. Semantic models take it one image at a time.
+        // a batch above that limit uses the CPU path. Semantic models take it one image at a time.
         #[cfg(feature = "cuda-preprocess")]
         if self
             .cuda_preprocessor

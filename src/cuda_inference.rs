@@ -160,7 +160,7 @@ impl CudaStreamHandle {
 /// Built in two phases at model load time: [`CudaStreamHandle::open`] runs
 /// *before* the ORT session is constructed (so the stream can be plumbed
 /// into the TRT/CUDA EPs), then [`Self::finalize`] runs *after* the session
-/// commit (so the model input dimensions and batch limit are known).
+/// commit (so the model batch limit is known).
 /// Per-frame work happens in [`Self::preprocess`].
 pub(crate) struct CudaPreprocessor {
     /// Kept alive so the stream below outlives every session bound to it.
@@ -179,12 +179,9 @@ pub(crate) struct CudaPreprocessor {
     /// Recorded after each staged upload; `frame_host` is rewritten only once it completes.
     uploaded: CudaEvent,
 
-    /// Model input height/width (letterbox target). May be non-square.
-    dst_h: usize,
-    dst_w: usize,
     /// Fill the input by stretching each axis instead of letterboxing, for RT-DETR.
     stretch: bool,
-    /// Number of `3 * dst_h * dst_w` slots the input buffer holds.
+    /// Maximum batch supported by the model's GPU path.
     batch: usize,
     /// CUDA device the context, stream and buffers live on.
     device_id: usize,
@@ -193,13 +190,7 @@ pub(crate) struct CudaPreprocessor {
 impl CudaPreprocessor {
     /// Phase-2 init: NVRTC-compile the preprocess kernel and reuse the
     /// context+stream from [`CudaStreamHandle::open`].
-    pub(crate) fn finalize(
-        handle: CudaStreamHandle,
-        dst_h: usize,
-        dst_w: usize,
-        batch: usize,
-        stretch: bool,
-    ) -> Result<Self> {
+    pub(crate) fn finalize(handle: CudaStreamHandle, batch: usize, stretch: bool) -> Result<Self> {
         let CudaStreamHandle {
             ctx,
             stream,
@@ -239,8 +230,6 @@ impl CudaPreprocessor {
             frame_dev_capacity: 1,
             frame_host,
             uploaded,
-            dst_h,
-            dst_w,
             stretch,
             batch,
             device_id,
@@ -264,10 +253,10 @@ impl CudaPreprocessor {
         self.batch
     }
 
-    /// Initialize a newly allocated runtime input before graph warmup.
+    /// Initialize the graph's dummy input on the shared inference stream.
     ///
     /// # Safety
-    /// `ptr` must address `elements` f32 values on this CUDA context.
+    /// `ptr` must address `elements` f32 values on this CUDA context until the shared stream completes.
     pub(crate) unsafe fn zero_input(&self, ptr: u64, elements: usize) -> Result<()> {
         self.stream
             .context()
@@ -275,7 +264,12 @@ impl CudaPreprocessor {
             .map_err(|e| InferenceError::InferenceError(format!("CUDA context: {e:?}")))?;
         // The caller owns a device allocation of `elements` f32 values on this context.
         unsafe {
-            cudarc::driver::result::memset_d8_sync(ptr, 0, elements * std::mem::size_of::<f32>())
+            cudarc::driver::result::memset_d8_async(
+                ptr,
+                0,
+                elements * std::mem::size_of::<f32>(),
+                self.stream.cu_stream(),
+            )
         }
         .map_err(|e| InferenceError::InferenceError(format!("zero input: {e:?}")))
     }
@@ -328,16 +322,8 @@ impl CudaPreprocessor {
         let (dst_h, dst_w) = dst;
         debug_assert!(
             slot < self.batch,
-            "slot {slot} out of range for a {}-slot input buffer",
+            "slot {slot} exceeds the model's batch limit {}",
             self.batch
-        );
-        // Writes are linear (`idx = y * dst_w + x`, plane stride `dst_h * dst_w`), so the
-        // product is what has to fit; the caller sizes the buffer to the largest target.
-        debug_assert!(
-            dst_h * dst_w <= self.dst_h * self.dst_w,
-            "letterbox target {dst_h}x{dst_w} exceeds the input buffer sized for {}x{}",
-            self.dst_h,
-            self.dst_w
         );
         let needed = (src_h as usize) * (src_w as usize) * 3;
         if frame_hwc.len() != needed {
@@ -448,7 +434,7 @@ impl Drop for CudaPreprocessor {
 #[cfg(test)]
 mod tests {
     // Runs only on an NVIDIA GPU: the whole module is `cuda-preprocess`-gated,
-    // so these compile and execute exclusively on the GPU CI runner. Inline
+    // so these compile and execute exclusively on the GPU CI runner.
     // Each test keeps its CUDA input allocation alive through the queued work.
     use super::*;
 
@@ -470,8 +456,7 @@ mod tests {
         stretch: bool,
     ) -> (CudaPreprocessor, CudaSlice<f32>, u64) {
         let handle = CudaStreamHandle::open(0).expect("open CUDA device 0");
-        let pre = CudaPreprocessor::finalize(handle, dst_h, dst_w, 1, stretch)
-            .expect("finalize preprocessor");
+        let pre = CudaPreprocessor::finalize(handle, 1, stretch).expect("finalize preprocessor");
         let input = pre.stream.alloc_zeros::<f32>(3 * dst_h * dst_w).unwrap();
         let ptr = {
             let (ptr, _guard) = input.device_ptr(&pre.stream);
@@ -508,29 +493,13 @@ mod tests {
     }
 
     #[test]
-    fn preprocessor_finalize_allocates() {
-        let (pre, _input, ptr) = preprocessor(640, 640);
-        assert_eq!((pre.dst_h, pre.dst_w), (640, 640));
-        assert_ne!(ptr, 0, "device input buffer must be allocated");
-    }
-
-    #[test]
     fn preprocess_square_geometry() {
         let (mut pre, input, ptr) = preprocessor(640, 640);
         let (src_h, src_w) = (480u32, 640u32);
         let frame = solid(src_h as usize, src_w as usize, 200, 100, 50);
 
-        let geom = unsafe {
-            pre.preprocess(
-                &frame,
-                (src_h, src_w),
-                false,
-                (pre.dst_h, pre.dst_w),
-                ptr,
-                0,
-            )
-        }
-        .expect("preprocess");
+        let geom = unsafe { pre.preprocess(&frame, (src_h, src_w), false, (640, 640), ptr, 0) }
+            .expect("preprocess");
 
         // 640/640 = 1.0 is the binding axis; the 480-tall image is centered.
         assert!(
@@ -551,13 +520,11 @@ mod tests {
     #[test]
     fn preprocess_non_square_target() {
         let (mut pre, _input, ptr) = preprocessor(384, 640);
-        assert_eq!((pre.dst_h, pre.dst_w), (384, 640));
 
         // 640x640 into 384x640: scale 0.6 fills the width, pads the height to 0.
         let frame = solid(640, 640, 10, 20, 30);
-        let geom =
-            unsafe { pre.preprocess(&frame, (640, 640), false, (pre.dst_h, pre.dst_w), ptr, 0) }
-                .expect("preprocess");
+        let geom = unsafe { pre.preprocess(&frame, (640, 640), false, (384, 640), ptr, 0) }
+            .expect("preprocess");
 
         assert_eq!(geom.pad_y, 0);
         assert!(
@@ -574,9 +541,8 @@ mod tests {
         let (mut pre, input, ptr) = preprocessor_with(640, 640, true);
         let frame = solid(480, 640, 200, 100, 50);
 
-        let geom =
-            unsafe { pre.preprocess(&frame, (480, 640), false, (pre.dst_h, pre.dst_w), ptr, 0) }
-                .expect("preprocess");
+        let geom = unsafe { pre.preprocess(&frame, (480, 640), false, (640, 640), ptr, 0) }
+            .expect("preprocess");
 
         assert_eq!((geom.pad_x, geom.pad_y), (0, 0));
         assert!(
@@ -599,17 +565,8 @@ mod tests {
         let (mut pre, input, ptr) = preprocessor(dst, dst);
         let frame = solid(src_h as usize, src_w as usize, 255, 255, 255);
 
-        let geom = unsafe {
-            pre.preprocess(
-                &frame,
-                (src_h, src_w),
-                false,
-                (pre.dst_h, pre.dst_w),
-                ptr,
-                0,
-            )
-        }
-        .expect("preprocess");
+        let geom = unsafe { pre.preprocess(&frame, (src_h, src_w), false, (dst, dst), ptr, 0) }
+            .expect("preprocess");
         assert!(
             geom.pad_x > 0,
             "expected horizontal padding, got {}",
@@ -634,17 +591,8 @@ mod tests {
         let (mut pre, input, ptr) = preprocessor(dst, dst);
         // Square input, no letterbox: every pixel is R=255, G=0, B=0.
         let frame = solid(dst, dst, 255, 0, 0);
-        unsafe {
-            pre.preprocess(
-                &frame,
-                (dst as u32, dst as u32),
-                false,
-                (pre.dst_h, pre.dst_w),
-                ptr,
-                0,
-            )
-        }
-        .expect("preprocess");
+        unsafe { pre.preprocess(&frame, (dst as u32, dst as u32), false, (dst, dst), ptr, 0) }
+            .expect("preprocess");
 
         let host = readback(&pre, &input);
         let hw = dst * dst;
@@ -671,7 +619,7 @@ mod tests {
                 &frame,
                 (dst as u32, dst as u32),
                 false,
-                (rgb.dst_h, rgb.dst_w),
+                (dst, dst),
                 rgb_ptr,
                 0,
             )
@@ -685,7 +633,7 @@ mod tests {
                 &frame,
                 (dst as u32, dst as u32),
                 true,
-                (bgr.dst_h, bgr.dst_w),
+                (dst, dst),
                 bgr_ptr,
                 0,
             )
@@ -711,8 +659,7 @@ mod tests {
     fn preprocess_rejects_wrong_len() {
         let (mut pre, _input, ptr) = preprocessor(64, 64);
         let bad = vec![0u8; 10]; // != 64 * 64 * 3
-        let result =
-            unsafe { pre.preprocess(&bad, (64, 64), false, (pre.dst_h, pre.dst_w), ptr, 0) };
+        let result = unsafe { pre.preprocess(&bad, (64, 64), false, (64, 64), ptr, 0) };
         assert!(
             matches!(result, Err(InferenceError::InferenceError(_))),
             "wrong-length frame must be rejected"
@@ -724,10 +671,10 @@ mod tests {
         let (mut pre, _input, ptr) = preprocessor(128, 128);
         // First a small frame, then a larger one to force `frame_dev` to grow.
         let small = solid(32, 32, 1, 2, 3);
-        unsafe { pre.preprocess(&small, (32, 32), false, (pre.dst_h, pre.dst_w), ptr, 0) }
+        unsafe { pre.preprocess(&small, (32, 32), false, (128, 128), ptr, 0) }
             .expect("small frame");
         let large = solid(256, 256, 4, 5, 6);
-        unsafe { pre.preprocess(&large, (256, 256), false, (pre.dst_h, pre.dst_w), ptr, 0) }
+        unsafe { pre.preprocess(&large, (256, 256), false, (128, 128), ptr, 0) }
             .expect("large frame after buffer growth");
     }
 
