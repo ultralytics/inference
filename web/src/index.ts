@@ -290,7 +290,8 @@ function ensureInit(wasmUrl?: string | URL): Promise<void> {
 /** Encoded-image inputs (decoded by the wasm side via the `image` crate). */
 type EncodedInput = string | URL | Blob | ArrayBuffer | Uint8Array;
 /** Drawable inputs that can be read as raw pixels without re-encoding. */
-type DrawableInput = ImageData | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | OffscreenCanvas | ImageBitmap;
+type DrawableInput =
+  ImageData | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | OffscreenCanvas | ImageBitmap;
 
 function isDrawable(input: ImageInput): input is DrawableInput {
   return (
