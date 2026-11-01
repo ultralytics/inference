@@ -17,6 +17,7 @@
 | NVIDIA driver          | 580+        | `nvidia-smi`                                                                                                             |
 | CUDA toolkit           | 11.4 – 13.3 | `nvcc --version` _(toolkit only required for `cuda-preprocess`; `cuda` and `tensorrt` ship their EP libs through `ort`)_ |
 | TensorRT               | 10.x        | `ldconfig -p \| grep libnvinfer` (only for `tensorrt` / `cuda-preprocess`)                                               |
+| cuRAND                 | 10.x        | `libcurand.so.10` must be on the loader path for the CUDA execution provider                                             |
 | GPU compute capability | sm_70+      | `nvidia-smi --query-gpu=compute_cap --format=csv`                                                                        |
 
 > **Prebuilt EP binaries are CUDA 13.** ONNX Runtime deprecated CUDA 12, and the pinned `ort`
@@ -30,7 +31,7 @@
 > **Blackwell and Jetson.** The prebuilt CUDA binaries cover RTX 50xx (Blackwell) cards on x64, which the GPU CI job
 > runs on, and `aarch64` builds cover Jetson Orin and Thor, Grace Hopper and Blackwell, and DGX Spark.
 
-`cuda-preprocess` only needs `libcudart.so` and `libnvrtc.so` at **runtime**. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
+The `cuda-preprocess` kernel uses `libcudart.so` and `libnvrtc.so` at **runtime**, in addition to the inference provider's dependencies. Kernel code is compiled in-process via NVRTC, so `nvcc` is not invoked at runtime.
 
 ## Enable in your project
 
@@ -240,6 +241,7 @@ last image, so `--batch 1` on it still pays for 16.
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | ``cudarc-* build script failed: `nvcc --version` failed``                  | Set `PATH` to include the toolkit's `bin/`, or set `CUDARC_CUDA_VERSION` (see above).                                                                                                                                    |
 | `libcudart.so.13: cannot open shared object file`                          | Toolkit not installed or not on `ld.so` path. Verify `ldconfig -p \| grep libcudart.so`.                                                                                                                                 |
+| `libcurand.so.10: cannot open shared object file`                          | Install cuRAND with the CUDA runtime libraries and expose its library directory to the loader. NVIDIA's `nvidia-curand` wheel is available for pip-based installations.                                                  |
 | `libnvinfer.so.10: cannot open shared object file`                         | TensorRT not installed. Required for `tensorrt` and `cuda-preprocess` features.                                                                                                                                          |
 | TRT engine build is slow on first run                                      | Expected: engines are cached under `.trt_cache/`. Subsequent runs reuse them.                                                                                                                                            |
 | Build hits `Must specify one of the following features: [cuda-13020, ...]` | Your environment has neither `nvcc` on `PATH` nor `CUDARC_CUDA_VERSION` set. Pick one.                                                                                                                                   |
