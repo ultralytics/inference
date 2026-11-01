@@ -106,7 +106,13 @@ impl JsResults {
     /// Convert core [`Results`] into the serializable JS payload, labeling it with
     /// the model's declared `task` (the caller already holds it, so there is no
     /// need to guess it back from which result fields are populated).
-    pub(crate) fn from_results(r: &Results, task: Task, colormap: Colormap, viz: DepthViz) -> Self {
+    pub(crate) fn from_results(
+        r: &Results,
+        task: Task,
+        colormap: Colormap,
+        viz: DepthViz,
+        overlay: Vec<u8>,
+    ) -> Self {
         // Class id -> display name and palette color, shared by every detection type.
         let name = |c: usize| r.names.get(&c).cloned().unwrap_or_default();
         let hex = |c: usize| Color::from_index(c).to_hex();
@@ -194,7 +200,11 @@ impl JsResults {
             obb,
             keypoints,
             probs,
-            masks: build_mask_overlay(r),
+            masks: if overlay.is_empty() {
+                build_mask_overlay(r)
+            } else {
+                overlay
+            },
             semantic_mask: r.semantic_mask.as_ref().map_or_else(Vec::new, |sem| {
                 let mut bytes = Vec::with_capacity(sem.data.len() * 2);
                 for &v in &sem.data {
@@ -222,44 +232,38 @@ fn put(buf: &mut [u8], w: usize, x: usize, y: usize, c: Color, a: u8) {
     buf[i..i + 4].copy_from_slice(&[c.0, c.1, c.2, a]);
 }
 
-/// Build a translucent colored RGBA overlay (`width*height*4`) from the segment
-/// instance masks or the semantic class map, colored by the class palette.
+/// Composite one instance mask into the browser overlay in detection order.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn put_instance_mask(
+    overlay: &mut Vec<u8>,
+    mask: ndarray::ArrayView2<'_, f32>,
+    box_data: ndarray::ArrayView1<'_, f32>,
+) {
+    let (h, w) = mask.dim();
+    if overlay.is_empty() {
+        overlay.resize(h * w * 4, 0);
+    }
+    let color = Color::from_index(box_data[5] as usize);
+    let x0 = box_data[0].max(0.0) as usize;
+    let y0 = box_data[1].max(0.0) as usize;
+    let x1 = (box_data[2].max(0.0) as usize).saturating_add(1).min(w);
+    let y1 = (box_data[3].max(0.0) as usize).saturating_add(1).min(h);
+    for y in y0..y1 {
+        let row = mask.row(y);
+        for x in x0..x1 {
+            if row[x] > 0.5 {
+                put(overlay, w, x, y, color, 140);
+            }
+        }
+    }
+}
+
+/// Build a translucent colored RGBA overlay (`width*height*4`) from the semantic
+/// class map, colored by the class palette.
 /// Empty for other tasks or if the mask resolution does not match the image.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn build_mask_overlay(r: &Results) -> Vec<u8> {
     let (h, w) = (r.orig_shape.0 as usize, r.orig_shape.1 as usize);
-
-    // Segment: per-instance binary masks, each colored by its detection class.
-    if let (Some(masks), Some(boxes)) = (&r.masks, &r.boxes) {
-        let (n, mh, mw) = masks.data.dim();
-        if mh != h || mw != w {
-            return Vec::new();
-        }
-        let mut buf = vec![0u8; w * h * 4];
-        let cls = boxes.cls();
-        let xyxy = boxes.xyxy();
-        for i in 0..n.min(cls.len()) {
-            let c = Color::from_index(cls[i] as usize);
-            // `apply_mask_proto` leaves a mask zero outside its own detection box, so the
-            // rest of the frame cannot contribute and scanning it per instance is wasted
-            // work. Casting a float to an integer saturates, so a huge or non-finite
-            // coordinate clamps instead of wrapping.
-            let x0 = xyxy[[i, 0]].max(0.0) as usize;
-            let y0 = xyxy[[i, 1]].max(0.0) as usize;
-            let x1 = (xyxy[[i, 2]].max(0.0) as usize).saturating_add(1).min(w);
-            let y1 = (xyxy[[i, 3]].max(0.0) as usize).saturating_add(1).min(h);
-            let mask = masks.data.index_axis(ndarray::Axis(0), i);
-            for y in y0..y1 {
-                let row = mask.row(y);
-                for x in x0..x1 {
-                    if row[x] > 0.5 {
-                        put(&mut buf, w, x, y, c, 140);
-                    }
-                }
-            }
-        }
-        return buf;
-    }
 
     // Semantic: per-pixel class map, blended 50/50 like the native renderer.
     if let Some(sem) = &r.semantic_mask {

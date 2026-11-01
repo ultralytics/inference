@@ -324,7 +324,8 @@ async function toBytes(input: EncodedInput, what: string): Promise<Uint8Array> {
 function toImageData(input: DrawableInput): { data: Uint8Array; width: number; height: number } {
   if (typeof ImageData !== "undefined" && input instanceof ImageData) {
     return {
-      data: new Uint8Array(input.data.buffer, input.data.byteOffset, input.data.byteLength),
+      // Snapshot caller-owned pixels before a queued prediction can yield.
+      data: new Uint8Array(input.data),
       width: input.width,
       height: input.height,
     };
@@ -494,34 +495,28 @@ class LiteRtBackend {
   }
 
   /** Upload the input tensor, run, and read every output back to the CPU. */
-  async run<T>(
+  async run(
     input: Float32Array,
     shape: number[],
-    postprocess: (outputs: Float32Array[], shapes: number[][], inferenceMs: number) => T,
-  ): Promise<T> {
+  ): Promise<{ outputs: Float32Array[]; shapes: number[][]; inferenceMs: number }> {
     const t0 = performance.now();
     const cpuIn = new this.litert.Tensor(input, shape);
     let gpuIn: LiteRtTensor | undefined;
     try {
       gpuIn = this.device === "wasm" ? cpuIn : await cpuIn.moveTo("webgpu");
       const tensors = await this.model.run(gpuIn);
-      const hosts: LiteRtTensor[] = [];
-      try {
-        const outputs: Float32Array[] = [];
-        const shapes: number[][] = [];
-        for (const tensor of tensors) {
-          const host = await tensor.moveTo("wasm");
-          hosts.push(host);
-          const data = host.toTypedArray();
-          outputs.push(data instanceof Float32Array ? data : new Float32Array(data));
-          shapes.push(Array.from(host.type.layout.dimensions));
-        }
-        return postprocess(outputs, shapes, performance.now() - t0);
-      } finally {
-        // Keep host tensors alive through postprocessing in case their arrays are views.
-        for (const host of hosts) if (!tensors.includes(host)) host.delete?.();
-        for (const tensor of tensors) tensor.delete?.();
+      const outputs: Float32Array[] = [];
+      const shapes: number[][] = [];
+      for (const tensor of tensors) {
+        const host = await tensor.moveTo("wasm");
+        // LiteRT's toTypedArray() already copies the host data.
+        const data = host.toTypedArray();
+        outputs.push(data instanceof Float32Array ? data : new Float32Array(data));
+        shapes.push(Array.from(host.type.layout.dimensions));
+        host.delete?.();
+        if (tensor !== host) tensor.delete?.();
       }
+      return { outputs, shapes, inferenceMs: performance.now() - t0 };
     } finally {
       // Free the input tensors on both success and failure (per-frame loops leak fast).
       if (gpuIn && gpuIn !== cpuIn) gpuIn.delete?.();
@@ -611,17 +606,16 @@ class LiteRtEngine implements Engine {
 
   private async runDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
-    return this.backend.run(input, Array.from(this.pipeline.inputShape), (outputs, shapes, inferenceMs) =>
-      this.pipeline.postprocess(
-        outputs,
-        shapes.map((s) => new Uint32Array(s)),
-        inferenceMs,
-        p.conf,
-        p.iou,
-        p.classes,
-        p.colormap,
-        p.depthViz,
-      ),
+    const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
+    return this.pipeline.postprocess(
+      outputs,
+      shapes.map((s) => new Uint32Array(s)),
+      inferenceMs,
+      p.conf,
+      p.iou,
+      p.classes,
+      p.colormap,
+      p.depthViz,
     );
   }
 

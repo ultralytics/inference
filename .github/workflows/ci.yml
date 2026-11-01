@@ -126,20 +126,21 @@ jobs:
       # The ort provider libraries link TensorRT 10, not the runner image's 11, and
       # `cuda-preprocess` selects the TensorRT provider by default. NVIDIA's apt repo
       # carries the 10.x libraries, which install alongside the image's own TensorRT.
+      # The CUDA provider also needs cuRAND, which is not present in the runner image.
       - name: Install dependencies
         run: |
           export DEBIAN_FRONTEND=noninteractive
           curl -fsSLo /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
           dpkg -i /tmp/cuda-keyring.deb
           apt-get update
-          apt-get install -y pkg-config libssl-dev libnvinfer10 libnvonnxparsers10
+          apt-get install -y pkg-config libssl-dev libnvinfer10 libnvonnxparsers10 libcurand-13-2
 
       # The runner image's CUDA, cuDNN and cuBLAS are pip wheels that nothing puts on
       # the loader path, so ONNX Runtime cannot find them without this.
       - name: Set library paths
         run: |
           nvidia_libs=$(ls -d /usr/local/lib/python3*/dist-packages/nvidia/*/lib | paste -sd:)
-          echo "LD_LIBRARY_PATH=$nvidia_libs:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$nvidia_libs:/usr/local/cuda-13.2/targets/x86_64-linux/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

@@ -36,7 +36,7 @@ use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{
-    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head,
+    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head_masks,
 };
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
@@ -602,6 +602,7 @@ impl YoloModel {
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
+        let mut overlay = Vec::new();
         let results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
@@ -637,7 +638,7 @@ impl YoloModel {
                         })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
-            postprocess_with_head(
+            postprocess_with_head_masks(
                 views,
                 self.metadata.task,
                 &pre,
@@ -650,9 +651,10 @@ impl YoloModel {
                 self.metadata.end2end,
                 self.metadata.kpt_shape,
                 self.metadata.is_rtdetr(),
+                &mut |mask, box_data| payload::put_instance_mask(&mut overlay, mask, box_data),
             )
         };
-        results_to_js(&results, self.metadata.task, colormap, viz, t_post)
+        results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
     }
 }
 
@@ -893,7 +895,8 @@ impl YoloPipeline {
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        let results = postprocess_with_head(
+        let mut overlay = Vec::new();
+        let results = postprocess_with_head_masks(
             views,
             self.metadata.task,
             &pending.pre,
@@ -906,12 +909,14 @@ impl YoloPipeline {
             self.metadata.end2end,
             self.metadata.kpt_shape,
             self.metadata.is_rtdetr(),
+            &mut |mask, box_data| payload::put_instance_mask(&mut overlay, mask, box_data),
         );
         results_to_js(
             &results,
             self.metadata.task,
             colormap.parse().unwrap_or_default(),
             depth_viz.parse().unwrap_or_default(),
+            overlay,
             t_post,
         )
     }
@@ -1015,10 +1020,11 @@ fn results_to_js(
     task: Task,
     colormap: Colormap,
     viz: DepthViz,
+    overlay: Vec<u8>,
     t_post: f64,
 ) -> Result<JsValue, JsError> {
     let value = to_js(
-        &JsResults::from_results(results, task, colormap, viz),
+        &JsResults::from_results(results, task, colormap, viz, overlay),
         "results",
     )?;
     let speed = js_sys::Reflect::get(&value, &JsValue::from_str("speed"))

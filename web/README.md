@@ -193,6 +193,8 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
   `YOLO.load("/models/yolo26n.onnx", { device: "webgpu" | "cpu" })` (default `"auto"`). If
   WebGPU cannot engage, the load falls back to CPU; `model.device` reports what
   actually ran.
+- **Workers**: LiteRT image inputs and timing support worker globals; LiteRT's own worker asset
+  loading requirements still apply. The ONNX Runtime Web loader requires a browser window.
 - **RT-DETR**: supported for detection. An RT-DETR `.onnx` runs on WebGPU like any other
   model. LiteRT models that cannot be fully delegated to WebGPU run on CPU/wasm;
   `model.device` reports the selected device. Export an RT-DETR model yourself, since

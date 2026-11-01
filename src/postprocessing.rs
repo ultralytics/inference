@@ -32,6 +32,8 @@ use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, Sem
 use crate::task::Task;
 use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
 
+type MaskSink<'a> = dyn for<'b> FnMut(ArrayView2<'b, f32>, ArrayView1<'b, f32>) + 'a;
+
 /// Post-process raw model output into [`Results`] for `task`, selecting the RT-DETR decode
 /// when `rtdetr` is set.
 ///
@@ -58,6 +60,83 @@ pub fn postprocess_with_head(
     kpt_shape: Option<(usize, usize)>,
     rtdetr: bool,
 ) -> Results {
+    postprocess_with_head_impl(
+        outputs,
+        task,
+        preprocess,
+        config,
+        names,
+        orig_img,
+        path,
+        speed,
+        inference_shape,
+        end2end,
+        kpt_shape,
+        rtdetr,
+        None,
+    )
+}
+
+/// Post-process for the browser without retaining a full-resolution mask per detection.
+///
+/// The `on_mask` callback receives
+/// the original-resolution mask and its `[x1, y1, x2, y2, confidence, class]` box in
+/// detection order; streamed masks are not stored in [`Results::masks`].
+#[cfg(target_arch = "wasm32")]
+#[must_use]
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
+pub fn postprocess_with_head_masks(
+    outputs: Vec<(&[f32], Vec<usize>)>,
+    task: Task,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+    end2end: bool,
+    kpt_shape: Option<(usize, usize)>,
+    rtdetr: bool,
+    on_mask: &mut MaskSink<'_>,
+) -> Results {
+    postprocess_with_head_impl(
+        outputs,
+        task,
+        preprocess,
+        config,
+        names,
+        orig_img,
+        path,
+        speed,
+        inference_shape,
+        end2end,
+        kpt_shape,
+        rtdetr,
+        Some(on_mask),
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::similar_names,
+    clippy::implicit_hasher
+)]
+fn postprocess_with_head_impl(
+    outputs: Vec<(&[f32], Vec<usize>)>,
+    task: Task,
+    preprocess: &PreprocessResult,
+    config: &InferenceConfig,
+    names: Arc<HashMap<usize, String>>,
+    orig_img: Array3<u8>,
+    path: String,
+    speed: Speed,
+    inference_shape: (u32, u32),
+    end2end: bool,
+    kpt_shape: Option<(usize, usize)>,
+    rtdetr: bool,
+    on_mask: Option<&mut MaskSink<'_>>,
+) -> Results {
     let results = Results::new(orig_img, path, names, speed, inference_shape);
     match task {
         Task::Detect => {
@@ -83,9 +162,9 @@ pub fn postprocess_with_head(
                 .get(1)
                 .and_then(|(_, s)| if s.len() == 4 { Some(s[1]) } else { None });
             if end2end || is_end2end_segment_shape(&outputs[0].1, proto_channels) {
-                postprocess_segment_end2end(outputs, preprocess, config, results)
+                postprocess_segment_end2end(outputs, preprocess, config, results, on_mask)
             } else {
-                postprocess_segment(outputs, preprocess, config, results)
+                postprocess_segment(outputs, preprocess, config, results, on_mask)
             }
         }
         Task::Semantic => {
@@ -742,6 +821,11 @@ fn apply_mask_proto(
         .assign(&src);
 }
 
+enum BuiltMasks {
+    Full(Array3<f32>),
+    Streamed,
+}
+
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
 /// to the original image size. Shared by the standard and end2end segment post-processors.
 ///
@@ -758,7 +842,8 @@ fn build_instance_masks(
     boxes_data: &Array2<f32>,
     preprocess: &PreprocessResult,
     inference_shape: (u32, u32),
-) -> Option<Array3<f32>> {
+    on_mask: Option<&mut MaskSink<'_>>,
+) -> Option<BuiltMasks> {
     // Protos: [1, num_masks, mh, mw] -> [num_masks, mh*mw]
     let protos = match ArrayView2::from_shape((num_masks, mh * mw), protos_data) {
         Ok(view) => view,
@@ -781,6 +866,29 @@ fn build_instance_masks(
     let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
     let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
 
+    if let Some(on_mask) = on_mask {
+        let (h, w) = (oh as usize, ow as usize);
+        let mut mask = Array2::<f32>::zeros((h, w));
+        for (mask_flat, box_data) in masks_flat.outer_iter().zip(boxes_data.outer_iter()) {
+            mask.fill(0.0);
+            apply_mask_proto(
+                mask.view_mut(),
+                &mask_flat,
+                &box_data,
+                mw,
+                mh,
+                ow,
+                oh,
+                crop_x,
+                crop_y,
+                crop_w,
+                crop_h,
+            );
+            on_mask(mask.view(), box_data);
+        }
+        return Some(BuiltMasks::Streamed);
+    }
+
     let mut masks_data = Array3::zeros((boxes_data.nrows(), oh as usize, ow as usize));
     let zip = Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
@@ -796,7 +904,7 @@ fn build_instance_masks(
     #[cfg(target_arch = "wasm32")]
     zip.for_each(apply);
 
-    Some(masks_data)
+    Some(BuiltMasks::Full(masks_data))
 }
 
 /// Post-process segmentation model output.
@@ -826,6 +934,7 @@ fn postprocess_segment(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     mut results: Results,
+    on_mask: Option<&mut MaskSink<'_>>,
 ) -> Results {
     let nc = results.names.len();
     let inference_shape = results.inference_shape();
@@ -907,9 +1016,10 @@ fn postprocess_segment(
         &boxes_data,
         preprocess,
         inference_shape,
+        on_mask,
     );
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
-    if let Some(masks_data) = masks_data {
+    if let Some(BuiltMasks::Full(masks_data)) = masks_data {
         results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
     }
 
@@ -1296,6 +1406,7 @@ fn postprocess_segment_end2end(
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
     mut results: Results,
+    on_mask: Option<&mut MaskSink<'_>>,
 ) -> Results {
     let inference_shape = results.inference_shape();
     if outputs.len() < 2 {
@@ -1360,12 +1471,15 @@ fn postprocess_segment_end2end(
         &boxes_data,
         preprocess,
         inference_shape,
+        on_mask,
     ) else {
         return results;
     };
 
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
-    results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
+    if let BuiltMasks::Full(masks_data) = masks_data {
+        results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
+    }
     results
 }
 
@@ -1877,6 +1991,44 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_streamed_instance_masks_match_dense_masks() {
+        let coeffs = ndarray::array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.5]];
+        let protos: Vec<f32> = (0..32u16).map(|i| (f32::from(i) - 15.0) / 4.0).collect();
+        let boxes = ndarray::array![
+            [0.0, 0.0, 5.5, 5.5, 0.9, 0.0],
+            [2.0, 1.5, 7.0, 7.0, 0.8, 1.0],
+            [-1.0, 4.0, 3.0, 9.0, 0.7, 2.0]
+        ];
+        let pre = unit_preprocess((8, 8));
+        let Some(BuiltMasks::Full(full)) =
+            build_instance_masks(&coeffs, &protos, 2, 4, 4, &boxes, &pre, (8, 8), None)
+        else {
+            panic!("dense masks should be built");
+        };
+        let mut index = 0;
+        let mut sink = |mask: ArrayView2<'_, f32>, bbox: ArrayView1<'_, f32>| {
+            assert_eq!(mask, full.index_axis(ndarray::Axis(0), index));
+            assert_eq!(bbox, boxes.row(index));
+            index += 1;
+        };
+        assert!(matches!(
+            build_instance_masks(
+                &coeffs,
+                &protos,
+                2,
+                4,
+                4,
+                &boxes,
+                &pre,
+                (8, 8),
+                Some(&mut sink)
+            ),
+            Some(BuiltMasks::Streamed)
+        ));
+        assert_eq!(index, boxes.nrows());
     }
 
     /// Class names `class0..class{nc-1}`.
