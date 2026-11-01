@@ -159,8 +159,7 @@ impl CudaStreamHandle {
 ///
 /// Built in two phases at model load time: [`CudaStreamHandle::open`] runs
 /// *before* the ORT session is constructed (so the stream can be plumbed
-/// into the TRT/CUDA EPs), then [`Self::finalize`] runs *after* the session
-/// commit (so the execution provider is initialized).
+/// into the TRT/CUDA EPs), then [`Self::finalize`] uses the committed model's metadata.
 /// Per-frame work happens in [`Self::preprocess`].
 pub(crate) struct CudaPreprocessor {
     /// Kept alive so the stream below outlives every session bound to it.
@@ -299,8 +298,8 @@ impl CudaPreprocessor {
     /// explicit synchronize.
     ///
     /// # Safety
-    /// `input_ptr` must address the full batch tensor on this CUDA context and stay
-    /// valid until the queued work on the shared stream has completed.
+    /// `input_ptr` must address at least `(slot + 1) * 3 * dst.0 * dst.1` f32 values
+    /// on this CUDA context until the queued work on the shared stream completes.
     pub(crate) unsafe fn preprocess(
         &mut self,
         frame_hwc: &[u8],

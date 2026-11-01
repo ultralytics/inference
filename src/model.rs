@@ -694,7 +694,7 @@ impl YOLOModel {
         let mut metadata = metadata;
         metadata.imgsz = Some(resolved_imgsz);
 
-        // Finalize the GPU preprocessor after the execution provider is initialized.
+        // Finalize the GPU preprocessor using the model metadata.
         // The handle MUST be consumed (not dropped) once `with_compute_stream`
         // has been wired into the EPs above - dropping the last `Arc<CudaStream>`
         // would invalidate the raw pointer held by ORT. So if the stream was
