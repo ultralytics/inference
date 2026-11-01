@@ -4,9 +4,7 @@
 //!
 //! Mirrors the Ultralytics `Results` API field-for-field so the TypeScript
 //! wrapper sees a plain serializable object. Per-task fields are empty/`null`
-//! when unused. The only entry points the bindings need are [`JsResults`] and
-//! [`JsResults::from_results`]; every other type here is an internal detail of
-//! that mapping.
+//! when unused.
 
 use serde::Serialize;
 

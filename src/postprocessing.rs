@@ -79,9 +79,9 @@ pub fn postprocess_with_head(
 
 /// Post-process for the browser without retaining a full-resolution mask per detection.
 ///
-/// The `on_mask` callback receives
-/// the original-resolution mask and its `[x1, y1, x2, y2, confidence, class]` box in
-/// detection order; streamed masks are not stored in [`Results::masks`].
+/// The `on_mask` callback receives the original-resolution mask and its
+/// `[x1, y1, x2, y2, confidence, class]` box in detection order; streamed masks
+/// are not stored in [`Results::masks`].
 #[cfg(target_arch = "wasm32")]
 #[must_use]
 #[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
@@ -731,6 +731,7 @@ fn extract_detect_boxes(
 /// gets the same crop and destination size along its axis as a single full-frame resize,
 /// so `fast_image_resize` computes the same coefficients, the same f32 intermediate rows,
 /// and the output is exactly the same.
+/// Returns the inclusive bounds of the pixels written, if any.
 #[allow(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
@@ -749,18 +750,18 @@ fn apply_mask_proto(
     crop_y: f32,
     crop_w: f32,
     crop_h: f32,
-) {
+) -> Option<(usize, usize, usize, usize)> {
     let x1 = box_data[0].max(0.0).min(ow as f32);
     let y1 = box_data[1].max(0.0).min(oh as f32);
     let x2 = box_data[2].max(0.0).min(ow as f32);
     let y2 = box_data[3].max(0.0).min(oh as f32);
 
     if ow == 0 || oh == 0 {
-        return;
+        return None;
     }
 
-    // Only pixels inside the box are ever written and `mask_out` arrives zeroed from the
-    // caller's `Array3::zeros`, so walk the box instead of testing every pixel in the frame.
+    // Only pixels inside the box are ever written and `mask_out` arrives zeroed,
+    // so walk the box instead of testing every pixel in the frame.
     // The bounds are the integer pixels satisfying the old `x >= x1 && x <= x2` test; a
     // degenerate box gives an empty range and writes nothing, as before.
     let x_start = x1.ceil() as usize;
@@ -769,7 +770,7 @@ fn apply_mask_proto(
     let y_end = (y2.floor() as usize).min(oh as usize - 1);
 
     if x_start > x_end || y_start > y_end {
-        return;
+        return None;
     }
 
     let f32_data: Vec<f32> = mask_flat
@@ -777,9 +778,7 @@ fn apply_mask_proto(
         .map(|&v| 1.0 / (1.0 + (-v).exp()))
         .collect();
     let src_bytes: &[u8] = bytemuck::cast_slice(&f32_data);
-    let Ok(src_image) = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32) else {
-        return;
-    };
+    let src_image = ImageRef::new(mw as u32, mh as u32, src_bytes, PixelType::F32).ok()?;
 
     let resize_alg = ResizeAlg::Convolution(FilterType::Bilinear);
 
@@ -792,9 +791,7 @@ fn apply_mask_proto(
         f64::from(crop_w.max(1.0).min(mw as f32)),
         mh as f64,
     );
-    if resize(&src_image, &mut rows, &options).is_err() {
-        return;
-    }
+    resize(&src_image, &mut rows, &options).ok()?;
 
     // Vertical pass over the box only: just the output rows inside the box are resized, from
     // the matching source rows at the same scale. An integer left edge and unchanged width
@@ -809,9 +806,7 @@ fn apply_mask_proto(
         box_w as f64,
         box_h as f64 * row_scale,
     );
-    if resize(&rows, &mut cols, &options).is_err() {
-        return;
-    }
+    resize(&rows, &mut cols, &options).ok()?;
 
     let cols_slice: &[f32] = bytemuck::cast_slice(cols.buffer());
     let src =
@@ -819,6 +814,7 @@ fn apply_mask_proto(
     mask_out
         .slice_mut(s![y_start..=y_end, x_start..=x_end])
         .assign(&src);
+    Some((x_start, y_start, x_end, y_end))
 }
 
 enum BuiltMasks {
@@ -866,25 +862,22 @@ fn build_instance_masks(
     let crop_w = 2.0f32.mul_add(-crop_x, mw as f32);
     let crop_h = 2.0f32.mul_add(-crop_y, mh as f32);
 
+    let apply =
+        |mask_out: ArrayViewMut2<f32>, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
+            apply_mask_proto(
+                mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
+            )
+        };
     if let Some(on_mask) = on_mask {
         let (h, w) = (oh as usize, ow as usize);
         let mut mask = Array2::<f32>::zeros((h, w));
         for (mask_flat, box_data) in masks_flat.outer_iter().zip(boxes_data.outer_iter()) {
-            mask.fill(0.0);
-            apply_mask_proto(
-                mask.view_mut(),
-                &mask_flat,
-                &box_data,
-                mw,
-                mh,
-                ow,
-                oh,
-                crop_x,
-                crop_y,
-                crop_w,
-                crop_h,
-            );
+            let bounds = apply(mask.view_mut(), mask_flat, box_data);
             on_mask(mask.view(), box_data);
+            if let Some((x_start, y_start, x_end, y_end)) = bounds {
+                mask.slice_mut(s![y_start..=y_end, x_start..=x_end])
+                    .fill(0.0);
+            }
         }
         return Some(BuiltMasks::Streamed);
     }
@@ -893,16 +886,15 @@ fn build_instance_masks(
     let zip = Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
         .and(boxes_data.outer_iter());
-    let apply = |mask_out, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
-        apply_mask_proto(
-            mask_out, &mask_flat, &box_data, mw, mh, ow, oh, crop_x, crop_y, crop_w, crop_h,
-        );
-    };
     // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
     #[cfg(not(target_arch = "wasm32"))]
-    zip.par_for_each(apply);
+    zip.par_for_each(|mask, coeffs, bbox| {
+        let _ = apply(mask, coeffs, bbox);
+    });
     #[cfg(target_arch = "wasm32")]
-    zip.for_each(apply);
+    zip.for_each(|mask, coeffs, bbox| {
+        let _ = apply(mask, coeffs, bbox);
+    });
 
     Some(BuiltMasks::Full(masks_data))
 }
@@ -1995,12 +1987,13 @@ mod tests {
 
     #[test]
     fn test_streamed_instance_masks_match_dense_masks() {
-        let coeffs = ndarray::array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.5]];
+        let coeffs = ndarray::array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.5], [1.0, 1.0]];
         let protos: Vec<f32> = (0..32u16).map(|i| (f32::from(i) - 15.0) / 4.0).collect();
         let boxes = ndarray::array![
             [0.0, 0.0, 5.5, 5.5, 0.9, 0.0],
             [2.0, 1.5, 7.0, 7.0, 0.8, 1.0],
-            [-1.0, 4.0, 3.0, 9.0, 0.7, 2.0]
+            [-1.0, 4.0, 3.0, 9.0, 0.7, 2.0],
+            [3.5, 3.5, 3.5, 3.5, 0.6, 3.0]
         ];
         let pre = unit_preprocess((8, 8));
         let Some(BuiltMasks::Full(full)) =
