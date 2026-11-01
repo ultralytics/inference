@@ -197,8 +197,7 @@ the CPU path runs and the flag is silently ignored:
 `predict_batch` and the multi-image path use the same kernel, writing each image
 into its own slot of one `[N, 3, H, W]` device buffer, so a batch is uploaded
 without a host-side concatenation. A batch of more than one image keeps the CPU path
-for `Semantic` models, and for a batch larger than the device buffer, which is sized
-at load for the model's pinned batch or the configured `batch`.
+for `Semantic` models.
 
 The source frame goes to the GPU as 8-bit RGB, a third of the bytes of the f32 tensor. On a
 discrete GPU it is first copied into a reused pinned host buffer, so the upload runs as an async
