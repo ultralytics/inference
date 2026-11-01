@@ -184,30 +184,6 @@ impl DepthMap {
     /// warm and single-pixel outliers no longer wash out the range.
     #[must_use]
     pub fn colorize(&self, colormap: Colormap, viz: DepthViz) -> Vec<[u8; 3]> {
-        let mut out = vec![[0u8; 3]; self.data.len()];
-        self.colorize_into(&mut out, colormap, viz, |rgb| rgb);
-        out
-    }
-
-    /// Colorize into row-major opaque RGBA bytes, using the same mapping as [`Self::colorize`].
-    #[must_use]
-    pub fn colorize_rgba(&self, colormap: Colormap, viz: DepthViz) -> Vec<u8> {
-        let mut out = vec![0u8; self.data.len() * 4];
-        let (pixels, _) = out.as_chunks_mut::<4>();
-        self.colorize_into(pixels, colormap, viz, |[r, g, b]| [r, g, b, 255]);
-        out
-    }
-
-    /// Colorize directly into the caller's pixel format without an intermediate RGB image.
-    fn colorize_into<const N: usize, F>(
-        &self,
-        out: &mut [[u8; N]],
-        colormap: Colormap,
-        viz: DepthViz,
-        convert: F,
-    ) where
-        F: Fn([u8; 3]) -> [u8; N] + Sync,
-    {
         let data = &self.data;
         let black = [0u8; 3];
         // Per-viz normalization bounds: `Metric` maps depth directly over its valid min/max;
@@ -220,8 +196,7 @@ impl DepthMap {
             }
             DepthViz::Disparity => {
                 let Some((lo, hi)) = disparity_percentiles(data) else {
-                    out.fill(convert(black));
-                    return;
+                    return vec![black; data.len()];
                 };
                 (lo, 1.0 / (hi - lo).max(1e-6), true)
             }
@@ -230,26 +205,21 @@ impl DepthMap {
         // worth spreading across cores; `crate::parallel` is sequential on wasm.
         let Some(src) = data.as_slice() else {
             // Non-contiguous storage cannot be chunked; fall back to the sequential map.
-            for (px, &d) in out.iter_mut().zip(data.iter()) {
-                *px = convert(Self::pixel(d, lo, inv, disparity, colormap, black));
-            }
-            return;
+            return data
+                .iter()
+                .map(|&d| Self::pixel(d, lo, inv, disparity, colormap, black))
+                .collect();
         };
+        let mut out = vec![black; src.len()];
         out.par_chunks_mut(COLORIZE_CHUNK)
             .enumerate()
             .for_each(|(c, dst)| {
                 let base = c * COLORIZE_CHUNK;
                 for (k, px) in dst.iter_mut().enumerate() {
-                    *px = convert(Self::pixel(
-                        src[base + k],
-                        lo,
-                        inv,
-                        disparity,
-                        colormap,
-                        black,
-                    ));
+                    *px = Self::pixel(src[base + k], lo, inv, disparity, colormap, black);
                 }
             });
+        out
     }
 
     /// Map one depth sample to its color: invalid (non-positive) pixels stay `black`,
@@ -1307,29 +1277,6 @@ mod tests {
         assert_eq!(results.len(), 0);
         assert!(results.is_empty());
         assert_eq!(results.detection_summary(), "depth 1.50-4.00m");
-    }
-
-    #[test]
-    fn test_depth_colorize_rgba_matches_rgb() {
-        let data = array![[0.0f32, 1.5, 3.0], [-1.0, 4.0, 0.5]];
-        for map in [data.clone(), data.reversed_axes(), array![[0.0, -1.0]]] {
-            let depth = DepthMap::new(map, (0, 0));
-            for colormap in [
-                Colormap::Inferno,
-                Colormap::Jet,
-                Colormap::Spectral,
-                Colormap::Gray,
-            ] {
-                for viz in [DepthViz::Metric, DepthViz::Disparity] {
-                    let expected: Vec<u8> = depth
-                        .colorize(colormap, viz)
-                        .into_iter()
-                        .flat_map(|[r, g, b]| [r, g, b, 255])
-                        .collect();
-                    assert_eq!(depth.colorize_rgba(colormap, viz), expected);
-                }
-            }
-        }
     }
 
     #[test]

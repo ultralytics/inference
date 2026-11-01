@@ -20,7 +20,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use image::ImageReader;
@@ -101,11 +100,12 @@ fn now_ms() -> f64 {
         .map_or(0.0, |p| p.now())
 }
 
+/// ONNX Runtime Web sessions share runtime state during creation and execution.
+static ORT_LOCK: futures_util::lock::Mutex<()> = futures_util::lock::Mutex::new(());
+
 thread_local! {
     /// Backend choice and its shared initialization, including while it is in flight.
     static BACKEND: RefCell<Option<(bool, Option<String>, js_sys::Promise)>> = const { RefCell::new(None) };
-    /// ONNX Runtime Web sessions share runtime state during creation and execution.
-    static ORT_LOCK: Rc<futures_util::lock::Mutex<()>> = Rc::new(futures_util::lock::Mutex::new(()));
     /// The ONNX Runtime environment built once the backend is installed. Every session on
     /// the page is created under it.
     static ENV: RefCell<Option<Environment>> = const { RefCell::new(None) };
@@ -474,8 +474,7 @@ impl YoloModel {
     /// catches to fall back to CPU) instead of a silent downgrade we would
     /// mislabel.
     async fn commit(bytes: &[u8], device: Device) -> Result<Session, JsError> {
-        let runtime = ORT_LOCK.with(Rc::clone);
-        let _guard = runtime.lock().await;
+        let _guard = ORT_LOCK.lock().await;
         let env = ENV
             .with(|e| e.borrow().clone())
             .ok_or_else(|| JsError::new("the ONNX Runtime backend is not initialized"))?;
@@ -543,10 +542,9 @@ impl YoloModel {
     /// Core async predict: decode -> preprocess -> `run_async` -> sync -> postprocess.
     ///
     /// The three timed stages mirror the Ultralytics `speed` breakdown:
-    /// `preprocess` = JPEG/PNG decode + letterbox/normalize; `inference` =
-    /// `run_async` + cross-context output sync; `postprocess` = NMS, decoding,
-    /// and coordinate scaling. (Image *download* happens in JS before this and is
-    /// not counted here.)
+    /// `preprocess` = letterbox/normalize; `inference` = `run_async` + cross-context
+    /// output sync; `postprocess` = decoding, overlay construction, and serialization.
+    /// Image download and decoding happen before this and are not counted here.
     async fn run(
         &mut self,
         dynimg: image::DynamicImage,
@@ -577,9 +575,9 @@ impl YoloModel {
 
         // Upload the NCHW f32 tensor into the ORT (WebGPU) context and run. Postprocessing
         // reads only the letterbox geometry from `pre`, so the tensor moves instead of cloning.
+        let pre_ms = now_ms() - t_pre;
+        let guard = ORT_LOCK.lock().await;
         let t_inf = now_ms();
-        let runtime = ORT_LOCK.with(Rc::clone);
-        let guard = runtime.lock().await;
         let input = Tensor::from_array(std::mem::take(&mut pre.tensor)).map_err(map_ort)?;
         let run_options = RunOptions::new().map_err(map_ort)?;
         let mut outputs = self
@@ -598,7 +596,7 @@ impl YoloModel {
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         // Postprocess is timed after it returns (below), the same as the `YoloPipeline`
         // path: building the `Speed` here would only measure the setup above it.
-        let speed = || Speed::new(t_inf - t_pre, t_post - t_inf, 0.0);
+        let speed = || Speed::new(pre_ms, t_post - t_inf, 0.0);
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).

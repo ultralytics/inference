@@ -41,11 +41,7 @@ type MaskSink<'a> = dyn for<'b> FnMut(ArrayView2<'b, f32>, ArrayView1<'b, f32>) 
 /// of the NMS-free YOLO head but reports `[cx, cy, w, h]` normalized to the input, so the two
 /// cannot be told apart from the tensors alone and the caller has to say which it holds.
 #[must_use]
-#[allow(
-    clippy::too_many_arguments,
-    clippy::similar_names,
-    clippy::implicit_hasher
-)]
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub fn postprocess_with_head(
     outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,
@@ -117,11 +113,7 @@ pub fn postprocess_with_head_masks(
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::similar_names,
-    clippy::implicit_hasher
-)]
+#[allow(clippy::too_many_arguments, clippy::similar_names)]
 fn postprocess_with_head_impl(
     outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,

@@ -716,7 +716,12 @@ export class YOLO {
       const { data, width, height } = toImageData(image);
       predict = () => this.engine.predictDrawable(data, width, height, p);
     } else {
-      const bytes = await toBytes(image, "image");
+      const bytes =
+        image instanceof Uint8Array
+          ? image.slice()
+          : image instanceof ArrayBuffer
+            ? new Uint8Array(image.slice(0))
+            : await toBytes(image, "image");
       predict = () => this.engine.predictEncoded(bytes, p);
     }
     const result = this.queue.then(async () => decodeResults(await predict()));

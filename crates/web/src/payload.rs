@@ -47,7 +47,7 @@ struct JsKeypoints {
     color: String,
 }
 
-/// Per-stage timing in ms, mirroring `Speed` (decode+letterbox / inference+sync / decode+NMS).
+/// Per-stage timing in ms, mirroring `Speed` (preprocess / inference+sync / postprocess+serialization).
 #[derive(Serialize)]
 struct JsSpeed {
     preprocess: f64,
@@ -199,7 +199,7 @@ impl JsResults {
             keypoints,
             probs,
             masks: if overlay.is_empty() {
-                build_mask_overlay(r)
+                build_semantic_overlay(r)
             } else {
                 overlay
             },
@@ -259,8 +259,7 @@ pub(crate) fn put_instance_mask(
 /// Build a translucent colored RGBA overlay (`width*height*4`) from the semantic
 /// class map, colored by the class palette.
 /// Empty for other tasks or if the mask resolution does not match the image.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn build_mask_overlay(r: &Results) -> Vec<u8> {
+fn build_semantic_overlay(r: &Results) -> Vec<u8> {
     let (h, w) = (r.orig_shape.0 as usize, r.orig_shape.1 as usize);
 
     // Semantic: per-pixel class map, blended 50/50 like the native renderer.
@@ -299,5 +298,10 @@ fn build_depth_overlay(r: &Results, colormap: Colormap, viz: DepthViz) -> Vec<u8
     if depth.data.dim() != (h, w) {
         return Vec::new();
     }
-    depth.colorize_rgba(colormap, viz)
+    let mut buf = vec![0u8; w * h * 4];
+    let (pixels, _) = buf.as_chunks_mut::<4>();
+    for (px, rgb) in pixels.iter_mut().zip(depth.colorize(colormap, viz)) {
+        *px = [rgb[0], rgb[1], rgb[2], 255];
+    }
+    buf
 }
