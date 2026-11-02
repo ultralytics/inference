@@ -75,12 +75,6 @@ impl Device {
         }
     }
 
-    /// Whether this device needs the accelerated (jsep) runtime build versus the
-    /// portable CPU/wasm build.
-    fn accelerated(self) -> bool {
-        self == Self::WebGpu
-    }
-
     /// Lowercase label reported via [`YoloModel::device`], matching the native
     /// `Device` display style (`"cpu"`, `"coreml"`, ...).
     fn label(self) -> &'static str {
@@ -223,15 +217,13 @@ fn metadata_from_text(text: Option<String>, missing: &str) -> Result<ModelMetada
 /// consumes.
 fn build_metadata(model_bytes: &[u8]) -> Result<ModelMetadata, JsError> {
     let props = onnx_meta::parse_metadata_props(model_bytes);
-    let text = (!props.is_empty()).then(|| {
-        props
-            .iter()
-            .map(|(k, v)| format!("{k}: {v}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
+    let text = props
+        .iter()
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     metadata_from_text(
-        text,
+        Some(text),
         "no metadata found in ONNX model. Export it with Ultralytics \
          (`model.export(format='onnx')`) so the task, class names, and imgsz are embedded.",
     )
@@ -295,9 +287,16 @@ fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::Dynami
         .ok_or_else(|| JsError::new("failed to build image from rgba buffer"))
 }
 
-/// Build the shared `InferenceConfig` from the JS thresholds and class filter.
-fn make_config(conf: f32, iou: f32, classes: Option<Vec<u32>>) -> InferenceConfig {
-    let mut config = InferenceConfig::new().with_confidence(conf).with_iou(iou);
+/// Build the shared `InferenceConfig` from the JS thresholds and class filter,
+/// keeping the Rust defaults for any threshold left unset.
+fn make_config(conf: Option<f32>, iou: Option<f32>, classes: Option<Vec<u32>>) -> InferenceConfig {
+    let mut config = InferenceConfig::new();
+    if let Some(conf) = conf {
+        config = config.with_confidence(conf);
+    }
+    if let Some(iou) = iou {
+        config = config.with_iou(iou);
+    }
     if let Some(classes) = classes {
         config = config.with_classes(classes.into_iter().map(|c| c as usize).collect());
     }
@@ -346,7 +345,7 @@ impl YoloModel {
         device: String,
     ) -> Result<YoloModel, JsError> {
         let want = Device::parse(&device);
-        ensure_backend(ort_base_url, want.accelerated()).await?;
+        ensure_backend(ort_base_url, want == Device::WebGpu).await?;
         let metadata = build_metadata(&bytes)?;
         let bytes = onnx_meta::with_f32_io(&bytes).unwrap_or(bytes);
         if want != Device::Cpu
@@ -385,8 +384,8 @@ impl YoloModel {
 
     /// Run inference on a single encoded image (JPEG or PNG bytes).
     ///
-    /// `conf` and `iou` are the confidence and NMS IoU thresholds (pass the model
-    /// defaults 0.25 / 0.7 to match Ultralytics); `classes` optionally keeps only
+    /// `conf` and `iou` are the confidence and NMS IoU thresholds (omit them for the
+    /// Ultralytics defaults 0.25 / 0.7); `classes` optionally keeps only
     /// the given class ids (for semantic, other pixels become background).
     /// Returns a plain JS object whose shape mirrors the Ultralytics `Results` API.
     ///
@@ -395,8 +394,8 @@ impl YoloModel {
     pub async fn predict(
         &mut self,
         image: Vec<u8>,
-        conf: f32,
-        iou: f32,
+        conf: Option<f32>,
+        iou: Option<f32>,
         classes: Option<Vec<u32>>,
         colormap: String,
         depth_viz: String,
@@ -427,8 +426,8 @@ impl YoloModel {
         rgba: Vec<u8>,
         width: u32,
         height: u32,
-        conf: f32,
-        iou: f32,
+        conf: Option<f32>,
+        iou: Option<f32>,
         classes: Option<Vec<u32>>,
         colormap: String,
         depth_viz: String,
@@ -548,8 +547,8 @@ impl YoloModel {
     async fn run(
         &mut self,
         dynimg: image::DynamicImage,
-        conf: f32,
-        iou: f32,
+        conf: Option<f32>,
+        iou: Option<f32>,
         classes: Option<Vec<u32>>,
         colormap: Colormap,
         viz: DepthViz,
@@ -710,20 +709,6 @@ impl YoloPipeline {
         self.metadata.task.as_str().to_owned()
     }
 
-    /// Whether this is an NMS-free export, e.g. YOLO26 with `nms=False`.
-    #[wasm_bindgen(getter)]
-    #[must_use]
-    pub fn end2end(&self) -> bool {
-        self.metadata.end2end
-    }
-
-    /// Whether this is an RT-DETR export.
-    #[wasm_bindgen(getter)]
-    #[must_use]
-    pub fn rtdetr(&self) -> bool {
-        self.metadata.is_rtdetr()
-    }
-
     /// Class id -> name map (like `model.names`), as a JS object.
     ///
     /// # Errors
@@ -825,8 +810,8 @@ impl YoloPipeline {
         outputs: Vec<Float32Array>,
         shapes: Vec<Uint32Array>,
         inference_ms: f64,
-        conf: f32,
-        iou: f32,
+        conf: Option<f32>,
+        iou: Option<f32>,
         classes: Option<Vec<u32>>,
         colormap: String,
         depth_viz: String,

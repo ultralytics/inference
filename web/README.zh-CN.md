@@ -79,7 +79,7 @@ await annotate(document.querySelector("canvas"), "bus.jpg", results);
 ```
 
 `predict()` 接受 URL/路径、`Blob`/`File`、原始编码图片字节（`Uint8Array`/`ArrayBuffer`）、
-`ImageData`、`HTMLImageElement`、`HTMLCanvasElement`、`HTMLVideoElement` 或 `ImageBitmap`。
+`ImageData`、`HTMLImageElement`、`HTMLCanvasElement`、`HTMLVideoElement`、`OffscreenCanvas` 或 `ImageBitmap`。
 
 ```ts
 const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
@@ -288,7 +288,7 @@ wasm 默认从 jsDelivr CDN 加载；向 `YOLO.load` 传入 `litertWasmUrl: "/li
 - **支持的任务**：detect、segment、semantic、depth、classify、pose 和 obb 均已支持。
 - **跨源隔离**：LiteRT 的多线程 wasm 需要 `SharedArrayBuffer`，因此请以
   `Cross-Origin-Opener-Policy: same-origin` 和 `Cross-Origin-Embedder-Policy: require-corp`
-  提供服务。
+  提供服务。这会拦截默认 CDN 上的 wasm，因此还需传入同源的 `litertWasmUrl`。
 
 ## 🏎️ 基准测试
 

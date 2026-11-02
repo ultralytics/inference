@@ -79,8 +79,8 @@ pub(crate) struct JsResults {
     obb: Vec<JsObb>,
     keypoints: Vec<JsKeypoints>,
     probs: Option<JsProbs>,
-    /// Segment masks as a translucent colored `RGBA` overlay (`width*height*4`);
-    /// empty for other tasks. A `Uint8Array`, drawable straight onto a canvas.
+    /// Segment or semantic masks as a translucent colored `RGBA` overlay
+    /// (`width*height*4`); empty for other tasks. A `Uint8Array`, drawable straight onto a canvas.
     #[serde(with = "serde_bytes")]
     masks: Vec<u8>,
     /// Semantic class id per pixel, little-endian `u16` (`width*height*2` bytes),
