@@ -347,13 +347,8 @@ fn scale_and_clip_box(xyxy: &[f32; 4], preprocess: &PreprocessResult) -> [f32; 4
 /// image, then clamp it to the image bounds.
 #[inline]
 fn scale_keypoint(x: f32, y: f32, preprocess: &PreprocessResult) -> (f32, f32) {
-    let scaled = scale_coords(&[x, y, x, y], preprocess.scale, preprocess.padding);
-    #[allow(clippy::cast_precision_loss)]
-    let (max_h, max_w) = (
-        preprocess.orig_shape.0 as f32,
-        preprocess.orig_shape.1 as f32,
-    );
-    (scaled[0].clamp(0.0, max_w), scaled[1].clamp(0.0, max_h))
+    let [x, y, ..] = scale_and_clip_box(&[x, y, x, y], preprocess);
+    (x, y)
 }
 
 /// Append `nk` keypoints of `kpt_dim` channels from `kpts`, with x/y scaled to original image
@@ -950,7 +945,7 @@ fn postprocess_segment(
     }
 
     // Convert to 2D [preds, features]. `output_to_2d` yields an empty array when the feature
-    // count disagrees with the buffer, which `decode_row` cannot index.
+    // count disagrees with the buffer, which the decoder cannot index.
     let output_2d = output_to_2d(output0, num_preds, expected_features, is_transposed);
 
     if output_2d.is_empty() {
@@ -1807,13 +1802,9 @@ fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> R
 /// Post-process semantic segmentation model output.
 ///
 /// The model outputs raw logits of shape `[1, nc, lh, lw]` at the P3 scale
-/// (stride 8). Pipeline:
-/// 1. Transpose CHW to HWC once (small: lh*lw*nc f32s) so per-pixel argmax is contiguous.
-/// 2. Bilinear-interpolate each output pixel's 4 source neighbors, fused with argmax
-///    over `nc` classes, producing the final class map in one pass.
-///
-/// Memory traffic per output pixel drops from 4*nc strided reads to 4*nc contiguous
-/// reads; the source channels for one source pixel fit in ~80 bytes (1-2 cache lines).
+/// (stride 8). The letterbox padding is cropped, then each output pixel bilinearly
+/// interpolates its 4 source neighbors per class and keeps the argmax, producing the
+/// final class map in one pass over the CHW data.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
@@ -3092,7 +3083,7 @@ mod tests {
     }
 
     /// A class count that disagrees with the real head width used to panic: `output_to_2d`
-    /// returns an empty array and `decode_row` indexed row 0 of it. Pose and obb already
+    /// returns an empty array and the decoder indexed row 0 of it. Pose and obb already
     /// guarded this; segment did not.
     #[test]
     fn test_dispatch_segment_feature_mismatch_is_empty() {

@@ -24,12 +24,14 @@ use rayon::iter::{
 };
 use rayon::slice::ParallelSliceMut;
 
-use crate::download::{DEFAULT_IMAGES, DEFAULT_OBB_IMAGE, download_image, try_download_model};
+use crate::download::{default_images, download_image, try_download_model};
 use crate::error::{InferenceError, Result};
 use crate::inference::{InferenceConfig, Quantization};
 use crate::metadata::ModelMetadata;
 use crate::postprocessing::postprocess_with_head;
-use crate::preprocessing::{calculate_rect_size, image_to_array, preprocess_for_task};
+use crate::preprocessing::{
+    calculate_rect_size, image_to_array, preprocess_for_task, stride_imgsz,
+};
 use crate::results::{Results, Speed};
 use crate::task::Task;
 use crate::{verbose, warn};
@@ -1871,13 +1873,8 @@ impl YOLOModel {
     /// Returns an error if the download or inference fails.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_default(&mut self) -> Result<Vec<Results>> {
-        let urls: &[&str] = if self.task() == crate::task::Task::Obb {
-            &[DEFAULT_OBB_IMAGE]
-        } else {
-            DEFAULT_IMAGES
-        };
         let mut all_results = Vec::new();
-        for url in urls {
+        for url in default_images(self.task()) {
             let path = download_image(url)?;
             let results = self.predict(&path)?;
             if let Some(result) = results.into_iter().next() {
@@ -1999,7 +1996,6 @@ impl YOLOModel {
                 preprocess_for_task(
                     image,
                     current_target_size,
-                    stride,
                     task,
                     scale_fill,
                     fp16_input.then_some(Quantization::Fp16),
@@ -2271,14 +2267,6 @@ fn is_benign_coreml_warmup_error(provider: &str, msg: &str) -> bool {
     provider == "CoreMLExecutionProvider"
         && msg.contains("GatherElements")
         && msg.contains("Out of range")
-}
-
-/// Round `(h, w)` up to a multiple of `stride`, at least one stride, as the Ultralytics
-/// Python `check_imgsz` does, so a dynamic model's feature maps line up.
-fn stride_imgsz((h, w): (usize, usize), stride: u32) -> (usize, usize) {
-    let stride = stride as usize;
-    let round_up = |v: usize| v.div_ceil(stride).max(1) * stride;
-    (round_up(h), round_up(w))
 }
 
 /// Warn when a model runs at `used` instead of the `requested` size: rounded up to the stride

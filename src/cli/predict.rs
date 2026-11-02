@@ -21,8 +21,6 @@ use crate::cli::args::PredictArgs;
 use crate::task::Task;
 use crate::{error, verbose, warn};
 
-const DEFAULT_OBB_IMAGES: &[&str] = &[crate::download::DEFAULT_OBB_IMAGE];
-
 /// Run the `predict` command end to end.
 ///
 /// Loads (downloading if needed) the model, iterates the source, and prints, annotates, and
@@ -87,7 +85,7 @@ pub fn run_prediction(args: &PredictArgs) {
     let source = source_path.as_ref().map_or_else(
         || {
             // Select default images based on model task
-            let default_urls = default_source_urls(model.task());
+            let default_urls = crate::download::default_images(model.task());
 
             if verbose {
                 warn!(
@@ -481,13 +479,6 @@ fn build_inference_config(
     Ok(config)
 }
 
-const fn default_source_urls(task: Task) -> &'static [&'static str] {
-    match task {
-        Task::Obb => DEFAULT_OBB_IMAGES,
-        _ => crate::download::DEFAULT_IMAGES,
-    }
-}
-
 /// Whether a `runs/<task>/predictN` directory is needed for this run.
 ///
 /// Without the `annotate` feature there is nothing to save but the semantic class maps,
@@ -714,17 +705,17 @@ mod tests {
     }
 
     #[test]
-    fn test_default_source_urls_are_task_specific() {
+    fn test_default_images_are_task_specific() {
         assert_eq!(
-            default_source_urls(Task::Detect),
+            crate::download::default_images(Task::Detect),
             crate::download::DEFAULT_IMAGES
         );
         assert_eq!(
-            default_source_urls(Task::Segment),
+            crate::download::default_images(Task::Segment),
             crate::download::DEFAULT_IMAGES
         );
         assert_eq!(
-            default_source_urls(Task::Obb),
+            crate::download::default_images(Task::Obb),
             &[crate::download::DEFAULT_OBB_IMAGE]
         );
     }

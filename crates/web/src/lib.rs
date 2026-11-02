@@ -272,7 +272,7 @@ fn preprocess_image(
     } else {
         imgsz
     };
-    let pre = preprocess_for_task(&rgb, target, stride, task, scale_fill, None);
+    let pre = preprocess_for_task(&rgb, target, task, scale_fill, None);
     let rgb = rgb.into_rgb8();
     let (width, height) = rgb.dimensions();
     let orig_img = Array3::from_shape_vec((height as usize, width as usize, 3), rgb.into_raw())
@@ -607,15 +607,9 @@ impl YoloModel {
                 .try_extract_tensor::<u8>()
                 .map_err(|e| JsError::new(&format!("failed to extract output '{name}': {e}")))?;
             let shape: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
-            // Drop the leading batch dim so the shape is `[H, W]` (or pass through).
-            let img_shape: &[usize] = if shape.len() == 3 {
-                &shape[1..]
-            } else {
-                &shape
-            };
             let results = postprocess_semantic_mask(
                 data,
-                img_shape,
+                &shape,
                 names,
                 orig_img,
                 String::new(),
