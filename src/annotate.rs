@@ -84,11 +84,7 @@ pub const fn get_class_color(class_id: usize) -> Rgb<u8> {
 ///
 /// Returns the scale factor and the base line thickness. Callers derive the
 /// font size or marker radius from the factor as needed.
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 fn render_scale(width: u32, height: u32) -> (f32, i32) {
     let max_dim = width.max(height) as f32;
     let scale_factor = (max_dim / 640.0).max(1.0);
@@ -386,11 +382,7 @@ fn draw_line_segment(
 /// * `cx`, `cy` - Center of the circle in pixel coordinates.
 /// * `radius` - Radius in pixels.
 /// * `color` - RGB fill color.
-#[allow(
-    clippy::cast_sign_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap
-)]
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, color: Rgb<u8>) {
     let (width, height) = img.dimensions();
 
@@ -567,9 +559,7 @@ fn draw_label(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
-    clippy::cast_possible_wrap,
-    clippy::manual_clamp,
-    clippy::too_many_lines
+    clippy::cast_possible_wrap
 )]
 fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
@@ -740,12 +730,7 @@ fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
 }
 
 /// Draw pose keypoints and the lines between them, styled by the keypoint fields of `options`.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_wrap
-)]
+#[allow(clippy::cast_possible_truncation)]
 fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOptions) {
     let (width, height) = img.dimensions();
 
@@ -843,12 +828,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
 /// * `img` - Target image to draw on.
 /// * `result` - Inference results; only the `obb` field is read.
 /// * `font` - Optional loaded font; labels are skipped when `None`.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_wrap
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
     let (width, height) = img.dimensions();
 
@@ -908,10 +888,8 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
 /// * `color` - Blend color.
 /// * `alpha` - Opacity; 0.0 is fully transparent, 1.0 is fully opaque.
 #[allow(
-    clippy::many_single_char_names,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
     clippy::cast_possible_wrap,
     clippy::manual_clamp
 )]

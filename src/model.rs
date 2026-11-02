@@ -186,15 +186,9 @@ pub struct YOLOModel {
 
 #[allow(
     clippy::too_many_lines,
-    clippy::needless_pass_by_value,
     clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
     clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::if_not_else,
-    clippy::manual_is_multiple_of,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
+    clippy::cast_possible_wrap
 )]
 impl YOLOModel {
     /// Load a YOLO model from an ONNX file.
