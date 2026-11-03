@@ -13,10 +13,11 @@ use crate::results::Results;
 const BLEND_CHUNK: usize = 4096;
 use crate::visualizer::color::{COLORS, Color, Colormap, DEPTH_ALPHA, DepthViz};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont, point};
 use image::{DynamicImage, Rgb};
-use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
+use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut};
 use imageproc::rect::Rect;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -543,7 +544,7 @@ fn is_rtl(c: char) -> bool {
 /// `text` as it must be drawn left to right: Arabic letters joined and right-to-left runs reversed.
 /// Text without right-to-left letters is returned as is.
 fn visual_text(text: &str) -> std::borrow::Cow<'_, str> {
-    if text.chars().any(is_rtl) {
+    if !text.is_ascii() && text.chars().any(is_rtl) {
         visual_order(&join_arabic(text)).into()
     } else {
         text.into()
@@ -640,64 +641,115 @@ fn visual_order(text: &str) -> String {
         .collect()
 }
 
+/// The UAX #9 bidi classes labels need, with marks folded into their letter.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BidiClass {
+    Ltr,
+    Rtl,
+    ArabicLetter,
+    Number,
+    ArabicNumber,
+    Sign,
+    Separator,
+    Terminator,
+    Neutral,
+}
+
+/// The bidi class of `c`.
+fn bidi_class(c: char) -> BidiClass {
+    match c {
+        '0'..='9' | '\u{6F0}'..='\u{6F9}' => BidiClass::Number,
+        '\u{660}'..='\u{669}' | '\u{66B}' | '\u{66C}' => BidiClass::ArabicNumber,
+        '+' | '-' => BidiClass::Sign,
+        ',' | '.' | '/' | ':' | '\u{60C}' => BidiClass::Separator,
+        '#'
+        | '$'
+        | '%'
+        | '°'
+        | '\u{A2}'..='\u{A5}'
+        | '\u{66A}'
+        | '\u{2030}'
+        | '\u{20A0}'..='\u{20CF}' => BidiClass::Terminator,
+        '\u{600}'..='\u{7BF}' | '\u{860}'..='\u{8FF}' | '\u{FB50}'..='\u{FEFF}' if is_rtl(c) => {
+            BidiClass::ArabicLetter
+        }
+        _ if is_rtl(c) => BidiClass::Rtl,
+        _ if c.is_alphabetic() => BidiClass::Ltr,
+        _ => BidiClass::Neutral,
+    }
+}
+
 /// Embedding level of each cluster (0 left to right, 1 right to left, 2 left to right inside
 /// right to left) with the implicit rules of UAX #9, no explicit embeddings: the first strong
 /// letter sets the base direction, numbers read left to right, and bracket pairs and neutrals
 /// take the direction around them.
 fn bidi_levels(clusters: &[&str]) -> Vec<u8> {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Class {
-        Ltr,
-        Rtl,
-        Number,
-        Neutral,
-    }
-    use Class::{Ltr, Neutral, Number, Rtl};
+    use BidiClass::{
+        ArabicLetter, ArabicNumber, Ltr, Neutral, Number, Rtl, Separator, Sign, Terminator,
+    };
 
-    let first = |s: &str| s.chars().next().unwrap_or(' ');
-    let mut classes: Vec<Class> = clusters
+    let mut classes: Vec<BidiClass> = clusters
         .iter()
-        .map(|s| match first(s) {
-            '0'..='9' | '\u{660}'..='\u{669}' | '\u{6F0}'..='\u{6F9}' => Number,
-            c if is_rtl(c) => Rtl,
-            c if c.is_alphabetic() => Ltr,
-            _ => Neutral,
-        })
+        .map(|s| bidi_class(s.chars().next().unwrap_or(' ')))
         .collect();
     let n = classes.len();
+    let base = classes
+        .iter()
+        .find_map(|&c| match c {
+            Ltr => Some(Ltr),
+            Rtl | ArabicLetter => Some(Rtl),
+            _ => None,
+        })
+        .unwrap_or(Ltr);
 
-    // A separator between two numbers joins them.
+    // Digits after an Arabic letter are Arabic numbers, and Arabic letters are right to left.
+    let mut arabic = false;
+    for class in &mut classes {
+        match *class {
+            Ltr | Rtl => arabic = false,
+            ArabicLetter => (arabic, *class) = (true, Rtl),
+            Number if arabic => *class = ArabicNumber,
+            _ => {}
+        }
+    }
+    // A single separator between two numbers of one kind joins them, and a sign only joins
+    // European numbers. Other separators and signs are neutral.
     for i in 1..n.saturating_sub(1) {
-        if matches!(
-            first(clusters[i]),
-            '.' | ',' | ':' | '/' | '+' | '-' | '\u{60C}' | '\u{66B}' | '\u{66C}'
-        ) && classes[i - 1] == Number
-            && classes[i + 1] == Number
+        let (before, after) = (classes[i - 1], classes[i + 1]);
+        if before == after
+            && (before == Number && matches!(classes[i], Sign | Separator)
+                || before == ArabicNumber && classes[i] == Separator)
         {
+            classes[i] = before;
+        }
+    }
+    // Terminators such as `%` next to European numbers join them, from either side.
+    for i in 1..n {
+        if classes[i] == Terminator && classes[i - 1] == Number {
             classes[i] = Number;
         }
     }
-
-    // Numbers after left-to-right text are left-to-right text.
-    let base = classes
-        .iter()
-        .copied()
-        .find(|&c| c == Ltr || c == Rtl)
-        .unwrap_or(Ltr);
+    for i in (0..n.saturating_sub(1)).rev() {
+        if classes[i] == Terminator && classes[i + 1] == Number {
+            classes[i] = Number;
+        }
+    }
+    // European numbers after left-to-right text are left-to-right text.
     let mut strong = base;
     for class in &mut classes {
         match *class {
             Ltr | Rtl => strong = *class,
             Number if strong == Ltr => *class = Ltr,
+            Sign | Separator | Terminator => *class = Neutral,
             _ => {}
         }
     }
 
     // Paired brackets take the base direction when the text inside has it, and otherwise the
     // direction of the text before them. Numbers count as right to left.
-    let side = |c: Class| if c == Ltr { Ltr } else { Rtl };
+    let side = |c: BidiClass| if c == Ltr { Ltr } else { Rtl };
     for (start, end) in bracket_pairs(clusters) {
-        let inside: Vec<Class> = classes[start + 1..end]
+        let inside: Vec<BidiClass> = classes[start + 1..end]
             .iter()
             .filter(|&&c| c != Neutral)
             .map(|&c| side(c))
@@ -780,17 +832,85 @@ fn mirrored(s: &str) -> &str {
     }
 }
 
+/// Glyph coverage rasterized once per frame, keyed by glyph, font size and the glyph's offset in
+/// its label: labels such as `person 0.87` and `person 0.86` share every glyph but the last.
+type GlyphCache = HashMap<(u16, u32, u32), Option<(i32, i32, usize, Vec<f32>)>>;
+
+/// The labels drawn so far in a frame: where they sit, so the next one avoids them, and the
+/// glyphs they rasterized.
+#[derive(Default)]
+struct Labels {
+    placed: Vec<Rect>,
+    glyphs: GlyphCache,
+}
+
+/// Draw `text` at `(x, y)` exactly as imageproc's `draw_text_mut` does, taking each glyph's
+/// coverage from `glyphs` when an earlier label already rasterized it.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
+fn draw_text(
+    img: &mut image::RgbImage,
+    color: Rgb<u8>,
+    (x, y): (i32, i32),
+    scale: PxScale,
+    font: &FontRef,
+    text: &str,
+    glyphs: &mut GlyphCache,
+) {
+    let scaled = font.as_scaled(scale);
+    let (width, height) = (i64::from(img.width()), i64::from(img.height()));
+    let mut caret = 0.0_f32;
+    let mut prev = None;
+    for c in text.chars() {
+        let id = scaled.glyph_id(c);
+        let at = caret;
+        caret += scaled.h_advance(id);
+        let glyph = glyphs
+            .entry((id.0, scale.y.to_bits(), at.to_bits()))
+            .or_insert_with(|| {
+                let outlined = font
+                    .outline_glyph(id.with_scale_and_position(scale, point(at, scaled.ascent())))?;
+                let bounds = outlined.px_bounds();
+                let w = bounds.width() as usize;
+                let mut coverage = vec![0.0; w * bounds.height() as usize];
+                outlined.draw(|gx, gy, v| coverage[gy as usize * w + gx as usize] = v);
+                Some((bounds.min.x as i32, bounds.min.y as i32, w, coverage))
+            });
+        let Some((min_x, min_y, w, coverage)) = glyph else {
+            continue;
+        };
+        if let Some(prev) = prev {
+            caret += scaled.kern(id, prev);
+        }
+        prev = Some(id);
+        for (row, line) in coverage.chunks((*w).max(1)).enumerate() {
+            let py = i64::from(y + *min_y) + row as i64;
+            for (col, &v) in line.iter().enumerate() {
+                let px = i64::from(x + *min_x) + col as i64;
+                if v > 0.0 && (0..width).contains(&px) && (0..height).contains(&py) {
+                    let pixel = img.get_pixel_mut(px as u32, py as u32);
+                    let v = v.clamp(0.0, 1.0);
+                    *pixel = imageproc::pixelops::weighted_sum(*pixel, color, 1.0 - v, v);
+                }
+            }
+        }
+    }
+}
+
 /// Draw a class label with a filled background rectangle, avoiding overlap with previously placed labels.
 ///
 /// The label is positioned above `(anchor_x, anchor_y)`. If that position would clip
 /// the top edge, the label falls back to `top_fallback_y`. Up to 10 downward shifts
-/// are attempted to avoid collision with rectangles already in `occupied`.
+/// are attempted to avoid collision with labels already in `labels`.
 ///
 /// # Arguments
 ///
 /// * `img` - Target image to draw on.
 /// * `font` - Loaded font used for measuring and rendering glyphs.
-/// * `occupied` - Running list of already-placed label rectangles; updated in place.
+/// * `labels` - Labels already drawn in this frame; updated in place.
 /// * `label` - Text to render inside the background box.
 /// * `color` - Background fill color; text color is chosen automatically for contrast.
 /// * `font_scale` - Font size in pixels.
@@ -806,7 +926,7 @@ fn mirrored(s: &str) -> &str {
 fn draw_label(
     img: &mut image::RgbImage,
     font: &FontRef,
-    occupied: &mut Vec<Rect>,
+    labels: &mut Labels,
     label: &str,
     color: Rgb<u8>,
     font_scale: f32,
@@ -853,7 +973,8 @@ fn draw_label(
     let mut current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
 
     while attempts < max_attempts {
-        if !occupied
+        if !labels
+            .placed
             .iter()
             .any(|existing| rect_intersect(&current_rect, existing))
         {
@@ -876,7 +997,7 @@ fn draw_label(
         attempts += 1;
     }
 
-    occupied.push(current_rect);
+    labels.placed.push(current_rect);
 
     if text_x >= 0
         && text_y >= 0
@@ -885,7 +1006,15 @@ fn draw_label(
     {
         draw_filled_rect_mut(img, current_rect, color);
         let text_color = get_text_color(color);
-        draw_text_mut(img, text_color, text_x, text_y, scale, font, label);
+        draw_text(
+            img,
+            text_color,
+            (text_x, text_y),
+            scale,
+            font,
+            label,
+            &mut labels.glyphs,
+        );
     }
 }
 
@@ -976,8 +1105,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
                 });
         }
 
-        // Keep track of occupied label areas to avoid overlap
-        let mut labels_rects: Vec<Rect> = Vec::new();
+        let mut labels = Labels::default();
 
         // Draw boxes and labels
         for i in 0..boxes.len() {
@@ -1024,17 +1152,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Fon
             let label = format!(" {class_name} {confidence:.2} ");
 
             if let Some(f) = font {
-                draw_label(
-                    img,
-                    f,
-                    &mut labels_rects,
-                    &label,
-                    color,
-                    font_scale,
-                    x1,
-                    y1,
-                    y1,
-                );
+                draw_label(img, f, &mut labels, &label, color, font_scale, x1, y1, y1);
             }
         }
     }
@@ -1186,8 +1304,7 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
         let conf = obb.conf();
         let cls = obb.cls();
 
-        // Keep track of occupied label areas to avoid overlap
-        let mut labels_rects: Vec<Rect> = Vec::new();
+        let mut labels = Labels::default();
 
         for i in 0..obb.len() {
             let class_id = cls[i] as usize;
@@ -1209,7 +1326,7 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>)
                 draw_label(
                     img,
                     f,
-                    &mut labels_rects,
+                    &mut labels,
                     &label,
                     color,
                     font_scale,
@@ -1300,7 +1417,7 @@ fn draw_classification(
         let top_indices = probs.top_k(top_k);
         let (width, _height) = img.dimensions();
 
-        if let Some(ref f) = font {
+        if let Some(f) = font {
             // Adaptive font scale based on image width
             let scale_factor = (width as f32 / 600.0).clamp(0.6, 2.0);
             let base_size = 30.0;
@@ -1346,9 +1463,11 @@ fn draw_classification(
                 );
             }
 
+            let mut glyphs = GlyphCache::new();
             for label in entries {
                 // Draw text (white)
-                draw_text_mut(img, Rgb([255, 255, 255]), x_pos, y_pos, scale, f, &label);
+                let white = Rgb([255, 255, 255]);
+                draw_text(img, white, (x_pos, y_pos), scale, f, &label, &mut glyphs);
 
                 y_pos += line_height;
             }
@@ -1376,6 +1495,21 @@ mod tests {
         // Brackets around left-to-right text keep enclosing it.
         assert_eq!(visual_text(" כלב (dog) 0.64 "), " 0.64 (dog) בלכ ");
         assert_eq!(visual_text(" שם (2) 0.55 "), " 0.55 (2) םש ");
+        // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
+        // and Arabic-Indic digits stay right to left after a left-to-right letter.
+        assert_eq!(visual_text(" שם 2-3 0.14 "), " 0.14 2-3 םש ");
+        assert_eq!(
+            visual_text(" قطة 2-3 0.14 "),
+            " 0.14 3-2 \u{FE94}\u{FEC4}\u{FED7} "
+        );
+        assert_eq!(
+            visual_text(" x \u{663}\u{664} שם 0.36 "),
+            " x 0.36 םש \u{663}\u{664} "
+        );
+        // `%` stays with European digits, but not with the Arabic numbers digits become after
+        // an Arabic letter.
+        assert_eq!(visual_text(" שם 50% "), " 50% םש ");
+        assert_eq!(visual_text(" قطة 50% "), " %50 \u{FE94}\u{FEC4}\u{FED7} ");
         // A left-to-right label keeps its order around a right-to-left word.
         assert_eq!(
             visual_text("COVID مريض 0.55"),
