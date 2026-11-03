@@ -813,13 +813,17 @@ export async function annotate(
   ctx.lineWidth = lineWidth;
   ctx.font = font;
   ctx.textBaseline = "top";
+  ctx.textAlign = "left";
 
-  // First-strong isolates let a label's first letter set its direction, like the native and Python renderers.
-  const isolate = (text: string) => `\u2068${text}\u2069`;
+  // A label's first letter sets its direction, like the native and Python renderers. Safari's
+  // canvas ignores Unicode isolates, so set `ctx.direction` instead.
+  const fillText = (text: string, x: number, y: number) => {
+    ctx.direction = /^\P{L}*[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(text) ? "rtl" : "ltr";
+    ctx.fillText(text, x, y);
+  };
 
-  const label = (name: string, x: number, y: number, color: string) => {
+  const label = (text: string, x: number, y: number, color: string) => {
     if (!showLabels) return;
-    const text = isolate(name);
     const pad = Math.round(fontSize * 0.2);
     const w = ctx.measureText(text).width + pad * 2;
     const h = fontSize + pad * 2;
@@ -827,7 +831,7 @@ export async function annotate(
     ctx.fillStyle = color;
     ctx.fillRect(x, ly, w, h);
     ctx.fillStyle = textColorFor(color);
-    ctx.fillText(text, x + pad, ly + pad);
+    fillText(text, x + pad, ly + pad);
   };
 
   // Axis-aligned boxes (detect / segment / pose).
@@ -902,7 +906,7 @@ export async function annotate(
   // and Python renderers, which list the top classes rather than a single banner).
   if (results.probs && showLabels) {
     const { top5, top5conf, top5names } = results.probs;
-    const lines = top5.map((_, i) => isolate(`${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`));
+    const lines = top5.map((_, i) => `${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`);
     const pad = Math.round(fontSize * 0.3);
     const lineH = Math.round(fontSize * 1.25);
     const boxW = Math.max(...lines.map((t) => ctx.measureText(t).width)) + pad * 2;
@@ -910,7 +914,7 @@ export async function annotate(
     ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
     ctx.fillRect(pad, pad, boxW, boxH);
     ctx.fillStyle = "#ffffff";
-    lines.forEach((t, i) => ctx.fillText(t, pad * 2, pad * 2 + i * lineH));
+    lines.forEach((t, i) => fillText(t, pad * 2, pad * 2 + i * lineH));
   }
 }
 
