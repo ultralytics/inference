@@ -387,6 +387,7 @@ interface LiteRtCompiledModel {
 }
 interface LiteRtModule {
   loadLiteRt(wasmPath: string, opts?: { threads?: boolean }): Promise<void>;
+  supportsFeature(feature: "relaxedSimd"): Promise<boolean>;
   loadAndCompile(model: Uint8Array | string, opts: { accelerator: string | string[] }): Promise<LiteRtCompiledModel>;
   Tensor: new (data: Float32Array, shape: number[]) => LiteRtTensor;
 }
@@ -448,10 +449,13 @@ function ensureLiteRtRuntime(litert: LiteRtModule, wasmUrl: string): Promise<voi
   litertInitUrl = wasmUrl;
   // Enable WASM multithreading when the page is cross-origin isolated (COOP/COEP
   // set, so SharedArrayBuffer is available); otherwise LiteRT.js runs single-
-  // threaded. SIMD is detected by LiteRT itself. Isolation is a page-global
-  // property, so this needs no per-load option.
-  const threads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
-  litertInit = litert.loadLiteRt(wasmUrl, { threads }).catch((e) => {
+  // threaded. LiteRT's threaded build also needs relaxed SIMD, which Safari lacks.
+  // Isolation is a page-global property, so this needs no per-load option.
+  const isolated = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
+  litertInit = (async () => {
+    const threads = isolated && (await litert.supportsFeature("relaxedSimd"));
+    await litert.loadLiteRt(wasmUrl, { threads });
+  })().catch((e) => {
     litertInit = null; // let a later load retry if the first init failed
     litertInitUrl = null;
     throw e;
