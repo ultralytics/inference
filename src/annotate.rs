@@ -890,10 +890,22 @@ fn draw_text(
     let (width, height) = (i64::from(img.width()), i64::from(img.height()));
     let mut caret = 0.0_f32;
     let mut prev = None;
+    let mut letter = (0.0_f32, 0.0_f32); // where the last letter starts and its advance
     for c in text.chars() {
         let id = scaled.glyph_id(c);
-        let at = caret;
-        caret += scaled.h_advance(id);
+        let mark = is_mark(c);
+        let at = if mark {
+            // A combining mark takes no room: center it over its letter, as text shapers do for
+            // fonts without mark positioning.
+            let bounds = font
+                .outline(id)
+                .map_or(0.0, |o| o.bounds.min.x + o.bounds.max.x);
+            letter.0 + bounds.mul_add(-scaled.h_scale_factor(), letter.1) / 2.0
+        } else {
+            letter = (caret, scaled.h_advance(id));
+            caret += letter.1;
+            letter.0
+        };
         let glyph = glyphs
             .entry((id.0, scale.y.to_bits(), at.to_bits()))
             .or_insert_with(|| {
@@ -908,10 +920,12 @@ fn draw_text(
         let Some((min_x, min_y, w, coverage)) = glyph else {
             continue;
         };
-        if let Some(prev) = prev {
-            caret += scaled.kern(id, prev);
+        if !mark {
+            if let Some(prev) = prev {
+                caret += scaled.kern(id, prev);
+            }
+            prev = Some(id);
         }
-        prev = Some(id);
         for (row, line) in coverage.chunks((*w).max(1)).enumerate() {
             let py = i64::from(y + *min_y) + row as i64;
             for (col, &v) in line.iter().enumerate() {
@@ -966,6 +980,7 @@ fn draw_label(
     let scaled_font = font.as_scaled(scale);
     let text_w = label
         .chars()
+        .filter(|&c| !is_mark(c))
         .map(|c| scaled_font.h_advance(scaled_font.glyph_id(c)))
         .sum::<f32>()
         .ceil() as i32;
@@ -1467,7 +1482,8 @@ fn draw_classification(
 
             // Basic approximation: chars * scale * 0.5 (average char width)
             for label in &entries {
-                let w = (label.chars().count() as f32 * scale.x * 0.5) as u32;
+                let w =
+                    (label.chars().filter(|&c| !is_mark(c)).count() as f32 * scale.x * 0.5) as u32;
                 if w > max_width {
                     max_width = w;
                 }
