@@ -14,10 +14,11 @@ const BLEND_CHUNK: usize = 4096;
 use crate::visualizer::color::{COLORS, Color, Colormap, DEPTH_ALPHA, DepthViz};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, GlyphId, PxScale, ScaleFont, point};
-use harfrust::{Buffer, Direction, Script, ShapeOptions, ShaperFont};
+use harfrust::{Buffer, Direction, Script, ShapeOptions, ShapePlan, ShapePlanKey, ShaperFont};
 use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut};
 use imageproc::rect::Rect;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::ops::Range;
@@ -256,6 +257,7 @@ pub fn annotate_image_with_options(
         Some(LabelFont {
             glyphs: FontRef::try_from_slice(data).ok()?,
             face: harfrust::Font::new(data, 0)?,
+            plans: RefCell::default(),
         })
     });
 
@@ -445,10 +447,12 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         });
 }
 
-/// The label font: `harfrust` shapes text with it and `ab_glyph` draws the shaped glyphs.
+/// The label font: `harfrust` shapes text with it, reusing a plan per direction and script, and
+/// `ab_glyph` draws the shaped glyphs.
 struct LabelFont {
     glyphs: FontRef<'static>,
     face: harfrust::Font,
+    plans: RefCell<Vec<ShapePlan>>,
 }
 
 /// The runs of `text` in drawing order from left to right, as byte range, direction and script:
@@ -462,17 +466,17 @@ fn runs(text: &str) -> Vec<(Range<usize>, Direction, Option<Script>)> {
             let mut pieces = vec![(run.clone(), None)];
             for (i, c) in text[run.clone()].char_indices() {
                 let script = harfrust::unicode::script(c.into());
-                let last = pieces.len() - 1;
-                match pieces[last].1 {
-                    // Spaces, digits, punctuation and marks take the script around them.
-                    _ if matches!(script, Script::COMMON | Script::INHERITED | Script::UNKNOWN) => {
-                    }
-                    None => pieces[last].1 = Some(script),
-                    Some(s) if s != script => {
-                        pieces[last].0.end = run.start + i;
+                // Spaces, digits, punctuation and marks take the script around them.
+                if matches!(script, Script::COMMON | Script::INHERITED | Script::UNKNOWN) {
+                    continue;
+                }
+                match pieces.last_mut() {
+                    Some((_, current @ None)) => *current = Some(script),
+                    Some((range, Some(current))) if *current != script => {
+                        range.end = run.start + i;
                         pieces.push((run.start + i..run.end, Some(script)));
                     }
-                    Some(_) => {}
+                    _ => {}
                 }
             }
             let direction = if levels[run.start].is_rtl() {
@@ -507,7 +511,13 @@ fn layout(font: &LabelFont, scale: PxScale, text: &str) -> (Vec<(GlyphId, f64, f
         buffer.set_post_context(&text[range.end..]);
         buffer.set_direction(direction);
         buffer.set_script(script);
-        if harfrust::shape(&shaper, &mut buffer, ShapeOptions::new()).is_err() {
+        let key = ShapePlanKey::new(&font.face, script, direction);
+        let mut plans = font.plans.borrow_mut();
+        if !plans.iter().any(|plan| key.matches(plan)) {
+            plans.push(ShapePlan::new(&font.face, direction, script, None, &[]));
+        }
+        let options = ShapeOptions::new().plan(plans.iter().find(|plan| key.matches(plan)));
+        if harfrust::shape(&shaper, &mut buffer, options).is_err() {
             continue;
         }
         for (info, pos) in buffer.glyph_infos().iter().zip(buffer.glyph_positions()) {
@@ -1213,6 +1223,7 @@ mod tests {
         let font = LabelFont {
             glyphs: FontRef::try_from_slice(data).unwrap(),
             face: harfrust::Font::new(data, 0).unwrap(),
+            plans: RefCell::default(),
         };
         let ids = |text| -> Vec<u16> {
             let (glyphs, _) = layout(&font, PxScale::from(20.0), text);
