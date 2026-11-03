@@ -113,7 +113,7 @@ pub fn postprocess_with_head_masks(
     )
 }
 
-#[allow(clippy::too_many_arguments, clippy::similar_names)]
+#[allow(clippy::too_many_arguments)]
 fn postprocess_with_head_impl(
     outputs: Vec<(&[f32], Vec<usize>)>,
     task: Task,
@@ -242,7 +242,6 @@ const fn infer_end2end_kpt_shape(shape: &[usize]) -> Option<(usize, usize)> {
 /// Post-process detection model output.
 ///
 /// Zero-copy implementation using stride-based indexing to avoid memory allocations.
-#[allow(clippy::similar_names, clippy::cast_precision_loss)]
 fn postprocess_detect(
     output: &[f32],
     output_shape: &[usize],
@@ -505,7 +504,6 @@ struct Candidate {
 /// - SIMD bitmask NMS (IoU 1 vs 8)
 /// - Struct-of-Arrays (SoA) layout for NMS cache locality
 /// - Direct unsafe indexing for performance
-#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn extract_detect_boxes(
     output: &[f32],
     num_classes: usize,
@@ -905,14 +903,7 @@ fn build_instance_masks(
 /// # Returns
 ///
 /// `Results` struct containing boxes and masks.
-#[allow(
-    clippy::similar_names,
-    clippy::cast_precision_loss,
-    clippy::too_many_lines,
-    clippy::needless_pass_by_value,
-    clippy::manual_let_else,
-    clippy::cast_possible_truncation
-)]
+#[allow(clippy::similar_names, clippy::needless_pass_by_value)]
 fn postprocess_segment(
     outputs: Vec<(&[f32], Vec<usize>)>,
     preprocess: &PreprocessResult,
@@ -1044,13 +1035,6 @@ const fn parse_transposed_shape(
 ///
 /// `num_keypoints` and `kpt_dim` come from the model's `kpt_shape` metadata, so non-COCO
 /// keypoint counts and 2-channel (no visibility) exports decode correctly.
-#[allow(
-    clippy::too_many_lines,
-    clippy::similar_names,
-    clippy::type_complexity,
-    clippy::cast_precision_loss,
-    clippy::doc_lazy_continuation
-)]
 fn postprocess_pose(
     output: &[f32],
     output_shape: &[usize],
@@ -1186,7 +1170,6 @@ fn postprocess_classify(output: &[f32], mut results: Results) -> Results {
 /// # Returns
 ///
 /// `Results` struct containing oriented bounding boxes.
-#[allow(clippy::too_many_lines, clippy::similar_names)]
 fn postprocess_obb(
     output: &[f32],
     output_shape: &[usize],
@@ -1380,10 +1363,8 @@ fn postprocess_detect_end2end(
 /// `output0`: `[1, max_det, 6 + nm]`, `output1`: `[1, nm, mh, mw]` (protos).
 #[allow(
     clippy::cast_precision_loss,
-    clippy::too_many_lines,
     clippy::needless_pass_by_value,
-    clippy::similar_names,
-    clippy::manual_let_else
+    clippy::similar_names
 )]
 fn postprocess_segment_end2end(
     outputs: Vec<(&[f32], Vec<usize>)>,
@@ -1468,7 +1449,7 @@ fn postprocess_segment_end2end(
 }
 
 /// Post-process YOLO26 end-to-end pose output `[1, max_det, 6 + nk*kpt_dim]`.
-#[allow(clippy::cast_precision_loss, clippy::similar_names)]
+#[allow(clippy::cast_precision_loss)]
 fn postprocess_pose_end2end(
     output: &[f32],
     output_shape: &[usize],
@@ -1680,7 +1661,6 @@ fn bilinear_x_lut(
 /// Panics if the freshly-allocated `Array2<u16>` class map is not contiguous (cannot occur
 /// for `Array2::zeros` on standard layout).
 #[allow(
-    clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
@@ -1754,8 +1734,7 @@ pub fn postprocess_semantic_mask(
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
-    clippy::cast_possible_truncation,
-    clippy::similar_names
+    clippy::cast_possible_truncation
 )]
 fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> Results {
     let oh = results.orig_img.shape()[0];
@@ -1814,12 +1793,7 @@ fn postprocess_depth(output: &[f32], shape: &[usize], mut results: Results) -> R
 ///
 /// Memory traffic per output pixel drops from 4*nc strided reads to 4*nc contiguous
 /// reads; the source channels for one source pixel fit in ~80 bytes (1-2 cache lines).
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_truncation,
-    clippy::similar_names
-)]
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 fn postprocess_semantic(output: &[f32], shape: &[usize], results: Results) -> Results {
     let oh = results.orig_img.shape()[0];
     let ow = results.orig_img.shape()[1];
