@@ -818,7 +818,8 @@ export async function annotate(
   // A label's first letter sets its direction, like the native and Python renderers. Safari's
   // canvas ignores Unicode isolates, so set `ctx.direction` instead.
   const fillText = (text: string, x: number, y: number) => {
-    ctx.direction = /^\P{L}*[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(text) ? "rtl" : "ltr";
+    const letter = text.match(/\p{L}/u)?.[0] ?? "";
+    ctx.direction = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(letter) ? "rtl" : "ltr";
     ctx.fillText(text, x, y);
   };
 
