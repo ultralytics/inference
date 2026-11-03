@@ -135,7 +135,7 @@ ort = { version = "=2.0.0-rc.15", default-features = false, features = [
     "num-complex",
 ] }
 # JPEG 2000 (.jp2) decoding
-hayro-jpeg2000 = { version = "^0.4.1", default-features = false, features = ["image"] }
+hayro-jpeg2000 = { version = "^0.5", default-features = false, features = ["image"] }
 ureq = "^3.3.0"
 dirs = "^7.0"
 # Glob sources such as `images/**/*.jpg`
