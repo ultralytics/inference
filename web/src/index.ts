@@ -129,8 +129,8 @@ export interface LoadOptions {
    * Optional base URL to self-host the ONNX Runtime Web build instead of
    * fetching it from `cdn.pyke.io`. The directory must contain
    * `ort.webgpu.min.js`, `ort-wasm-simd-threaded.jsep.wasm`, and
-   * `ort-wasm-simd-threaded.jsep.mjs` for WebGPU, plus `ort.wasm.min.js` and
-   * `ort-wasm-simd-threaded.wasm` for the CPU build, which is what a `"cpu"`
+   * `ort-wasm-simd-threaded.jsep.mjs` for WebGPU, plus `ort.wasm.min.js`,
+   * `ort-wasm-simd-threaded.wasm`, and `ort-wasm-simd-threaded.mjs` for the CPU build, which is what a `"cpu"`
    * device and the WebGPU fallback below load. Use an absolute URL ending in `/`.
    */
   ortBaseUrl?: string | URL;
@@ -167,9 +167,7 @@ async function resolveDevice(pref?: "auto" | "webgpu" | "cpu"): Promise<string> 
   return "cpu";
 }
 
-/** Ultralytics default thresholds (mirrored in the option JSDoc above). */
-const DEFAULT_CONF = 0.25;
-const DEFAULT_IOU = 0.7;
+/** Ultralytics default keypoint confidence threshold for drawing. */
 const DEFAULT_KEYPOINT_THRESHOLD = 0.25;
 
 /** A model source: a URL/path, raw bytes, or a `Blob`/`File` (e.g. a dropped file). */
@@ -535,8 +533,8 @@ class LiteRtBackend {
 
 /** Prediction knobs passed straight through to wasm, shared by every engine call. */
 interface PredictParams {
-  conf: number;
-  iou: number;
+  conf: number | undefined;
+  iou: number | undefined;
   classes: Uint32Array | undefined;
   colormap: string;
   depthViz: string;
@@ -593,22 +591,18 @@ class LiteRtEngine implements Engine {
     return this.pipeline.names as Record<number, string>;
   }
 
-  predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
-    return this.runDrawable(data, width, height, p);
-  }
-
   /** LiteRT takes raw pixels, so decode encoded inputs to RGBA in JS first. */
   async predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown> {
     const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
     try {
       const { data, width, height } = toImageData(bitmap);
-      return await this.runDrawable(data, width, height, p);
+      return await this.predictDrawable(data, width, height, p);
     } finally {
       bitmap.close();
     }
   }
 
-  private async runDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
+  async predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
     const input = this.pipeline.preprocess_rgba(data, width, height);
     const { outputs, shapes, inferenceMs } = await this.backend.run(input, Array.from(this.pipeline.inputShape));
     return this.pipeline.postprocess(
@@ -707,8 +701,9 @@ export class YOLO {
    */
   async predict(image: ImageInput, options?: PredictOptions): Promise<Results> {
     const p: PredictParams = {
-      conf: options?.conf ?? DEFAULT_CONF,
-      iou: options?.iou ?? DEFAULT_IOU,
+      // Unset thresholds fall back to the Rust `InferenceConfig` defaults.
+      conf: options?.conf,
+      iou: options?.iou,
       classes: options?.classes ? new Uint32Array(options.classes) : undefined,
       // Empty means "unset": the wasm side falls back to the Rust `Colormap`/`DepthViz`
       // defaults, so the default lives in exactly one place.
@@ -751,7 +746,7 @@ function textColorFor(hex: string): string {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   // Perceived luminance (same threshold Ultralytics uses).
-  return r * 0.299 + g * 0.587 + b * 0.114 > 140 ? "#000000" : "#FFFFFF";
+  return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? "#000000" : "#FFFFFF";
 }
 
 /**
