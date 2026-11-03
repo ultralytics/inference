@@ -1120,12 +1120,8 @@ fn draw_classification(
                 entries.push(label);
             }
 
-            // Basic approximation: chars * scale * 0.5 (average char width)
             for label in &entries {
-                let w = (label.chars().count() as f32 * scale.x * 0.5) as u32;
-                if w > max_width {
-                    max_width = w;
-                }
+                max_width = max_width.max(shape(f, scale, label).1.ceil() as u32);
             }
 
             // Draw background for all entries with padding
