@@ -528,6 +528,47 @@ const LAM_ALEF: [(char, [char; 2]); 4] = [
     ('\u{627}', ['\u{FEFB}', '\u{FEFC}']),
 ];
 
+/// Hebrew letters with a point as `(letter, point, precomposed)`, from Unicode's Alphabetic
+/// Presentation Forms the label font has: shin and sin dots sit on different sides, and the font
+/// only places them in these precomposed letters.
+const HEBREW_FORMS: [(char, char, char); 35] = [
+    ('\u{5F2}', '\u{5B7}', '\u{FB1F}'),
+    ('\u{5E9}', '\u{5C1}', '\u{FB2A}'),
+    ('\u{5E9}', '\u{5C2}', '\u{FB2B}'),
+    ('\u{FB49}', '\u{5C1}', '\u{FB2C}'),
+    ('\u{FB49}', '\u{5C2}', '\u{FB2D}'),
+    ('\u{FB2A}', '\u{5BC}', '\u{FB2C}'),
+    ('\u{FB2B}', '\u{5BC}', '\u{FB2D}'),
+    ('\u{5D0}', '\u{5B7}', '\u{FB2E}'),
+    ('\u{5D0}', '\u{5B8}', '\u{FB2F}'),
+    ('\u{5D0}', '\u{5BC}', '\u{FB30}'),
+    ('\u{5D1}', '\u{5BC}', '\u{FB31}'),
+    ('\u{5D2}', '\u{5BC}', '\u{FB32}'),
+    ('\u{5D3}', '\u{5BC}', '\u{FB33}'),
+    ('\u{5D4}', '\u{5BC}', '\u{FB34}'),
+    ('\u{5D5}', '\u{5BC}', '\u{FB35}'),
+    ('\u{5D6}', '\u{5BC}', '\u{FB36}'),
+    ('\u{5D8}', '\u{5BC}', '\u{FB38}'),
+    ('\u{5D9}', '\u{5BC}', '\u{FB39}'),
+    ('\u{5DA}', '\u{5BC}', '\u{FB3A}'),
+    ('\u{5DB}', '\u{5BC}', '\u{FB3B}'),
+    ('\u{5DC}', '\u{5BC}', '\u{FB3C}'),
+    ('\u{5DE}', '\u{5BC}', '\u{FB3E}'),
+    ('\u{5E0}', '\u{5BC}', '\u{FB40}'),
+    ('\u{5E1}', '\u{5BC}', '\u{FB41}'),
+    ('\u{5E3}', '\u{5BC}', '\u{FB43}'),
+    ('\u{5E4}', '\u{5BC}', '\u{FB44}'),
+    ('\u{5E6}', '\u{5BC}', '\u{FB46}'),
+    ('\u{5E7}', '\u{5BC}', '\u{FB47}'),
+    ('\u{5E8}', '\u{5BC}', '\u{FB48}'),
+    ('\u{5E9}', '\u{5BC}', '\u{FB49}'),
+    ('\u{5EA}', '\u{5BC}', '\u{FB4A}'),
+    ('\u{5D5}', '\u{5B9}', '\u{FB4B}'),
+    ('\u{5D1}', '\u{5BF}', '\u{FB4C}'),
+    ('\u{5DB}', '\u{5BF}', '\u{FB4D}'),
+    ('\u{5E4}', '\u{5BF}', '\u{FB4E}'),
+];
+
 /// Combining marks drawn on the letter before them: the general ones plus every Hebrew, Arabic,
 /// Syriac, Thaana, N'Ko, Samaritan and Mandaic mark (Unicode 17 `Mn`).
 const fn is_mark(c: char) -> bool {
@@ -548,8 +589,8 @@ fn is_rtl(c: char) -> bool {
         && !is_mark(c)
 }
 
-/// `text` as it must be drawn left to right: Arabic letters joined and right-to-left runs reversed.
-/// Text without right-to-left letters or Arabic-Indic digits is returned as is.
+/// `text` as it must be drawn left to right: letters shaped and right-to-left runs reversed. Text
+/// without right-to-left letters or Arabic-Indic digits is returned as is.
 fn visual_text(text: &str) -> std::borrow::Cow<'_, str> {
     let rtl = |c| {
         matches!(
@@ -558,24 +599,30 @@ fn visual_text(text: &str) -> std::borrow::Cow<'_, str> {
         )
     };
     if !text.is_ascii() && text.chars().any(rtl) {
-        visual_order(&join_arabic(text)).into()
+        visual_order(&shape_letters(text)).into()
     } else {
         text.into()
     }
 }
 
-/// Replace each Arabic letter with the form that joins it to its neighbors, and lam-alef pairs
-/// with their ligature. Marks are skipped when looking for neighbors and alefs, and tatweel and
-/// ZWJ join on both sides.
-fn join_arabic(text: &str) -> String {
+/// Replace Hebrew letters and their points with the precomposed letter, each Arabic letter with
+/// the form that joins it to its neighbors, and lam-alef pairs with their ligature. Marks are
+/// skipped when looking for neighbors and alefs, and tatweel and ZWJ join on both sides.
+fn shape_letters(text: &str) -> String {
     let mut units: Vec<(char, &[char])> = Vec::new();
     let mut chars = text.chars();
-    while let Some(c) = chars.next() {
+    while let Some(mut c) = chars.next() {
         let i = units.len();
         units.push((c, &[]));
         while let Some(m) = chars.clone().next().filter(|&m| is_mark(m)) {
             chars.next();
-            units.push((m, &[]));
+            match HEBREW_FORMS
+                .iter()
+                .find(|&&(letter, point, _)| (letter, point) == (c, m))
+            {
+                Some(&(.., precomposed)) => c = precomposed,
+                None => units.push((m, &[])),
+            }
         }
         let lam_alef = LAM_ALEF
             .iter()
@@ -1614,7 +1661,7 @@ mod tests {
         assert_eq!(visual_text(" person 0.73 "), " person 0.73 ");
         // Hebrew reverses, the number keeps its order, and a point stays on its letter.
         assert_eq!(visual_text(" אדם 0.82 "), " 0.82 םדא ");
-        assert_eq!(visual_text("אָב"), "באָ");
+        assert_eq!(visual_text("אָב"), "ב\u{FB2F}");
         // Arabic joins: initial, medial and final forms, and lam-alef as one glyph.
         assert_eq!(visual_text("شخص 0.91"), "0.91 \u{FEBA}\u{FEA8}\u{FEB7}");
         assert_eq!(visual_text("لا"), "\u{FEFB}");
@@ -1634,7 +1681,8 @@ mod tests {
             "0.50 123\u{200D}456 םש"
         );
         assert_eq!(visual_text("שם \u{200E}123 0.50"), "123 0.50 םש");
-        // Lam-alef joins across a vowel.
+        // Shin and sin dots use the precomposed letters, and lam-alef joins across a vowel.
+        assert_eq!(visual_text("שׁ שׂ"), "\u{FB2B} \u{FB2A}");
         assert_eq!(visual_text("\u{644}\u{64E}\u{627}"), "\u{FEFB}\u{64E}");
         // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
         // and Arabic-Indic digits stay right to left after a left-to-right letter.
