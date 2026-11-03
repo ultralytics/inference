@@ -565,22 +565,28 @@ fn visual_text(text: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// Replace each Arabic letter with the form that joins it to its neighbors, and lam-alef pairs
-/// with their ligature. Marks are skipped when looking for neighbors, and tatweel and ZWJ join
-/// on both sides.
+/// with their ligature. Marks are skipped when looking for neighbors and alefs, and tatweel and
+/// ZWJ join on both sides.
 fn join_arabic(text: &str) -> String {
     let mut units: Vec<(char, &[char])> = Vec::new();
-    let mut chars = text.chars().peekable();
+    let mut chars = text.chars();
     while let Some(c) = chars.next() {
+        let i = units.len();
+        units.push((c, &[]));
+        while let Some(m) = chars.clone().next().filter(|&m| is_mark(m)) {
+            chars.next();
+            units.push((m, &[]));
+        }
         let lam_alef = LAM_ALEF
             .iter()
-            .find(|(alef, _)| c == '\u{644}' && chars.peek() == Some(alef));
-        if let Some((_, forms)) = lam_alef {
+            .find(|&&(alef, _)| c == '\u{644}' && chars.clone().next() == Some(alef));
+        units[i] = if let Some((_, forms)) = lam_alef {
             chars.next();
-            units.push((c, forms));
+            (c, forms)
         } else {
             let forms = ARABIC_FORMS.binary_search_by_key(&c, |&(letter, _)| letter);
-            units.push((c, forms.map_or(&[][..], |i| &ARABIC_FORMS[i].1)));
-        }
+            (c, forms.map_or(&[][..], |k| &ARABIC_FORMS[k].1))
+        };
     }
     let joins = |(c, forms): (char, &[char]), form: usize| {
         matches!(c, '\u{640}' | '\u{200D}') || forms.get(form).is_some_and(|&f| f != '\0')
@@ -1628,6 +1634,8 @@ mod tests {
             "0.50 123\u{200D}456 םש"
         );
         assert_eq!(visual_text("שם \u{200E}123 0.50"), "123 0.50 םש");
+        // Lam-alef joins across a vowel.
+        assert_eq!(visual_text("\u{644}\u{64E}\u{627}"), "\u{FEFB}\u{64E}");
         // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
         // and Arabic-Indic digits stay right to left after a left-to-right letter.
         assert_eq!(visual_text(" שם 2-3 0.14 "), " 0.14 2-3 םש ");
