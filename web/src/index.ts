@@ -256,6 +256,11 @@ export interface AnnotateOptions {
    * annotator); `1` shows the raw colorized depth map, `0` shows only the source.
    */
   depthAlpha?: number;
+  /**
+   * Optional URL/path to the wasm binary, as in {@link LoadOptions.wasmUrl}. Labels with
+   * right-to-left text need the engine, so pass it when no model has loaded it in this thread.
+   */
+  wasmUrl?: string | URL;
 }
 
 /** Image-like inputs accepted by {@link YOLO.predict}. */
@@ -820,7 +825,9 @@ export async function annotate(
   const rtlText = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
   const runsNeeded = (text: string) => rtlText.test(text) && /[\p{Ps}\p{Pe}]/u.test(text);
   const names = [...results.boxes, ...results.obb].map((b) => b.name);
-  if (showLabels && names.concat(results.probs?.top5names ?? []).some(runsNeeded)) await ensureInit();
+  if (showLabels && names.concat(results.probs?.top5names ?? []).some(runsNeeded)) {
+    await ensureInit(options?.wasmUrl);
+  }
   const fillText = (text: string, x: number, y: number) => {
     const rtl = Number(rtlText.test(text.match(/\p{L}/u)?.[0] ?? ""));
     const runs = runsNeeded(text) ? bidi_runs(text) : [0, text.length, rtl];
