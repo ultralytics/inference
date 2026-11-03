@@ -828,26 +828,40 @@ export async function annotate(
   if (showLabels && names.concat(results.probs?.top5names ?? []).some((n) => rtlText.test(n))) {
     await ensureInit(options?.wasmUrl);
   }
-  const fillText = (text: string, x: number, y: number) => {
-    ctx.direction = "ltr";
-    if (!rtlText.test(text)) return ctx.fillText(text, x, y);
-    for (const run of bidi_runs(text)) {
-      ctx.direction = run.startsWith("\u202E") ? "rtl" : "ltr";
-      ctx.fillText(run, x, y);
-      x += ctx.measureText(run).width;
+  // Class names repeat across labels, so each run's width is measured once per call.
+  const widths = new Map<string, number>();
+  type Run = { text: string; rtl: boolean; width: number };
+  const layout = (text: string): Run[] =>
+    (rtlText.test(text) ? bidi_runs(text) : [text]).map((run) => {
+      const rtl = run.startsWith("\u202E");
+      let width = widths.get(run);
+      if (width === undefined) {
+        ctx.direction = rtl ? "rtl" : "ltr";
+        width = ctx.measureText(run).width;
+        widths.set(run, width);
+      }
+      return { text: run, rtl, width };
+    });
+  const runsWidth = (runs: Run[]) => runs.reduce((sum, run) => sum + run.width, 0);
+  const fillText = (runs: Run[], x: number, y: number) => {
+    for (const run of runs) {
+      ctx.direction = run.rtl ? "rtl" : "ltr";
+      ctx.fillText(run.text, x, y);
+      x += run.width;
     }
   };
 
   const label = (text: string, x: number, y: number, color: string) => {
     if (!showLabels) return;
     const pad = Math.round(fontSize * 0.2);
-    const w = ctx.measureText(text).width + pad * 2;
+    const runs = layout(text);
+    const w = runsWidth(runs) + pad * 2;
     const h = fontSize + pad * 2;
     const ly = Math.max(0, y - h);
     ctx.fillStyle = color;
     ctx.fillRect(x, ly, w, h);
     ctx.fillStyle = textColorFor(color);
-    fillText(text, x + pad, ly + pad);
+    fillText(runs, x + pad, ly + pad);
   };
 
   // Axis-aligned boxes (detect / segment / pose).
@@ -922,10 +936,10 @@ export async function annotate(
   // and Python renderers, which list the top classes rather than a single banner).
   if (results.probs && showLabels) {
     const { top5, top5conf, top5names } = results.probs;
-    const lines = top5.map((_, i) => `${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`);
+    const lines = top5.map((_, i) => layout(`${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`));
     const pad = Math.round(fontSize * 0.3);
     const lineH = Math.round(fontSize * 1.25);
-    const boxW = Math.max(...lines.map((t) => ctx.measureText(t).width)) + pad * 2;
+    const boxW = Math.max(...lines.map(runsWidth)) + pad * 2;
     const boxH = lines.length * lineH + pad * 2;
     ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
     ctx.fillRect(pad, pad, boxW, boxH);
