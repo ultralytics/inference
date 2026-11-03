@@ -19,7 +19,7 @@
  * ```
  */
 
-import init, { YoloModel, YoloPipeline, start, pose_palette } from "../pkg/ultralytics_inference_web.js";
+import init, { YoloModel, YoloPipeline, start, pose_palette, bidi_runs } from "../pkg/ultralytics_inference_web.js";
 
 /** Pose drawing scheme supplied by the engine (skeleton + palette colors). */
 interface PoseScheme {
@@ -814,12 +814,14 @@ export async function annotate(
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
 
-  // A label's first letter sets its direction, like the native and Python renderers. Safari's
-  // canvas ignores Unicode isolates, so set `ctx.direction` instead.
+  // Draw a label run by run in display order (its first letter sets the direction, like the
+  // native and Python renderers), since Safari's canvas does not pair brackets in RTL text.
   const fillText = (text: string, x: number, y: number) => {
-    const letter = text.match(/\p{L}/u)?.[0] ?? "";
-    ctx.direction = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(letter) ? "rtl" : "ltr";
-    ctx.fillText(text, x, y);
+    for (const [run, rtl] of bidi_runs(text) as Array<[string, boolean]>) {
+      ctx.direction = rtl ? "rtl" : "ltr";
+      ctx.fillText(run, x, y);
+      x += ctx.measureText(run).width;
+    }
   };
 
   const label = (text: string, x: number, y: number, color: string) => {
