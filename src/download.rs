@@ -78,6 +78,14 @@ pub const DEFAULT_IMAGES: &[&str] = &[DEFAULT_BUS_IMAGE_URL, DEFAULT_ZIDANE_IMAG
 /// Default image URL for OBB (Oriented Bounding Box) tasks.
 pub const DEFAULT_OBB_IMAGE: &str = DEFAULT_BOATS_IMAGE_URL;
 
+/// Default image URLs for a `task` model: the boats image for OBB, otherwise [`DEFAULT_IMAGES`].
+pub(crate) const fn default_images(task: crate::task::Task) -> &'static [&'static str] {
+    match task {
+        crate::task::Task::Obb => &[DEFAULT_OBB_IMAGE],
+        _ => DEFAULT_IMAGES,
+    }
+}
+
 const CONNECT_TIMEOUT: u64 = 30;
 const READ_TIMEOUT: u64 = 300;
 const MAX_RETRIES: u32 = 3;
@@ -184,14 +192,7 @@ pub(crate) fn part_path(dest: &Path) -> PathBuf {
 /// Retries up to `MAX_RETRIES` times on transient failures with exponential backoff.
 /// Permanent errors (4xx, filesystem) are returned immediately without retrying.
 /// Uses a temp file and atomic rename to prevent corrupted partial downloads.
-#[allow(
-    clippy::similar_names,
-    clippy::too_many_lines,
-    clippy::large_stack_arrays,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::too_many_lines, clippy::large_stack_arrays)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut last_err = InferenceError::ModelLoadError(String::new());

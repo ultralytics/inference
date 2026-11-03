@@ -7,17 +7,12 @@
 
 #![allow(
     unsafe_code,
-    clippy::similar_names,
     clippy::cast_precision_loss,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
-    clippy::wildcard_imports,
     clippy::ptr_as_ptr,
-    clippy::cast_lossless,
-    clippy::single_match_else,
-    clippy::suboptimal_flops,
-    clippy::manual_div_ceil
+    clippy::suboptimal_flops
 )]
 
 use std::borrow::Cow;
@@ -223,7 +218,7 @@ fn build_preprocess_result(
 ///
 /// * `image` - Input image.
 /// * `target_size` - Target size as (height, width).
-/// * `stride` - Model stride for padding alignment (typically 32).
+/// * `stride` - Unused: the letterbox pads to `target_size` itself.
 ///
 /// # Returns
 ///
@@ -243,7 +238,7 @@ pub fn preprocess_image(
 ///
 /// * `image` - Input image.
 /// * `target_size` - Target size as (height, width).
-/// * `stride` - Model stride for padding alignment (typically 32).
+/// * `stride` - Unused: the letterbox pads to `target_size` itself.
 /// * `quantize` - Requested precision. FP16 also generates an FP16 tensor.
 ///
 /// # Returns
@@ -498,9 +493,15 @@ pub fn calculate_rect_size(
     // zero (a zero-width image), which would hand the model a zero-width input and the CUDA
     // preprocess a zero-sized kernel grid, so keep at least one stride step on each axis.
     let (geom, _) = LetterboxGeometry::compute(orig_width, orig_height, target_size, false);
+    stride_imgsz((geom.new_h as usize, geom.new_w as usize), stride)
+}
+
+/// Round `(h, w)` up to a multiple of `stride`, at least one stride, as the Ultralytics
+/// Python `check_imgsz` does, so a dynamic model's feature maps line up.
+pub(crate) fn stride_imgsz((h, w): (usize, usize), stride: u32) -> (usize, usize) {
     let stride = stride as usize;
-    let round_up = |extent: u32| (extent as usize).div_ceil(stride).max(1) * stride;
-    (round_up(geom.new_h), round_up(geom.new_w))
+    let round_up = |v: usize| v.div_ceil(stride).max(1) * stride;
+    (round_up(h), round_up(w))
 }
 
 /// Preprocess `image` for a `task` model at `target`.
@@ -511,17 +512,14 @@ pub fn calculate_rect_size(
 pub fn preprocess_for_task(
     image: &DynamicImage,
     target: (usize, usize),
-    stride: u32,
     task: Task,
     scale_fill: bool,
     quantize: Option<Quantization>,
 ) -> PreprocessResult {
     if task == Task::Classify {
         preprocess_image_center_crop(image, target, quantize)
-    } else if scale_fill {
-        preprocess_image_stretch(image, target, quantize)
     } else {
-        preprocess_image_with_precision(image, target, stride, quantize)
+        build_preprocess_result(image, target, quantize, scale_fill)
     }
 }
 
@@ -802,7 +800,6 @@ fn center_crop_image(
     (resized_rgb, crop, (scale, scale))
 }
 
-#[allow(clippy::similar_names)]
 #[cfg(test)]
 mod tests {
     use super::*;

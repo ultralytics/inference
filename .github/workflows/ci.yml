@@ -81,6 +81,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo test --no-default-features --features annotate,cuda,tensorrt
 
+      # cudarc only needs the toolkit version to build, so this lints fork PRs that skip the GPU job.
+      - name: Clippy (annotate + cuda-preprocess)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CUDARC_CUDA_VERSION: "13020"
+        run: cargo clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
+
       # `openvino` runs need the OpenVINO runtime installed, so lint only.
       - name: Clippy (annotate + openvino)
         if: matrix.os == 'ubuntu-latest'
@@ -145,12 +152,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      # llvm-cov needs nightly. It lands second, so it becomes the default toolchain.
+      # llvm-cov needs nightly.
       - name: Set up Rust nightly
         uses: dtolnay/rust-toolchain@master
         with:
@@ -167,11 +169,6 @@ jobs:
 
       - name: Show GPU
         run: nvidia-smi
-
-      # `cuda-preprocess` needs a CUDA toolkit to build, so no hosted runner lints it.
-      # Both toolchains are installed above, so each command names the one it wants.
-      - name: Clippy (annotate + cuda-preprocess)
-        run: cargo +stable clippy --all-targets --no-default-features --features annotate,cuda-preprocess -- -D warnings
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2

@@ -15,8 +15,6 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::cast_lossless,
     clippy::cast_possible_wrap,
     // `pub(crate)` here documents intent (these types are crate-internal API
     // for `model.rs`); the module just happens to be private too.
@@ -266,7 +264,6 @@ impl CudaPreprocessor {
     }
 
     /// Queue a copy from each device address into its host buffer, then wait once.
-    #[allow(unsafe_code)]
     pub(crate) fn read_back<'a>(
         &self,
         outputs: impl IntoIterator<Item = (u64, &'a mut [f32])>,
