@@ -119,6 +119,8 @@ ffmpeg-next = { version = "^9.0", optional = true }
 # Optional - Image annotation (for --save feature)
 imageproc = { version = "^0.27", optional = true, default-features = false, features = ["text"] }
 ab_glyph = { version = "^0.2", optional = true }
+harfrust = { version = "^0.15", optional = true }
+unicode-bidi = { version = "^0.3", optional = true }
 
 # Native-only dependencies. None of these build for `wasm32-unknown-unknown`
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -157,7 +159,7 @@ visualize = ["minifb", "annotate"]
 video = ["dep:ffmpeg-next"]
 
 # Image annotation support (for --save feature in CLI)
-annotate = ["imageproc", "ab_glyph"]
+annotate = ["imageproc", "ab_glyph", "harfrust", "unicode-bidi"]
 
 # NVIDIA GPU acceleration
 cuda = ["ort/cuda"]

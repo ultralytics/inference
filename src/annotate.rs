@@ -13,7 +13,7 @@ use crate::results::Results;
 const BLEND_CHUNK: usize = 4096;
 use crate::visualizer::color::{COLORS, Color, Colormap, DEPTH_ALPHA, DepthViz};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont, point};
+use ab_glyph::{Font, FontRef, GlyphId, PxScale, ScaleFont, point};
 use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut};
 use imageproc::rect::Rect;
@@ -250,7 +250,13 @@ pub fn annotate_image_with_options(
 
     let labels = result.boxes.is_some() || result.obb.is_some() || result.probs.is_some();
     let unicode = labels && result.names.values().any(|n| !n.is_ascii());
-    let font = font_bytes(unicode).and_then(|data| FontRef::try_from_slice(data).ok());
+    let font = font_bytes(unicode).and_then(|data| {
+        Some((
+            FontRef::try_from_slice(data).ok()?,
+            harfrust::Font::new(data, 0)?,
+            std::cell::RefCell::default(),
+        ))
+    });
 
     draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref());
@@ -438,435 +444,91 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         });
 }
 
-/// Arabic letters and their presentation forms `[isolated, final, initial, medial]`, `'\0'` where
-/// a letter has none, from Unicode's Arabic Presentation Forms-B then -A as the Ultralytics Python
-/// `Annotator` builds them. Letters without a medial form never join the letter after them.
-const ARABIC_FORMS: [(char, [char; 4]); 76] = [
-    ('\u{621}', ['\u{FE80}', '\0', '\0', '\0']),
-    ('\u{622}', ['\u{FE81}', '\u{FE82}', '\0', '\0']),
-    ('\u{623}', ['\u{FE83}', '\u{FE84}', '\0', '\0']),
-    ('\u{624}', ['\u{FE85}', '\u{FE86}', '\0', '\0']),
-    ('\u{625}', ['\u{FE87}', '\u{FE88}', '\0', '\0']),
-    ('\u{626}', ['\u{FE89}', '\u{FE8A}', '\u{FE8B}', '\u{FE8C}']),
-    ('\u{627}', ['\u{FE8D}', '\u{FE8E}', '\0', '\0']),
-    ('\u{628}', ['\u{FE8F}', '\u{FE90}', '\u{FE91}', '\u{FE92}']),
-    ('\u{629}', ['\u{FE93}', '\u{FE94}', '\0', '\0']),
-    ('\u{62A}', ['\u{FE95}', '\u{FE96}', '\u{FE97}', '\u{FE98}']),
-    ('\u{62B}', ['\u{FE99}', '\u{FE9A}', '\u{FE9B}', '\u{FE9C}']),
-    ('\u{62C}', ['\u{FE9D}', '\u{FE9E}', '\u{FE9F}', '\u{FEA0}']),
-    ('\u{62D}', ['\u{FEA1}', '\u{FEA2}', '\u{FEA3}', '\u{FEA4}']),
-    ('\u{62E}', ['\u{FEA5}', '\u{FEA6}', '\u{FEA7}', '\u{FEA8}']),
-    ('\u{62F}', ['\u{FEA9}', '\u{FEAA}', '\0', '\0']),
-    ('\u{630}', ['\u{FEAB}', '\u{FEAC}', '\0', '\0']),
-    ('\u{631}', ['\u{FEAD}', '\u{FEAE}', '\0', '\0']),
-    ('\u{632}', ['\u{FEAF}', '\u{FEB0}', '\0', '\0']),
-    ('\u{633}', ['\u{FEB1}', '\u{FEB2}', '\u{FEB3}', '\u{FEB4}']),
-    ('\u{634}', ['\u{FEB5}', '\u{FEB6}', '\u{FEB7}', '\u{FEB8}']),
-    ('\u{635}', ['\u{FEB9}', '\u{FEBA}', '\u{FEBB}', '\u{FEBC}']),
-    ('\u{636}', ['\u{FEBD}', '\u{FEBE}', '\u{FEBF}', '\u{FEC0}']),
-    ('\u{637}', ['\u{FEC1}', '\u{FEC2}', '\u{FEC3}', '\u{FEC4}']),
-    ('\u{638}', ['\u{FEC5}', '\u{FEC6}', '\u{FEC7}', '\u{FEC8}']),
-    ('\u{639}', ['\u{FEC9}', '\u{FECA}', '\u{FECB}', '\u{FECC}']),
-    ('\u{63A}', ['\u{FECD}', '\u{FECE}', '\u{FECF}', '\u{FED0}']),
-    ('\u{641}', ['\u{FED1}', '\u{FED2}', '\u{FED3}', '\u{FED4}']),
-    ('\u{642}', ['\u{FED5}', '\u{FED6}', '\u{FED7}', '\u{FED8}']),
-    ('\u{643}', ['\u{FED9}', '\u{FEDA}', '\u{FEDB}', '\u{FEDC}']),
-    ('\u{644}', ['\u{FEDD}', '\u{FEDE}', '\u{FEDF}', '\u{FEE0}']),
-    ('\u{645}', ['\u{FEE1}', '\u{FEE2}', '\u{FEE3}', '\u{FEE4}']),
-    ('\u{646}', ['\u{FEE5}', '\u{FEE6}', '\u{FEE7}', '\u{FEE8}']),
-    ('\u{647}', ['\u{FEE9}', '\u{FEEA}', '\u{FEEB}', '\u{FEEC}']),
-    ('\u{648}', ['\u{FEED}', '\u{FEEE}', '\0', '\0']),
-    ('\u{649}', ['\u{FEEF}', '\u{FEF0}', '\u{FBE8}', '\u{FBE9}']),
-    ('\u{64A}', ['\u{FEF1}', '\u{FEF2}', '\u{FEF3}', '\u{FEF4}']),
-    ('\u{671}', ['\u{FB50}', '\u{FB51}', '\0', '\0']),
-    ('\u{677}', ['\u{FBDD}', '\0', '\0', '\0']),
-    ('\u{679}', ['\u{FB66}', '\u{FB67}', '\u{FB68}', '\u{FB69}']),
-    ('\u{67A}', ['\u{FB5E}', '\u{FB5F}', '\u{FB60}', '\u{FB61}']),
-    ('\u{67B}', ['\u{FB52}', '\u{FB53}', '\u{FB54}', '\u{FB55}']),
-    ('\u{67E}', ['\u{FB56}', '\u{FB57}', '\u{FB58}', '\u{FB59}']),
-    ('\u{67F}', ['\u{FB62}', '\u{FB63}', '\u{FB64}', '\u{FB65}']),
-    ('\u{680}', ['\u{FB5A}', '\u{FB5B}', '\u{FB5C}', '\u{FB5D}']),
-    ('\u{683}', ['\u{FB76}', '\u{FB77}', '\u{FB78}', '\u{FB79}']),
-    ('\u{684}', ['\u{FB72}', '\u{FB73}', '\u{FB74}', '\u{FB75}']),
-    ('\u{686}', ['\u{FB7A}', '\u{FB7B}', '\u{FB7C}', '\u{FB7D}']),
-    ('\u{687}', ['\u{FB7E}', '\u{FB7F}', '\u{FB80}', '\u{FB81}']),
-    ('\u{688}', ['\u{FB88}', '\u{FB89}', '\0', '\0']),
-    ('\u{68C}', ['\u{FB84}', '\u{FB85}', '\0', '\0']),
-    ('\u{68D}', ['\u{FB82}', '\u{FB83}', '\0', '\0']),
-    ('\u{68E}', ['\u{FB86}', '\u{FB87}', '\0', '\0']),
-    ('\u{691}', ['\u{FB8C}', '\u{FB8D}', '\0', '\0']),
-    ('\u{698}', ['\u{FB8A}', '\u{FB8B}', '\0', '\0']),
-    ('\u{6A4}', ['\u{FB6A}', '\u{FB6B}', '\u{FB6C}', '\u{FB6D}']),
-    ('\u{6A6}', ['\u{FB6E}', '\u{FB6F}', '\u{FB70}', '\u{FB71}']),
-    ('\u{6A9}', ['\u{FB8E}', '\u{FB8F}', '\u{FB90}', '\u{FB91}']),
-    ('\u{6AD}', ['\u{FBD3}', '\u{FBD4}', '\u{FBD5}', '\u{FBD6}']),
-    ('\u{6AF}', ['\u{FB92}', '\u{FB93}', '\u{FB94}', '\u{FB95}']),
-    ('\u{6B1}', ['\u{FB9A}', '\u{FB9B}', '\u{FB9C}', '\u{FB9D}']),
-    ('\u{6B3}', ['\u{FB96}', '\u{FB97}', '\u{FB98}', '\u{FB99}']),
-    ('\u{6BA}', ['\u{FB9E}', '\u{FB9F}', '\0', '\0']),
-    ('\u{6BB}', ['\u{FBA0}', '\u{FBA1}', '\u{FBA2}', '\u{FBA3}']),
-    ('\u{6BE}', ['\u{FBAA}', '\u{FBAB}', '\u{FBAC}', '\u{FBAD}']),
-    ('\u{6C0}', ['\u{FBA4}', '\u{FBA5}', '\0', '\0']),
-    ('\u{6C1}', ['\u{FBA6}', '\u{FBA7}', '\u{FBA8}', '\u{FBA9}']),
-    ('\u{6C5}', ['\u{FBE0}', '\u{FBE1}', '\0', '\0']),
-    ('\u{6C6}', ['\u{FBD9}', '\u{FBDA}', '\0', '\0']),
-    ('\u{6C7}', ['\u{FBD7}', '\u{FBD8}', '\0', '\0']),
-    ('\u{6C8}', ['\u{FBDB}', '\u{FBDC}', '\0', '\0']),
-    ('\u{6C9}', ['\u{FBE2}', '\u{FBE3}', '\0', '\0']),
-    ('\u{6CB}', ['\u{FBDE}', '\u{FBDF}', '\0', '\0']),
-    ('\u{6CC}', ['\u{FBFC}', '\u{FBFD}', '\u{FBFE}', '\u{FBFF}']),
-    ('\u{6D0}', ['\u{FBE4}', '\u{FBE5}', '\u{FBE6}', '\u{FBE7}']),
-    ('\u{6D2}', ['\u{FBAE}', '\u{FBAF}', '\0', '\0']),
-    ('\u{6D3}', ['\u{FBB0}', '\u{FBB1}', '\0', '\0']),
-];
+/// A label font: `ab_glyph` rasterizes its glyphs and `harfrust` shapes text with it, reusing a
+/// shaping plan per script and direction.
+type LabelFont = (
+    FontRef<'static>,
+    harfrust::Font,
+    std::cell::RefCell<Vec<harfrust::ShapePlan>>,
+);
 
-/// Lam followed by one of these alefs is one `[isolated, final]` ligature.
-const LAM_ALEF: [(char, [char; 2]); 4] = [
-    ('\u{622}', ['\u{FEF5}', '\u{FEF6}']),
-    ('\u{623}', ['\u{FEF7}', '\u{FEF8}']),
-    ('\u{625}', ['\u{FEF9}', '\u{FEFA}']),
-    ('\u{627}', ['\u{FEFB}', '\u{FEFC}']),
-];
-
-/// Combining marks drawn on the letter before them: the general ones plus every Hebrew, Arabic,
-/// Syriac, Thaana, N'Ko, Samaritan and Mandaic mark (Unicode 17 `Mn`).
-const fn is_mark(c: char) -> bool {
-    matches!(c, '\u{300}'..='\u{36F}' | '\u{591}'..='\u{5BD}' | '\u{5BF}' | '\u{5C1}'..='\u{5C2}'
-        | '\u{5C4}'..='\u{5C5}' | '\u{5C7}' | '\u{610}'..='\u{61A}' | '\u{64B}'..='\u{65F}'
-        | '\u{670}' | '\u{6D6}'..='\u{6DC}' | '\u{6DF}'..='\u{6E4}' | '\u{6E7}'..='\u{6E8}'
-        | '\u{6EA}'..='\u{6ED}' | '\u{711}' | '\u{730}'..='\u{74A}' | '\u{7A6}'..='\u{7B0}'
-        | '\u{7EB}'..='\u{7F3}' | '\u{7FD}' | '\u{816}'..='\u{819}' | '\u{81B}'..='\u{823}'
-        | '\u{825}'..='\u{827}' | '\u{829}'..='\u{82D}' | '\u{859}'..='\u{85B}'
-        | '\u{897}'..='\u{89F}' | '\u{8CA}'..='\u{8E1}' | '\u{8E3}'..='\u{8FF}' | '\u{FB1E}'
-        | '\u{FE20}'..='\u{FE2F}')
-}
-
-/// Hebrew, Arabic and the other right-to-left scripts' letters.
-fn is_rtl(c: char) -> bool {
-    matches!(c, '\u{590}'..='\u{8FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
-        && c.is_alphabetic()
-        && !is_mark(c)
-}
-
-/// `text` as it must be drawn left to right: Arabic letters joined and right-to-left runs reversed.
-/// Text without right-to-left letters or Arabic-Indic digits is returned as is.
-fn visual_text(text: &str) -> std::borrow::Cow<'_, str> {
-    let rtl = |c| {
-        matches!(
-            bidi_class(c),
-            BidiClass::Rtl | BidiClass::ArabicLetter | BidiClass::ArabicNumber
-        )
-    };
-    if !text.is_ascii() && text.chars().any(rtl) {
-        visual_order(&join_arabic(text)).into()
-    } else {
-        text.into()
-    }
-}
-
-/// Replace each Arabic letter with the form that joins it to its neighbors, and lam-alef pairs
-/// with their ligature. Marks are skipped when looking for neighbors, and tatweel and ZWJ join
-/// on both sides.
-fn join_arabic(text: &str) -> String {
-    let mut units: Vec<(char, &[char])> = Vec::new();
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        let lam_alef = LAM_ALEF
-            .iter()
-            .find(|(alef, _)| c == '\u{644}' && chars.peek() == Some(alef));
-        if let Some((_, forms)) = lam_alef {
-            chars.next();
-            units.push((c, forms));
-        } else {
-            let forms = ARABIC_FORMS.binary_search_by_key(&c, |&(letter, _)| letter);
-            units.push((c, forms.map_or(&[][..], |i| &ARABIC_FORMS[i].1)));
-        }
-    }
-    let joins = |(c, forms): (char, &[char]), form: usize| {
-        matches!(c, '\u{640}' | '\u{200D}') || forms.get(form).is_some_and(|&f| f != '\0')
-    };
-    let letter = |u: &&(char, &[char])| !is_mark(u.0);
-    units
-        .iter()
-        .enumerate()
-        .map(|(i, &(c, forms))| {
-            if forms.is_empty() {
-                return c;
-            }
-            // A letter joins the one before when that one has a medial form, and the one after
-            // when it has a medial form itself and the next letter has a final form.
-            let before = units[..i]
-                .iter()
-                .rev()
-                .find(letter)
-                .is_some_and(|&u| joins(u, 3))
-                && joins((c, forms), 1);
-            let after = units[i + 1..]
-                .iter()
-                .find(letter)
-                .is_some_and(|&u| joins(u, 1))
-                && joins((c, forms), 3);
-            forms[match (before, after) {
-                (false, false) => 0,
-                (true, false) => 1,
-                (false, true) => 2,
-                (true, true) => 3,
-            }]
-        })
-        .collect()
-}
-
-/// Reorder `text` into drawing order with the Unicode Bidirectional Algorithm (UAX #9): each run
-/// is reversed by its level from [`bidi_levels`], and brackets in right-to-left runs are
-/// mirrored. Marks move with their letter.
-fn visual_order(text: &str) -> String {
-    let mut clusters: Vec<&str> = Vec::new();
-    let mut start = 0;
-    for (i, c) in text.char_indices().skip(1) {
-        if !is_mark(c) {
-            clusters.push(&text[start..i]);
-            start = i;
-        }
-    }
-    clusters.push(&text[start..]);
-
-    let levels = bidi_levels(&clusters);
-    let n = levels.len();
-    let mut order: Vec<usize> = (0..n).collect();
-    for level in [2, 1] {
-        let mut i = 0;
-        while i < n {
-            let end = (i..n).find(|&j| levels[order[j]] < level).unwrap_or(n);
-            order[i..end].reverse();
-            i = end + 1;
-        }
-    }
-    // Brackets and other mirrored characters in right-to-left runs face the other way.
-    let mirror = |c: char| {
-        let pair = |list: &[char]| list.iter().position(|&m| m == c).map(|k| list[k ^ 1]);
-        pair(&BRACKETS).or_else(|| pair(&MIRRORED)).unwrap_or(c)
-    };
-    let mut out = String::with_capacity(text.len());
-    for &i in &order {
-        if levels[i] == 1 {
-            out.extend(clusters[i].chars().map(mirror));
-        } else {
-            out.push_str(clusters[i]);
-        }
-    }
-    out
-}
-
-/// The UAX #9 bidi classes labels need, with marks folded into their letter.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BidiClass {
-    Ltr,
-    Rtl,
-    ArabicLetter,
-    Number,
-    ArabicNumber,
-    Sign,
-    Separator,
-    Terminator,
-    Neutral,
-}
-
-/// The bidi class of `c`.
-fn bidi_class(c: char) -> BidiClass {
-    match c {
-        '0'..='9' | '\u{6F0}'..='\u{6F9}' => BidiClass::Number,
-        '\u{660}'..='\u{669}' | '\u{66B}' | '\u{66C}' => BidiClass::ArabicNumber,
-        '+' | '-' => BidiClass::Sign,
-        ',' | '.' | '/' | ':' | '\u{60C}' => BidiClass::Separator,
-        '#'
-        | '$'
-        | '%'
-        | '°'
-        | '\u{A2}'..='\u{A5}'
-        | '\u{66A}'
-        | '\u{2030}'
-        | '\u{20A0}'..='\u{20CF}' => BidiClass::Terminator,
-        '\u{600}'..='\u{7BF}' | '\u{860}'..='\u{8FF}' | '\u{FB50}'..='\u{FEFF}' if is_rtl(c) => {
-            BidiClass::ArabicLetter
-        }
-        _ if is_rtl(c) => BidiClass::Rtl,
-        _ if c.is_alphabetic() => BidiClass::Ltr,
-        _ => BidiClass::Neutral,
-    }
-}
-
-/// Embedding level of each cluster (0 left to right, 1 right to left, 2 left to right inside
-/// right to left) with the implicit rules of UAX #9, no explicit embeddings: the first strong
-/// letter sets the base direction, numbers read left to right, and bracket pairs and neutrals
-/// take the direction around them.
-fn bidi_levels(clusters: &[&str]) -> Vec<u8> {
-    use BidiClass::{
-        ArabicLetter, ArabicNumber, Ltr, Neutral, Number, Rtl, Separator, Sign, Terminator,
-    };
-
-    let mut classes: Vec<BidiClass> = clusters
-        .iter()
-        .map(|s| bidi_class(s.chars().next().unwrap_or(' ')))
-        .collect();
-    let n = classes.len();
-    let base = classes
-        .iter()
-        .find_map(|&c| match c {
-            Ltr => Some(Ltr),
-            Rtl | ArabicLetter => Some(Rtl),
-            _ => None,
-        })
-        .unwrap_or(Ltr);
-
-    // Digits after an Arabic letter are Arabic numbers, and Arabic letters are right to left.
-    let mut arabic = false;
-    for class in &mut classes {
-        match *class {
-            Ltr | Rtl => arabic = false,
-            ArabicLetter => (arabic, *class) = (true, Rtl),
-            Number if arabic => *class = ArabicNumber,
-            _ => {}
-        }
-    }
-    // A single separator between two numbers of one kind joins them, and a sign only joins
-    // European numbers. Other separators and signs are neutral.
-    for i in 1..n.saturating_sub(1) {
-        let (before, after) = (classes[i - 1], classes[i + 1]);
-        if before == after
-            && (before == Number && matches!(classes[i], Sign | Separator)
-                || before == ArabicNumber && classes[i] == Separator)
-        {
-            classes[i] = before;
-        }
-    }
-    // Terminators such as `%` next to European numbers join them, from either side.
-    for i in 1..n {
-        if classes[i] == Terminator && classes[i - 1] == Number {
-            classes[i] = Number;
-        }
-    }
-    for i in (0..n.saturating_sub(1)).rev() {
-        if classes[i] == Terminator && classes[i + 1] == Number {
-            classes[i] = Number;
-        }
-    }
-    // European numbers after left-to-right text are left-to-right text.
-    let mut strong = base;
-    for class in &mut classes {
-        match *class {
-            Ltr | Rtl => strong = *class,
-            Number if strong == Ltr => *class = Ltr,
-            Sign | Separator | Terminator => *class = Neutral,
-            _ => {}
-        }
-    }
-
-    // Paired brackets take the base direction when the text inside has it, and otherwise the
-    // direction of the text before them. Numbers count as right to left.
-    let side = |c: BidiClass| if c == Ltr { Ltr } else { Rtl };
-    for (start, end) in bracket_pairs(clusters) {
-        let inside: Vec<BidiClass> = classes[start + 1..end]
-            .iter()
-            .filter(|&&c| c != Neutral)
-            .map(|&c| side(c))
-            .collect();
-        if inside.is_empty() {
-            continue;
-        }
-        let dir = if inside.contains(&base) {
-            base
-        } else {
-            classes[..start]
-                .iter()
-                .rev()
-                .find(|&&c| c != Neutral)
-                .map_or(base, |&c| side(c))
-        };
-        classes[start] = dir;
-        classes[end] = dir;
-    }
-
-    // Other neutrals take the direction on both sides when it matches, where numbers count as
-    // right to left, and the base direction otherwise.
-    let mut i = 0;
-    while i < n {
-        let end = (i..n).find(|&j| classes[j] != Neutral).unwrap_or(n);
-        if end > i {
-            let before = if i == 0 { base } else { side(classes[i - 1]) };
-            let after = if end == n { base } else { side(classes[end]) };
-            classes[i..end].fill(if before == after { before } else { base });
-        }
-        i = end + 1;
-    }
-
-    classes
-        .iter()
-        .map(|&c| match c {
-            Ltr if base == Ltr => 0,
-            Rtl => 1,
-            _ => 2,
-        })
-        .collect()
-}
-
-/// Unicode's paired brackets as `(opening, closing)` pairs: they pair up and face the other way
-/// in right-to-left text (UAX #9 `Bidi_Paired_Bracket` and `Bidi_Mirroring_Glyph`, Unicode 16).
-const BRACKETS: [char; 128] = [
-    '(', ')', '[', ']', '{', '}', '༺', '༻', '༼', '༽', '᚛', '᚜', '⁅', '⁆', '⁽', '⁾', '₍', '₎', '⌈',
-    '⌉', '⌊', '⌋', '\u{2329}', '\u{232A}', '❨', '❩', '❪', '❫', '❬', '❭', '❮', '❯', '❰', '❱', '❲',
-    '❳', '❴', '❵', '⟅', '⟆', '⟦', '⟧', '⟨', '⟩', '⟪', '⟫', '⟬', '⟭', '⟮', '⟯', '⦃', '⦄', '⦅', '⦆',
-    '⦇', '⦈', '⦉', '⦊', '⦋', '⦌', '⦍', '⦐', '⦏', '⦎', '⦑', '⦒', '⦓', '⦔', '⦕', '⦖', '⦗', '⦘', '⧘',
-    '⧙', '⧚', '⧛', '⧼', '⧽', '⸢', '⸣', '⸤', '⸥', '⸦', '⸧', '⸨', '⸩', '⹕', '⹖', '⹗', '⹘', '⹙', '⹚',
-    '⹛', '⹜', '〈', '〉', '《', '》', '「', '」', '『', '』', '【', '】', '〔', '〕', '〖', '〗',
-    '〘', '〙', '〚', '〛', '﹙', '﹚', '﹛', '﹜', '﹝', '﹞', '（', '）', '［', '］', '｛', '｝',
-    '｟', '｠', '｢', '｣',
-];
-
-/// Unicode's other mirrored characters in pairs: they face the other way in right-to-left text
-/// (UAX #9 `Bidi_Mirroring_Glyph`, Unicode 16).
-const MIRRORED: [char; 300] = [
-    '<', '>', '«', '»', '‹', '›', '∈', '∋', '∉', '∌', '∊', '∍', '∕', '⧵', '∟', '⯾', '∠', '⦣', '∡',
-    '⦛', '∢', '⦠', '∤', '⫮', '∼', '∽', '≃', '⋍', '≅', '≌', '≒', '≓', '≔', '≕', '≤', '≥', '≦', '≧',
-    '≨', '≩', '≪', '≫', '≮', '≯', '≰', '≱', '≲', '≳', '≴', '≵', '≶', '≷', '≸', '≹', '≺', '≻', '≼',
-    '≽', '≾', '≿', '⊀', '⊁', '⊂', '⊃', '⊄', '⊅', '⊆', '⊇', '⊈', '⊉', '⊊', '⊋', '⊏', '⊐', '⊑', '⊒',
-    '⊘', '⦸', '⊢', '⊣', '⊦', '⫞', '⊨', '⫤', '⊩', '⫣', '⊫', '⫥', '⊰', '⊱', '⊲', '⊳', '⊴', '⊵', '⊶',
-    '⊷', '⊸', '⟜', '⋉', '⋊', '⋋', '⋌', '⋐', '⋑', '⋖', '⋗', '⋘', '⋙', '⋚', '⋛', '⋜', '⋝', '⋞', '⋟',
-    '⋠', '⋡', '⋢', '⋣', '⋤', '⋥', '⋦', '⋧', '⋨', '⋩', '⋪', '⋫', '⋬', '⋭', '⋰', '⋱', '⋲', '⋺', '⋳',
-    '⋻', '⋴', '⋼', '⋶', '⋽', '⋷', '⋾', '⟃', '⟄', '⟈', '⟉', '⟋', '⟍', '⟕', '⟖', '⟝', '⟞', '⟢', '⟣',
-    '⟤', '⟥', '⦤', '⦥', '⦨', '⦩', '⦪', '⦫', '⦬', '⦭', '⦮', '⦯', '⧀', '⧁', '⧄', '⧅', '⧏', '⧐', '⧑',
-    '⧒', '⧔', '⧕', '⧨', '⧩', '⧸', '⧹', '⨫', '⨬', '⨭', '⨮', '⨴', '⨵', '⨼', '⨽', '⩤', '⩥', '⩹', '⩺',
-    '⩻', '⩼', '⩽', '⩾', '⩿', '⪀', '⪁', '⪂', '⪃', '⪄', '⪅', '⪆', '⪇', '⪈', '⪉', '⪊', '⪋', '⪌', '⪍',
-    '⪎', '⪏', '⪐', '⪑', '⪒', '⪓', '⪔', '⪕', '⪖', '⪗', '⪘', '⪙', '⪚', '⪛', '⪜', '⪝', '⪞', '⪟', '⪠',
-    '⪡', '⪢', '⪦', '⪧', '⪨', '⪩', '⪪', '⪫', '⪬', '⪭', '⪯', '⪰', '⪱', '⪲', '⪳', '⪴', '⪵', '⪶', '⪷',
-    '⪸', '⪹', '⪺', '⪻', '⪼', '⪽', '⪾', '⪿', '⫀', '⫁', '⫂', '⫃', '⫄', '⫅', '⫆', '⫇', '⫈', '⫉', '⫊',
-    '⫋', '⫌', '⫍', '⫎', '⫏', '⫐', '⫑', '⫒', '⫓', '⫔', '⫕', '⫖', '⫬', '⫭', '⫷', '⫸', '⫹', '⫺', '⸂',
-    '⸃', '⸄', '⸅', '⸉', '⸊', '⸌', '⸍', '⸜', '⸝', '⸠', '⸡', '﹤', '﹥', '＜', '＞',
-];
-
-/// Matching `(start, end)` indices of bracket pairs in `clusters`, in order of `start`.
-fn bracket_pairs(clusters: &[&str]) -> Vec<(usize, usize)> {
-    let mut open: Vec<(usize, char)> = Vec::new();
-    let mut pairs = Vec::new();
-    for (i, s) in clusters.iter().enumerate() {
-        let c = s.chars().next().unwrap_or(' ');
-        match BRACKETS.iter().position(|&b| b == c) {
-            Some(k) if k % 2 == 0 => open.push((i, BRACKETS[k + 1])),
-            Some(_) => {
-                if let Some(k) = open.iter().rposition(|&(_, close)| close == c) {
-                    pairs.push((open[k].0, i));
-                    open.truncate(k);
+/// Lay `text` out in visual order, returning each glyph with its pen position in pixels and the
+/// total advance. ASCII is laid out glyph by glyph as imageproc does; other text is split by
+/// `unicode-bidi` into left-to-right and right-to-left runs that `harfrust` shapes, joining Arabic
+/// letters, placing marks on their letter and mirroring brackets.
+fn shape(font: &LabelFont, scale: PxScale, text: &str) -> (Vec<(GlyphId, f32, f32)>, f32) {
+    let scaled = font.0.as_scaled(scale);
+    if text.is_ascii() {
+        let (mut caret, mut prev) = (0.0_f32, None);
+        let glyphs = text
+            .chars()
+            .map(|c| {
+                let id = scaled.glyph_id(c);
+                let at = caret;
+                caret += scaled.h_advance(id);
+                // Like imageproc, kern only glyphs with an outline, which in ASCII is all but space.
+                if c != ' '
+                    && let Some(prev) = prev.replace(id)
+                {
+                    caret += scaled.kern(id, prev);
                 }
+                (id, at, 0.0)
+            })
+            .collect();
+        return (glyphs, caret);
+    }
+    let (sx, sy) = (scaled.h_scale_factor(), scaled.v_scale_factor());
+    let bidi = unicode_bidi::BidiInfo::new(text, None);
+    let mut glyphs = Vec::new();
+    let mut caret = 0.0_f32;
+    for paragraph in &bidi.paragraphs {
+        let (levels, runs) = bidi.visual_runs(paragraph, paragraph.range.clone());
+        let shaper = harfrust::ShaperFont::new(&font.1);
+        for run in runs {
+            let mut buffer = harfrust::Buffer::new();
+            buffer.push_str(&text[run.clone()]);
+            buffer.guess_segment_properties();
+            buffer.set_direction(if levels[run.start].is_rtl() {
+                harfrust::Direction::RightToLeft
+            } else {
+                harfrust::Direction::LeftToRight
+            });
+            let key = harfrust::ShapePlanKey::new(&font.1, buffer.script(), buffer.direction());
+            let mut plans = font.2.borrow_mut();
+            if !plans.iter().any(|plan| key.matches(plan)) {
+                let (direction, script) = (buffer.direction(), buffer.script());
+                plans.push(harfrust::ShapePlan::new(
+                    &font.1,
+                    direction,
+                    script,
+                    None,
+                    &[],
+                ));
             }
-            None => {}
+            let plan = plans.iter().find(|plan| key.matches(plan));
+            let options = harfrust::ShapeOptions::new().plan(plan);
+            if harfrust::shape(&shaper, &mut buffer, options).is_err() {
+                continue;
+            }
+            for (info, pos) in buffer.glyph_infos().iter().zip(buffer.glyph_positions()) {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+                glyphs.push((
+                    GlyphId(info.glyph_id as u16),
+                    (pos.x_offset as f32).mul_add(sx, caret),
+                    pos.y_offset as f32 * sy,
+                ));
+                #[allow(clippy::cast_precision_loss)]
+                let advance = pos.x_advance as f32 * sx;
+                caret += advance;
+            }
         }
     }
-    pairs.sort_unstable();
-    pairs
+    (glyphs, caret)
 }
 
 /// Glyph coverage rasterized once per frame, keyed by glyph, font size and the glyph's offset in
 /// its label: labels such as `person 0.87` and `person 0.86` share every glyph but the last.
-type GlyphCache = HashMap<(u16, u32, u32), Option<(i32, i32, usize, Vec<f32>)>>;
+type GlyphCache = HashMap<(u16, u32, u32, u32), Option<(i32, i32, usize, Vec<f32>)>>;
 
 /// The labels drawn so far in a frame: where they sit, so the next one avoids them, and the
 /// glyphs they rasterized.
@@ -876,8 +538,8 @@ struct Labels {
     glyphs: GlyphCache,
 }
 
-/// Draw `text` at `(x, y)` exactly as imageproc's `draw_text_mut` does, taking each glyph's
-/// coverage from `glyphs` when an earlier label already rasterized it.
+/// Draw shaped `text` at `(x, y)`, taking each glyph's coverage from `glyphs` when an earlier
+/// label already rasterized it.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -888,35 +550,20 @@ fn draw_text(
     color: Rgb<u8>,
     (x, y): (i32, i32),
     scale: PxScale,
-    font: &FontRef,
+    font: &LabelFont,
     text: &str,
     glyphs: &mut GlyphCache,
 ) {
-    let scaled = font.as_scaled(scale);
+    let ascent = font.0.as_scaled(scale).ascent();
     let (width, height) = (i64::from(img.width()), i64::from(img.height()));
-    let mut caret = 0.0_f32;
-    let mut prev = None;
-    let mut letter = (0.0_f32, 0.0_f32); // where the last letter starts and its advance
-    for c in text.chars() {
-        let id = scaled.glyph_id(c);
-        let mark = is_mark(c);
-        let at = if mark {
-            // A combining mark takes no room: center it over its letter, as text shapers do for
-            // fonts without mark positioning.
-            let bounds = font
-                .outline(id)
-                .map_or(0.0, |o| o.bounds.min.x + o.bounds.max.x);
-            letter.0 + bounds.mul_add(-scaled.h_scale_factor(), letter.1) / 2.0
-        } else {
-            letter = (caret, scaled.h_advance(id));
-            caret += letter.1;
-            letter.0
-        };
+    for (id, at, rise) in shape(font, scale, text).0 {
         let glyph = glyphs
-            .entry((id.0, scale.y.to_bits(), at.to_bits()))
+            .entry((id.0, scale.y.to_bits(), at.to_bits(), rise.to_bits()))
             .or_insert_with(|| {
+                let position = point(at, ascent - rise);
                 let outlined = font
-                    .outline_glyph(id.with_scale_and_position(scale, point(at, scaled.ascent())))?;
+                    .0
+                    .outline_glyph(id.with_scale_and_position(scale, position))?;
                 let bounds = outlined.px_bounds();
                 let w = bounds.width() as usize;
                 let mut coverage = vec![0.0; w * bounds.height() as usize];
@@ -926,12 +573,6 @@ fn draw_text(
         let Some((min_x, min_y, w, coverage)) = glyph else {
             continue;
         };
-        if !mark {
-            if let Some(prev) = prev {
-                caret += scaled.kern(id, prev);
-            }
-            prev = Some(id);
-        }
         for (row, line) in coverage.chunks((*w).max(1)).enumerate() {
             let py = i64::from(y + *min_y) + row as i64;
             for (col, &v) in line.iter().enumerate() {
@@ -971,7 +612,7 @@ fn draw_text(
 )]
 fn draw_label(
     img: &mut image::RgbImage,
-    font: &FontRef,
+    font: &LabelFont,
     labels: &mut Labels,
     label: &str,
     color: Rgb<u8>,
@@ -980,16 +621,9 @@ fn draw_label(
     anchor_y: i32,
     top_fallback_y: i32,
 ) {
-    let label = &*visual_text(label);
     let (width, height) = img.dimensions();
     let scale = PxScale::from(font_scale);
-    let scaled_font = font.as_scaled(scale);
-    let text_w = label
-        .chars()
-        .filter(|&c| !is_mark(c))
-        .map(|c| scaled_font.h_advance(scaled_font.glyph_id(c)))
-        .sum::<f32>()
-        .ceil() as i32;
+    let text_w = shape(font, scale, label).1.ceil() as i32;
     let text_h = scale.y.ceil() as i32;
 
     // A missing or degenerate font can produce a zero-width label. imageproc's
@@ -1082,7 +716,7 @@ fn draw_label(
     clippy::cast_precision_loss,
     clippy::cast_possible_wrap
 )]
-fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
+fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
     let (width, height) = img.dimensions();
 
     // Dynamic scale factor and thickness based on image size (reference 640x640)
@@ -1339,7 +973,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
 /// * `result` - Inference results; only the `obb` field is read.
 /// * `font` - Optional loaded font; labels are skipped when `None`.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&FontRef>) {
+fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
     let (width, height) = img.dimensions();
 
     // Dynamic scale factor and thickness based on image size (reference 640x640)
@@ -1457,7 +1091,7 @@ fn draw_transparent_rect(
 fn draw_classification(
     img: &mut image::RgbImage,
     result: &Results,
-    font: Option<&FontRef>,
+    font: Option<&LabelFont>,
     top_k: usize,
 ) {
     if let Some(ref probs) = result.probs {
@@ -1483,13 +1117,12 @@ fn draw_classification(
                 let class_name = result.names.get(&class_id).map_or("class", String::as_str);
 
                 let label = format!("{class_name} {score:.2}");
-                entries.push(visual_text(&label).into_owned());
+                entries.push(label);
             }
 
             // Basic approximation: chars * scale * 0.5 (average char width)
             for label in &entries {
-                let w =
-                    (label.chars().filter(|&c| !is_mark(c)).count() as f32 * scale.x * 0.5) as u32;
+                let w = (label.chars().count() as f32 * scale.x * 0.5) as u32;
                 if w > max_width {
                     max_width = w;
                 }
@@ -1530,46 +1163,6 @@ mod tests {
     use ndarray::Array3;
     use std::collections::HashMap;
     use std::sync::Arc;
-
-    #[test]
-    fn test_visual_text_orders_and_joins_rtl_labels() {
-        assert_eq!(visual_text(" person 0.73 "), " person 0.73 ");
-        // Hebrew reverses, the number keeps its order, and a point stays on its letter.
-        assert_eq!(visual_text(" אדם 0.82 "), " 0.82 םדא ");
-        assert_eq!(visual_text("אָב"), "באָ");
-        // Arabic joins: initial, medial and final forms, and lam-alef as one glyph.
-        assert_eq!(visual_text("شخص 0.91"), "0.91 \u{FEBA}\u{FEA8}\u{FEB7}");
-        assert_eq!(visual_text("لا"), "\u{FEFB}");
-        assert_eq!(
-            visual_text("\u{628}\u{8D3}\u{62A}"),
-            "\u{FE96}\u{FE91}\u{8D3}"
-        );
-        // Brackets around left-to-right text keep enclosing it.
-        assert_eq!(visual_text(" כלב (dog) 0.64 "), " 0.64 (dog) בלכ ");
-        assert_eq!(visual_text(" שם (2) 0.55 "), " 0.55 (2) םש ");
-        assert_eq!(visual_text(" שם （cat） ≤5 0.50 "), " 5 0.50≥ （cat） םש ");
-        // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
-        // and Arabic-Indic digits stay right to left after a left-to-right letter.
-        assert_eq!(visual_text(" שם 2-3 0.14 "), " 0.14 2-3 םש ");
-        assert_eq!(
-            visual_text(" قطة 2-3 0.14 "),
-            " 0.14 3-2 \u{FE94}\u{FEC4}\u{FED7} "
-        );
-        assert_eq!(
-            visual_text(" x \u{663}\u{664} שם 0.36 "),
-            " x 0.36 םש \u{663}\u{664} "
-        );
-        // `%` stays with European digits, but not with the Arabic numbers digits become after
-        // an Arabic letter.
-        assert_eq!(visual_text(" שם 50% "), " 50% םש ");
-        assert_eq!(visual_text("\u{663} \u{664}"), "\u{664} \u{663}");
-        assert_eq!(visual_text(" قطة 50% "), " %50 \u{FE94}\u{FEC4}\u{FED7} ");
-        // A left-to-right label keeps its order around a right-to-left word.
-        assert_eq!(
-            visual_text("COVID مريض 0.55"),
-            "COVID 0.55 \u{FEBE}\u{FEF3}\u{FEAE}\u{FEE3}"
-        );
-    }
 
     #[test]
     fn test_get_class_color() {
