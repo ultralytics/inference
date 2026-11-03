@@ -29,11 +29,8 @@ use crate::{error, verbose, warn};
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
     clippy::too_many_lines,
-    clippy::option_if_let_else,
     clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::missing_panics_doc
+    clippy::cast_possible_truncation
 )]
 pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments - use default model if not specified

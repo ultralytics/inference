@@ -192,14 +192,7 @@ pub(crate) fn part_path(dest: &Path) -> PathBuf {
 /// Retries up to `MAX_RETRIES` times on transient failures with exponential backoff.
 /// Permanent errors (4xx, filesystem) are returned immediately without retrying.
 /// Uses a temp file and atomic rename to prevent corrupted partial downloads.
-#[allow(
-    clippy::similar_names,
-    clippy::too_many_lines,
-    clippy::large_stack_arrays,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::too_many_lines, clippy::large_stack_arrays)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut last_err = InferenceError::ModelLoadError(String::new());

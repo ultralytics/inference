@@ -7,17 +7,12 @@
 
 #![allow(
     unsafe_code,
-    clippy::similar_names,
     clippy::cast_precision_loss,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
-    clippy::wildcard_imports,
     clippy::ptr_as_ptr,
-    clippy::cast_lossless,
-    clippy::single_match_else,
-    clippy::suboptimal_flops,
-    clippy::manual_div_ceil
+    clippy::suboptimal_flops
 )]
 
 use std::borrow::Cow;
@@ -805,7 +800,6 @@ fn center_crop_image(
     (resized_rgb, crop, (scale, scale))
 }
 
-#[allow(clippy::similar_names)]
 #[cfg(test)]
 mod tests {
     use super::*;
