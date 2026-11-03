@@ -717,10 +717,12 @@ One of the key benefits of this library is a Rust/ONNX Runtime stack with no PyT
 
 ### Optional Dependencies (for the `annotate` feature)
 
-| Crate       | Purpose                                                                                            |
-| ----------- | -------------------------------------------------------------------------------------------------- |
-| `imageproc` | Drawing boxes and shapes                                                                           |
-| `ab_glyph`  | Text rendering (Arial font, downloaded on first use; Arabic and Hebrew labels drawn right to left) |
+| Crate          | Purpose                                                          |
+| -------------- | ---------------------------------------------------------------- |
+| `imageproc`    | Drawing boxes and shapes                                         |
+| `ab_glyph`     | Text rendering (Arial font, downloaded on first use)             |
+| `harfrust`     | Text shaping (Arabic joining, Hebrew points, ligatures, kerning) |
+| `unicode-bidi` | Right-to-left label order (Unicode bidi algorithm)               |
 
 ### Optional Dependencies (for Video & Visualization)
 
