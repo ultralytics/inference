@@ -646,12 +646,18 @@ fn visual_order(text: &str) -> String {
         let pair = |list: &[char]| list.iter().position(|&m| m == c).map(|k| list[k ^ 1]);
         pair(&BRACKETS).or_else(|| pair(&MIRRORED)).unwrap_or(c)
     };
+    // Direction marks, embeddings and isolates have done their work and the font has no glyph.
+    let control = |c: &char| {
+        matches!(c, '\u{61C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}')
+    };
     let mut out = String::with_capacity(text.len());
     for &i in &order {
+        let chars = clusters[i].chars().filter(|c| !control(c));
         if levels[i] == 1 {
-            out.extend(clusters[i].chars().map(mirror));
+            out.extend(chars.map(mirror));
         } else {
-            out.push_str(clusters[i]);
+            out.extend(chars);
         }
     }
     out
@@ -669,6 +675,7 @@ enum BidiClass {
     Separator,
     Terminator,
     Neutral,
+    Ignored,
 }
 
 /// The bidi class of `c`, with every number, sign, separator and terminator of Unicode 16.
@@ -739,6 +746,15 @@ fn bidi_class(c: char) -> BidiClass {
         | '\u{FFE6}'
         | '\u{11FDD}'..='\u{11FE0}'
         | '\u{1E2FF}' => BidiClass::Terminator,
+        '\u{AD}'
+        | '\u{180E}'
+        | '\u{200B}'..='\u{200D}'
+        | '\u{2060}'..='\u{2065}'
+        | '\u{206A}'..='\u{206F}'
+        | '\u{FEFF}' => BidiClass::Ignored,
+        '\u{200E}' => BidiClass::Ltr,
+        '\u{200F}' => BidiClass::Rtl,
+        '\u{61C}' => BidiClass::ArabicLetter,
         '\u{600}'..='\u{7BF}' | '\u{860}'..='\u{8FF}' | '\u{FB50}'..='\u{FEFF}' if is_rtl(c) => {
             BidiClass::ArabicLetter
         }
@@ -754,13 +770,18 @@ fn bidi_class(c: char) -> BidiClass {
 /// take the direction around them.
 fn bidi_levels(clusters: &[&str]) -> Vec<u8> {
     use BidiClass::{
-        ArabicLetter, ArabicNumber, Ltr, Neutral, Number, Rtl, Separator, Sign, Terminator,
+        ArabicLetter, ArabicNumber, Ignored, Ltr, Neutral, Number, Rtl, Separator, Sign, Terminator,
     };
 
-    let mut classes: Vec<BidiClass> = clusters
-        .iter()
-        .map(|s| bidi_class(s.chars().next().unwrap_or(' ')))
-        .collect();
+    // Characters UAX #9 ignores, such as ZWJ, take the class of the one before them.
+    let mut classes: Vec<BidiClass> = Vec::with_capacity(clusters.len());
+    for s in clusters {
+        let class = bidi_class(s.chars().next().unwrap_or(' '));
+        classes.push(match class {
+            Ignored => classes.last().copied().unwrap_or(Neutral),
+            _ => class,
+        });
+    }
     let n = classes.len();
     let base = classes
         .iter()
@@ -1599,9 +1620,14 @@ mod tests {
         assert_eq!(visual_text(" כלב (dog) 0.64 "), " 0.64 (dog) בלכ ");
         assert_eq!(visual_text(" שם (2) 0.55 "), " 0.55 (2) םש ");
         assert_eq!(visual_text(" שם （cat） ≤5 0.50 "), " 5 0.50≥ （cat） םש ");
-        // Full-width digits and numbers grouped with a no-break space.
+        // Full-width digits, numbers grouped with a no-break space or ZWJ, and direction marks.
         assert_eq!(visual_text("שם ２３ 0.50"), "0.50 ２３ םש");
         assert_eq!(visual_text("שם 1\u{A0}234 0.50"), "0.50 1\u{A0}234 םש");
+        assert_eq!(
+            visual_text("שם 123\u{200D}456 0.50"),
+            "0.50 123\u{200D}456 םש"
+        );
+        assert_eq!(visual_text("שם \u{200E}123 0.50"), "123 0.50 םש");
         // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
         // and Arabic-Indic digits stay right to left after a left-to-right letter.
         assert_eq!(visual_text(" שם 2-3 0.14 "), " 0.14 2-3 םש ");
