@@ -82,7 +82,7 @@ await annotate(document.querySelector("canvas"), "bus.jpg", results);
 
 `predict()` accepts a URL/path, a `Blob`/`File`, raw encoded image bytes
 (`Uint8Array`/`ArrayBuffer`), `ImageData`, an `HTMLImageElement`,
-`HTMLCanvasElement`, `HTMLVideoElement`, or an `ImageBitmap`.
+`HTMLCanvasElement`, `HTMLVideoElement`, an `OffscreenCanvas`, or an `ImageBitmap`.
 
 ```ts
 const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
@@ -311,7 +311,8 @@ Notes:
 - **Tasks**: detect, segment, semantic, depth, classify, pose, and obb are all supported.
 - **Cross-origin isolation**: LiteRT's threaded wasm wants `SharedArrayBuffer`,
   so serve with `Cross-Origin-Opener-Policy: same-origin` and
-  `Cross-Origin-Embedder-Policy: require-corp`.
+  `Cross-Origin-Embedder-Policy: require-corp`. That blocks the default CDN wasm, so
+  pass a same-origin `litertWasmUrl` too.
 
 ## 🏎️ Benchmarks
 
