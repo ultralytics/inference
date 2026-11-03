@@ -819,23 +819,22 @@ export async function annotate(
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
 
-  // A label's first letter sets its direction, like the native and Python renderers. Safari's
-  // canvas does not pair brackets in right-to-left text, so labels with both are drawn run by run
-  // in display order from the engine's bidi runs.
-  const rtlText = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
-  const runsNeeded = (text: string) => rtlText.test(text) && /[\p{Ps}\p{Pe}]/u.test(text);
+  // Labels that may hold right-to-left text (Unicode's right-to-left blocks and controls) are
+  // drawn as the engine's bidi runs, each in its resolved direction, since Safari's canvas
+  // does not pair brackets in right-to-left text. Other labels read left to right as they are.
+  const rtlText =
+    /[\u0590-\u08FF\u200F\u202B\u202E\u2067\u2068\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
   const names = [...results.boxes, ...results.obb].map((b) => b.name);
-  if (showLabels && names.concat(results.probs?.top5names ?? []).some(runsNeeded)) {
+  if (showLabels && names.concat(results.probs?.top5names ?? []).some((n) => rtlText.test(n))) {
     await ensureInit(options?.wasmUrl);
   }
   const fillText = (text: string, x: number, y: number) => {
-    const rtl = Number(rtlText.test(text.match(/\p{L}/u)?.[0] ?? ""));
-    const runs = runsNeeded(text) ? bidi_runs(text) : [0, text.length, rtl];
-    for (let i = 0; i < runs.length; i += 3) {
-      const run = text.slice(runs[i], runs[i + 1]);
-      ctx.direction = runs[i + 2] ? "rtl" : "ltr";
+    ctx.direction = "ltr";
+    if (!rtlText.test(text)) return ctx.fillText(text, x, y);
+    for (const run of bidi_runs(text)) {
+      ctx.direction = run.startsWith("\u202E") ? "rtl" : "ltr";
       ctx.fillText(run, x, y);
-      if (i + 3 < runs.length) x += ctx.measureText(run).width;
+      x += ctx.measureText(run).width;
     }
   };
 
