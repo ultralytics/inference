@@ -602,20 +602,10 @@ fn join_arabic(text: &str) -> String {
         .collect()
 }
 
-/// Reorder `text` into drawing order with the implicit rules of the Unicode Bidirectional
-/// Algorithm (UAX #9, no explicit embeddings): the first strong letter sets the base direction,
-/// numbers read left to right, neutrals between two runs of one direction take it and the others
-/// take the base direction, and each run is reversed by level. Marks move with their letter.
+/// Reorder `text` into drawing order with the Unicode Bidirectional Algorithm (UAX #9): each run
+/// is reversed by its level from [`bidi_levels`], and brackets in right-to-left runs are
+/// mirrored. Marks move with their letter.
 fn visual_order(text: &str) -> String {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Class {
-        Ltr,
-        Rtl,
-        Number,
-        Neutral,
-    }
-    use Class::{Ltr, Neutral, Number, Rtl};
-
     let mut clusters: Vec<&str> = Vec::new();
     let mut start = 0;
     for (i, c) in text.char_indices().skip(1) {
@@ -625,6 +615,44 @@ fn visual_order(text: &str) -> String {
         }
     }
     clusters.push(&text[start..]);
+
+    let levels = bidi_levels(&clusters);
+    let n = levels.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    for level in [2, 1] {
+        let mut i = 0;
+        while i < n {
+            let end = (i..n).find(|&j| levels[order[j]] < level).unwrap_or(n);
+            order[i..end].reverse();
+            i = end + 1;
+        }
+    }
+    // Brackets in right-to-left runs face the other way.
+    order
+        .iter()
+        .map(|&i| {
+            if levels[i] == 1 {
+                mirrored(clusters[i])
+            } else {
+                clusters[i]
+            }
+        })
+        .collect()
+}
+
+/// Embedding level of each cluster (0 left to right, 1 right to left, 2 left to right inside
+/// right to left) with the implicit rules of UAX #9, no explicit embeddings: the first strong
+/// letter sets the base direction, numbers read left to right, and bracket pairs and neutrals
+/// take the direction around them.
+fn bidi_levels(clusters: &[&str]) -> Vec<u8> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Class {
+        Ltr,
+        Rtl,
+        Number,
+        Neutral,
+    }
+    use Class::{Ltr, Neutral, Number, Rtl};
 
     let first = |s: &str| s.chars().next().unwrap_or(' ');
     let mut classes: Vec<Class> = clusters
@@ -638,7 +666,7 @@ fn visual_order(text: &str) -> String {
         .collect();
     let n = classes.len();
 
-    // A separator between two numbers and a terminator such as `%` next to one join the number.
+    // A separator between two numbers joins them.
     for i in 1..n.saturating_sub(1) {
         if matches!(
             first(clusters[i]),
@@ -646,17 +674,6 @@ fn visual_order(text: &str) -> String {
         ) && classes[i - 1] == Number
             && classes[i + 1] == Number
         {
-            classes[i] = Number;
-        }
-    }
-    let terminator = |s: &str| matches!(first(s), '%' | '$' | '#' | '°' | '\u{66A}' | '\u{2030}');
-    for i in 1..n {
-        if terminator(clusters[i]) && classes[i - 1] == Number {
-            classes[i] = Number;
-        }
-    }
-    for i in (0..n.saturating_sub(1)).rev() {
-        if terminator(clusters[i]) && classes[i + 1] == Number {
             classes[i] = Number;
         }
     }
@@ -676,9 +693,33 @@ fn visual_order(text: &str) -> String {
         }
     }
 
-    // Neutrals take the direction on both sides when it matches, where numbers count as
-    // right to left, and the base direction otherwise.
+    // Paired brackets take the base direction when the text inside has it, and otherwise the
+    // direction of the text before them. Numbers count as right to left.
     let side = |c: Class| if c == Ltr { Ltr } else { Rtl };
+    for (start, end) in bracket_pairs(clusters) {
+        let inside: Vec<Class> = classes[start + 1..end]
+            .iter()
+            .filter(|&&c| c != Neutral)
+            .map(|&c| side(c))
+            .collect();
+        if inside.is_empty() {
+            continue;
+        }
+        let dir = if inside.contains(&base) {
+            base
+        } else {
+            classes[..start]
+                .iter()
+                .rev()
+                .find(|&&c| c != Neutral)
+                .map_or(base, |&c| side(c))
+        };
+        classes[start] = dir;
+        classes[end] = dir;
+    }
+
+    // Other neutrals take the direction on both sides when it matches, where numbers count as
+    // right to left, and the base direction otherwise.
     let mut i = 0;
     while i < n {
         let end = (i..n).find(|&j| classes[j] != Neutral).unwrap_or(n);
@@ -690,24 +731,53 @@ fn visual_order(text: &str) -> String {
         i = end + 1;
     }
 
-    let levels: Vec<u8> = classes
+    classes
         .iter()
         .map(|&c| match c {
             Ltr if base == Ltr => 0,
             Rtl => 1,
             _ => 2,
         })
-        .collect();
-    let mut order: Vec<usize> = (0..n).collect();
-    for level in [2, 1] {
-        let mut i = 0;
-        while i < n {
-            let end = (i..n).find(|&j| levels[order[j]] < level).unwrap_or(n);
-            order[i..end].reverse();
-            i = end + 1;
+        .collect()
+}
+
+/// Matching `(start, end)` indices of `()`, `[]` and `{}` in `clusters`, in order of `start`.
+fn bracket_pairs(clusters: &[&str]) -> Vec<(usize, usize)> {
+    let mut open: Vec<(usize, &str)> = Vec::new();
+    let mut pairs = Vec::new();
+    for (i, &s) in clusters.iter().enumerate() {
+        match s {
+            "(" => open.push((i, ")")),
+            "[" => open.push((i, "]")),
+            "{" => open.push((i, "}")),
+            ")" | "]" | "}" => {
+                if let Some(k) = open.iter().rposition(|&(_, close)| close == s) {
+                    pairs.push((open[k].0, i));
+                    open.truncate(k);
+                }
+            }
+            _ => {}
         }
     }
-    order.iter().map(|&i| clusters[i]).collect()
+    pairs.sort_unstable();
+    pairs
+}
+
+/// The bracket facing the other way, or `s` itself.
+fn mirrored(s: &str) -> &str {
+    match s {
+        "(" => ")",
+        ")" => "(",
+        "[" => "]",
+        "]" => "[",
+        "{" => "}",
+        "}" => "{",
+        "<" => ">",
+        ">" => "<",
+        "«" => "»",
+        "»" => "«",
+        _ => s,
+    }
 }
 
 /// Draw a class label with a filled background rectangle, avoiding overlap with previously placed labels.
@@ -1301,8 +1371,11 @@ mod tests {
         assert_eq!(visual_text(" אדם 0.82 "), " 0.82 םדא ");
         assert_eq!(visual_text("אָב"), "באָ");
         // Arabic joins: initial, medial and final forms, and lam-alef as one glyph.
-        assert_eq!(visual_text("شخص 50%"), "50% \u{FEBA}\u{FEA8}\u{FEB7}");
+        assert_eq!(visual_text("شخص 0.91"), "0.91 \u{FEBA}\u{FEA8}\u{FEB7}");
         assert_eq!(visual_text("لا"), "\u{FEFB}");
+        // Brackets around left-to-right text keep enclosing it.
+        assert_eq!(visual_text(" כלב (dog) 0.64 "), " 0.64 (dog) בלכ ");
+        assert_eq!(visual_text(" שם (2) 0.55 "), " 0.55 (2) םש ");
         // A left-to-right label keeps its order around a right-to-left word.
         assert_eq!(
             visual_text("COVID مريض 0.55"),
