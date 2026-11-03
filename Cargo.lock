@@ -2574,6 +2574,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "ultralytics-inference",
+ "unicode-bidi",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

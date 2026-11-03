@@ -1071,6 +1071,27 @@ pub fn pose_palette() -> Result<JsValue, JsError> {
     to_js(&scheme, "pose palette")
 }
 
+/// Split a label into `[text, rtl]` runs in left-to-right display order (Unicode bidi
+/// algorithm, direction from the first strong letter). The JS annotator draws each run on its
+/// own because Safari's canvas does not pair brackets in right-to-left text.
+///
+/// # Errors
+/// Returns a JS error only if serialization fails (not expected).
+#[wasm_bindgen]
+pub fn bidi_runs(text: &str) -> Result<JsValue, JsError> {
+    let bidi = unicode_bidi::BidiInfo::new(text, None);
+    let runs: Vec<(&str, bool)> = bidi
+        .paragraphs
+        .iter()
+        .flat_map(|para| {
+            let (levels, runs) = bidi.visual_runs(para, para.range.clone());
+            runs.into_iter()
+                .map(move |run| (&text[run.clone()], levels[run.start].is_rtl()))
+        })
+        .collect();
+    to_js(&runs, "bidi runs")
+}
+
 /// Install a panic hook that logs Rust panics to the browser console.
 #[wasm_bindgen(start)]
 pub fn start() {
