@@ -628,17 +628,20 @@ fn visual_order(text: &str) -> String {
             i = end + 1;
         }
     }
-    // Brackets in right-to-left runs face the other way.
-    order
-        .iter()
-        .map(|&i| {
-            if levels[i] == 1 {
-                mirrored(clusters[i])
-            } else {
-                clusters[i]
-            }
-        })
-        .collect()
+    // Brackets and other mirrored characters in right-to-left runs face the other way.
+    let mirror = |c: char| {
+        let pair = |list: &[char]| list.iter().position(|&m| m == c).map(|k| list[k ^ 1]);
+        pair(&BRACKETS).or_else(|| pair(&MIRRORED)).unwrap_or(c)
+    };
+    let mut out = String::with_capacity(text.len());
+    for &i in &order {
+        if levels[i] == 1 {
+            out.extend(clusters[i].chars().map(mirror));
+        } else {
+            out.push_str(clusters[i]);
+        }
+    }
+    out
 }
 
 /// The UAX #9 bidi classes labels need, with marks folded into their letter.
@@ -793,43 +796,35 @@ fn bidi_levels(clusters: &[&str]) -> Vec<u8> {
         .collect()
 }
 
-/// Matching `(start, end)` indices of `()`, `[]` and `{}` in `clusters`, in order of `start`.
+/// Opening and closing brackets, in pairs: they pair up and face the other way in right-to-left
+/// text (UAX #9 bidi brackets and mirroring).
+const BRACKETS: [char; 28] = [
+    '(', ')', '[', ']', '{', '}', '⁽', '⁾', '₍', '₎', '⟨', '⟩', '〈', '〉', '《', '》', '「', '」',
+    '『', '』', '【', '】', '（', '）', '［', '］', '｛', '｝',
+];
+
+/// Other characters that face the other way in right-to-left text, in pairs.
+const MIRRORED: [char; 12] = ['<', '>', '«', '»', '‹', '›', '≤', '≥', '≪', '≫', '＜', '＞'];
+
+/// Matching `(start, end)` indices of bracket pairs in `clusters`, in order of `start`.
 fn bracket_pairs(clusters: &[&str]) -> Vec<(usize, usize)> {
-    let mut open: Vec<(usize, &str)> = Vec::new();
+    let mut open: Vec<(usize, char)> = Vec::new();
     let mut pairs = Vec::new();
-    for (i, &s) in clusters.iter().enumerate() {
-        match s {
-            "(" => open.push((i, ")")),
-            "[" => open.push((i, "]")),
-            "{" => open.push((i, "}")),
-            ")" | "]" | "}" => {
-                if let Some(k) = open.iter().rposition(|&(_, close)| close == s) {
+    for (i, s) in clusters.iter().enumerate() {
+        let c = s.chars().next().unwrap_or(' ');
+        match BRACKETS.iter().position(|&b| b == c) {
+            Some(k) if k % 2 == 0 => open.push((i, BRACKETS[k + 1])),
+            Some(_) => {
+                if let Some(k) = open.iter().rposition(|&(_, close)| close == c) {
                     pairs.push((open[k].0, i));
                     open.truncate(k);
                 }
             }
-            _ => {}
+            None => {}
         }
     }
     pairs.sort_unstable();
     pairs
-}
-
-/// The bracket facing the other way, or `s` itself.
-fn mirrored(s: &str) -> &str {
-    match s {
-        "(" => ")",
-        ")" => "(",
-        "[" => "]",
-        "]" => "[",
-        "{" => "}",
-        "}" => "{",
-        "<" => ">",
-        ">" => "<",
-        "«" => "»",
-        "»" => "«",
-        _ => s,
-    }
 }
 
 /// Glyph coverage rasterized once per frame, keyed by glyph, font size and the glyph's offset in
@@ -1495,6 +1490,7 @@ mod tests {
         // Brackets around left-to-right text keep enclosing it.
         assert_eq!(visual_text(" כלב (dog) 0.64 "), " 0.64 (dog) בלכ ");
         assert_eq!(visual_text(" שם (2) 0.55 "), " 0.55 (2) םש ");
+        assert_eq!(visual_text(" שם （cat） ≤5 0.50 "), " 5 0.50≥ （cat） םש ");
         // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
         // and Arabic-Indic digits stay right to left after a left-to-right letter.
         assert_eq!(visual_text(" שם 2-3 0.14 "), " 0.14 2-3 םש ");
