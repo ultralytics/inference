@@ -542,9 +542,15 @@ fn is_rtl(c: char) -> bool {
 }
 
 /// `text` as it must be drawn left to right: Arabic letters joined and right-to-left runs reversed.
-/// Text without right-to-left letters is returned as is.
+/// Text without right-to-left letters or Arabic-Indic digits is returned as is.
 fn visual_text(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.is_ascii() && text.chars().any(is_rtl) {
+    let rtl = |c| {
+        matches!(
+            bidi_class(c),
+            BidiClass::Rtl | BidiClass::ArabicLetter | BidiClass::ArabicNumber
+        )
+    };
+    if !text.is_ascii() && text.chars().any(rtl) {
         visual_order(&join_arabic(text)).into()
     } else {
         text.into()
@@ -796,15 +802,39 @@ fn bidi_levels(clusters: &[&str]) -> Vec<u8> {
         .collect()
 }
 
-/// Opening and closing brackets, in pairs: they pair up and face the other way in right-to-left
-/// text (UAX #9 bidi brackets and mirroring).
-const BRACKETS: [char; 28] = [
-    '(', ')', '[', ']', '{', '}', '⁽', '⁾', '₍', '₎', '⟨', '⟩', '〈', '〉', '《', '》', '「', '」',
-    '『', '』', '【', '】', '（', '）', '［', '］', '｛', '｝',
+/// Unicode's paired brackets as `(opening, closing)` pairs: they pair up and face the other way
+/// in right-to-left text (UAX #9 `Bidi_Paired_Bracket` and `Bidi_Mirroring_Glyph`, Unicode 16).
+const BRACKETS: [char; 128] = [
+    '(', ')', '[', ']', '{', '}', '༺', '༻', '༼', '༽', '᚛', '᚜', '⁅', '⁆', '⁽', '⁾', '₍', '₎', '⌈',
+    '⌉', '⌊', '⌋', '\u{2329}', '\u{232A}', '❨', '❩', '❪', '❫', '❬', '❭', '❮', '❯', '❰', '❱', '❲',
+    '❳', '❴', '❵', '⟅', '⟆', '⟦', '⟧', '⟨', '⟩', '⟪', '⟫', '⟬', '⟭', '⟮', '⟯', '⦃', '⦄', '⦅', '⦆',
+    '⦇', '⦈', '⦉', '⦊', '⦋', '⦌', '⦍', '⦐', '⦏', '⦎', '⦑', '⦒', '⦓', '⦔', '⦕', '⦖', '⦗', '⦘', '⧘',
+    '⧙', '⧚', '⧛', '⧼', '⧽', '⸢', '⸣', '⸤', '⸥', '⸦', '⸧', '⸨', '⸩', '⹕', '⹖', '⹗', '⹘', '⹙', '⹚',
+    '⹛', '⹜', '〈', '〉', '《', '》', '「', '」', '『', '』', '【', '】', '〔', '〕', '〖', '〗',
+    '〘', '〙', '〚', '〛', '﹙', '﹚', '﹛', '﹜', '﹝', '﹞', '（', '）', '［', '］', '｛', '｝',
+    '｟', '｠', '｢', '｣',
 ];
 
-/// Other characters that face the other way in right-to-left text, in pairs.
-const MIRRORED: [char; 12] = ['<', '>', '«', '»', '‹', '›', '≤', '≥', '≪', '≫', '＜', '＞'];
+/// Unicode's other mirrored characters in pairs: they face the other way in right-to-left text
+/// (UAX #9 `Bidi_Mirroring_Glyph`, Unicode 16).
+const MIRRORED: [char; 300] = [
+    '<', '>', '«', '»', '‹', '›', '∈', '∋', '∉', '∌', '∊', '∍', '∕', '⧵', '∟', '⯾', '∠', '⦣', '∡',
+    '⦛', '∢', '⦠', '∤', '⫮', '∼', '∽', '≃', '⋍', '≅', '≌', '≒', '≓', '≔', '≕', '≤', '≥', '≦', '≧',
+    '≨', '≩', '≪', '≫', '≮', '≯', '≰', '≱', '≲', '≳', '≴', '≵', '≶', '≷', '≸', '≹', '≺', '≻', '≼',
+    '≽', '≾', '≿', '⊀', '⊁', '⊂', '⊃', '⊄', '⊅', '⊆', '⊇', '⊈', '⊉', '⊊', '⊋', '⊏', '⊐', '⊑', '⊒',
+    '⊘', '⦸', '⊢', '⊣', '⊦', '⫞', '⊨', '⫤', '⊩', '⫣', '⊫', '⫥', '⊰', '⊱', '⊲', '⊳', '⊴', '⊵', '⊶',
+    '⊷', '⊸', '⟜', '⋉', '⋊', '⋋', '⋌', '⋐', '⋑', '⋖', '⋗', '⋘', '⋙', '⋚', '⋛', '⋜', '⋝', '⋞', '⋟',
+    '⋠', '⋡', '⋢', '⋣', '⋤', '⋥', '⋦', '⋧', '⋨', '⋩', '⋪', '⋫', '⋬', '⋭', '⋰', '⋱', '⋲', '⋺', '⋳',
+    '⋻', '⋴', '⋼', '⋶', '⋽', '⋷', '⋾', '⟃', '⟄', '⟈', '⟉', '⟋', '⟍', '⟕', '⟖', '⟝', '⟞', '⟢', '⟣',
+    '⟤', '⟥', '⦤', '⦥', '⦨', '⦩', '⦪', '⦫', '⦬', '⦭', '⦮', '⦯', '⧀', '⧁', '⧄', '⧅', '⧏', '⧐', '⧑',
+    '⧒', '⧔', '⧕', '⧨', '⧩', '⧸', '⧹', '⨫', '⨬', '⨭', '⨮', '⨴', '⨵', '⨼', '⨽', '⩤', '⩥', '⩹', '⩺',
+    '⩻', '⩼', '⩽', '⩾', '⩿', '⪀', '⪁', '⪂', '⪃', '⪄', '⪅', '⪆', '⪇', '⪈', '⪉', '⪊', '⪋', '⪌', '⪍',
+    '⪎', '⪏', '⪐', '⪑', '⪒', '⪓', '⪔', '⪕', '⪖', '⪗', '⪘', '⪙', '⪚', '⪛', '⪜', '⪝', '⪞', '⪟', '⪠',
+    '⪡', '⪢', '⪦', '⪧', '⪨', '⪩', '⪪', '⪫', '⪬', '⪭', '⪯', '⪰', '⪱', '⪲', '⪳', '⪴', '⪵', '⪶', '⪷',
+    '⪸', '⪹', '⪺', '⪻', '⪼', '⪽', '⪾', '⪿', '⫀', '⫁', '⫂', '⫃', '⫄', '⫅', '⫆', '⫇', '⫈', '⫉', '⫊',
+    '⫋', '⫌', '⫍', '⫎', '⫏', '⫐', '⫑', '⫒', '⫓', '⫔', '⫕', '⫖', '⫬', '⫭', '⫷', '⫸', '⫹', '⫺', '⸂',
+    '⸃', '⸄', '⸅', '⸉', '⸊', '⸌', '⸍', '⸜', '⸝', '⸠', '⸡', '﹤', '﹥', '＜', '＞',
+];
 
 /// Matching `(start, end)` indices of bracket pairs in `clusters`, in order of `start`.
 fn bracket_pairs(clusters: &[&str]) -> Vec<(usize, usize)> {
@@ -1505,6 +1535,7 @@ mod tests {
         // `%` stays with European digits, but not with the Arabic numbers digits become after
         // an Arabic letter.
         assert_eq!(visual_text(" שם 50% "), " 50% םש ");
+        assert_eq!(visual_text("\u{663} \u{664}"), "\u{664} \u{663}");
         assert_eq!(visual_text(" قطة 50% "), " %50 \u{FE94}\u{FEC4}\u{FED7} ");
         // A left-to-right label keeps its order around a right-to-left word.
         assert_eq!(
