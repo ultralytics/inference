@@ -436,6 +436,280 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         });
 }
 
+/// Arabic letters and their presentation forms `[isolated, final, initial, medial]`, `'\0'` where
+/// a letter has none, from Unicode's Arabic Presentation Forms-B then -A as the Ultralytics Python
+/// `Annotator` builds them. Letters without a medial form never join the letter after them.
+const ARABIC_FORMS: [(char, [char; 4]); 76] = [
+    ('\u{621}', ['\u{FE80}', '\0', '\0', '\0']),
+    ('\u{622}', ['\u{FE81}', '\u{FE82}', '\0', '\0']),
+    ('\u{623}', ['\u{FE83}', '\u{FE84}', '\0', '\0']),
+    ('\u{624}', ['\u{FE85}', '\u{FE86}', '\0', '\0']),
+    ('\u{625}', ['\u{FE87}', '\u{FE88}', '\0', '\0']),
+    ('\u{626}', ['\u{FE89}', '\u{FE8A}', '\u{FE8B}', '\u{FE8C}']),
+    ('\u{627}', ['\u{FE8D}', '\u{FE8E}', '\0', '\0']),
+    ('\u{628}', ['\u{FE8F}', '\u{FE90}', '\u{FE91}', '\u{FE92}']),
+    ('\u{629}', ['\u{FE93}', '\u{FE94}', '\0', '\0']),
+    ('\u{62A}', ['\u{FE95}', '\u{FE96}', '\u{FE97}', '\u{FE98}']),
+    ('\u{62B}', ['\u{FE99}', '\u{FE9A}', '\u{FE9B}', '\u{FE9C}']),
+    ('\u{62C}', ['\u{FE9D}', '\u{FE9E}', '\u{FE9F}', '\u{FEA0}']),
+    ('\u{62D}', ['\u{FEA1}', '\u{FEA2}', '\u{FEA3}', '\u{FEA4}']),
+    ('\u{62E}', ['\u{FEA5}', '\u{FEA6}', '\u{FEA7}', '\u{FEA8}']),
+    ('\u{62F}', ['\u{FEA9}', '\u{FEAA}', '\0', '\0']),
+    ('\u{630}', ['\u{FEAB}', '\u{FEAC}', '\0', '\0']),
+    ('\u{631}', ['\u{FEAD}', '\u{FEAE}', '\0', '\0']),
+    ('\u{632}', ['\u{FEAF}', '\u{FEB0}', '\0', '\0']),
+    ('\u{633}', ['\u{FEB1}', '\u{FEB2}', '\u{FEB3}', '\u{FEB4}']),
+    ('\u{634}', ['\u{FEB5}', '\u{FEB6}', '\u{FEB7}', '\u{FEB8}']),
+    ('\u{635}', ['\u{FEB9}', '\u{FEBA}', '\u{FEBB}', '\u{FEBC}']),
+    ('\u{636}', ['\u{FEBD}', '\u{FEBE}', '\u{FEBF}', '\u{FEC0}']),
+    ('\u{637}', ['\u{FEC1}', '\u{FEC2}', '\u{FEC3}', '\u{FEC4}']),
+    ('\u{638}', ['\u{FEC5}', '\u{FEC6}', '\u{FEC7}', '\u{FEC8}']),
+    ('\u{639}', ['\u{FEC9}', '\u{FECA}', '\u{FECB}', '\u{FECC}']),
+    ('\u{63A}', ['\u{FECD}', '\u{FECE}', '\u{FECF}', '\u{FED0}']),
+    ('\u{641}', ['\u{FED1}', '\u{FED2}', '\u{FED3}', '\u{FED4}']),
+    ('\u{642}', ['\u{FED5}', '\u{FED6}', '\u{FED7}', '\u{FED8}']),
+    ('\u{643}', ['\u{FED9}', '\u{FEDA}', '\u{FEDB}', '\u{FEDC}']),
+    ('\u{644}', ['\u{FEDD}', '\u{FEDE}', '\u{FEDF}', '\u{FEE0}']),
+    ('\u{645}', ['\u{FEE1}', '\u{FEE2}', '\u{FEE3}', '\u{FEE4}']),
+    ('\u{646}', ['\u{FEE5}', '\u{FEE6}', '\u{FEE7}', '\u{FEE8}']),
+    ('\u{647}', ['\u{FEE9}', '\u{FEEA}', '\u{FEEB}', '\u{FEEC}']),
+    ('\u{648}', ['\u{FEED}', '\u{FEEE}', '\0', '\0']),
+    ('\u{649}', ['\u{FEEF}', '\u{FEF0}', '\u{FBE8}', '\u{FBE9}']),
+    ('\u{64A}', ['\u{FEF1}', '\u{FEF2}', '\u{FEF3}', '\u{FEF4}']),
+    ('\u{671}', ['\u{FB50}', '\u{FB51}', '\0', '\0']),
+    ('\u{677}', ['\u{FBDD}', '\0', '\0', '\0']),
+    ('\u{679}', ['\u{FB66}', '\u{FB67}', '\u{FB68}', '\u{FB69}']),
+    ('\u{67A}', ['\u{FB5E}', '\u{FB5F}', '\u{FB60}', '\u{FB61}']),
+    ('\u{67B}', ['\u{FB52}', '\u{FB53}', '\u{FB54}', '\u{FB55}']),
+    ('\u{67E}', ['\u{FB56}', '\u{FB57}', '\u{FB58}', '\u{FB59}']),
+    ('\u{67F}', ['\u{FB62}', '\u{FB63}', '\u{FB64}', '\u{FB65}']),
+    ('\u{680}', ['\u{FB5A}', '\u{FB5B}', '\u{FB5C}', '\u{FB5D}']),
+    ('\u{683}', ['\u{FB76}', '\u{FB77}', '\u{FB78}', '\u{FB79}']),
+    ('\u{684}', ['\u{FB72}', '\u{FB73}', '\u{FB74}', '\u{FB75}']),
+    ('\u{686}', ['\u{FB7A}', '\u{FB7B}', '\u{FB7C}', '\u{FB7D}']),
+    ('\u{687}', ['\u{FB7E}', '\u{FB7F}', '\u{FB80}', '\u{FB81}']),
+    ('\u{688}', ['\u{FB88}', '\u{FB89}', '\0', '\0']),
+    ('\u{68C}', ['\u{FB84}', '\u{FB85}', '\0', '\0']),
+    ('\u{68D}', ['\u{FB82}', '\u{FB83}', '\0', '\0']),
+    ('\u{68E}', ['\u{FB86}', '\u{FB87}', '\0', '\0']),
+    ('\u{691}', ['\u{FB8C}', '\u{FB8D}', '\0', '\0']),
+    ('\u{698}', ['\u{FB8A}', '\u{FB8B}', '\0', '\0']),
+    ('\u{6A4}', ['\u{FB6A}', '\u{FB6B}', '\u{FB6C}', '\u{FB6D}']),
+    ('\u{6A6}', ['\u{FB6E}', '\u{FB6F}', '\u{FB70}', '\u{FB71}']),
+    ('\u{6A9}', ['\u{FB8E}', '\u{FB8F}', '\u{FB90}', '\u{FB91}']),
+    ('\u{6AD}', ['\u{FBD3}', '\u{FBD4}', '\u{FBD5}', '\u{FBD6}']),
+    ('\u{6AF}', ['\u{FB92}', '\u{FB93}', '\u{FB94}', '\u{FB95}']),
+    ('\u{6B1}', ['\u{FB9A}', '\u{FB9B}', '\u{FB9C}', '\u{FB9D}']),
+    ('\u{6B3}', ['\u{FB96}', '\u{FB97}', '\u{FB98}', '\u{FB99}']),
+    ('\u{6BA}', ['\u{FB9E}', '\u{FB9F}', '\0', '\0']),
+    ('\u{6BB}', ['\u{FBA0}', '\u{FBA1}', '\u{FBA2}', '\u{FBA3}']),
+    ('\u{6BE}', ['\u{FBAA}', '\u{FBAB}', '\u{FBAC}', '\u{FBAD}']),
+    ('\u{6C0}', ['\u{FBA4}', '\u{FBA5}', '\0', '\0']),
+    ('\u{6C1}', ['\u{FBA6}', '\u{FBA7}', '\u{FBA8}', '\u{FBA9}']),
+    ('\u{6C5}', ['\u{FBE0}', '\u{FBE1}', '\0', '\0']),
+    ('\u{6C6}', ['\u{FBD9}', '\u{FBDA}', '\0', '\0']),
+    ('\u{6C7}', ['\u{FBD7}', '\u{FBD8}', '\0', '\0']),
+    ('\u{6C8}', ['\u{FBDB}', '\u{FBDC}', '\0', '\0']),
+    ('\u{6C9}', ['\u{FBE2}', '\u{FBE3}', '\0', '\0']),
+    ('\u{6CB}', ['\u{FBDE}', '\u{FBDF}', '\0', '\0']),
+    ('\u{6CC}', ['\u{FBFC}', '\u{FBFD}', '\u{FBFE}', '\u{FBFF}']),
+    ('\u{6D0}', ['\u{FBE4}', '\u{FBE5}', '\u{FBE6}', '\u{FBE7}']),
+    ('\u{6D2}', ['\u{FBAE}', '\u{FBAF}', '\0', '\0']),
+    ('\u{6D3}', ['\u{FBB0}', '\u{FBB1}', '\0', '\0']),
+];
+
+/// Lam followed by one of these alefs is one `[isolated, final]` ligature.
+const LAM_ALEF: [(char, [char; 2]); 4] = [
+    ('\u{622}', ['\u{FEF5}', '\u{FEF6}']),
+    ('\u{623}', ['\u{FEF7}', '\u{FEF8}']),
+    ('\u{625}', ['\u{FEF9}', '\u{FEFA}']),
+    ('\u{627}', ['\u{FEFB}', '\u{FEFC}']),
+];
+
+/// Hebrew points, Arabic harakat and other combining marks, drawn on the letter before them.
+const fn is_mark(c: char) -> bool {
+    matches!(c, '\u{300}'..='\u{36F}' | '\u{591}'..='\u{5BD}' | '\u{5BF}' | '\u{5C1}' | '\u{5C2}'
+        | '\u{5C4}' | '\u{5C5}' | '\u{5C7}' | '\u{610}'..='\u{61A}' | '\u{64B}'..='\u{65F}' | '\u{670}'
+        | '\u{6D6}'..='\u{6DC}' | '\u{6DF}'..='\u{6E4}' | '\u{6E7}' | '\u{6E8}' | '\u{6EA}'..='\u{6ED}')
+}
+
+/// Hebrew, Arabic and the other right-to-left scripts' letters.
+fn is_rtl(c: char) -> bool {
+    matches!(c, '\u{590}'..='\u{8FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
+        && c.is_alphabetic()
+        && !is_mark(c)
+}
+
+/// `text` as it must be drawn left to right: Arabic letters joined and right-to-left runs reversed.
+/// Text without right-to-left letters is returned as is.
+fn visual_text(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.chars().any(is_rtl) {
+        visual_order(&join_arabic(text)).into()
+    } else {
+        text.into()
+    }
+}
+
+/// Replace each Arabic letter with the form that joins it to its neighbors, and lam-alef pairs
+/// with their ligature. Marks are skipped when looking for neighbors, and tatweel and ZWJ join
+/// on both sides.
+fn join_arabic(text: &str) -> String {
+    let mut units: Vec<(char, &[char])> = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        let lam_alef = LAM_ALEF
+            .iter()
+            .find(|(alef, _)| c == '\u{644}' && chars.peek() == Some(alef));
+        if let Some((_, forms)) = lam_alef {
+            chars.next();
+            units.push((c, forms));
+        } else {
+            let forms = ARABIC_FORMS.binary_search_by_key(&c, |&(letter, _)| letter);
+            units.push((c, forms.map_or(&[][..], |i| &ARABIC_FORMS[i].1)));
+        }
+    }
+    let joins = |(c, forms): (char, &[char]), form: usize| {
+        matches!(c, '\u{640}' | '\u{200D}') || forms.get(form).is_some_and(|&f| f != '\0')
+    };
+    let letter = |u: &&(char, &[char])| !is_mark(u.0);
+    units
+        .iter()
+        .enumerate()
+        .map(|(i, &(c, forms))| {
+            if forms.is_empty() {
+                return c;
+            }
+            // A letter joins the one before when that one has a medial form, and the one after
+            // when it has a medial form itself and the next letter has a final form.
+            let before = units[..i]
+                .iter()
+                .rev()
+                .find(letter)
+                .is_some_and(|&u| joins(u, 3))
+                && joins((c, forms), 1);
+            let after = units[i + 1..]
+                .iter()
+                .find(letter)
+                .is_some_and(|&u| joins(u, 1))
+                && joins((c, forms), 3);
+            forms[match (before, after) {
+                (false, false) => 0,
+                (true, false) => 1,
+                (false, true) => 2,
+                (true, true) => 3,
+            }]
+        })
+        .collect()
+}
+
+/// Reorder `text` into drawing order with the implicit rules of the Unicode Bidirectional
+/// Algorithm (UAX #9, no explicit embeddings): the first strong letter sets the base direction,
+/// numbers read left to right, neutrals between two runs of one direction take it and the others
+/// take the base direction, and each run is reversed by level. Marks move with their letter.
+fn visual_order(text: &str) -> String {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Class {
+        Ltr,
+        Rtl,
+        Number,
+        Neutral,
+    }
+    use Class::{Ltr, Neutral, Number, Rtl};
+
+    let mut clusters: Vec<&str> = Vec::new();
+    let mut start = 0;
+    for (i, c) in text.char_indices().skip(1) {
+        if !is_mark(c) {
+            clusters.push(&text[start..i]);
+            start = i;
+        }
+    }
+    clusters.push(&text[start..]);
+
+    let first = |s: &str| s.chars().next().unwrap_or(' ');
+    let mut classes: Vec<Class> = clusters
+        .iter()
+        .map(|s| match first(s) {
+            '0'..='9' | '\u{660}'..='\u{669}' | '\u{6F0}'..='\u{6F9}' => Number,
+            c if is_rtl(c) => Rtl,
+            c if c.is_alphabetic() => Ltr,
+            _ => Neutral,
+        })
+        .collect();
+    let n = classes.len();
+
+    // A separator between two numbers and a terminator such as `%` next to one join the number.
+    for i in 1..n.saturating_sub(1) {
+        if matches!(
+            first(clusters[i]),
+            '.' | ',' | ':' | '/' | '+' | '-' | '\u{60C}' | '\u{66B}' | '\u{66C}'
+        ) && classes[i - 1] == Number
+            && classes[i + 1] == Number
+        {
+            classes[i] = Number;
+        }
+    }
+    let terminator = |s: &str| matches!(first(s), '%' | '$' | '#' | '°' | '\u{66A}' | '\u{2030}');
+    for i in 1..n {
+        if terminator(clusters[i]) && classes[i - 1] == Number {
+            classes[i] = Number;
+        }
+    }
+    for i in (0..n.saturating_sub(1)).rev() {
+        if terminator(clusters[i]) && classes[i + 1] == Number {
+            classes[i] = Number;
+        }
+    }
+
+    // Numbers after left-to-right text are left-to-right text.
+    let base = classes
+        .iter()
+        .copied()
+        .find(|&c| c == Ltr || c == Rtl)
+        .unwrap_or(Ltr);
+    let mut strong = base;
+    for class in &mut classes {
+        match *class {
+            Ltr | Rtl => strong = *class,
+            Number if strong == Ltr => *class = Ltr,
+            _ => {}
+        }
+    }
+
+    // Neutrals take the direction on both sides when it matches, where numbers count as
+    // right to left, and the base direction otherwise.
+    let side = |c: Class| if c == Ltr { Ltr } else { Rtl };
+    let mut i = 0;
+    while i < n {
+        let end = (i..n).find(|&j| classes[j] != Neutral).unwrap_or(n);
+        if end > i {
+            let before = if i == 0 { base } else { side(classes[i - 1]) };
+            let after = if end == n { base } else { side(classes[end]) };
+            classes[i..end].fill(if before == after { before } else { base });
+        }
+        i = end + 1;
+    }
+
+    let levels: Vec<u8> = classes
+        .iter()
+        .map(|&c| match c {
+            Ltr if base == Ltr => 0,
+            Rtl => 1,
+            _ => 2,
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..n).collect();
+    for level in [2, 1] {
+        let mut i = 0;
+        while i < n {
+            let end = (i..n).find(|&j| levels[order[j]] < level).unwrap_or(n);
+            order[i..end].reverse();
+            i = end + 1;
+        }
+    }
+    order.iter().map(|&i| clusters[i]).collect()
+}
+
 /// Draw a class label with a filled background rectangle, avoiding overlap with previously placed labels.
 ///
 /// The label is positioned above `(anchor_x, anchor_y)`. If that position would clip
@@ -470,6 +744,7 @@ fn draw_label(
     anchor_y: i32,
     top_fallback_y: i32,
 ) {
+    let label = &*visual_text(label);
     let (width, height) = img.dimensions();
     let scale = PxScale::from(font_scale);
     let scaled_font = font.as_scaled(scale);
@@ -974,12 +1249,12 @@ fn draw_classification(
                 let class_name = result.names.get(&class_id).map_or("class", String::as_str);
 
                 let label = format!("{class_name} {score:.2}");
-                entries.push(label);
+                entries.push(visual_text(&label).into_owned());
             }
 
             // Basic approximation: chars * scale * 0.5 (average char width)
             for label in &entries {
-                let w = (label.len() as f32 * scale.x * 0.5) as u32;
+                let w = (label.chars().count() as f32 * scale.x * 0.5) as u32;
                 if w > max_width {
                     max_width = w;
                 }
@@ -1018,6 +1293,22 @@ mod tests {
     use ndarray::Array3;
     use std::collections::HashMap;
     use std::sync::Arc;
+
+    #[test]
+    fn test_visual_text_orders_and_joins_rtl_labels() {
+        assert_eq!(visual_text(" person 0.73 "), " person 0.73 ");
+        // Hebrew reverses, the number keeps its order, and a point stays on its letter.
+        assert_eq!(visual_text(" אדם 0.82 "), " 0.82 םדא ");
+        assert_eq!(visual_text("אָב"), "באָ");
+        // Arabic joins: initial, medial and final forms, and lam-alef as one glyph.
+        assert_eq!(visual_text("شخص 50%"), "50% \u{FEBA}\u{FEA8}\u{FEB7}");
+        assert_eq!(visual_text("لا"), "\u{FEFB}");
+        // A left-to-right label keeps its order around a right-to-left word.
+        assert_eq!(
+            visual_text("COVID مريض 0.55"),
+            "COVID 0.55 \u{FEBE}\u{FEF3}\u{FEAE}\u{FEE3}"
+        );
+    }
 
     #[test]
     fn test_get_class_color() {

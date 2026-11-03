@@ -814,8 +814,12 @@ export async function annotate(
   ctx.font = font;
   ctx.textBaseline = "top";
 
-  const label = (text: string, x: number, y: number, color: string) => {
+  // First-strong isolates let a label's first letter set its direction, like the native and Python renderers.
+  const isolate = (text: string) => `\u2068${text}\u2069`;
+
+  const label = (name: string, x: number, y: number, color: string) => {
     if (!showLabels) return;
+    const text = isolate(name);
     const pad = Math.round(fontSize * 0.2);
     const w = ctx.measureText(text).width + pad * 2;
     const h = fontSize + pad * 2;
@@ -898,7 +902,7 @@ export async function annotate(
   // and Python renderers, which list the top classes rather than a single banner).
   if (results.probs && showLabels) {
     const { top5, top5conf, top5names } = results.probs;
-    const lines = top5.map((_, i) => `${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`);
+    const lines = top5.map((_, i) => isolate(`${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`));
     const pad = Math.round(fontSize * 0.3);
     const lineH = Math.round(fontSize * 1.25);
     const boxW = Math.max(...lines.map((t) => ctx.measureText(t).width)) + pad * 2;
