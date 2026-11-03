@@ -248,7 +248,8 @@ pub fn annotate_image_with_options(
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
 
-    let unicode = result.boxes.is_some() && result.names.values().any(|n| !n.is_ascii());
+    let labels = result.boxes.is_some() || result.obb.is_some() || result.probs.is_some();
+    let unicode = labels && result.names.values().any(|n| !n.is_ascii());
     let font = font_bytes(unicode).and_then(|data| FontRef::try_from_slice(data).ok());
 
     draw_semantic_mask(&mut img, result);
