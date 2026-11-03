@@ -671,21 +671,74 @@ enum BidiClass {
     Neutral,
 }
 
-/// The bidi class of `c`.
+/// The bidi class of `c`, with every number, sign, separator and terminator of Unicode 16.
 fn bidi_class(c: char) -> BidiClass {
     match c {
-        '0'..='9' | '\u{6F0}'..='\u{6F9}' => BidiClass::Number,
-        '\u{660}'..='\u{669}' | '\u{66B}' | '\u{66C}' => BidiClass::ArabicNumber,
-        '+' | '-' => BidiClass::Sign,
-        ',' | '.' | '/' | ':' | '\u{60C}' => BidiClass::Separator,
+        '0'..='9'
+        | '\u{B2}'
+        | '\u{B3}'
+        | '\u{B9}'
+        | '\u{6F0}'..='\u{6F9}'
+        | '\u{2070}'
+        | '\u{2074}'..='\u{2079}'
+        | '\u{2080}'..='\u{2089}'
+        | '\u{2488}'..='\u{249B}'
+        | '\u{FF10}'..='\u{FF19}'
+        | '\u{102E1}'..='\u{102FB}'
+        | '\u{1CCF0}'..='\u{1CCF9}'
+        | '\u{1D7CE}'..='\u{1D7FF}'
+        | '\u{1F100}'..='\u{1F10A}'
+        | '\u{1FBF0}'..='\u{1FBF9}' => BidiClass::Number,
+        '\u{600}'..='\u{605}'
+        | '\u{660}'..='\u{669}'
+        | '\u{66B}'
+        | '\u{66C}'
+        | '\u{6DD}'
+        | '\u{890}'
+        | '\u{891}'
+        | '\u{8E2}'
+        | '\u{10D30}'..='\u{10D39}'
+        | '\u{10D40}'..='\u{10D49}'
+        | '\u{10E60}'..='\u{10E7E}' => BidiClass::ArabicNumber,
+        '+' | '-' | '\u{207A}' | '\u{207B}' | '\u{208A}' | '\u{208B}' | '\u{2212}' | '\u{FB29}'
+        | '\u{FE62}' | '\u{FE63}' | '\u{FF0B}' | '\u{FF0D}' => BidiClass::Sign,
+        ',' | '.' | '/' | ':' | '\u{A0}' | '\u{60C}' | '\u{202F}' | '\u{2044}' | '\u{FE50}'
+        | '\u{FE52}' | '\u{FE55}' | '\u{FF0C}' | '\u{FF0E}' | '\u{FF0F}' | '\u{FF1A}' => {
+            BidiClass::Separator
+        }
         '#'
         | '$'
         | '%'
-        | '°'
         | '\u{A2}'..='\u{A5}'
+        | '\u{B0}'
+        | '\u{B1}'
+        | '\u{58F}'
+        | '\u{609}'
+        | '\u{60A}'
         | '\u{66A}'
-        | '\u{2030}'
-        | '\u{20A0}'..='\u{20CF}' => BidiClass::Terminator,
+        | '\u{9F2}'
+        | '\u{9F3}'
+        | '\u{9FB}'
+        | '\u{AF1}'
+        | '\u{BF9}'
+        | '\u{E3F}'
+        | '\u{17DB}'
+        | '\u{2030}'..='\u{2034}'
+        | '\u{20A0}'..='\u{20C0}'
+        | '\u{212E}'
+        | '\u{2213}'
+        | '\u{A838}'
+        | '\u{A839}'
+        | '\u{FE5F}'
+        | '\u{FE69}'
+        | '\u{FE6A}'
+        | '\u{FF03}'..='\u{FF05}'
+        | '\u{FFE0}'
+        | '\u{FFE1}'
+        | '\u{FFE5}'
+        | '\u{FFE6}'
+        | '\u{11FDD}'..='\u{11FE0}'
+        | '\u{1E2FF}' => BidiClass::Terminator,
         '\u{600}'..='\u{7BF}' | '\u{860}'..='\u{8FF}' | '\u{FB50}'..='\u{FEFF}' if is_rtl(c) => {
             BidiClass::ArabicLetter
         }
@@ -1546,6 +1599,9 @@ mod tests {
         assert_eq!(visual_text(" כלב (dog) 0.64 "), " 0.64 (dog) בלכ ");
         assert_eq!(visual_text(" שם (2) 0.55 "), " 0.55 (2) םש ");
         assert_eq!(visual_text(" שם （cat） ≤5 0.50 "), " 5 0.50≥ （cat） םש ");
+        // Full-width digits and numbers grouped with a no-break space.
+        assert_eq!(visual_text("שם ２３ 0.50"), "0.50 ２３ םש");
+        assert_eq!(visual_text("שם 1\u{A0}234 0.50"), "0.50 1\u{A0}234 םש");
         // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
         // and Arabic-Indic digits stay right to left after a left-to-right letter.
         assert_eq!(visual_text(" שם 2-3 0.14 "), " 0.14 2-3 םש ");
