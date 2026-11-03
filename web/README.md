@@ -184,6 +184,10 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
 `annotate()` also takes `lineWidth` and `font` to set the box width and label font, and `labels: false` or
 `keypoints: false` to hide labels or keypoints.
 
+Arabic, Hebrew and other right-to-left class names are drawn right to left in every browser, Safari included. They use
+the engine's wasm, so if `annotate()` runs where no model was loaded (for example on the main thread while a worker runs
+the model), pass the same `wasmUrl` you gave `YOLO.load`.
+
 ## ⚙️ Requirements & Notes
 
 - **WebGPU** (Chrome/Edge, or Firefox with WebGPU enabled) from a **secure
