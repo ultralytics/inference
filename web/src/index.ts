@@ -814,26 +814,52 @@ export async function annotate(
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
 
-  // Draw a label run by run in display order (its first letter sets the direction, like the
-  // native and Python renderers), since Safari's canvas does not pair brackets in RTL text.
-  const fillText = (text: string, x: number, y: number) => {
-    for (const [run, rtl] of bidi_runs(text) as Array<[string, boolean]>) {
-      ctx.direction = rtl ? "rtl" : "ltr";
-      ctx.fillText(run, x, y);
-      x += ctx.measureText(run).width;
+  // A label's first letter sets its direction, like the native and Python renderers. Safari's
+  // canvas does not pair brackets in right-to-left text, so labels with both are drawn run by run
+  // in display order from the engine's bidi runs.
+  const rtlText = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  const runsNeeded = (text: string) => rtlText.test(text) && /[\p{Ps}\p{Pe}]/u.test(text);
+  const names = [...results.boxes, ...results.obb].map((b) => b.name);
+  if (showLabels && names.concat(results.probs?.top5names ?? []).some(runsNeeded)) {
+    await ensureInit();
+  }
+  const setDirection = (rtl: boolean) => {
+    const direction = rtl ? "rtl" : "ltr";
+    if (ctx.direction !== direction) ctx.direction = direction;
+  };
+  type Run = { text: string; rtl: boolean; width: number };
+  const layout = (text: string): Run[] => {
+    const rtl = rtlText.test(text.match(/\p{L}/u)?.[0] ?? "");
+    const bounds = runsNeeded(text) ? bidi_runs(text) : [0, text.length, Number(rtl)];
+    const runs: Run[] = [];
+    for (let i = 0; i < bounds.length; i += 3) {
+      const run = { text: text.slice(bounds[i], bounds[i + 1]), rtl: bounds[i + 2] === 1, width: 0 };
+      setDirection(run.rtl);
+      run.width = ctx.measureText(run.text).width;
+      runs.push(run);
+    }
+    return runs;
+  };
+  const runsWidth = (runs: Run[]) => runs.reduce((sum, run) => sum + run.width, 0);
+  const fillText = (runs: Run[], x: number, y: number) => {
+    for (const run of runs) {
+      setDirection(run.rtl);
+      ctx.fillText(run.text, x, y);
+      x += run.width;
     }
   };
 
   const label = (text: string, x: number, y: number, color: string) => {
     if (!showLabels) return;
     const pad = Math.round(fontSize * 0.2);
-    const w = ctx.measureText(text).width + pad * 2;
+    const runs = layout(text);
+    const w = runsWidth(runs) + pad * 2;
     const h = fontSize + pad * 2;
     const ly = Math.max(0, y - h);
     ctx.fillStyle = color;
     ctx.fillRect(x, ly, w, h);
     ctx.fillStyle = textColorFor(color);
-    fillText(text, x + pad, ly + pad);
+    fillText(runs, x + pad, ly + pad);
   };
 
   // Axis-aligned boxes (detect / segment / pose).
@@ -908,10 +934,10 @@ export async function annotate(
   // and Python renderers, which list the top classes rather than a single banner).
   if (results.probs && showLabels) {
     const { top5, top5conf, top5names } = results.probs;
-    const lines = top5.map((_, i) => `${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`);
+    const lines = top5.map((_, i) => layout(`${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`));
     const pad = Math.round(fontSize * 0.3);
     const lineH = Math.round(fontSize * 1.25);
-    const boxW = Math.max(...lines.map((t) => ctx.measureText(t).width)) + pad * 2;
+    const boxW = Math.max(...lines.map(runsWidth)) + pad * 2;
     const boxH = lines.length * lineH + pad * 2;
     ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
     ctx.fillRect(pad, pad, boxW, boxH);

@@ -1071,25 +1071,25 @@ pub fn pose_palette() -> Result<JsValue, JsError> {
     to_js(&scheme, "pose palette")
 }
 
-/// Split a label into `[text, rtl]` runs in left-to-right display order (Unicode bidi
-/// algorithm, direction from the first strong letter). The JS annotator draws each run on its
-/// own because Safari's canvas does not pair brackets in right-to-left text.
-///
-/// # Errors
-/// Returns a JS error only if serialization fails (not expected).
+/// Split a label into runs in left-to-right display order (Unicode bidi algorithm, direction
+/// from the first strong letter), as `[start, end, rtl]` UTF-16 offset triples. The JS annotator
+/// draws each run on its own because Safari's canvas does not pair brackets in right-to-left text.
 #[wasm_bindgen]
-pub fn bidi_runs(text: &str) -> Result<JsValue, JsError> {
+pub fn bidi_runs(text: &str) -> Vec<u32> {
+    let utf16 = |end: usize| text[..end].encode_utf16().count() as u32;
     let bidi = unicode_bidi::BidiInfo::new(text, None);
-    let runs: Vec<(&str, bool)> = bidi
-        .paragraphs
-        .iter()
-        .flat_map(|para| {
-            let (levels, runs) = bidi.visual_runs(para, para.range.clone());
-            runs.into_iter()
-                .map(move |run| (&text[run.clone()], levels[run.start].is_rtl()))
-        })
-        .collect();
-    to_js(&runs, "bidi runs")
+    let mut out = Vec::new();
+    for para in &bidi.paragraphs {
+        let (levels, runs) = bidi.visual_runs(para, para.range.clone());
+        for run in runs {
+            out.extend([
+                utf16(run.start),
+                utf16(run.end),
+                u32::from(levels[run.start].is_rtl()),
+            ]);
+        }
+    }
+    out
 }
 
 /// Install a panic hook that logs Rust panics to the browser console.
