@@ -14,11 +14,13 @@ const BLEND_CHUNK: usize = 4096;
 use crate::visualizer::color::{COLORS, Color, Colormap, DEPTH_ALPHA, DepthViz};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, GlyphId, PxScale, ScaleFont, point};
+use harfrust::{Buffer, Direction, Script, ShapeOptions, ShaperFont};
 use image::{DynamicImage, Rgb};
 use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut};
 use imageproc::rect::Rect;
 use std::collections::HashMap;
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -251,11 +253,10 @@ pub fn annotate_image_with_options(
     let labels = result.boxes.is_some() || result.obb.is_some() || result.probs.is_some();
     let unicode = labels && result.names.values().any(|n| !n.is_ascii());
     let font = font_bytes(unicode).and_then(|data| {
-        Some((
-            FontRef::try_from_slice(data).ok()?,
-            harfrust::Font::new(data, 0)?,
-            std::cell::RefCell::default(),
-        ))
+        Some(LabelFont {
+            glyphs: FontRef::try_from_slice(data).ok()?,
+            face: harfrust::Font::new(data, 0)?,
+        })
     });
 
     draw_semantic_mask(&mut img, result);
@@ -444,83 +445,77 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         });
 }
 
-/// A label font: `ab_glyph` rasterizes its glyphs and `harfrust` shapes text with it, reusing a
-/// shaping plan per script and direction.
-type LabelFont = (
-    FontRef<'static>,
-    harfrust::Font,
-    std::cell::RefCell<Vec<harfrust::ShapePlan>>,
-);
+/// The label font: `harfrust` shapes text with it and `ab_glyph` draws the shaped glyphs.
+struct LabelFont {
+    glyphs: FontRef<'static>,
+    face: harfrust::Font,
+}
 
-/// Lay `text` out in visual order, returning each glyph with its pen position in pixels and the
-/// total advance. ASCII is laid out glyph by glyph as imageproc does; other text is split by
-/// `unicode-bidi` into left-to-right and right-to-left runs that `harfrust` shapes, joining Arabic
-/// letters, placing marks on their letter and mirroring brackets.
-fn shape(font: &LabelFont, scale: PxScale, text: &str) -> (Vec<(GlyphId, f32, f32)>, f32) {
-    let scaled = font.0.as_scaled(scale);
-    if text.is_ascii() {
-        let (mut caret, mut prev) = (0.0_f32, None);
-        let glyphs = text
-            .chars()
-            .map(|c| {
-                let id = scaled.glyph_id(c);
-                let at = caret;
-                caret += scaled.h_advance(id);
-                // Like imageproc, kern only glyphs with an outline, which in ASCII is all but space.
-                if c != ' '
-                    && let Some(prev) = prev.replace(id)
-                {
-                    caret += scaled.kern(id, prev);
-                }
-                (id, at, 0.0)
-            })
-            .collect();
-        return (glyphs, caret);
-    }
-    let (sx, sy) = (scaled.h_scale_factor(), scaled.v_scale_factor());
+/// The runs of `text` in drawing order from left to right, as byte range, direction and script:
+/// `unicode-bidi` splits it by direction, and each run splits by script.
+fn runs(text: &str) -> Vec<(Range<usize>, Direction, Option<Script>)> {
     let bidi = unicode_bidi::BidiInfo::new(text, None);
-    let mut glyphs = Vec::new();
-    let mut caret = 0.0_f32;
+    let mut out = Vec::new();
     for paragraph in &bidi.paragraphs {
         let (levels, runs) = bidi.visual_runs(paragraph, paragraph.range.clone());
-        let shaper = harfrust::ShaperFont::new(&font.1);
         for run in runs {
-            let mut buffer = harfrust::Buffer::new();
-            buffer.push_str(&text[run.clone()]);
-            buffer.guess_segment_properties();
-            buffer.set_direction(if levels[run.start].is_rtl() {
-                harfrust::Direction::RightToLeft
+            let mut pieces = vec![(run.clone(), None)];
+            for (i, c) in text[run.clone()].char_indices() {
+                let script = harfrust::unicode::script(c.into());
+                let last = pieces.len() - 1;
+                match pieces[last].1 {
+                    // Spaces, digits, punctuation and marks take the script around them.
+                    _ if matches!(script, Script::COMMON | Script::INHERITED | Script::UNKNOWN) => {
+                    }
+                    None => pieces[last].1 = Some(script),
+                    Some(s) if s != script => {
+                        pieces[last].0.end = run.start + i;
+                        pieces.push((run.start + i..run.end, Some(script)));
+                    }
+                    Some(_) => {}
+                }
+            }
+            let direction = if levels[run.start].is_rtl() {
+                pieces.reverse();
+                Direction::RightToLeft
             } else {
-                harfrust::Direction::LeftToRight
-            });
-            let key = harfrust::ShapePlanKey::new(&font.1, buffer.script(), buffer.direction());
-            let mut plans = font.2.borrow_mut();
-            if !plans.iter().any(|plan| key.matches(plan)) {
-                let (direction, script) = (buffer.direction(), buffer.script());
-                plans.push(harfrust::ShapePlan::new(
-                    &font.1,
-                    direction,
-                    script,
-                    None,
-                    &[],
-                ));
+                Direction::LeftToRight
+            };
+            out.extend(
+                pieces
+                    .into_iter()
+                    .map(|(range, script)| (range, direction, script)),
+            );
+        }
+    }
+    out
+}
+
+/// Shape `text` and lay it out from left to right: each glyph with its pen position in pixels,
+/// and the advance width of the label. Each run is shaped in logical order with the text around
+/// it as context, which joins Arabic letters, places marks and mirrors brackets.
+fn layout(font: &LabelFont, scale: PxScale, text: &str) -> (Vec<(GlyphId, f64, f64)>, f64) {
+    let px = f64::from(font.glyphs.as_scaled(scale).h_scale_factor());
+    let shaper = ShaperFont::new(&font.face);
+    let mut buffer = Buffer::new();
+    let mut glyphs = Vec::new();
+    let mut caret = 0.0;
+    for (range, direction, script) in runs(text) {
+        buffer.clear();
+        buffer.push_str(&text[range.clone()]);
+        buffer.set_pre_context(&text[..range.start]);
+        buffer.set_post_context(&text[range.end..]);
+        buffer.set_direction(direction);
+        buffer.set_script(script);
+        if harfrust::shape(&shaper, &mut buffer, ShapeOptions::new()).is_err() {
+            continue;
+        }
+        for (info, pos) in buffer.glyph_infos().iter().zip(buffer.glyph_positions()) {
+            if let Ok(id) = u16::try_from(info.glyph_id) {
+                let (dx, dy) = (f64::from(pos.x_offset), f64::from(pos.y_offset));
+                glyphs.push((GlyphId(id), dx.mul_add(px, caret), -dy * px));
             }
-            let plan = plans.iter().find(|plan| key.matches(plan));
-            let options = harfrust::ShapeOptions::new().plan(plan);
-            if harfrust::shape(&shaper, &mut buffer, options).is_err() {
-                continue;
-            }
-            for (info, pos) in buffer.glyph_infos().iter().zip(buffer.glyph_positions()) {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-                glyphs.push((
-                    GlyphId(info.glyph_id as u16),
-                    (pos.x_offset as f32).mul_add(sx, caret),
-                    pos.y_offset as f32 * sy,
-                ));
-                #[allow(clippy::cast_precision_loss)]
-                let advance = pos.x_advance as f32 * sx;
-                caret += advance;
-            }
+            caret = f64::from(pos.x_advance).mul_add(px, caret);
         }
     }
     (glyphs, caret)
@@ -538,8 +533,8 @@ struct Labels {
     glyphs: GlyphCache,
 }
 
-/// Draw shaped `text` at `(x, y)`, taking each glyph's coverage from `glyphs` when an earlier
-/// label already rasterized it.
+/// Draw the `glyphs` of a [`layout`] at `(x, y)`, taking each glyph's coverage from `cache` when
+/// an earlier label already rasterized it.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -550,26 +545,23 @@ fn draw_text(
     color: Rgb<u8>,
     (x, y): (i32, i32),
     scale: PxScale,
-    font: &LabelFont,
-    text: &str,
-    glyphs: &mut GlyphCache,
+    font: &FontRef,
+    glyphs: &[(GlyphId, f64, f64)],
+    cache: &mut GlyphCache,
 ) {
-    let ascent = font.0.as_scaled(scale).ascent();
+    let ascent = font.as_scaled(scale).ascent();
     let (width, height) = (i64::from(img.width()), i64::from(img.height()));
-    for (id, at, rise) in shape(font, scale, text).0 {
-        let glyph = glyphs
-            .entry((id.0, scale.y.to_bits(), at.to_bits(), rise.to_bits()))
-            .or_insert_with(|| {
-                let position = point(at, ascent - rise);
-                let outlined = font
-                    .0
-                    .outline_glyph(id.with_scale_and_position(scale, position))?;
-                let bounds = outlined.px_bounds();
-                let w = bounds.width() as usize;
-                let mut coverage = vec![0.0; w * bounds.height() as usize];
-                outlined.draw(|gx, gy, v| coverage[gy as usize * w + gx as usize] = v);
-                Some((bounds.min.x as i32, bounds.min.y as i32, w, coverage))
-            });
+    for &(id, pen_x, pen_y) in glyphs {
+        let at = point(pen_x as f32, pen_y as f32 + ascent);
+        let key = (id.0, scale.y.to_bits(), at.x.to_bits(), at.y.to_bits());
+        let glyph = cache.entry(key).or_insert_with(|| {
+            let outlined = font.outline_glyph(id.with_scale_and_position(scale, at))?;
+            let bounds = outlined.px_bounds();
+            let w = bounds.width() as usize;
+            let mut coverage = vec![0.0; w * bounds.height() as usize];
+            outlined.draw(|gx, gy, v| coverage[gy as usize * w + gx as usize] = v);
+            Some((bounds.min.x as i32, bounds.min.y as i32, w, coverage))
+        });
         let Some((min_x, min_y, w, coverage)) = glyph else {
             continue;
         };
@@ -623,7 +615,8 @@ fn draw_label(
 ) {
     let (width, height) = img.dimensions();
     let scale = PxScale::from(font_scale);
-    let text_w = shape(font, scale, label).1.ceil() as i32;
+    let (glyphs, advance) = layout(font, scale, label);
+    let text_w = advance.ceil() as i32;
     let text_h = scale.y.ceil() as i32;
 
     // A missing or degenerate font can produce a zero-width label. imageproc's
@@ -692,8 +685,8 @@ fn draw_label(
             text_color,
             (text_x, text_y),
             scale,
-            font,
-            label,
+            &font.glyphs,
+            &glyphs,
             &mut labels.glyphs,
         );
     }
@@ -1116,12 +1109,9 @@ fn draw_classification(
                 let score = probs.data[class_id];
                 let class_name = result.names.get(&class_id).map_or("class", String::as_str);
 
-                let label = format!("{class_name} {score:.2}");
-                entries.push(label);
-            }
-
-            for label in &entries {
-                max_width = max_width.max(shape(f, scale, label).1.ceil() as u32);
+                let (glyphs, advance) = layout(f, scale, &format!("{class_name} {score:.2}"));
+                max_width = max_width.max(advance.ceil() as u32);
+                entries.push(glyphs);
             }
 
             // Draw background for all entries with padding
@@ -1140,11 +1130,19 @@ fn draw_classification(
                 );
             }
 
-            let mut glyphs = GlyphCache::new();
-            for label in entries {
+            let mut cache = GlyphCache::new();
+            for glyphs in entries {
                 // Draw text (white)
                 let white = Rgb([255, 255, 255]);
-                draw_text(img, white, (x_pos, y_pos), scale, f, &label, &mut glyphs);
+                draw_text(
+                    img,
+                    white,
+                    (x_pos, y_pos),
+                    scale,
+                    &f.glyphs,
+                    &glyphs,
+                    &mut cache,
+                );
 
                 y_pos += line_height;
             }
@@ -1159,6 +1157,78 @@ mod tests {
     use ndarray::Array3;
     use std::collections::HashMap;
     use std::sync::Arc;
+
+    #[test]
+    fn test_layout_orders_and_shapes_rtl_labels() {
+        // Each run's text in drawing order, right-to-left runs reversed.
+        let visual = |text: &str| {
+            let mut out = String::new();
+            for (range, direction, _) in runs(text) {
+                if direction == Direction::RightToLeft {
+                    out.extend(text[range].chars().rev());
+                } else {
+                    out.push_str(&text[range]);
+                }
+            }
+            out
+        };
+        assert_eq!(visual(" person 0.73 "), " person 0.73 ");
+        // Hebrew reverses and the number keeps its order.
+        assert_eq!(visual(" אדם 0.82 "), " 0.82 םדא ");
+        // Brackets around left-to-right text keep enclosing it (shaping mirrors them).
+        assert_eq!(visual(" כלב (dog) 0.64 "), " 0.64 )dog( בלכ ");
+        assert_eq!(visual(" שם (2) 0.55 "), " 0.55 )2( םש ");
+        assert_eq!(visual(" שם （cat） ≤5 0.50 "), " 5 0.50≤ ）cat（ םש ");
+        // Full-width digits, numbers grouped with a no-break space or ZWJ, direction marks and
+        // isolates.
+        assert_eq!(visual("שם ２３ 0.50"), "0.50 ２３ םש");
+        assert_eq!(visual("שם 1\u{A0}234 0.50"), "0.50 1\u{A0}234 םש");
+        assert_eq!(visual("שם 123\u{200D}456 0.50"), "0.50 123\u{200D}456 םש");
+        assert_eq!(visual("שם \u{200E}123 0.50"), "\u{200E}123 0.50 םש");
+        assert_eq!(
+            visual("שם \u{2066}ABC 12\u{2069} 0.50"),
+            "0.50 \u{2069}ABC 12\u{2066} םש"
+        );
+        // A minus sign joins European numbers after Hebrew but not Arabic numbers after Arabic,
+        // and Arabic-Indic digits stay right to left after a left-to-right letter.
+        assert_eq!(visual(" שם 2-3 0.14 "), " 0.14 2-3 םש ");
+        assert_eq!(visual(" قطة 2-3 0.14 "), " 0.14 3-2 ةطق ");
+        assert_eq!(
+            visual(" x \u{663}\u{664} שם 0.36 "),
+            " x 0.36 םש \u{663}\u{664} "
+        );
+        // `%` stays with European digits, but not with the Arabic numbers digits become after
+        // an Arabic letter.
+        assert_eq!(visual(" שם 50% "), " 50% םש ");
+        assert_eq!(visual("\u{663} \u{664}"), "\u{664} \u{663}");
+        assert_eq!(visual(" قطة 50% "), " %50 ةطق ");
+        // A left-to-right label keeps its order around a right-to-left word.
+        assert_eq!(visual("COVID مريض 0.55"), "COVID 0.55 ضيرم");
+
+        // Shaping, with the font when it is cached: Arabic letters join, lam-alef forms its
+        // ligature across a vowel, shin and sin dots differ, and brackets mirror.
+        let Some(data) = font_bytes(true) else {
+            return;
+        };
+        let font = LabelFont {
+            glyphs: FontRef::try_from_slice(data).unwrap(),
+            face: harfrust::Font::new(data, 0).unwrap(),
+        };
+        let ids = |text| -> Vec<u16> {
+            let (glyphs, _) = layout(&font, PxScale::from(20.0), text);
+            glyphs.iter().map(|g| g.0.0).collect()
+        };
+        let cmap =
+            |text: &str| -> Vec<u16> { text.chars().map(|c| font.glyphs.glyph_id(c).0).collect() };
+        assert_eq!(ids("شخص"), cmap("\u{FEBA}\u{FEA8}\u{FEB7}"));
+        assert_eq!(ids("لا"), cmap("\u{FEFB}"));
+        assert_eq!(ids("\u{644}\u{64E}\u{627}"), cmap("\u{64E}\u{FEFB}"));
+        assert_eq!(
+            ids("\u{5E9}\u{5C1} \u{5E9}\u{5C2}"),
+            cmap("\u{FB2B} \u{FB2A}")
+        );
+        assert_eq!(ids("שם ≤"), cmap("≥ םש"));
+    }
 
     #[test]
     fn test_get_class_color() {
