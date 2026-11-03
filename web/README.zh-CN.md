@@ -177,6 +177,9 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
 `annotate()` 还接受 `lineWidth` 和 `font` 用于设置框线宽度和标签字体，以及 `labels: false` 或
 `keypoints: false` 用于隐藏标签或关键点。
 
+阿拉伯语、希伯来语等从右到左的类别名在所有浏览器（包括 Safari）中都会从右到左绘制。这需要引擎的 wasm，
+因此如果 `annotate()` 运行在未加载模型的线程中（例如模型在 worker 中运行而绘制在主线程），请传入与 `YOLO.load` 相同的 `wasmUrl`。
+
 ## ⚙️ 环境要求与注意事项
 
 - **WebGPU**（Chrome/Edge，或启用了 WebGPU 的 Firefox）配合**安全上下文**（`https://` 或

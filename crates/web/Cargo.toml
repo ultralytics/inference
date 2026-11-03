@@ -2,7 +2,7 @@
 
 [package]
 name = "ultralytics-inference-web"
-version = "0.0.55"
+version = "0.0.56"
 edition = "2024"
 rust-version = "1.92"
 description = "Browser/WebAssembly bindings for ultralytics-inference (WebGPU via ort-web)"
@@ -49,6 +49,8 @@ serde-wasm-bindgen = "0.6"
 serde_json = "1"
 miniz_oxide = "0.9"
 console_error_panic_hook = "0.1"
+# Order right-to-left label runs for the canvas annotator.
+unicode-bidi = "0.3"
 ndarray = "0.17"
 web-sys = { version = "0.3", features = ["Performance"] }
 # Decode JPEG/PNG image bytes handed in from JavaScript.

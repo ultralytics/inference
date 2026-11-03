@@ -19,7 +19,7 @@
  * ```
  */
 
-import init, { YoloModel, YoloPipeline, start, pose_palette } from "../pkg/ultralytics_inference_web.js";
+import init, { YoloModel, YoloPipeline, start, pose_palette, bidi_runs } from "../pkg/ultralytics_inference_web.js";
 
 /** Pose drawing scheme supplied by the engine (skeleton + palette colors). */
 interface PoseScheme {
@@ -256,6 +256,11 @@ export interface AnnotateOptions {
    * annotator); `1` shows the raw colorized depth map, `0` shows only the source.
    */
   depthAlpha?: number;
+  /**
+   * Optional URL/path to the wasm binary, as in {@link LoadOptions.wasmUrl}. Labels with
+   * right-to-left text need the engine, so pass it when no model has loaded it in this thread.
+   */
+  wasmUrl?: string | URL;
 }
 
 /** Image-like inputs accepted by {@link YOLO.predict}. */
@@ -812,17 +817,51 @@ export async function annotate(
   ctx.lineWidth = lineWidth;
   ctx.font = font;
   ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+
+  // Labels that may hold right-to-left text (Unicode's right-to-left blocks and controls) are
+  // drawn as the engine's bidi runs, each in its resolved direction, since Safari's canvas
+  // does not pair brackets in right-to-left text. Other labels read left to right as they are.
+  const rtlText =
+    /[\u0590-\u08FF\u200F\u202B\u202E\u2067\u2068\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+  const names = [...results.boxes, ...results.obb].map((b) => b.name);
+  if (showLabels && names.concat(results.probs?.top5names ?? []).some((n) => rtlText.test(n))) {
+    await ensureInit(options?.wasmUrl);
+  }
+  // Class names repeat across labels, so each run's width is measured once per call.
+  const widths = new Map<string, number>();
+  type Run = { text: string; rtl: boolean; width: number };
+  const layout = (text: string): Run[] =>
+    (rtlText.test(text) ? bidi_runs(text) : [text]).map((run) => {
+      const rtl = run.startsWith("\u202E");
+      let width = widths.get(run);
+      if (width === undefined) {
+        ctx.direction = rtl ? "rtl" : "ltr";
+        width = ctx.measureText(run).width;
+        widths.set(run, width);
+      }
+      return { text: run, rtl, width };
+    });
+  const runsWidth = (runs: Run[]) => runs.reduce((sum, run) => sum + run.width, 0);
+  const fillText = (runs: Run[], x: number, y: number) => {
+    for (const run of runs) {
+      ctx.direction = run.rtl ? "rtl" : "ltr";
+      ctx.fillText(run.text, x, y);
+      x += run.width;
+    }
+  };
 
   const label = (text: string, x: number, y: number, color: string) => {
     if (!showLabels) return;
     const pad = Math.round(fontSize * 0.2);
-    const w = ctx.measureText(text).width + pad * 2;
+    const runs = layout(text);
+    const w = runsWidth(runs) + pad * 2;
     const h = fontSize + pad * 2;
     const ly = Math.max(0, y - h);
     ctx.fillStyle = color;
     ctx.fillRect(x, ly, w, h);
     ctx.fillStyle = textColorFor(color);
-    ctx.fillText(text, x + pad, ly + pad);
+    fillText(runs, x + pad, ly + pad);
   };
 
   // Axis-aligned boxes (detect / segment / pose).
@@ -897,15 +936,15 @@ export async function annotate(
   // and Python renderers, which list the top classes rather than a single banner).
   if (results.probs && showLabels) {
     const { top5, top5conf, top5names } = results.probs;
-    const lines = top5.map((_, i) => `${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`);
+    const lines = top5.map((_, i) => layout(`${top5names[i] ?? top5[i]} ${top5conf[i].toFixed(2)}`));
     const pad = Math.round(fontSize * 0.3);
     const lineH = Math.round(fontSize * 1.25);
-    const boxW = Math.max(...lines.map((t) => ctx.measureText(t).width)) + pad * 2;
+    const boxW = Math.max(...lines.map(runsWidth)) + pad * 2;
     const boxH = lines.length * lineH + pad * 2;
     ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
     ctx.fillRect(pad, pad, boxW, boxH);
     ctx.fillStyle = "#ffffff";
-    lines.forEach((t, i) => ctx.fillText(t, pad * 2, pad * 2 + i * lineH));
+    lines.forEach((t, i) => fillText(t, pad * 2, pad * 2 + i * lineH));
   }
 }
 

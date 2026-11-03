@@ -1071,6 +1071,37 @@ pub fn pose_palette() -> Result<JsValue, JsError> {
     to_js(&scheme, "pose palette")
 }
 
+/// Split a label into runs in left-to-right display order (Unicode bidi algorithm), each wrapped
+/// in a left-to-right or right-to-left override so canvas draws it in its resolved direction. The
+/// JS annotator draws runs one by one because Safari's canvas does not pair brackets in
+/// right-to-left text. Explicit embeddings, overrides and isolates are dropped, since the
+/// resolved levels already carry them.
+#[wasm_bindgen]
+pub fn bidi_runs(text: &str) -> Vec<String> {
+    use unicode_bidi::BidiClass::{FSI, LRE, LRI, LRO, PDF, PDI, RLE, RLI, RLO};
+    let bidi = unicode_bidi::BidiInfo::new(text, None);
+    let mut out = Vec::new();
+    for para in &bidi.paragraphs {
+        let (levels, runs) = bidi.visual_runs(para, para.range.clone());
+        for run in runs {
+            let mut s = String::from(if levels[run.start].is_rtl() {
+                '\u{202E}'
+            } else {
+                '\u{202D}'
+            });
+            for (i, c) in text[run.clone()].char_indices() {
+                let class = bidi.original_classes[run.start + i];
+                if !matches!(class, LRE | RLE | LRO | RLO | PDF | LRI | RLI | FSI | PDI) {
+                    s.push(c);
+                }
+            }
+            s.push('\u{202C}');
+            out.push(s);
+        }
+    }
+    out
+}
+
 /// Install a panic hook that logs Rust panics to the browser console.
 #[wasm_bindgen(start)]
 pub fn start() {
