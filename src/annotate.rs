@@ -528,11 +528,17 @@ const LAM_ALEF: [(char, [char; 2]); 4] = [
     ('\u{627}', ['\u{FEFB}', '\u{FEFC}']),
 ];
 
-/// Hebrew points, Arabic harakat and other combining marks, drawn on the letter before them.
+/// Combining marks drawn on the letter before them: the general ones plus every Hebrew, Arabic,
+/// Syriac, Thaana, N'Ko, Samaritan and Mandaic mark (Unicode 17 `Mn`).
 const fn is_mark(c: char) -> bool {
-    matches!(c, '\u{300}'..='\u{36F}' | '\u{591}'..='\u{5BD}' | '\u{5BF}' | '\u{5C1}' | '\u{5C2}'
-        | '\u{5C4}' | '\u{5C5}' | '\u{5C7}' | '\u{610}'..='\u{61A}' | '\u{64B}'..='\u{65F}' | '\u{670}'
-        | '\u{6D6}'..='\u{6DC}' | '\u{6DF}'..='\u{6E4}' | '\u{6E7}' | '\u{6E8}' | '\u{6EA}'..='\u{6ED}')
+    matches!(c, '\u{300}'..='\u{36F}' | '\u{591}'..='\u{5BD}' | '\u{5BF}' | '\u{5C1}'..='\u{5C2}'
+        | '\u{5C4}'..='\u{5C5}' | '\u{5C7}' | '\u{610}'..='\u{61A}' | '\u{64B}'..='\u{65F}'
+        | '\u{670}' | '\u{6D6}'..='\u{6DC}' | '\u{6DF}'..='\u{6E4}' | '\u{6E7}'..='\u{6E8}'
+        | '\u{6EA}'..='\u{6ED}' | '\u{711}' | '\u{730}'..='\u{74A}' | '\u{7A6}'..='\u{7B0}'
+        | '\u{7EB}'..='\u{7F3}' | '\u{7FD}' | '\u{816}'..='\u{819}' | '\u{81B}'..='\u{823}'
+        | '\u{825}'..='\u{827}' | '\u{829}'..='\u{82D}' | '\u{859}'..='\u{85B}'
+        | '\u{897}'..='\u{89F}' | '\u{8CA}'..='\u{8E1}' | '\u{8E3}'..='\u{8FF}' | '\u{FB1E}'
+        | '\u{FE20}'..='\u{FE2F}')
 }
 
 /// Hebrew, Arabic and the other right-to-left scripts' letters.
@@ -1534,6 +1540,10 @@ mod tests {
         // Arabic joins: initial, medial and final forms, and lam-alef as one glyph.
         assert_eq!(visual_text("شخص 0.91"), "0.91 \u{FEBA}\u{FEA8}\u{FEB7}");
         assert_eq!(visual_text("لا"), "\u{FEFB}");
+        assert_eq!(
+            visual_text("\u{628}\u{8D3}\u{62A}"),
+            "\u{FE96}\u{FE91}\u{8D3}"
+        );
         // Brackets around left-to-right text keep enclosing it.
         assert_eq!(visual_text(" כלב (dog) 0.64 "), " 0.64 (dog) בלכ ");
         assert_eq!(visual_text(" שם (2) 0.55 "), " 0.55 (2) םש ");
