@@ -876,6 +876,15 @@ struct Labels {
     glyphs: GlyphCache,
 }
 
+/// Width of `text` drawn by [`draw_text`], where marks take no room.
+fn text_width(font: &FontRef, scale: PxScale, text: &str) -> f32 {
+    let scaled = font.as_scaled(scale);
+    text.chars()
+        .filter(|&c| !is_mark(c))
+        .map(|c| scaled.h_advance(scaled.glyph_id(c)))
+        .sum()
+}
+
 /// Draw `text` at `(x, y)` exactly as imageproc's `draw_text_mut` does, taking each glyph's
 /// coverage from `glyphs` when an earlier label already rasterized it.
 #[allow(
@@ -983,13 +992,7 @@ fn draw_label(
     let label = &*visual_text(label);
     let (width, height) = img.dimensions();
     let scale = PxScale::from(font_scale);
-    let scaled_font = font.as_scaled(scale);
-    let text_w = label
-        .chars()
-        .filter(|&c| !is_mark(c))
-        .map(|c| scaled_font.h_advance(scaled_font.glyph_id(c)))
-        .sum::<f32>()
-        .ceil() as i32;
+    let text_w = text_width(font, scale, label).ceil() as i32;
     let text_h = scale.y.ceil() as i32;
 
     // A missing or degenerate font can produce a zero-width label. imageproc's
@@ -1486,13 +1489,8 @@ fn draw_classification(
                 entries.push(visual_text(&label).into_owned());
             }
 
-            // Basic approximation: chars * scale * 0.5 (average char width)
             for label in &entries {
-                let w =
-                    (label.chars().filter(|&c| !is_mark(c)).count() as f32 * scale.x * 0.5) as u32;
-                if w > max_width {
-                    max_width = w;
-                }
+                max_width = max_width.max(text_width(f, scale, label).ceil() as u32);
             }
 
             // Draw background for all entries with padding
