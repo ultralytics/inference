@@ -16,14 +16,14 @@ Setup notes for running `ultralytics-inference` on a DGX Spark (GB10 Grace Black
 `ort` 2.0.0-rc.15 publishes prebuilt ONNX Runtime binaries for `aarch64-unknown-linux-gnu` with CUDA 13,
 TensorRT and NVRTX, covering Jetson Orin and Thor, Grace Hopper and Blackwell, and DGX Spark. With the
 CUDA 13 runtime, cuDNN 9 and TensorRT 10 installed, `cuda` and `tensorrt` build with no extra setup.
-`cuda-preprocess` also compiles a CUDA kernel, so it needs the CUDA 13 toolkit with `nvcc` at build time
+`cuda-preprocess` also needs `nvcc` on `PATH` or `CUDARC_CUDA_VERSION` set at build time
 (see [CUDA.md](CUDA.md)):
 
 ```bash
 cargo build --release --features cuda-preprocess
 ```
 
-Anything outside that build has no prebuilt binary on aarch64: other GPU features such as `xnnpack`, and
+Anything outside that build has no prebuilt binary on aarch64: other execution provider features such as `xnnpack`, and
 CUDA 12 systems such as JetPack 6. Those fail at link time, and the failure looks like a local
 misconfiguration and is not:
 
