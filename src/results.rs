@@ -330,10 +330,10 @@ pub struct Results {
     pub path: String,
 }
 
-/// Format the first `count` class IDs as a summary like `"4 persons, 1 bus"`.
+/// Format the class IDs in `cls` as a summary like `"4 persons, 1 bus"`.
 ///
 /// Entries are sorted by class ID, names are pluralized via [`crate::utils::pluralize`] when
-/// the count is above 1, and unknown IDs fall back to `"object"`. Empty when `count` is 0.
+/// the count is above 1, and unknown IDs fall back to `"object"`. Empty when `cls` is empty.
 fn format_class_counts(cls: &ArrayView1<'_, f32>, names: &HashMap<usize, String>) -> String {
     let mut counts: BTreeMap<usize, usize> = BTreeMap::new();
     for &c in cls {

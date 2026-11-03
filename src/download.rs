@@ -78,6 +78,14 @@ pub const DEFAULT_IMAGES: &[&str] = &[DEFAULT_BUS_IMAGE_URL, DEFAULT_ZIDANE_IMAG
 /// Default image URL for OBB (Oriented Bounding Box) tasks.
 pub const DEFAULT_OBB_IMAGE: &str = DEFAULT_BOATS_IMAGE_URL;
 
+/// Default image URLs for a `task` model: the boats image for OBB, otherwise [`DEFAULT_IMAGES`].
+pub(crate) const fn default_images(task: crate::task::Task) -> &'static [&'static str] {
+    match task {
+        crate::task::Task::Obb => &[DEFAULT_OBB_IMAGE],
+        _ => DEFAULT_IMAGES,
+    }
+}
+
 const CONNECT_TIMEOUT: u64 = 30;
 const READ_TIMEOUT: u64 = 300;
 const MAX_RETRIES: u32 = 3;
