@@ -390,13 +390,10 @@ pub fn download_image(url: &str) -> Result<String> {
         download_file(url, dest)?;
     }
 
-    Ok(dest
-        .canonicalize()
-        .or_else(|_| std::env::current_dir().map(|p| p.join(filename)))
-        .map_or_else(
-            |_| filename.to_string(),
-            |p| p.to_string_lossy().into_owned(),
-        ))
+    Ok(std::path::absolute(dest).map_or_else(
+        |_| filename.to_string(),
+        |p| p.to_string_lossy().into_owned(),
+    ))
 }
 
 /// Download multiple images from URLs to the current directory.
