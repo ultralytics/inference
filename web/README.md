@@ -230,13 +230,16 @@ the model), pass the same `wasmUrl` you gave `YOLO.load`.
   bundle (~25 MB, browser-cached afterward) from `cdn.pyke.io`. If you set a
   Content-Security-Policy, allow that origin in `script-src`/`connect-src`. To
   avoid the CDN entirely, self-host the runtime and point to it:
+
   ```ts
   const model = await YOLO.load("/models/yolo26n.onnx", { ortBaseUrl: "/ort/" });
   ```
+
   The folder must contain the ONNX Runtime Web entry scripts (`ort.webgpu.min.js`
   and `ort.wasm.min.js` for the CPU fallback) plus the
   `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` binaries. If your bundler does not serve this package's
   own `ultralytics_inference_web_bg.wasm`, pass its URL as `wasmUrl`.
+
 - **Telemetry**: `ort-web` can report the page domain to pyke on first session
   creation. This package turns that off, so nothing is sent. See the
   [ort-web docs](https://ort.pyke.io/backends/web) for what it would send.
