@@ -204,6 +204,11 @@ pub(crate) fn download_file(url: &str, dest: &Path) -> Result<()> {
             let config = ureq::Agent::config_builder()
                 .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT)))
                 .timeout_recv_body(Some(Duration::from_secs(READ_TIMEOUT)))
+                .tls_config(
+                    ureq::tls::TlsConfig::builder()
+                        .provider(ureq::tls::TlsProvider::NativeTls)
+                        .build(),
+                )
                 .build();
             let agent = ureq::Agent::new_with_config(config);
 
