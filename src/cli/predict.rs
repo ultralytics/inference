@@ -122,8 +122,8 @@ pub fn run_prediction(args: &PredictArgs) {
     let need_predict_dir = needs_predict_dir(save, save_json, model.task());
 
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
-        let parent_dir = format!("runs/{}", model.task().as_str());
-        let dir = find_next_run_dir(&parent_dir, "predict");
+        let parent_dir = Path::new("runs").join(model.task().as_str());
+        let dir = find_next_run_dir(&parent_dir.to_string_lossy(), "predict");
         if let Err(e) = crate::io::ensure_dir(Path::new(&dir)) {
             error!("Failed to create save directory '{dir}': {e}");
             process::exit(1);
