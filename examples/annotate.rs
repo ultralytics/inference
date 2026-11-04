@@ -25,8 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Draw boxes/labels onto each result and write it out. `Results::save`
     // annotates the original image and saves it in one call.
-    let out_dir = Path::new("runs/predict");
-    std::fs::create_dir_all(out_dir)?;
+    let out_dir = Path::new("runs").join("predict");
+    std::fs::create_dir_all(&out_dir)?;
     for (i, result) in results.iter().enumerate() {
         let out = out_dir.join(format!("annotated_{i}.jpg"));
         result.save(&out)?;
