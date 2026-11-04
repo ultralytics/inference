@@ -215,12 +215,15 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
 - **运行时资源**：首次加载时，`ort-web` 会从 `cdn.pyke.io` 获取 ONNX Runtime Web 的 wasm 包
   （约 25 MB，之后由浏览器缓存）。如果你设置了 Content-Security-Policy，请在
   `script-src`/`connect-src` 中放行该源。若想完全避开 CDN，可自行托管运行时并指向它：
+
   ```ts
   const model = await YOLO.load("/models/yolo26n.onnx", { ortBaseUrl: "/ort/" });
   ```
+
   该目录需包含 ONNX Runtime Web 的入口脚本（`ort.webgpu.min.js`，以及 CPU 回退所需的
   `ort.wasm.min.js`）和 `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` 二进制文件。如果打包工具没有提供本包自带的
   `ultralytics_inference_web_bg.wasm`，可通过 `wasmUrl` 传入其 URL。
+
 - **遥测**：`ort-web` 可以在首次创建会话时向 pyke 上报页面域名。本包已将其关闭，不会发送任何数据。
   上报内容见 [ort-web 文档](https://ort.pyke.io/backends/web)。
 

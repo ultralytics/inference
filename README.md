@@ -429,7 +429,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **Accessing Detection Data:**
 
-```text
+```rust
 if let Some(ref boxes) = result.boxes {
     // Bounding boxes in different formats
     let xyxy = boxes.xyxy();      // [x1, y1, x2, y2]

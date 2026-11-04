@@ -428,7 +428,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **访问检测数据：**
 
-```text
+```rust
 if let Some(ref boxes) = result.boxes {
     // 不同格式的边界框
     let xyxy = boxes.xyxy();      // [x1, y1, x2, y2]
