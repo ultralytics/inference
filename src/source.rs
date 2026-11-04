@@ -485,7 +485,15 @@ impl SourceIterator {
 
     /// Download an image from a URL.
     fn download_image(url: &str) -> Result<DynamicImage> {
-        let mut response = ureq::get(url)
+        let config = ureq::Agent::config_builder()
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .provider(ureq::tls::TlsProvider::NativeTls)
+                    .build(),
+            )
+            .build();
+        let mut response = ureq::Agent::new_with_config(config)
+            .get(url)
             .call()
             .map_err(|e| InferenceError::ImageError(format!("Failed to download {url}: {e}")))?
             .into_body();
