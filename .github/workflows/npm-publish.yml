@@ -22,7 +22,7 @@ on:
 
 jobs:
   check:
-    if: github.repository == 'ultralytics/inference'
+    if: github.repository == 'ultralytics/inference' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       publish: ${{ steps.check_version.outputs.publish }}
