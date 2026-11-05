@@ -226,6 +226,9 @@ pub fn run_prediction(args: &PredictArgs) {
         }
     });
 
+    // Set when the viewer is closed; stops reading the source, which also stops the decoder.
+    let quit = std::cell::Cell::new(false);
+
     // Use BatchProcessor for centralized batch management
     {
         let mut batch_processor = BatchProcessor::new(
@@ -340,12 +343,13 @@ pub fn run_prediction(args: &PredictArgs) {
                             if let Some(ref mut v) = viewer {
                                 let annotated = annotate_image(img, &result, None);
 
-                                if v.update(&annotated).is_ok() {
-                                    // Main thread is blocking on channel, so visualizer wait is less critical
-                                    // but we keep a small wait to allow window events processing
-                                    if !is_video {
-                                        let _ = v.wait(Duration::from_millis(200));
-                                    }
+                                // Images stay up briefly. Q, Esc or closing the window ends
+                                // the run, like the `q` key in Ultralytics.
+                                let open = v.update(&annotated).unwrap_or(true)
+                                    && (is_video
+                                        || v.wait(Duration::from_millis(200)).unwrap_or(true));
+                                if !open {
+                                    quit.set(true);
                                 }
                             }
                         }
@@ -363,6 +367,9 @@ pub fn run_prediction(args: &PredictArgs) {
         // not abandon the rest of the source, so skip it and carry on like Ultralytics does.
         let (mut read, mut skipped) = (0usize, 0usize);
         for item in receiver {
+            if quit.get() {
+                break;
+            }
             let (img, meta) = match item {
                 Ok(val) => val,
                 Err(e) => {
