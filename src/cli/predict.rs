@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::process;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 #[cfg(feature = "visualize")]
 use std::time::Duration;
 
@@ -204,26 +205,54 @@ pub fn run_prediction(args: &PredictArgs) {
     #[cfg(not(feature = "annotate"))]
     let mut result_saver: Option<crate::io::SaveResults> = None;
 
+    // A webcam keeps capturing while inference runs, so like Ultralytics it keeps only the
+    // latest frame for inference instead of blocking until the capture buffer overflows or
+    // handing inference a stale queued frame.
+    let webcam = matches!(source, crate::source::Source::Webcam(_));
+    // The latest webcam frame inference has not taken yet, and whether the source has ended.
+    let latest = Arc::new((Mutex::new((None, false)), Condvar::new()));
+
     // Create a bounded channel for pipelined processing
     // Buffer size 2x batch size ensures we can decode the next batch while processing current one
     let channel_capacity = batch_size * 2;
     let (sender, receiver) = std::sync::mpsc::sync_channel(channel_capacity);
 
     // Spawn producer thread for frame decoding
+    let slot = Arc::clone(&latest);
     std::thread::spawn(move || {
-        let iter = match crate::source::SourceIterator::new(source) {
-            Ok(iter) => iter,
+        match crate::source::SourceIterator::new(source) {
+            Ok(iter) => {
+                for item in iter {
+                    if webcam {
+                        if Arc::strong_count(&slot) == 1 {
+                            break; // Consumer finished, stop capturing
+                        }
+                        slot.0.lock().unwrap_or_else(PoisonError::into_inner).0 = Some(item);
+                        slot.1.notify_one();
+                    } else if sender.send(item).is_err() {
+                        break; // Receiver dropped, stop decoding
+                    }
+                }
+            }
             Err(e) => {
                 error!("Error initializing source in thread: {e}");
-                return;
-            }
-        };
-
-        for item in iter {
-            if sender.send(item).is_err() {
-                break; // Receiver dropped, stop decoding
             }
         }
+        slot.0.lock().unwrap_or_else(PoisonError::into_inner).1 = true;
+        slot.1.notify_one();
+    });
+    let frames = std::iter::from_fn(move || {
+        if !webcam {
+            return receiver.recv().ok();
+        }
+        let (lock, ready) = &*latest;
+        let mut state = ready
+            .wait_while(
+                lock.lock().unwrap_or_else(PoisonError::into_inner),
+                |(frame, done)| frame.is_none() && !*done,
+            )
+            .unwrap_or_else(PoisonError::into_inner);
+        state.0.take()
     });
 
     // Set when the viewer is closed; stops reading the source, which also stops the decoder.
@@ -366,7 +395,7 @@ pub fn run_prediction(args: &PredictArgs) {
         // Main thread: consume frames from channel and run inference. One unreadable file must
         // not abandon the rest of the source, so skip it and carry on like Ultralytics does.
         let (mut read, mut skipped) = (0usize, 0usize);
-        for item in receiver {
+        for item in frames {
             if quit.get() {
                 break;
             }
