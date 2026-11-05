@@ -472,8 +472,13 @@ impl SourceIterator {
     }
 
     /// Collect sorted image paths matching a glob pattern, with `**` matching any depth.
+    /// Matching ignores case on Windows, like Python's `glob`.
     fn collect_images_from_glob(pattern: &str) -> Result<Vec<PathBuf>> {
-        let mut paths: Vec<PathBuf> = glob::glob(pattern)
+        let options = glob::MatchOptions {
+            case_sensitive: !cfg!(windows),
+            ..glob::MatchOptions::new()
+        };
+        let mut paths: Vec<PathBuf> = glob::glob_with(pattern, options)
             .map_err(|e| InferenceError::ImageError(format!("Invalid glob '{pattern}': {e}")))?
             .filter_map(std::result::Result::ok)
             .filter(|path| is_image_file(path))
