@@ -209,6 +209,10 @@ pub fn run_prediction(args: &PredictArgs) {
     let channel_capacity = batch_size * 2;
     let (sender, receiver) = std::sync::mpsc::sync_channel(channel_capacity);
 
+    // A webcam keeps capturing while inference runs, so like Ultralytics it drops the frames
+    // inference is not ready for instead of blocking until the capture buffer overflows.
+    let webcam = matches!(source, crate::source::Source::Webcam(_));
+
     // Spawn producer thread for frame decoding
     std::thread::spawn(move || {
         let iter = match crate::source::SourceIterator::new(source) {
@@ -220,7 +224,15 @@ pub fn run_prediction(args: &PredictArgs) {
         };
 
         for item in iter {
-            if sender.send(item).is_err() {
+            let disconnected = if webcam {
+                matches!(
+                    sender.try_send(item),
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_))
+                )
+            } else {
+                sender.send(item).is_err()
+            };
+            if disconnected {
                 break; // Receiver dropped, stop decoding
             }
         }
