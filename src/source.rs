@@ -580,26 +580,29 @@ impl SourceIterator {
         let device_name = if format_name == "dshow" {
             let mut list = std::ptr::null_mut();
             let name = unsafe {
-                // Returns the device count, negative on error (the list is then null).
-                let count = ffmpeg::ffi::avdevice_list_input_sources(
+                // On error the list stays null.
+                ffmpeg::ffi::avdevice_list_input_sources(
                     ptr,
                     std::ptr::null(),
                     std::ptr::null_mut(),
                     &raw mut list,
                 );
-                let name = (0..usize::try_from(count).unwrap_or(0))
-                    .map(|i| &**(*list).devices.add(i))
-                    .filter(|d| {
-                        (0..usize::try_from(d.nb_media_types).unwrap_or(0)).any(|j| {
-                            *d.media_types.add(j) == ffmpeg::ffi::AVMediaType::AVMEDIA_TYPE_VIDEO
+                let name = list.as_ref().and_then(|list| {
+                    (0..usize::try_from(list.nb_devices).unwrap_or(0))
+                        .map(|i| &**list.devices.add(i))
+                        .filter(|d| {
+                            (0..usize::try_from(d.nb_media_types).unwrap_or(0)).any(|j| {
+                                *d.media_types.add(j)
+                                    == ffmpeg::ffi::AVMediaType::AVMEDIA_TYPE_VIDEO
+                            })
                         })
-                    })
-                    .nth(idx as usize)
-                    .map(|d| {
-                        std::ffi::CStr::from_ptr(d.device_name)
-                            .to_string_lossy()
-                            .into_owned()
-                    });
+                        .nth(idx as usize)
+                        .map(|d| {
+                            std::ffi::CStr::from_ptr(d.device_name)
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                });
                 ffmpeg::ffi::avdevice_free_list_devices(&raw mut list);
                 name
             };
