@@ -559,7 +559,7 @@ impl SourceIterator {
         } else if cfg!(target_os = "linux") {
             ("video4linux2", format!("/dev/video{idx}"))
         } else if cfg!(target_os = "windows") {
-            ("dshow", format!("video={idx}"))
+            ("dshow", String::new()) // named below, dshow does not take an index
         } else {
             return Err(InferenceError::VideoError(
                 "Unsupported OS for webcam".to_string(),
@@ -576,6 +576,41 @@ impl SourceIterator {
                 "Input format '{format_name}' not found"
             )));
         }
+        // dshow opens cameras by name, so use the name of its `idx`-th video source.
+        let device_name = if format_name == "dshow" {
+            let mut list = std::ptr::null_mut();
+            let name = unsafe {
+                // Returns the device count, negative on error (the list is then null).
+                let count = ffmpeg::ffi::avdevice_list_input_sources(
+                    ptr,
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                    &raw mut list,
+                );
+                let name = (0..usize::try_from(count).unwrap_or(0))
+                    .map(|i| &**(*list).devices.add(i))
+                    .filter(|d| {
+                        (0..usize::try_from(d.nb_media_types).unwrap_or(0)).any(|j| {
+                            *d.media_types.add(j) == ffmpeg::ffi::AVMediaType::AVMEDIA_TYPE_VIDEO
+                        })
+                    })
+                    .nth(idx as usize)
+                    .map(|d| {
+                        std::ffi::CStr::from_ptr(d.device_name)
+                            .to_string_lossy()
+                            .into_owned()
+                    });
+                ffmpeg::ffi::avdevice_free_list_devices(&raw mut list);
+                name
+            };
+            format!(
+                "video={}",
+                name.ok_or_else(|| InferenceError::VideoError(format!("Webcam {idx} not found")))?
+            )
+        } else {
+            device_name
+        };
+
         #[allow(clippy::ptr_cast_constness)]
         let input_format = unsafe { ffmpeg::format::Input::wrap(ptr.cast_mut()) };
 
