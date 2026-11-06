@@ -6,11 +6,9 @@
 //! including NMS, coordinate transformation, and result construction.
 
 #![allow(
-    unsafe_code,
     clippy::doc_markdown,
     clippy::too_many_lines,
     clippy::if_not_else,
-    clippy::ptr_as_ptr,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
@@ -498,7 +496,6 @@ struct Candidate {
 /// - SIMD-accelerated candidate extraction (f32x8)
 /// - SIMD bitmask NMS (IoU 1 vs 8)
 /// - Struct-of-Arrays (SoA) layout for NMS cache locality
-/// - Direct unsafe indexing for performance
 fn extract_detect_boxes(
     output: &[f32],
     num_classes: usize,
@@ -521,7 +518,7 @@ fn extract_detect_boxes(
         if !config.keep_class(class) {
             return;
         }
-        let at = |k: usize| unsafe { *output.get_unchecked(base + k * step) };
+        let at = |k: usize| output[base + k * step];
         let bbox = scale_coords(
             &xywh_to_xyxy(at(0), at(1), at(2), at(3)),
             preprocess.scale,
@@ -554,38 +551,30 @@ fn extract_detect_boxes(
         }
     } else {
         // Layout [pred, feat] - Process 8 classes at once
-        for idx in 0..num_predictions {
-            let base = idx * feat_count;
-            let row_ptr = unsafe { output.as_ptr().add(base + 4) };
+        for (idx, row) in output
+            .chunks_exact(feat_count)
+            .take(num_predictions)
+            .enumerate()
+        {
             let mut best_score = conf_thresh;
             let mut best_class = 0;
-
-            for c_idx in (0..num_classes).step_by(8) {
-                if num_classes - c_idx >= 8 {
-                    let scores: f32x8 =
-                        unsafe { (row_ptr.add(c_idx) as *const f32x8).read_unaligned() };
-                    if scores.simd_gt(conf_v).any() {
-                        for i in 0..8 {
-                            let s = unsafe { *row_ptr.add(c_idx + i) };
-                            if s > best_score {
-                                best_score = s;
-                                best_class = c_idx + i;
-                            }
-                        }
-                    }
-                } else {
-                    for i in c_idx..num_classes {
-                        let s = unsafe { *row_ptr.add(i) };
-                        if s > best_score {
-                            best_score = s;
-                            best_class = i;
-                        }
+            let mut scan = |first: usize, scores: &[f32]| {
+                for (i, &s) in scores.iter().enumerate() {
+                    if s > best_score {
+                        best_score = s;
+                        best_class = first + i;
                     }
                 }
+            };
+            let (blocks, rest) = row[4..].as_chunks::<8>();
+            for (b, block) in blocks.iter().enumerate() {
+                if f32x8::new(*block).simd_gt(conf_v).any() {
+                    scan(b * 8, block);
+                }
             }
-
+            scan(num_classes - rest.len(), rest);
             if best_score > conf_thresh {
-                push_candidate(base, 1, best_score, best_class);
+                push_candidate(idx * feat_count, 1, best_score, best_class);
             }
         }
     }
@@ -643,11 +632,11 @@ fn extract_detect_boxes(
         while j < n {
             if n - j >= 8 {
                 if (0..8).any(|k| candidates[j + k].class == ac && !suppressed[j + k]) {
-                    let bx1 = unsafe { (x1.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let by1 = unsafe { (y1.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let bx2 = unsafe { (x2.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let by2 = unsafe { (y2.as_ptr().add(j) as *const f32x8).read_unaligned() };
-                    let ba = unsafe { (areas.as_ptr().add(j) as *const f32x8).read_unaligned() };
+                    let bx1 = f32x8::new(x1[j..j + 8].try_into().expect("chunk of 8"));
+                    let by1 = f32x8::new(y1[j..j + 8].try_into().expect("chunk of 8"));
+                    let bx2 = f32x8::new(x2[j..j + 8].try_into().expect("chunk of 8"));
+                    let by2 = f32x8::new(y2[j..j + 8].try_into().expect("chunk of 8"));
+                    let ba = f32x8::new(areas[j..j + 8].try_into().expect("chunk of 8"));
 
                     let ix1 = ax1.max(bx1);
                     let iy1 = ay1.max(by1);
