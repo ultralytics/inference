@@ -901,7 +901,8 @@ export async function annotate(
       const skeleton = options?.skeleton ?? (coco ? scheme.skeleton : []);
       const paletteAt = (i: number) => scheme.palette[i % scheme.palette.length];
       const kptColor = (i: number) => fixed ?? (coco ? scheme.keypoint_colors[i] : paletteAt(i));
-      const limbColor = (i: number, a: number) => (coco && !options?.skeleton ? (fixed ?? scheme.limb_colors[i]) : kptColor(a));
+      const limbColor = (i: number, a: number) =>
+        coco && !options?.skeleton ? (fixed ?? scheme.limb_colors[i]) : kptColor(a);
       if (options?.keypointLines ?? true) {
         skeleton.forEach(([a, b], li) => {
           const pa = kp.points[a];
