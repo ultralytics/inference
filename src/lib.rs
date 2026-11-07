@@ -126,7 +126,7 @@
 //! | `--task` | | Task type (`detect`, `segment`, `semantic`\*, `depth`\*, `classify`, `pose`, `obb`); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
 //! | `--conf` | | Confidence threshold | `0.25` |
-//! | `--iou` | | `IoU` threshold for NMS | `0.7` |
+//! | `--iou` | | `IoU` threshold for NMS | `0.5` |
 //! | `--max-det` | | Maximum number of detections | `300` |
 //! | `--imgsz` | | Inference image size | Model metadata |
 //! | `--rect [<BOOL>]` | | Enable rectangular inference (minimal padding) | `true` |

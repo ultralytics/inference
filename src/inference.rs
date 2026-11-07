@@ -193,7 +193,7 @@ impl InferenceConfig {
     /// Default confidence threshold (0.0 to 1.0).
     pub const DEFAULT_CONF: f32 = 0.25;
     /// Default `IoU` threshold for NMS (0.0 to 1.0).
-    pub const DEFAULT_IOU: f32 = 0.7;
+    pub const DEFAULT_IOU: f32 = 0.5;
     /// Default maximum number of detections per image.
     pub const DEFAULT_MAX_DET: usize = 300;
     /// Default inference precision. `None` uses the model's native precision.
