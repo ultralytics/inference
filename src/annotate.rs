@@ -86,14 +86,14 @@ pub fn get_class_color(colors: &[Color], class_id: usize) -> Rgb<u8> {
 
 /// Dynamic render scale derived from image size (reference 640x640).
 ///
-/// Returns the scale factor and the base line thickness. Callers derive the
-/// font size or marker radius from the factor as needed.
+/// Returns the box/OBB label font size (11 px at 640 and below) and the base line thickness,
+/// both growing with the longer side.
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 fn render_scale(width: u32, height: u32) -> (f32, i32) {
     let max_dim = width.max(height) as f32;
     let scale_factor = (max_dim / 640.0).max(1.0);
     let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
-    (scale_factor, thickness)
+    (11.0 * scale_factor, thickness)
 }
 
 /// Load and decode the image at `path` by its contents.
@@ -721,9 +721,7 @@ fn draw_label(
 fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
     let (width, height) = img.dimensions();
 
-    // Dynamic scale factor and thickness based on image size (reference 640x640)
-    let (scale_factor, thickness) = render_scale(width, height);
-    let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
+    let (font_scale, thickness) = render_scale(width, height);
 
     if let Some(ref boxes) = result.boxes {
         let xyxy = boxes.xyxy();
@@ -951,9 +949,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
     let (width, height) = img.dimensions();
 
-    // Dynamic scale factor and thickness based on image size (reference 640x640)
-    let (scale_factor, thickness) = render_scale(width, height);
-    let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
+    let (font_scale, thickness) = render_scale(width, height);
 
     if let Some(ref obb) = result.obb {
         let corners = obb.xyxyxyxy();

@@ -49,8 +49,6 @@ export interface Box {
   cls: number;
   name: string;
   color: string;
-  /** Label text color over {@link color}. */
-  text_color: string;
 }
 
 /** Oriented box, `xywhr` (angle in radians). */
@@ -64,8 +62,6 @@ export interface Obb {
   cls: number;
   name: string;
   color: string;
-  /** Label text color over {@link color}. */
-  text_color: string;
 }
 
 /** Keypoints for one detection: `[x, y, conf]` per point. */
@@ -746,6 +742,17 @@ export class YOLO {
   }
 }
 
+// Colors come from the Rust engine (the Ultralytics palette) on each detection,
+// so there is no palette duplicated here.
+
+/** Label text color over a `#rrggbb` background, the rule of `Color::text_color` in the engine. */
+function textColorFor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? "#111F68" : "#FFFFFF";
+}
+
 /**
  * Draw inference results onto a canvas, on top of the source image.
  *
@@ -843,8 +850,7 @@ export async function annotate(
     }
   };
 
-  // Box and text colors come from the engine on each detection, so no color rule is duplicated here.
-  const label = (text: string, x: number, y: number, { color, text_color }: Box | Obb) => {
+  const label = (text: string, x: number, y: number, color: string) => {
     if (!showLabels) return;
     const pad = Math.round(fontSize * 0.2);
     const runs = layout(text);
@@ -853,7 +859,7 @@ export async function annotate(
     const ly = Math.max(0, y - h);
     ctx.fillStyle = color;
     ctx.fillRect(x, ly, w, h);
-    ctx.fillStyle = text_color;
+    ctx.fillStyle = textColorFor(color);
     fillText(runs, x + pad, ly + pad);
   };
 
@@ -861,12 +867,13 @@ export async function annotate(
   for (const b of results.boxes) {
     ctx.strokeStyle = b.color;
     ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
-    label(`${b.name} ${(b.conf * 100).toFixed(0)}%`, b.x1, b.y1, b);
+    label(`${b.name} ${(b.conf * 100).toFixed(0)}%`, b.x1, b.y1, b.color);
   }
 
   // Oriented boxes (obb): draw the rotated rectangle.
   for (const o of results.obb) {
-    ctx.strokeStyle = o.color;
+    const color = o.color;
+    ctx.strokeStyle = color;
     const cos = Math.cos(o.angle);
     const sin = Math.sin(o.angle);
     const hw = o.w / 2;
@@ -883,7 +890,7 @@ export async function annotate(
     for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i][0], corners[i][1]);
     ctx.closePath();
     ctx.stroke();
-    label(`${o.name} ${(o.conf * 100).toFixed(0)}%`, corners[0][0], corners[0][1], o);
+    label(`${o.name} ${(o.conf * 100).toFixed(0)}%`, corners[0][0], corners[0][1], color);
   }
 
   // Pose keypoints + skeleton, colored with the engine's pose palette (per-limb

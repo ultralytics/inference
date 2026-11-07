@@ -13,7 +13,7 @@ use ultralytics_inference::results::{Results, SemanticMask};
 use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
-/// `color` is the class color (`#rrggbb`) and `text_color` the label text color over it.
+/// `color` is the class color (`#rrggbb`).
 #[derive(Serialize)]
 struct JsBox {
     x1: f32,
@@ -24,7 +24,6 @@ struct JsBox {
     cls: usize,
     name: String,
     color: String,
-    text_color: String,
 }
 
 /// One oriented box (`xywhr` + score), mirroring `Obb`.
@@ -39,7 +38,6 @@ struct JsObb {
     cls: usize,
     name: String,
     color: String,
-    text_color: String,
 }
 
 /// Keypoints for one detection (`[[x, y, conf], ...]`), with the instance color.
@@ -115,8 +113,7 @@ impl JsResults {
     ) -> Self {
         // Class id -> display name and class color, shared by every detection type.
         let name = |c: usize| r.names.get(&c).cloned().unwrap_or_default();
-        let color = |c: usize| Color::for_class(&r.colors, c);
-        let hex = |c: usize| color(c).to_hex();
+        let hex = |c: usize| Color::for_class(&r.colors, c).to_hex();
 
         let boxes = r.boxes.as_ref().map_or_else(Vec::new, |b| {
             let (xyxy, conf, cls) = (b.xyxy(), b.conf(), b.cls());
@@ -132,7 +129,6 @@ impl JsResults {
                         cls: c,
                         name: name(c),
                         color: hex(c),
-                        text_color: color(c).text_color().to_hex(),
                     }
                 })
                 .collect()
@@ -153,7 +149,6 @@ impl JsResults {
                         cls: c,
                         name: name(c),
                         color: hex(c),
-                        text_color: color(c).text_color().to_hex(),
                     }
                 })
                 .collect()
