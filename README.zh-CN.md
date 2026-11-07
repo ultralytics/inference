@@ -461,6 +461,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+**类别颜色：**
+
+检测框、掩码和标签使用 Ultralytics 调色板；若模型导出时带有 `colors` 元数据（每个类别一个 `#rrggbb`，例如在
+Ultralytics Platform 中设置），则使用模型自己的类别颜色。这些颜色保存在 `Results::colors` 中。
+
 **深度可视化：**
 
 深度结果的渲染方式是将彩色化的深度图以 `alpha = 0.6` 叠加到原图上，使用 `jet` 配色和
@@ -500,7 +505,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 **姿态绘制：**
 
 `annotate_image_with_options` 接受与 Ultralytics `Results.plot` 相同的关键点选项。17 个关键点（COCO-Pose）的模型
-绘制人体骨架，其他关键点布局为每个关键点使用一种调色板颜色且不连线，`skeleton` 可为自定义模型连接关键点：
+绘制人体骨架，其他关键点布局为每个关键点使用一种调色板颜色且不连线，`skeleton` 可为自定义模型连接关键点，每条连线使用其
+起始关键点的颜色：
 
 ```rust
 use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};

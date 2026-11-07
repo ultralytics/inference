@@ -1241,7 +1241,7 @@ mod tests {
     fn test_get_class_color_wraps() {
         // Indexing beyond the palette wraps rather than panicking.
         let _ = get_class_color(&[], 0);
-        let _ = get_class_color(&[Color(1, 2, 3)], 1000);
+        assert_eq!(get_class_color(&[Color(1, 2, 3)], 1000), Rgb([4, 42, 255]));
     }
 
     #[test]

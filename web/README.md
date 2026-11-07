@@ -163,7 +163,8 @@ Rust/Ultralytics `Results` API one-to-one:
 detection carries its class `color` (the model's `colors` metadata entry, else the
 Ultralytics palette), and `annotate()` draws the
 `masks` overlay and the pose skeleton with the same per-limb/keypoint colors as
-the native renderer. None of this is duplicated in JS.
+the native renderer. Only the label text color rule (`textColorFor`) lives in JS
+too, so `predict()` builds no extra string per box.
 
 For the `depth` task, `predict(img, { colormap, depthViz })` picks the colormap
 (`"jet"` default, `"inferno"`, `"spectral"`, `"gray"`) and normalization
