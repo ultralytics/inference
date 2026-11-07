@@ -600,7 +600,7 @@ impl YoloModel {
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
         let mut overlay = Vec::new();
-        let results = if semantic_baked {
+        let mut results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
                 .try_extract_tensor::<u8>()
@@ -642,9 +642,12 @@ impl YoloModel {
                 self.metadata.end2end,
                 self.metadata.kpt_shape,
                 self.metadata.is_rtdetr(),
-                &mut |mask, box_data| payload::put_instance_mask(&mut overlay, mask, box_data),
+                &mut |mask, box_data| {
+                    payload::put_instance_mask(&mut overlay, mask, box_data, &self.metadata.colors);
+                },
             )
         };
+        results.colors = Arc::clone(&self.metadata.colors);
         results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
     }
 }
@@ -873,7 +876,7 @@ impl YoloPipeline {
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
         let mut overlay = Vec::new();
-        let results = postprocess_with_head_masks(
+        let mut results = postprocess_with_head_masks(
             views,
             self.metadata.task,
             &pending.pre,
@@ -886,8 +889,11 @@ impl YoloPipeline {
             self.metadata.end2end,
             self.metadata.kpt_shape,
             self.metadata.is_rtdetr(),
-            &mut |mask, box_data| payload::put_instance_mask(&mut overlay, mask, box_data),
+            &mut |mask, box_data| {
+                payload::put_instance_mask(&mut overlay, mask, box_data, &self.metadata.colors);
+            },
         );
+        results.colors = Arc::clone(&self.metadata.colors);
         results_to_js(
             &results,
             self.metadata.task,
@@ -1039,8 +1045,8 @@ struct PoseScheme {
     keypoint_colors: Vec<String>,
     /// Hex color per limb (length 19, aligned with `skeleton`).
     limb_colors: Vec<String>,
-    /// The 20-color Ultralytics palette with red and blue swapped, the colors Ultralytics
-    /// pictures show for keypoint layouts other than COCO-Pose (OpenCV draws them as BGR).
+    /// The 20-color Ultralytics class palette, one color per keypoint for layouts other than
+    /// COCO-Pose.
     palette: Vec<String>,
 }
 
@@ -1062,10 +1068,7 @@ pub fn pose_palette() -> Result<JsValue, JsError> {
             .map(|&i| Color::from_pose_index(i).to_hex())
             .collect(),
         palette: (0..COLORS.len())
-            .map(|i| {
-                let Color(r, g, b) = Color::from_index(i);
-                Color(b, g, r).to_hex()
-            })
+            .map(|i| Color::from_index(i).to_hex())
             .collect(),
     };
     to_js(&scheme, "pose palette")

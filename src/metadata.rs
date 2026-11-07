@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::error::{InferenceError, Result};
 use crate::inference::{InferenceConfig, Quantization};
 use crate::task::Task;
+use crate::visualizer::color::Color;
 
 /// Metadata extracted from an Ultralytics YOLO ONNX model.
 ///
@@ -47,6 +48,9 @@ pub struct ModelMetadata {
     pub quantize: Option<Quantization>,
     /// Class ID to class name mapping.
     pub names: Arc<HashMap<usize, String>>,
+    /// Per-class colors from the optional `colors` metadata (`#rrggbb` strings indexed by class
+    /// ID); empty when the model has none, and classes without an entry use the palette.
+    pub colors: Arc<[Color]>,
     /// Whether the graph uses the NMS-free one-to-one head, from the `end2end` metadata key
     /// (selected with `nms=False` when available; output: `[B, max_det, 6+extra]`).
     pub end2end: bool,
@@ -144,6 +148,16 @@ impl ModelMetadata {
         // parsed with the same helper as imgsz.
         metadata.kpt_shape = Self::parse_int_pair(yaml_str, "kpt_shape");
 
+        // colors is a list of `#rrggbb` strings; one unreadable entry discards them all, so no
+        // class takes another's color.
+        metadata.colors = Self::parse_list(yaml_str, "colors", |items| {
+            items
+                .into_iter()
+                .map(Color::from_hex)
+                .collect::<Option<_>>()
+        })
+        .unwrap_or_default();
+
         // Parse names block if not already parsed inline
         if names.is_empty() {
             names = Self::parse_names_block(yaml_str);
@@ -213,47 +227,44 @@ impl ModelMetadata {
         )
     }
 
-    /// Parse a two-integer YAML value for `key`, accepting either the inline form
-    /// (`key: [a, b]` / `key: a, b`) or a multi-line block list (`key:` then
-    /// `- a` / `- b` on following lines). Returns the first two integers.
+    /// Parse a two-integer YAML list for `key` (see [`Self::parse_list`]), returning its first
+    /// two integers.
     fn parse_int_pair(yaml_str: &str, key: &str) -> Option<(usize, usize)> {
+        Self::parse_list(yaml_str, key, |items| {
+            let mut nums = items.iter().filter_map(|s| s.parse().ok());
+            Some((nums.next()?, nums.next()?))
+        })
+    }
+
+    /// Read the YAML list for `key` with `parse`, accepting either the inline form
+    /// (`key: [a, b]` / `key: a, b`) or a multi-line block list (`key:` then `- a` / `- b` on
+    /// following lines), with each item unquoted. Every line starting with `key:` is tried in
+    /// turn (a nested block such as `args` can repeat a key) until `parse` returns `Some`.
+    fn parse_list<T>(
+        yaml_str: &str,
+        key: &str,
+        parse: impl Fn(Vec<&str>) -> Option<T>,
+    ) -> Option<T> {
         let prefix = format!("{key}:");
         let lines: Vec<&str> = yaml_str.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
-            let Some(rest) = line.trim_start().strip_prefix(&prefix) else {
-                continue;
+        lines.iter().enumerate().find_map(|(i, line)| {
+            let rest = line.trim_start().strip_prefix(&prefix)?.trim();
+            let items = if rest.is_empty() {
+                lines[i + 1..]
+                    .iter()
+                    .map(|line| line.trim())
+                    .filter(|t| !t.is_empty() && !t.starts_with('#'))
+                    .map_while(|t| t.strip_prefix('-'))
+                    .map(Self::unquote)
+                    .collect()
+            } else {
+                rest.trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'))
+                    .split(',')
+                    .map(Self::unquote)
+                    .collect()
             };
-            // Inline form: [a, b] / (a, b) / a, b
-            let rest = rest
-                .trim()
-                .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')'));
-            let inline: Vec<usize> = rest
-                .split(',')
-                .filter_map(|s| s.trim().parse().ok())
-                .collect();
-            if inline.len() >= 2 {
-                return Some((inline[0], inline[1]));
-            }
-            // Multi-line block list on following `- value` lines.
-            let mut vals = Vec::new();
-            for following in lines.iter().skip(i + 1) {
-                let t = following.trim();
-                if let Some(v) = t.strip_prefix('-') {
-                    if let Ok(n) = v.trim().parse::<usize>() {
-                        vals.push(n);
-                    }
-                } else if !t.is_empty() && !t.starts_with('#') {
-                    break;
-                }
-                if vals.len() >= 2 {
-                    break;
-                }
-            }
-            if vals.len() >= 2 {
-                return Some((vals[0], vals[1]));
-            }
-        }
-        None
+            parse(items)
+        })
     }
 
     /// Parse the names block from YAML or Python dict format.
@@ -417,6 +428,7 @@ impl Default for ModelMetadata {
             channels: 3,
             quantize: None,
             names: Arc::new(HashMap::new()),
+            colors: Arc::default(),
             end2end: false,
             kpt_shape: None,
         }
@@ -549,6 +561,27 @@ channels: 3
         let m = ModelMetadata::from_yaml_str(yaml).unwrap();
         assert_eq!(m.class_name(0), Some("person"));
         assert_eq!(m.num_classes(), 1);
+    }
+
+    #[test]
+    fn test_parse_colors() {
+        // ONNX stores the Python repr inline; OpenVINO's metadata.yaml writes a block list.
+        let inline = "task: detect\ncolors: ['#042aff', '#FF0000']\nnames: {0: 'a', 1: 'b'}";
+        let block = "task: detect\ncolors:\n- '#042aff'\n- '#FF0000'\nnames:\n  0: a\n  1: b";
+        for yaml in [inline, block] {
+            let m = ModelMetadata::from_yaml_str(yaml).unwrap();
+            assert_eq!(*m.colors, [Color(4, 42, 255), Color(255, 0, 0)]);
+            assert_eq!(m.num_classes(), 2);
+        }
+        // Absent or unreadable colors fall back to the palette.
+        for yaml in ["task: detect", "colors: ['#042aff', 'red']"] {
+            assert!(
+                ModelMetadata::from_yaml_str(yaml)
+                    .unwrap()
+                    .colors
+                    .is_empty()
+            );
+        }
     }
 
     #[test]

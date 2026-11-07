@@ -149,8 +149,8 @@ Rust/Ultralytics `Results` API one-to-one:
 | ------------------ | -------------------------------------------------------------------- | --------------------- |
 | `task`             | `string`                                                             | all                   |
 | `width` / `height` | `number`                                                             | all                   |
-| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color }[]`                       | detect, segment, pose |
-| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`                    | obb                   |
+| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color, text_color }[]`           | detect, segment, pose |
+| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color, text_color }[]`        | obb                   |
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                                | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, top5names, color } \| null` | classify              |
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)                        | segment, semantic     |
@@ -160,7 +160,8 @@ Rust/Ultralytics `Results` API one-to-one:
 | `speed`            | `{ preprocess, inference, postprocess }` ms                          | all                   |
 
 `model.names` is the class id to name map (like `model.names` in Python). Every
-detection carries its Ultralytics palette `color`, and `annotate()` draws the
+detection carries its class `color` (the model's `colors` metadata entry, else the
+Ultralytics palette) and label `text_color`, and `annotate()` draws the
 `masks` overlay and the pose skeleton with the same per-limb/keypoint colors as
 the native renderer. None of this is duplicated in JS.
 

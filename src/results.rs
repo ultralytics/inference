@@ -13,7 +13,7 @@ use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 #[allow(clippy::wildcard_imports)] // native: rayon prelude; wasm: sequential shims
 use crate::parallel::*;
 use crate::utils::pluralize;
-use crate::visualizer::color::{Colormap, DepthViz};
+use crate::visualizer::color::{Color, Colormap, DepthViz};
 
 /// Pixels handed to one task when colorizing a depth map across cores.
 const COLORIZE_CHUNK: usize = 4096;
@@ -326,6 +326,9 @@ pub struct Results {
     pub speed: Speed,
     /// Class ID to name mapping.
     pub names: Arc<HashMap<usize, String>>,
+    /// Per-class colors from the model's `colors` metadata, indexed by class ID; empty when it
+    /// has none. Drawing resolves each class through [`Color::for_class`].
+    pub colors: Arc<[Color]>,
     /// Path to the source image/video.
     pub path: String,
 }
@@ -395,6 +398,7 @@ impl Results {
             depth: None,
             speed,
             names,
+            colors: Arc::default(),
             path,
         }
     }

@@ -32,6 +32,39 @@ impl Color {
         Self(color[0], color[1], color[2])
     }
 
+    /// The color of class `class_id`: its entry in a model's `colors` metadata when there is one,
+    /// else the Ultralytics palette.
+    #[must_use]
+    pub fn for_class(colors: &[Self], class_id: usize) -> Self {
+        colors
+            .get(class_id)
+            .copied()
+            .unwrap_or_else(|| Self::from_index(class_id))
+    }
+
+    /// Parse a `#rrggbb` hex string, the form of each entry in a model's `colors` metadata.
+    #[must_use]
+    pub fn from_hex(hex: &str) -> Option<Self> {
+        let hex = hex.strip_prefix('#')?;
+        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let [_, r, g, b] = u32::from_str_radix(hex, 16).ok()?.to_be_bytes();
+        Some(Self(r, g, b))
+    }
+
+    /// Label text color over this background: dark blue `#111F68` when its BT.601 luma is above
+    /// 150, else white.
+    #[must_use]
+    pub fn text_color(self) -> Self {
+        let (r, g, b) = (f32::from(self.0), f32::from(self.1), f32::from(self.2));
+        if 0.114_f32.mul_add(b, 0.299_f32.mul_add(r, 0.587 * g)) > 150.0 {
+            Self(17, 31, 104)
+        } else {
+            Self::WHITE
+        }
+    }
+
     /// Get a color from the pose palette by index (cycles through the
     /// pose-specific palette).
     #[must_use]
@@ -47,7 +80,7 @@ impl Color {
     }
 }
 
-/// Ultralytics Color Palette
+/// Ultralytics Color Palette, mirroring `ultralytics/utils/plotting.py` `Colors`
 pub const COLORS: [[u8; 3]; 20] = [
     [4, 42, 255],    // #042aff
     [11, 219, 235],  // #0bdbeb
@@ -71,7 +104,7 @@ pub const COLORS: [[u8; 3]; 20] = [
     [162, 255, 11],  // #a2ff0b
 ];
 
-/// Ultralytics Pose Color Palette
+/// Ultralytics Pose Color Palette, mirroring `ultralytics/utils/plotting.py` `Colors`
 pub const POSE_COLORS: [[u8; 3]; 20] = [
     [255, 128, 0],   // #ff8000
     [255, 153, 51],  // #ff9933
@@ -340,6 +373,18 @@ mod tests {
     #[test]
     fn test_from_pose_index() {
         assert_eq!(Color::from_pose_index(0), Color(255, 128, 0));
+    }
+
+    #[test]
+    fn test_from_hex_and_text_color() {
+        assert_eq!(Color::from_hex("#ff8000"), Some(Color(255, 128, 0)));
+        assert_eq!(Color::from_hex("ff8000"), None);
+        assert_eq!(Color::from_hex("#+f8000"), None);
+        // Dark text on exactly the palette entries Python draws with dark text.
+        let dark: Vec<usize> = (0..COLORS.len())
+            .filter(|&i| Color::from_index(i).text_color() == Color(17, 31, 104))
+            .collect();
+        assert_eq!(dark, [1, 2, 3, 5, 7, 8, 12, 14, 19]);
     }
 
     #[test]
