@@ -11,12 +11,12 @@
 )]
 
 use image::{DynamicImage, GenericImageView};
-use ndarray::{Array2, Array3, Axis};
+use ndarray::{Array2, Array3, Axis, s};
 
 use super::YOLOModel;
 use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
-use crate::results::{Boxes, Keypoints, Obb, Results, Speed};
+use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
 use crate::utils::{nms_per_class, nms_rotated_per_class};
 
@@ -209,6 +209,68 @@ fn merge_detections(
         }
         out.keypoints = Some(Keypoints::new(k, shape));
     }
+    out.masks = merge_masks(tiles, &wins, &src, &keep, shape);
+}
+
+/// Place the kept instance masks, each at its window origin, in a source-sized stack.
+fn merge_masks(
+    tiles: &[Results],
+    wins: &[Window],
+    src: &[(&Results, usize)],
+    keep: &[usize],
+    shape: (u32, u32),
+) -> Option<Masks> {
+    tiles.iter().any(|t| t.masks.is_some()).then(|| {
+        let mut data = Array3::<f32>::zeros((keep.len(), shape.0 as usize, shape.1 as usize));
+        for (o, &k) in keep.iter().enumerate() {
+            let Some(mask) = &src[k].0.masks else {
+                continue;
+            };
+            let m = mask.data.index_axis(Axis(0), src[k].1);
+            let (x, y) = (wins[k][0] as usize, wins[k][1] as usize);
+            data.slice_mut(s![o, y..y + m.nrows(), x..x + m.ncols()])
+                .assign(&m);
+        }
+        Masks::new(data, shape)
+    })
+}
+
+/// Stitch dense per-pixel tile outputs. Every window is weighted by its distance to the window
+/// edge, so a class map keeps the most central tile and a depth map blends the overlaps.
+fn merge_dense(out: &mut Results, tiles: &[Results], windows: &[Window], semantic: bool) {
+    let (h, w) = (out.orig_shape.0 as usize, out.orig_shape.1 as usize);
+    let (mut classes, mut depth, mut weights) = (
+        Array2::<u16>::zeros((h, w)),
+        Array2::<f32>::zeros((h, w)),
+        Array2::<f32>::zeros((h, w)),
+    );
+    for (t, win) in tiles.iter().zip(windows) {
+        let [x1, y1, x2, y2] = win.map(|v| v as usize);
+        let (th, tw) = (y2 - y1, x2 - x1);
+        let weight = |y: usize, x: usize| (y + 1).min(th - y).min((x + 1).min(tw - x)) as f32;
+        for y in 0..th {
+            for x in 0..tw {
+                let (wt, at) = (weight(y, x), [y1 + y, x1 + x]);
+                if semantic {
+                    if let Some(m) = &t.semantic_mask
+                        && wt > weights[at]
+                    {
+                        classes[at] = m.data[[y, x]];
+                        weights[at] = wt;
+                    }
+                } else if let Some(d) = &t.depth {
+                    depth[at] = d.data[[y, x]].mul_add(wt, depth[at]);
+                    weights[at] += wt;
+                }
+            }
+        }
+    }
+    if semantic {
+        out.semantic_mask = Some(SemanticMask::new(classes, out.orig_shape));
+    } else {
+        depth.zip_mut_with(&weights, |d, w| *d /= *w);
+        out.depth = Some(DepthMap::new(depth, out.orig_shape));
+    }
 }
 
 impl YOLOModel {
@@ -217,12 +279,13 @@ impl YOLOModel {
     ///
     /// Windows overlap by 20% and the last window in each direction is aligned to the image edge.
     /// Detection, pose and oriented boxes are offset to source coordinates and merged with NMS
-    /// using the configured `IoU` and `max_det`.
+    /// using the configured `IoU` and `max_det`, and segmentation places the kept masks in the
+    /// source image. Classification averages the tile probabilities, semantic maps keep the most
+    /// central tile per pixel and depth maps blend the overlaps.
     ///
     /// # Errors
     ///
-    /// Returns an error if `tile` is `0`, the model is not a detect, pose or obb model, or
-    /// inference fails.
+    /// Returns an error if `tile` is `0` or inference fails.
     pub fn predict_tiled(
         &mut self,
         image: &DynamicImage,
@@ -230,10 +293,10 @@ impl YOLOModel {
         tile: u32,
     ) -> Result<Vec<Results>> {
         let task = self.metadata.task;
-        if tile == 0 || !matches!(task, Task::Detect | Task::Pose | Task::Obb) {
-            return Err(InferenceError::ConfigError(format!(
-                "tiled prediction needs a tile size above 0 and a detect, pose or obb model, got {task:?}"
-            )));
+        if tile == 0 {
+            return Err(InferenceError::ConfigError(
+                "the tile size must be above 0".into(),
+            ));
         }
         let (w, h) = image.dimensions();
         let windows = tile_windows(h, w, tile);
@@ -269,7 +332,21 @@ impl YOLOModel {
             postprocess: total(|s| s.postprocess),
         };
 
-        merge_detections(&mut out, &tiles, &windows, task == Task::Obb, &self.config);
+        match task {
+            Task::Classify => {
+                let sum = tiles
+                    .iter()
+                    .filter_map(|t| t.probs.as_ref())
+                    .map(|p| p.data.clone());
+                out.probs = sum
+                    .reduce(|a, b| a + b)
+                    .map(|s| Probs::new(s / tiles.len() as f32));
+            }
+            Task::Semantic | Task::Depth => {
+                merge_dense(&mut out, &tiles, &windows, task == Task::Semantic);
+            }
+            _ => merge_detections(&mut out, &tiles, &windows, task == Task::Obb, &self.config),
+        }
         Ok(vec![out])
     }
 }
@@ -316,5 +393,60 @@ mod tests {
         let cut = vec![60.0, 10.0, 100.0, 90.0, 0.9, 0.0];
         let keep = merge_rows(&[cut], &[windows[0]], &windows, (100, 150), false, 0.5, 300);
         assert_eq!(keep, [0]);
+    }
+
+    fn blank(h: u32, w: u32) -> Results {
+        Results::new(
+            Array3::zeros((h as usize, w as usize, 3)),
+            String::new(),
+            std::sync::Arc::new(std::collections::HashMap::new()),
+            crate::results::Speed::default(),
+            (h, w),
+        )
+    }
+
+    #[test]
+    fn test_semantic_tiles_keep_the_most_central_pixel() {
+        // Two 5x5 windows overlapping on columns 3 and 4 of an 8-wide image. Column 3 is nearer the
+        // centre of the first window and column 4 of the second, so each tile wins its own side.
+        let windows = [[0, 0, 5, 5], [3, 0, 8, 5]];
+        let mut tiles = [blank(5, 5), blank(5, 5)];
+        tiles[0].semantic_mask = Some(SemanticMask::new(Array2::from_elem((5, 5), 1), (5, 5)));
+        tiles[1].semantic_mask = Some(SemanticMask::new(Array2::from_elem((5, 5), 2), (5, 5)));
+        let mut out = blank(5, 8);
+        merge_dense(&mut out, &tiles, &windows, true);
+        let map = out.semantic_mask.unwrap().data;
+        assert_eq!(map.row(2).to_vec(), [1, 1, 1, 1, 2, 2, 2, 2]);
+    }
+
+    #[test]
+    fn test_depth_tiles_blend_by_distance_to_the_edge() {
+        let windows = [[0, 0, 5, 5], [3, 0, 8, 5]];
+        let mut tiles = [blank(5, 5), blank(5, 5)];
+        tiles[0].depth = Some(DepthMap::new(Array2::from_elem((5, 5), 1.0), (5, 5)));
+        tiles[1].depth = Some(DepthMap::new(Array2::from_elem((5, 5), 4.0), (5, 5)));
+        let mut out = blank(5, 8);
+        merge_dense(&mut out, &tiles, &windows, false);
+        // Column 3 weighs 2 and 1: (1 * 2 + 4 * 1) / 3 = 2. Column 4 weighs 1 and 2: 3.
+        let depth = out.depth.unwrap().data;
+        assert_eq!(
+            depth.row(2).to_vec(),
+            [1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 4.0, 4.0]
+        );
+    }
+
+    #[test]
+    fn test_masks_land_at_their_window_offset() {
+        let windows = [[0, 0, 4, 2], [3, 0, 7, 2]];
+        let mut tiles = [blank(2, 4), blank(2, 4)];
+        tiles[1].masks = Some(Masks::new(Array3::ones((1, 2, 4)), (2, 4)));
+        let src = [(&tiles[1], 0)];
+        let wins = [windows[1]];
+        let masks = merge_masks(&tiles, &wins, &src, &[0], (2, 7)).unwrap();
+        assert_eq!(masks.data.shape(), [1, 2, 7]);
+        assert_eq!(
+            masks.data.index_axis(Axis(0), 0).row(0).to_vec(),
+            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+        );
     }
 }
