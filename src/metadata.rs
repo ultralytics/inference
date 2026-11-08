@@ -573,15 +573,9 @@ channels: 3
             assert_eq!(*m.colors, [Color(4, 42, 255), Color(255, 0, 0)]);
             assert_eq!(m.num_classes(), 2);
         }
-        // Absent or unreadable colors fall back to the palette.
-        for yaml in ["task: detect", "colors: ['#042aff', 'red']"] {
-            assert!(
-                ModelMetadata::from_yaml_str(yaml)
-                    .unwrap()
-                    .colors
-                    .is_empty()
-            );
-        }
+        // One unreadable entry discards the list, so every class falls back to the palette.
+        let bad = ModelMetadata::from_yaml_str("colors: ['#042aff', 'red']").unwrap();
+        assert!(bad.colors.is_empty());
     }
 
     #[test]

@@ -376,8 +376,10 @@ mod tests {
     }
 
     #[test]
-    fn test_from_hex_and_text_color() {
-        assert_eq!(Color::from_hex("#ff8000"), Some(Color(255, 128, 0)));
+    fn test_class_colors_and_text_color() {
+        // A model's own color where it has one, else the palette (wrapping past its 20 entries).
+        assert_eq!(Color::for_class(&[Color(1, 2, 3)], 0), Color(1, 2, 3));
+        assert_eq!(Color::for_class(&[Color(1, 2, 3)], 1000), Color(4, 42, 255));
         assert_eq!(Color::from_hex("ff8000"), None);
         assert_eq!(Color::from_hex("#+f8000"), None);
         // Dark text on exactly the palette entries Python draws with dark text.

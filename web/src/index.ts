@@ -742,9 +742,6 @@ export class YOLO {
   }
 }
 
-// Class colors come from the Rust engine on each detection. Only the label text color rule is
-// repeated here, so `predict()` builds no extra string per box.
-
 /** Label text color over a `#rrggbb` background, the rule of `Color::text_color` in the engine. */
 function textColorFor(hex: string): string {
   const r = parseInt(hex.slice(1, 3), 16);

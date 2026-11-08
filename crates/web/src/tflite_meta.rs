@@ -104,13 +104,7 @@ fn metadata_lines_from_json(json: &str) -> Option<String> {
                 Value::String(s) => lines.push(format!("{key}: {s}")),
                 Value::Bool(b) => lines.push(format!("{key}: {b}")),
                 Value::Number(n) => lines.push(format!("{key}: {n}")),
-                Value::Array(items) => {
-                    let items: Vec<String> = items
-                        .iter()
-                        .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
-                        .collect();
-                    lines.push(format!("{key}: [{}]", items.join(", ")));
-                }
+                Value::Array(_) => lines.push(format!("{key}: {val}")),
                 _ => {}
             },
         }

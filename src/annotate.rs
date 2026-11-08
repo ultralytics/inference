@@ -74,16 +74,6 @@ impl Default for AnnotateOptions {
     }
 }
 
-/// Return the RGB color assigned to a class ID.
-///
-/// Takes the class's entry in the model's `colors` metadata ([`Results::colors`]) when there is
-/// one, else cycles through the 20-entry Ultralytics palette (see [`Color::for_class`]).
-#[must_use]
-pub fn get_class_color(colors: &[Color], class_id: usize) -> Rgb<u8> {
-    let Color(r, g, b) = Color::for_class(colors, class_id);
-    Rgb([r, g, b])
-}
-
 /// Dynamic render scale derived from image size (reference 640x640).
 ///
 /// Returns the box/OBB label font size (11 px at 640 and below) and the base line thickness,
@@ -415,7 +405,7 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
 
 /// Overlay semantic segmentation class colors at 50% alpha onto `img`.
 ///
-/// Each pixel is colorized with its class color ([`get_class_color`]) blended 50/50 with
+/// Each pixel is colorized with its class color ([`Color::for_class`]) blended 50/50 with
 /// the original pixel. A no-op when `result.semantic_mask` is `None`.
 fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
     let Some(ref semantic_mask) = result.semantic_mask else {
@@ -438,8 +428,8 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
                 if raw == crate::results::SemanticMask::IGNORE {
                     continue; // filtered-out class: leave the original pixel
                 }
-                let color = get_class_color(&result.colors, raw as usize);
-                for (channel, tint) in px.iter_mut().zip(color.0) {
+                let Color(r, g, b) = Color::for_class(&result.colors, raw as usize);
+                for (channel, tint) in px.iter_mut().zip([r, g, b]) {
                     *channel = (*channel / 2).saturating_add(tint / 2);
                 }
             }
@@ -743,7 +733,8 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Lab
                 }
 
                 let class_id = cls[i] as usize;
-                let color = get_class_color(&result.colors, class_id);
+                let color = Color::for_class(&result.colors, class_id);
+                let color = Rgb([color.0, color.1, color.2]);
 
                 mask_present = true;
 
@@ -814,7 +805,8 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Lab
                 continue;
             }
 
-            let color = get_class_color(&result.colors, class_id);
+            let color = Color::for_class(&result.colors, class_id);
+            let color = Rgb([color.0, color.1, color.2]);
 
             // Draw box
             for t in 0..thickness {
@@ -960,7 +952,8 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont
 
         for i in 0..obb.len() {
             let class_id = cls[i] as usize;
-            let color = get_class_color(&result.colors, class_id);
+            let color = Color::for_class(&result.colors, class_id);
+            let color = Rgb([color.0, color.1, color.2]);
 
             for j in 0..4 {
                 let next_j = (j + 1) % 4;
@@ -1179,12 +1172,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_class_color() {
-        assert_eq!(get_class_color(&[], 0), Rgb([4, 42, 255]));
-        assert_eq!(get_class_color(&[Color(1, 2, 3)], 0), Rgb([1, 2, 3]));
-    }
-
-    #[test]
     fn test_draw_line_segment() {
         let mut img = image::RgbImage::new(100, 100);
         let color = Rgb([255, 0, 0]);
@@ -1235,13 +1222,6 @@ mod tests {
         assert!(big_font >= small_font);
         assert!(big_thick >= small_thick);
         assert!(small_thick >= 1);
-    }
-
-    #[test]
-    fn test_get_class_color_wraps() {
-        // Indexing beyond the palette wraps rather than panicking.
-        let _ = get_class_color(&[], 0);
-        assert_eq!(get_class_color(&[Color(1, 2, 3)], 1000), Rgb([4, 42, 255]));
     }
 
     #[test]
