@@ -82,7 +82,7 @@ await annotate(document.querySelector("canvas"), "bus.jpg", results);
 `ImageData`、`HTMLImageElement`、`HTMLCanvasElement`、`HTMLVideoElement`、`OffscreenCanvas` 或 `ImageBitmap`。
 
 ```ts
-const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
+const results = await model.predict(canvas, { conf: 0.25, iou: 0.5 });
 console.log(model.device); // "webgpu" 或 "cpu"
 ```
 

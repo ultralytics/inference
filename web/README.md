@@ -85,7 +85,7 @@ await annotate(document.querySelector("canvas"), "bus.jpg", results);
 `HTMLCanvasElement`, `HTMLVideoElement`, an `OffscreenCanvas`, or an `ImageBitmap`.
 
 ```ts
-const results = await model.predict(canvas, { conf: 0.25, iou: 0.7 });
+const results = await model.predict(canvas, { conf: 0.25, iou: 0.5 });
 console.log(model.device); // "webgpu" or "cpu"
 ```
 

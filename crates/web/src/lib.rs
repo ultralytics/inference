@@ -385,7 +385,7 @@ impl YoloModel {
     /// Run inference on a single encoded image (JPEG or PNG bytes).
     ///
     /// `conf` and `iou` are the confidence and NMS IoU thresholds (omit them for the
-    /// Ultralytics defaults 0.25 / 0.7); `classes` optionally keeps only
+    /// Ultralytics defaults 0.25 / 0.5); `classes` optionally keeps only
     /// the given class ids (for semantic, other pixels become background).
     /// Returns a plain JS object whose shape mirrors the Ultralytics `Results` API.
     ///

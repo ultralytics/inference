@@ -14,7 +14,7 @@ use clap::{Args, Parser, Subcommand};
                            Selects the matching nano model when --model is omitted
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
     --conf <CONF>          Confidence threshold [default: 0.25]
-    --iou <IOU>            IoU threshold for NMS [default: 0.7]
+    --iou <IOU>            IoU threshold for NMS [default: 0.5]
     --max-det <MAX_DET>    Maximum number of detections [default: 300]
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
     --rect [<BOOL>]        Enable rectangular inference (minimal padding) [default: true]

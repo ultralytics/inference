@@ -208,7 +208,7 @@ function decodeResults(raw: unknown): Results {
 export interface PredictOptions {
   /** Confidence threshold. Default `0.25` (matches Ultralytics). */
   conf?: number;
-  /** NMS IoU threshold. Default `0.7` (matches Ultralytics). */
+  /** NMS IoU threshold. Default `0.5` (matches Ultralytics predict). */
   iou?: number;
   /**
    * Keep only these class ids. Omit to keep all. Filters detections for
