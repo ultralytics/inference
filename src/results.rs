@@ -1204,6 +1204,18 @@ mod tests {
     use super::*;
     use ndarray::array;
 
+    /// An `n`x`n` black image with the given class names.
+    fn results(n: u32, names: &[(usize, &str)]) -> Results {
+        let names = names.iter().map(|&(i, s)| (i, s.to_string())).collect();
+        Results::new(
+            Array3::zeros((n as usize, n as usize, 3)),
+            String::new(),
+            Arc::new(names),
+            Speed::default(),
+            (n, n),
+        )
+    }
+
     #[test]
     fn test_boxes_xyxy() {
         let data = array![[10.0, 20.0, 100.0, 200.0, 0.95, 0.0]];
@@ -1255,10 +1267,7 @@ mod tests {
     }
     #[test]
     fn test_semantic_mask_has_no_detection_len() {
-        let names = Arc::new(HashMap::from([(0, "background".to_string())]));
-        let speed = Speed::default();
-        let orig_img = Array3::zeros((2, 2, 3));
-        let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (2, 2));
+        let mut results = results(2, &[(0, "background")]);
         results.semantic_mask = Some(SemanticMask::new(array![[0u16, 1], [1, 2]], (2, 2)));
 
         assert_eq!(results.len(), 0);
@@ -1268,10 +1277,7 @@ mod tests {
 
     #[test]
     fn test_depth_map_summary_and_len() {
-        let names = Arc::new(HashMap::new());
-        let speed = Speed::default();
-        let orig_img = Array3::zeros((2, 2, 3));
-        let mut results = Results::new(orig_img, "test.jpg".to_string(), names, speed, (2, 2));
+        let mut results = results(2, &[]);
         // Includes an invalid (0.0) pixel that must be excluded from min/max.
         let depth = DepthMap::new(array![[0.0f32, 1.5], [3.0, 4.0]], (2, 2));
         assert!((depth.min_depth().unwrap() - 1.5).abs() < 1e-6);
@@ -1443,7 +1449,6 @@ mod tests {
         let obb = Obb::new(data, (100, 100));
         assert_eq!(obb.len(), 1);
         assert!(!obb.is_empty());
-        assert!(!obb.is_empty());
         assert!((obb.conf()[0] - 0.9).abs() < 1e-6);
         assert!((obb.cls()[0] - 1.0).abs() < 1e-6);
         assert!(obb.id().is_none());
@@ -1467,16 +1472,7 @@ mod tests {
 
     #[test]
     fn test_results_len_dispatch() {
-        let names = Arc::new(HashMap::new());
-        let make = || {
-            Results::new(
-                Array3::zeros((4, 4, 3)),
-                String::new(),
-                Arc::clone(&names),
-                Speed::default(),
-                (4, 4),
-            )
-        };
+        let make = || results(4, &[]);
 
         let mut r = make();
         r.boxes = Some(Boxes::new(array![[0.0, 0.0, 1.0, 1.0, 0.9, 0.0]], (4, 4)));
@@ -1498,17 +1494,7 @@ mod tests {
 
     #[test]
     fn test_detection_summary_variants() {
-        let names = Arc::new(HashMap::from([
-            (0, "person".to_string()),
-            (5, "bus".to_string()),
-        ]));
-        let mut r = Results::new(
-            Array3::zeros((4, 4, 3)),
-            String::new(),
-            Arc::clone(&names),
-            Speed::default(),
-            (4, 4),
-        );
+        let mut r = results(4, &[(0, "person"), (5, "bus")]);
 
         // No detections.
         assert_eq!(r.detection_summary(), "(no detections)");
@@ -1560,14 +1546,7 @@ mod tests {
 
     #[test]
     fn test_summary_boxes_and_probs() {
-        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
-        let mut r = Results::new(
-            Array3::zeros((10, 10, 3)),
-            String::new(),
-            Arc::clone(&names),
-            Speed::default(),
-            (10, 10),
-        );
+        let mut r = results(10, &[(0, "person")]);
         r.boxes = Some(Boxes::new(array![[0.0, 0.0, 5.0, 5.0, 0.9, 0.0]], (10, 10)));
 
         let raw = r.summary(false);
@@ -1634,13 +1613,7 @@ mod tests {
         );
 
         // Probs summary returns one entry per top-5 class, best first.
-        let mut rp = Results::new(
-            Array3::zeros((4, 4, 3)),
-            String::new(),
-            names,
-            Speed::default(),
-            (4, 4),
-        );
+        let mut rp = results(4, &[(0, "person")]);
         rp.probs = Some(Probs::new(array![0.1, 0.9]));
         let ps = rp.summary(true);
         assert_eq!(ps.len(), 2);
@@ -1651,14 +1624,7 @@ mod tests {
     #[cfg(feature = "annotate")]
     #[test]
     fn test_results_save_writes_file() {
-        let names = Arc::new(HashMap::from([(0, "person".to_string())]));
-        let mut r = Results::new(
-            Array3::zeros((16, 16, 3)),
-            "x.jpg".to_string(),
-            names,
-            Speed::default(),
-            (16, 16),
-        );
+        let mut r = results(16, &[(0, "person")]);
         r.boxes = Some(Boxes::new(
             array![[1.0, 1.0, 10.0, 10.0, 0.9, 0.0]],
             (16, 16),
