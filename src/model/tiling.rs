@@ -449,4 +449,56 @@ mod tests {
             [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
         );
     }
+
+    /// Bus photo at `tile=320` against Ultralytics 8.4.207 (`xyxy`, confidence, class), keeping
+    /// the boxes above 0.6 and a loose confidence check, because the JPEG decoders differ slightly
+    /// and a box cut by a window edge can come from either window. A tile
+    /// larger than the image must equal plain prediction. Skips offline, like the batch test.
+    #[test]
+    fn test_predict_tiled_matches_ultralytics_on_the_bus_photo() {
+        const GOLDEN: [(f32, f32, f32, f32, f32, f32); 12] = [
+            (58.4, 398.7, 202.6, 575.5, 0.94, 0.0),
+            (256.1, 406.4, 343.6, 575.5, 0.92, 0.0),
+            (225.2, 512.0, 319.8, 831.9, 0.89, 0.0),
+            (55.7, 512.5, 202.4, 832.0, 0.88, 0.0),
+            (245.7, 760.1, 305.7, 859.4, 0.83, 0.0),
+            (0.2, 549.3, 79.3, 832.0, 0.81, 0.0),
+            (676.0, 512.2, 810.0, 832.0, 0.76, 0.0),
+            (490.0, 256.2, 803.7, 574.2, 0.71, 5.0),
+            (256.9, 256.1, 575.5, 573.3, 0.70, 5.0),
+            (0.0, 760.2, 34.2, 872.9, 0.68, 0.0),
+            (669.6, 823.9, 740.7, 879.7, 0.62, 31.0),
+            (490.6, 249.2, 789.8, 319.8, 0.62, 2.0),
+        ];
+        let _guard = crate::model::SESSION_BUILD_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let path = std::path::Path::new("yolo26n.onnx");
+        let mut model = match YOLOModel::load(path) {
+            Ok(model) => model,
+            Err(_) if !path.exists() => return,
+            Err(e) => panic!("yolo26n.onnx is present but failed to load: {e}"),
+        };
+        let image = image::open("assets/bus.jpg").unwrap();
+        let name = || "bus.jpg".to_string();
+
+        let tiled = model.predict_tiled(&image, name(), 320).unwrap().remove(0);
+        let found = tiled.boxes.unwrap().data;
+        assert!(found.nrows().abs_diff(20) <= 3, "{} boxes", found.nrows());
+        for (x1, y1, x2, y2, conf, cls) in GOLDEN {
+            let hit = found.rows().into_iter().any(|r| {
+                r[5] == cls
+                    && (r[4] - conf).abs() < 0.25
+                    && [x1, y1, x2, y2]
+                        .iter()
+                        .zip(r.iter())
+                        .all(|(a, b)| (a - b).abs() < 4.0)
+            });
+            assert!(hit, "no match for class {cls} box {x1} {y1} {x2} {y2}");
+        }
+
+        let plain = model.predict_image(&image, name()).unwrap().remove(0);
+        let wide = model.predict_tiled(&image, name(), 5000).unwrap().remove(0);
+        assert_eq!(plain.boxes.unwrap().data, wide.boxes.unwrap().data);
+    }
 }
