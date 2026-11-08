@@ -36,6 +36,8 @@ use crate::results::{Results, Speed};
 use crate::task::Task;
 use crate::{verbose, warn};
 
+mod tiling;
+
 /// Serializes the tests that build an ORT session: providers compile into one shared
 /// cache, and two sessions building it at once collide there.
 #[cfg(test)]
