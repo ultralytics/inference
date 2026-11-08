@@ -11,7 +11,7 @@ use crate::results::Results;
 
 /// Pixels handed to one task when blending a full-frame overlay across cores.
 const BLEND_CHUNK: usize = 4096;
-use crate::visualizer::color::{COLORS, Color, Colormap, DEPTH_ALPHA, DepthViz};
+use crate::visualizer::color::{Color, Colormap, DEPTH_ALPHA, DepthViz};
 use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON};
 use ab_glyph::{Font, FontRef, GlyphId, PxScale, ScaleFont, point};
 use harfrust::{Buffer, Direction, Script, ShapeOptions, ShapePlan, ShapePlanKey, ShaperFont};
@@ -74,26 +74,16 @@ impl Default for AnnotateOptions {
     }
 }
 
-/// Return the RGB color assigned to a class ID.
-///
-/// Cycles through the 20-entry Ultralytics palette so every class gets a
-/// distinct, repeating color regardless of how many classes the model has.
-#[must_use]
-pub const fn get_class_color(class_id: usize) -> Rgb<u8> {
-    let color = COLORS[class_id % COLORS.len()];
-    Rgb(color)
-}
-
 /// Dynamic render scale derived from image size (reference 640x640).
 ///
-/// Returns the scale factor and the base line thickness. Callers derive the
-/// font size or marker radius from the factor as needed.
+/// Returns the box/OBB label font size (11 px at 640 and below) and the base line thickness,
+/// both growing with the longer side.
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 fn render_scale(width: u32, height: u32) -> (f32, i32) {
     let max_dim = width.max(height) as f32;
     let scale_factor = (max_dim / 640.0).max(1.0);
     let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
-    (scale_factor, thickness)
+    (11.0 * scale_factor, thickness)
 }
 
 /// Load and decode the image at `path` by its contents.
@@ -415,7 +405,7 @@ fn draw_filled_circle(img: &mut image::RgbImage, cx: i32, cy: i32, radius: i32, 
 
 /// Overlay semantic segmentation class colors at 50% alpha onto `img`.
 ///
-/// Each pixel is colorized using `COLORS[class_id % COLORS.len()]` blended 50/50 with
+/// Each pixel is colorized with its class color ([`Color::for_class`]) blended 50/50 with
 /// the original pixel. A no-op when `result.semantic_mask` is `None`.
 fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
     let Some(ref semantic_mask) = result.semantic_mask else {
@@ -426,7 +416,6 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
         .data
         .as_slice()
         .expect("semantic mask must be contiguous");
-    let n_colors = COLORS.len();
     // Rows are independent, so blend them across cores; `crate::parallel` is sequential on wasm.
     // The chunk size is at least 1 because a zero-width image has no rows to blend.
     img.as_flat_samples_mut()
@@ -439,8 +428,8 @@ fn draw_semantic_mask(img: &mut image::RgbImage, result: &Results) {
                 if raw == crate::results::SemanticMask::IGNORE {
                     continue; // filtered-out class: leave the original pixel
                 }
-                let color = COLORS[raw as usize % n_colors];
-                for (channel, tint) in px.iter_mut().zip(color) {
+                let Color(r, g, b) = Color::for_class(&result.colors, raw as usize);
+                for (channel, tint) in px.iter_mut().zip([r, g, b]) {
                     *channel = (*channel / 2).saturating_add(tint / 2);
                 }
             }
@@ -689,10 +678,10 @@ fn draw_label(
         && text_y + text_h < height as i32
     {
         draw_filled_rect_mut(img, current_rect, color);
-        let text_color = get_text_color(color);
+        let Color(r, g, b) = Color(color[0], color[1], color[2]).text_color();
         draw_text(
             img,
-            text_color,
+            Rgb([r, g, b]),
             (text_x, text_y),
             scale,
             &font.glyphs,
@@ -704,7 +693,7 @@ fn draw_label(
 
 /// Draw detection boxes, optional instance masks, and class labels onto `img`.
 ///
-/// Instance masks are blended at 30% opacity before boxes are drawn on top.
+/// Instance masks are blended at 50% opacity before boxes are drawn on top.
 /// Labels are positioned above each box; overlap between labels is resolved
 /// by shifting downward up to 10 times.
 ///
@@ -722,9 +711,7 @@ fn draw_label(
 fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
     let (width, height) = img.dimensions();
 
-    // Dynamic scale factor and thickness based on image size (reference 640x640)
-    let (scale_factor, thickness) = render_scale(width, height);
-    let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
+    let (font_scale, thickness) = render_scale(width, height);
 
     if let Some(ref boxes) = result.boxes {
         let xyxy = boxes.xyxy();
@@ -746,7 +733,8 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Lab
                 }
 
                 let class_id = cls[i] as usize;
-                let color = get_class_color(class_id);
+                let color = Color::for_class(&result.colors, class_id);
+                let color = Rgb([color.0, color.1, color.2]);
 
                 mask_present = true;
 
@@ -775,7 +763,7 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Lab
         // Blend overlay with original image. Walking the two sample buffers directly keeps
         // this a linear pass; `get_pixel_mut` recomputed the offset for all 300k+ pixels.
         if let Some(overlay) = overlay.filter(|_| mask_present) {
-            let alpha = 0.3;
+            let alpha = 0.5;
             let overlay = overlay.as_raw();
             img.as_flat_samples_mut()
                 .samples
@@ -817,7 +805,8 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Lab
                 continue;
             }
 
-            let color = get_class_color(class_id);
+            let color = Color::for_class(&result.colors, class_id);
+            let color = Rgb([color.0, color.1, color.2]);
 
             // Draw box
             for t in 0..thickness {
@@ -842,25 +831,6 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Lab
     }
 }
 
-/// Return black or white, choosing whichever contrasts better with `bg`.
-///
-/// Uses the ITU-R BT.601 luminance formula. Backgrounds with luminance above 150
-/// get black text; darker backgrounds get white text.
-fn get_text_color(bg: Rgb<u8>) -> Rgb<u8> {
-    let r = f32::from(bg.0[0]);
-    let g = f32::from(bg.0[1]);
-    let b = f32::from(bg.0[2]);
-
-    // Calculate luminance (standard formula)
-    let luminance = 0.114_f32.mul_add(b, 0.299_f32.mul_add(r, 0.587 * g));
-
-    // Threshold usually around 128-186. Using 150 for better safety on mid-tones.
-    if luminance > 150.0 {
-        Rgb([0, 0, 0]) // Black text for light backgrounds
-    } else {
-        Rgb([255, 255, 255]) // White text for dark backgrounds
-    }
-}
 /// Return `true` if rectangles `r1` and `r2` overlap.
 fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
     let r1_left = r1.left();
@@ -900,36 +870,28 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
         };
 
         // Like Ultralytics, only the 17-keypoint COCO-Pose layout gets the pose palette and the
-        // human skeleton; other layouts take one palette color per keypoint and no lines.
+        // human skeleton; other layouts take one class palette color per keypoint and no lines,
+        // and a custom skeleton colors each line like its start keypoint.
         let coco = n_kpts == KPT_COLOR_INDICES.len();
         let skeleton: &[[usize; 2]] = match &options.skeleton {
             Some(skeleton) => skeleton,
             None if coco => &SKELETON,
             None => &[],
         };
-        // Ultralytics passes these RGB entries to OpenCV, which draws into a BGR image, so its
-        // pictures show them with red and blue swapped; swap them too so the colors match.
-        let palette = |i: usize| {
-            let Color(r, g, b) = Color::from_index(i);
-            Color(b, g, r)
-        };
         let kpt_color = |k: usize| {
             options.kpt_color.unwrap_or_else(|| {
                 if coco {
                     Color::from_pose_index(KPT_COLOR_INDICES[k])
                 } else {
-                    palette(k)
+                    Color::from_index(k)
                 }
             })
         };
-        let limb_color = |l: usize| {
-            options.kpt_color.unwrap_or_else(|| {
-                if coco && options.skeleton.is_none() {
-                    Color::from_pose_index(LIMB_COLOR_INDICES[l])
-                } else {
-                    palette(l)
-                }
-            })
+        let limb_color = |l: usize, start: usize| match options.kpt_color {
+            None if coco && options.skeleton.is_none() => {
+                Color::from_pose_index(LIMB_COLOR_INDICES[l])
+            }
+            _ => kpt_color(start),
         };
 
         for person_idx in 0..n_persons {
@@ -946,7 +908,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
                     let y1 = kpt_data[[person_idx, kpt_a, 1]];
                     let x2 = kpt_data[[person_idx, kpt_b, 0]];
                     let y2 = kpt_data[[person_idx, kpt_b, 1]];
-                    let color = limb_color(limb_idx);
+                    let color = limb_color(limb_idx, kpt_a);
                     let color = Rgb([color.0, color.1, color.2]);
                     draw_line_segment(img, x1, y1, x2, y2, color, thickness);
                 }
@@ -979,9 +941,7 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
 fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
     let (width, height) = img.dimensions();
 
-    // Dynamic scale factor and thickness based on image size (reference 640x640)
-    let (scale_factor, thickness) = render_scale(width, height);
-    let font_scale = (11.0 * scale_factor).max(10.0); // Min font size 10
+    let (font_scale, thickness) = render_scale(width, height);
 
     if let Some(ref obb) = result.obb {
         let corners = obb.xyxyxyxy();
@@ -992,7 +952,8 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont
 
         for i in 0..obb.len() {
             let class_id = cls[i] as usize;
-            let color = get_class_color(class_id);
+            let color = Color::for_class(&result.colors, class_id);
+            let color = Rgb([color.0, color.1, color.2]);
 
             for j in 0..4 {
                 let next_j = (j + 1) % 4;
@@ -1211,12 +1172,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_class_color() {
-        let c = get_class_color(0);
-        assert_eq!(c, Rgb([4, 42, 255]));
-    }
-
-    #[test]
     fn test_draw_line_segment() {
         let mut img = image::RgbImage::new(100, 100);
         let color = Rgb([255, 0, 0]);
@@ -1267,13 +1222,6 @@ mod tests {
         assert!(big_font >= small_font);
         assert!(big_thick >= small_thick);
         assert!(small_thick >= 1);
-    }
-
-    #[test]
-    fn test_get_class_color_wraps() {
-        // Indexing beyond the palette wraps rather than panicking.
-        let _ = get_class_color(0);
-        let _ = get_class_color(1000);
     }
 
     #[test]
@@ -1346,10 +1294,15 @@ mod tests {
                 .0
         };
         assert_eq!(mid(&AnnotateOptions::default()), [0, 0, 0]);
+        // A custom skeleton line takes its start keypoint's class palette color, in true RGB.
         let options = AnnotateOptions {
             skeleton: Some(vec![[0, 1]]),
-            kpt_color: Some(Color(255, 0, 0)),
             ..AnnotateOptions::default()
+        };
+        assert_eq!(mid(&options), [4, 42, 255]);
+        let options = AnnotateOptions {
+            kpt_color: Some(Color(255, 0, 0)),
+            ..options
         };
         assert_eq!(mid(&options), [255, 0, 0]);
         let no_lines = AnnotateOptions {

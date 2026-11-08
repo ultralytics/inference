@@ -1103,7 +1103,7 @@ impl YOLOModel {
             .zip(preprocessed)
             .enumerate()
             .map(|(i, (orig_img, pre))| {
-                vec![postprocess_with_head(
+                let mut results = postprocess_with_head(
                     Self::slice_batch_output(outputs, i),
                     metadata.task,
                     pre,
@@ -1116,7 +1116,9 @@ impl YOLOModel {
                     metadata.end2end,
                     metadata.kpt_shape,
                     metadata.is_rtdetr(),
-                )]
+                );
+                results.colors = Arc::clone(&metadata.colors);
+                vec![results]
             })
             .collect();
         Self::apply_postprocess_time(batch_results, start_postprocess)
@@ -1126,7 +1128,7 @@ impl YOLOModel {
     /// with ArgMax+Cast baked into the ONNX graph), slicing out each image's class map.
     fn semantic_mask_batch_results(
         outputs: &[(&[u8], Vec<usize>)],
-        names: &Arc<HashMap<usize, String>>,
+        metadata: &ModelMetadata,
         image_arrays: Vec<Array3<u8>>,
         paths: &[String],
         speed: &Speed,
@@ -1139,15 +1141,16 @@ impl YOLOModel {
             .enumerate()
             .map(|(i, orig_img)| {
                 let (data, shape) = &Self::slice_batch_output(outputs, i)[0];
-                let results = crate::postprocessing::postprocess_semantic_mask(
+                let mut results = crate::postprocessing::postprocess_semantic_mask(
                     data,
                     &shape[1..],
-                    Arc::clone(names),
+                    Arc::clone(&metadata.names),
                     orig_img,
                     paths.get(i).cloned().unwrap_or_default(),
                     speed.clone(),
                     inference_shape,
                 );
+                results.colors = Arc::clone(&metadata.colors);
                 vec![crate::postprocessing::filter_semantic_classes(
                     results, config,
                 )]
@@ -1196,7 +1199,7 @@ impl YOLOModel {
                 .collect::<Result<Vec<_>>>()?;
             return Ok(Self::semantic_mask_batch_results(
                 &views,
-                &metadata.names,
+                metadata,
                 image_arrays,
                 paths,
                 speed,
@@ -1399,6 +1402,7 @@ impl YOLOModel {
             "batch",
             "imgsz",
             "names",
+            "colors",
             "quantize",
             "half",
             "channels",
@@ -2031,7 +2035,7 @@ impl YOLOModel {
                     .collect::<Result<Vec<_>>>()?;
                 return Ok(Self::semantic_mask_batch_results(
                     &bufs,
-                    &self.metadata.names,
+                    &self.metadata,
                     image_arrays,
                     paths,
                     &speed,
@@ -2533,7 +2537,10 @@ mod tests {
 
         let batch = YOLOModel::semantic_mask_batch_results(
             &outputs,
-            &names,
+            &ModelMetadata {
+                names,
+                ..ModelMetadata::default()
+            },
             image_arrays,
             &paths,
             &Speed::new(1.0, 10.0, 0.0),

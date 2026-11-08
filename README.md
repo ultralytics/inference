@@ -462,6 +462,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+**Class Colors:**
+
+Boxes, masks and labels use the Ultralytics palette, or a model's own class colors when its export carries `colors`
+metadata (`#rrggbb` per class, e.g. set in Ultralytics Platform). They arrive in `Results::colors`.
+
 **Depth Visualization:**
 
 Depth results are rendered by blending the colorized depth map over the source image at
@@ -505,7 +510,7 @@ directly, linearly between its min and max.
 
 `annotate_image_with_options` takes the keypoint options of Ultralytics `Results.plot`. A 17-keypoint (COCO-Pose)
 model draws the human skeleton, any other layout draws one palette color per keypoint and no lines, and `skeleton`
-connects the keypoints of a custom model:
+connects the keypoints of a custom model, each line in the color of its first keypoint:
 
 ```rust
 use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};

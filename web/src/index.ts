@@ -37,7 +37,7 @@ function poseScheme(): PoseScheme {
 }
 
 // Field names mirror the Rust/Ultralytics `Results` API 1-1. Every detection
-// carries its palette `color` (`#rrggbb`), supplied by the engine.
+// carries its class `color` (`#rrggbb`), supplied by the engine.
 
 /** Axis-aligned box, pixel `xyxy`. */
 export interface Box {
@@ -742,16 +742,12 @@ export class YOLO {
   }
 }
 
-// Colors come from the Rust engine (the Ultralytics palette) on each detection,
-// so there is no palette duplicated here.
-
-/** Pick black or white text for readability over a given hex background. */
+/** Label text color over a `#rrggbb` background, the rule of `Color::text_color` in the engine. */
 function textColorFor(hex: string): string {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
-  // Perceived luminance (same threshold Ultralytics uses).
-  return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? "#000000" : "#FFFFFF";
+  return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? "#111F68" : "#FFFFFF";
 }
 
 /**
@@ -903,18 +899,20 @@ export async function annotate(
     ctx.lineWidth = Math.max(1, Math.round(lineWidth / 1.5));
     for (const kp of results.keypoints) {
       // Like Ultralytics, only the 17-keypoint COCO-Pose layout gets the pose palette and the
-      // human skeleton; other layouts take one palette color per keypoint and no lines.
+      // human skeleton; other layouts take one class palette color per keypoint and no lines,
+      // and a custom skeleton colors each line like its start keypoint.
       const coco = kp.points.length === scheme.keypoint_colors.length;
       const skeleton = options?.skeleton ?? (coco ? scheme.skeleton : []);
       const paletteAt = (i: number) => scheme.palette[i % scheme.palette.length];
-      const limbColor = (i: number) => fixed ?? (coco && !options?.skeleton ? scheme.limb_colors[i] : paletteAt(i));
       const kptColor = (i: number) => fixed ?? (coco ? scheme.keypoint_colors[i] : paletteAt(i));
+      const limbColor = (i: number, a: number) =>
+        coco && !options?.skeleton ? (fixed ?? scheme.limb_colors[i]) : kptColor(a);
       if (options?.keypointLines ?? true) {
         skeleton.forEach(([a, b], li) => {
           const pa = kp.points[a];
           const pb = kp.points[b];
           if (!pa || !pb || pa[2] < kptThresh || pb[2] < kptThresh) return;
-          ctx.strokeStyle = limbColor(li);
+          ctx.strokeStyle = limbColor(li, a);
           ctx.beginPath();
           ctx.moveTo(pa[0], pa[1]);
           ctx.lineTo(pb[0], pb[1]);

@@ -13,7 +13,7 @@ use ultralytics_inference::results::{Results, SemanticMask};
 use ultralytics_inference::visualizer::color::{Color, Colormap, DepthViz};
 
 /// One detected box, mirroring `Boxes` in the Ultralytics API (pixel `xyxy`).
-/// `color` is the Ultralytics palette color for the class (`#rrggbb`).
+/// `color` is the class color (`#rrggbb`).
 #[derive(Serialize)]
 struct JsBox {
     x1: f32,
@@ -111,9 +111,9 @@ impl JsResults {
         viz: DepthViz,
         overlay: Vec<u8>,
     ) -> Self {
-        // Class id -> display name and palette color, shared by every detection type.
+        // Class id -> display name and class color, shared by every detection type.
         let name = |c: usize| r.names.get(&c).cloned().unwrap_or_default();
-        let hex = |c: usize| Color::from_index(c).to_hex();
+        let hex = |c: usize| Color::for_class(&r.colors, c).to_hex();
 
         let boxes = r.boxes.as_ref().map_or_else(Vec::new, |b| {
             let (xyxy, conf, cls) = (b.xyxy(), b.conf(), b.cls());
@@ -230,18 +230,20 @@ fn put(buf: &mut [u8], w: usize, x: usize, y: usize, c: Color, a: u8) {
     buf[i..i + 4].copy_from_slice(&[c.0, c.1, c.2, a]);
 }
 
-/// Composite one instance mask into the browser overlay in detection order.
+/// Composite one instance mask into the browser overlay in detection order, in its class color
+/// (`colors` being the model's `colors` metadata).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub(crate) fn put_instance_mask(
     overlay: &mut Vec<u8>,
     mask: ndarray::ArrayView2<'_, f32>,
     box_data: ndarray::ArrayView1<'_, f32>,
+    colors: &[Color],
 ) {
     let (h, w) = mask.dim();
     if overlay.is_empty() {
         overlay.resize(h * w * 4, 0);
     }
-    let color = Color::from_index(box_data[5] as usize);
+    let color = Color::for_class(colors, box_data[5] as usize);
     let x0 = box_data[0].max(0.0) as usize;
     let y0 = box_data[1].max(0.0) as usize;
     let x1 = (box_data[2].max(0.0) as usize).saturating_add(1).min(w);
@@ -250,14 +252,14 @@ pub(crate) fn put_instance_mask(
         let row = mask.row(y);
         for x in x0..x1 {
             if row[x] > 0.5 {
-                put(overlay, w, x, y, color, 140);
+                put(overlay, w, x, y, color, 128);
             }
         }
     }
 }
 
 /// Build a translucent colored RGBA overlay (`width*height*4`) from the semantic
-/// class map, colored by the class palette.
+/// class map, in the class colors.
 /// Empty for other tasks or if the mask resolution does not match the image.
 fn build_semantic_overlay(r: &Results) -> Vec<u8> {
     let (h, w) = (r.orig_shape.0 as usize, r.orig_shape.1 as usize);
@@ -273,7 +275,8 @@ fn build_semantic_overlay(r: &Results) -> Vec<u8> {
                 // Filtered-out classes carry the IGNORE sentinel; leave transparent.
                 let cls = sem.data[[y, x]];
                 if cls != SemanticMask::IGNORE {
-                    put(&mut buf, w, x, y, Color::from_index(cls as usize), 128);
+                    let color = Color::for_class(&r.colors, cls as usize);
+                    put(&mut buf, w, x, y, color, 128);
                 }
             }
         }

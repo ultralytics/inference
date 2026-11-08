@@ -155,8 +155,8 @@ GitHub release 资源不会返回 `Access-Control-Allow-Origin`，因此浏览�
 | `speed`            | `{ preprocess, inference, postprocess }`，单位 ms                    | 全部                  |
 
 `model.names` 是类别 id 到名称的映射（相当于 Python 中的 `model.names`）。每个检测结果都带有
-Ultralytics 调色板中的 `color`，`annotate()` 绘制 `masks` 叠加层和姿态骨架时，使用的每条肢体/
-关键点配色与原生渲染器完全一致。这些逻辑都没有在 JS 中重复实现。
+其类别的 `color`（模型 `colors` 元数据中的颜色，否则为 Ultralytics 调色板颜色），`annotate()` 绘制 `masks`
+叠加层和姿态骨架时，使用的每条肢体/关键点配色与原生渲染器完全一致。
 
 对于 `depth` 任务，`predict(img, { colormap, depthViz })` 用于选择配色方案（默认 `"jet"`，
 另有 `"inferno"`、`"spectral"`、`"gray"`）和归一化方式（默认 `"disparity"`，另有 `"metric"`）；

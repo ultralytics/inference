@@ -160,9 +160,10 @@ Rust/Ultralytics `Results` API one-to-one:
 | `speed`            | `{ preprocess, inference, postprocess }` ms                          | all                   |
 
 `model.names` is the class id to name map (like `model.names` in Python). Every
-detection carries its Ultralytics palette `color`, and `annotate()` draws the
+detection carries its class `color` (the model's `colors` metadata entry, else the
+Ultralytics palette), and `annotate()` draws the
 `masks` overlay and the pose skeleton with the same per-limb/keypoint colors as
-the native renderer. None of this is duplicated in JS.
+the native renderer.
 
 For the `depth` task, `predict(img, { colormap, depthViz })` picks the colormap
 (`"jet"` default, `"inferno"`, `"spectral"`, `"gray"`) and normalization

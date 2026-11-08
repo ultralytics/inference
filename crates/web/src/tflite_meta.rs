@@ -82,8 +82,8 @@ fn extract_metadata_json(buf: &[u8]) -> Option<String> {
 /// [`ModelMetadata::from_yaml_str`](ultralytics_inference::metadata::ModelMetadata::from_yaml_str)
 /// parser consumes (the same shape the ONNX path rebuilds from `metadata_props`).
 /// Class names become an unquoted `names:` block (one `id: name` per line, so
-/// apostrophes need no escaping); `imgsz`/`kpt_shape` become inline lists; the
-/// nested `args` object is dropped (the parser reads none of it).
+/// apostrophes need no escaping); lists such as `imgsz`, `kpt_shape` and `colors`
+/// become inline lists; the nested `args` object is dropped (the parser reads none of it).
 fn metadata_lines_from_json(json: &str) -> Option<String> {
     let value: Value = serde_json::from_str(json).ok()?;
     let obj = value.as_object()?;
@@ -98,22 +98,13 @@ fn metadata_lines_from_json(json: &str) -> Option<String> {
                     }
                 }
             }
-            "imgsz" | "kpt_shape" => {
-                if let Some(arr) = val.as_array() {
-                    let nums: Vec<String> = arr
-                        .iter()
-                        .filter_map(Value::as_i64)
-                        .map(|n| n.to_string())
-                        .collect();
-                    lines.push(format!("{key}: [{}]", nums.join(", ")));
-                }
-            }
             // `args` is a nested object the metadata parser does not read; skip it.
             "args" => {}
             _ => match val {
                 Value::String(s) => lines.push(format!("{key}: {s}")),
                 Value::Bool(b) => lines.push(format!("{key}: {b}")),
                 Value::Number(n) => lines.push(format!("{key}: {n}")),
+                Value::Array(_) => lines.push(format!("{key}: {val}")),
                 _ => {}
             },
         }
