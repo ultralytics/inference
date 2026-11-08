@@ -32,17 +32,36 @@ fn main() {
 /// the whole thing instead of one per `use`.
 #[cfg(not(target_arch = "wasm32"))]
 fn run() {
-    use clap::Parser;
+    use clap::{Arg, CommandFactory, FromArgMatches};
     use ultralytics_inference::cli::args::{Cli, Commands};
-    use ultralytics_inference::cli::predict::run_prediction;
+    use ultralytics_inference::cli::predict::run_prediction_with_tile;
     use ultralytics_inference::logging::set_verbose;
 
     ultralytics_inference::io::init_logging();
 
-    match &Cli::parse().command {
+    // `--tile` is read here so the public `PredictArgs` struct stays as it is.
+    let matches = Cli::command()
+        .mut_subcommand("predict", |predict| {
+            predict.arg(
+                Arg::new("tile")
+                    .long("tile")
+                    .value_name("TILE")
+                    .num_args(0..=1)
+                    .default_missing_value("0")
+                    .value_parser(clap::value_parser!(u32))
+                    .help("Tile size for overlapping-window inference on large images; bare --tile uses --imgsz"),
+            )
+        })
+        .get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let tile = matches
+        .subcommand_matches("predict")
+        .and_then(|m| m.get_one::<u32>("tile").copied());
+
+    match &cli.command {
         Commands::Predict(args) => {
             set_verbose(args.verbose);
-            run_prediction(args);
+            run_prediction_with_tile(args, tile);
         }
         Commands::Version => {
             println!(

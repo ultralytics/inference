@@ -22,18 +22,24 @@ use crate::cli::args::PredictArgs;
 use crate::task::Task;
 use crate::{error, verbose, warn};
 
+/// Run the `predict` command from parsed arguments.
+pub fn run_prediction(args: &PredictArgs) {
+    run_prediction_with_tile(args, None);
+}
+
 /// Run the `predict` command end to end.
 ///
 /// Loads (downloading if needed) the model, iterates the source, and prints, annotates, and
 /// saves results according to `args`. Errors are reported to stderr and exit the process,
-/// since this is the CLI entry point.
+/// since this is the CLI entry point. A `tile` runs every image on overlapping windows of that
+/// size, and `Some(0)` uses the inference size.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
     clippy::too_many_lines,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation
 )]
-pub fn run_prediction(args: &PredictArgs) {
+pub fn run_prediction_with_tile(args: &PredictArgs, tile: Option<u32>) {
     // Parse arguments - use default model if not specified
     let (model_path, model_is_default) = resolve_model_path(args);
     let source_path = &args.source;
@@ -78,6 +84,9 @@ pub fn run_prediction(args: &PredictArgs) {
         );
         process::exit(1);
     }
+
+    // A tile of 0 (bare `--tile`) tiles at the inference size, like the Ultralytics `tile=True`.
+    model.set_tile(tile.map(|t| if t == 0 { model.imgsz().0 as u32 } else { t }));
 
     // Determine source
     let source = source_path.as_ref().map_or_else(

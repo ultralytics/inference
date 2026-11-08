@@ -18,6 +18,7 @@ use clap::{Args, Parser, Subcommand};
     --max-det <MAX_DET>    Maximum number of detections [default: 300]
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
     --rect [<BOOL>]        Enable rectangular inference (minimal padding) [default: true]
+    --tile [<TILE>]        Tile size for overlapping-window inference (bare uses --imgsz)
     --batch <BATCH>        Batch size for inference [default: 1]
     --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w32a32, w8a16, or w8a32
     --save [<BOOL>]        Save annotated images to runs/<task>/predict [default: true]
