@@ -285,7 +285,7 @@ impl YOLOModel {
     ///
     /// # Errors
     ///
-    /// Returns an error if `tile` is `0` or inference fails.
+    /// Returns an error if inference fails.
     pub(super) fn predict_tiled(
         &mut self,
         image: &DynamicImage,
@@ -293,11 +293,6 @@ impl YOLOModel {
         tile: u32,
     ) -> Result<Vec<Results>> {
         let task = self.metadata.task;
-        if tile == 0 {
-            return Err(InferenceError::ConfigError(
-                "the tile size must be above 0".into(),
-            ));
-        }
         let (w, h) = image.dimensions();
         let windows = tile_windows(h, w, tile);
         if windows == [[0, 0, w, h]] {
