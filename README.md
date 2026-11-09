@@ -510,6 +510,24 @@ depth spends the color range on nearby detail rather than the distant background
 objects read warm and a few stray pixels cannot wash out the rest. `metric` colors depth
 directly, linearly between its min and max.
 
+**Tiled Inference:**
+
+Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. `set_tile` makes every `predict` call on the model tiled, and `predict_tiled` runs one decoded image directly. Windows overlap by 20%, boxes are mapped back to the source image, and duplicates are removed per class. Detection, segmentation, pose, oriented boxes, classification, semantic and depth models are all supported:
+
+```rust
+use ultralytics_inference::YOLOModel;
+
+let mut model = YOLOModel::load("yolo26n.onnx")?;
+
+// Every predict call now runs on 640 pixel windows; None turns it off again
+model.set_tile(Some(640));
+let results = model.predict("aerial.jpg")?;
+
+// Or tile a single decoded image directly
+let image = image::open("aerial.jpg")?;
+let results = model.predict_tiled(&image, "aerial.jpg".into(), 640)?;
+```
+
 **Pose Drawing:**
 
 `annotate_image_with_options` takes the keypoint options of Ultralytics `Results.plot`. A 17-keypoint (COCO-Pose)
