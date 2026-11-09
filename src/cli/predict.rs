@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
@@ -532,23 +532,24 @@ static STOP: AtomicBool = AtomicBool::new(false);
 fn stop_on_ctrl_c(on: bool) {
     #[cfg(unix)]
     {
-        type Handler = Option<extern "C" fn(i32)>;
         const SIGINT: i32 = 2;
-        static PREV: Mutex<Handler> = Mutex::new(None);
-        // SAFETY: the libc signature with `None` as `SIG_DFL`; both calls are async-signal-safe.
-        // `SIG_IGN` comes back as a non-null value that is only ever handed back to `signal`.
+        static PREV: AtomicUsize = AtomicUsize::new(0); // SIG_DFL
+        // SAFETY: the libc signature with `sighandler_t` as an address, so the `SIG_DFL` (0) and
+        // `SIG_IGN` (1) sentinels round-trip; both calls are async-signal-safe.
         unsafe extern "C" {
-            safe fn signal(signum: i32, handler: Handler) -> Handler;
+            safe fn signal(signum: i32, handler: usize) -> usize;
         }
         extern "C" fn handle(_: i32) {
             STOP.store(true, Ordering::Relaxed);
-            signal(SIGINT, None);
+            signal(SIGINT, 0);
         }
-        let mut prev = PREV.lock().unwrap_or_else(PoisonError::into_inner);
         if on {
-            *prev = signal(SIGINT, Some(handle));
+            PREV.store(
+                signal(SIGINT, handle as extern "C" fn(i32) as usize),
+                Ordering::Relaxed,
+            );
         } else {
-            signal(SIGINT, prev.take());
+            signal(SIGINT, PREV.load(Ordering::Relaxed));
         }
     }
     #[cfg(windows)]
