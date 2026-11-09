@@ -2,8 +2,9 @@
 
 use std::path::Path;
 use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
-#[cfg(feature = "visualize")]
 use std::time::Duration;
 
 #[cfg(feature = "annotate")]
@@ -241,22 +242,29 @@ pub fn run_prediction(args: &PredictArgs) {
         slot.0.lock().unwrap_or_else(PoisonError::into_inner).1 = true;
         slot.1.notify_one();
     });
+    // Both waits wake up to check `STOP`, so Ctrl+C still ends a run whose source has stalled.
+    let tick = Duration::from_millis(100);
     let frames = std::iter::from_fn(move || {
         if !webcam {
-            return receiver.recv().ok();
+            loop {
+                match receiver.recv_timeout(tick) {
+                    Err(RecvTimeoutError::Timeout) if !STOP.load(Ordering::Relaxed) => {}
+                    item => return item.ok(),
+                }
+            }
         }
         let (lock, ready) = &*latest;
-        let mut state = ready
-            .wait_while(
-                lock.lock().unwrap_or_else(PoisonError::into_inner),
-                |(frame, done)| frame.is_none() && !*done,
-            )
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut state = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        while state.0.is_none() && !state.1 && !STOP.load(Ordering::Relaxed) {
+            (state, _) = ready
+                .wait_timeout(state, tick)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
         state.0.take()
     });
 
-    // Set when the viewer is closed; stops reading the source, which also stops the decoder.
-    let quit = std::cell::Cell::new(false);
+    STOP.store(false, Ordering::Relaxed);
+    stop_on_ctrl_c(true);
 
     // Use BatchProcessor for centralized batch management
     {
@@ -378,7 +386,7 @@ pub fn run_prediction(args: &PredictArgs) {
                                     && (is_video
                                         || v.wait(Duration::from_millis(200)).unwrap_or(true));
                                 if !open {
-                                    quit.set(true);
+                                    STOP.store(true, Ordering::Relaxed);
                                 }
                             }
                         }
@@ -396,7 +404,7 @@ pub fn run_prediction(args: &PredictArgs) {
         // not abandon the rest of the source, so skip it and carry on like Ultralytics does.
         let (mut read, mut skipped) = (0usize, 0usize);
         for item in frames {
-            if quit.get() {
+            if STOP.load(Ordering::Relaxed) {
                 break;
             }
             let (img, meta) = match item {
@@ -412,7 +420,7 @@ pub fn run_prediction(args: &PredictArgs) {
         }
         batch_processor.flush();
         // Like Ultralytics, a source with nothing to predict on is an error, not an empty run.
-        if read == 0 {
+        if read == 0 && !STOP.load(Ordering::Relaxed) {
             error!(
                 "No images or videos found in '{}'",
                 source_path.as_deref().unwrap_or_default()
@@ -429,6 +437,7 @@ pub fn run_prediction(args: &PredictArgs) {
     {
         error!("Failed to finish saving: {e}");
     }
+    stop_on_ctrl_c(false);
 
     // Print speed summary with inference tensor shape (after letterboxing)
     let num_results = result_count.max(1) as f64;
@@ -510,6 +519,54 @@ fn build_inference_config(
     }
 
     Ok(config)
+}
+
+/// Set by Ctrl+C or a closed viewer to stop reading the source, so queued saves and the video
+/// trailer still finish.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// While `on`, the first Ctrl+C sets [`STOP`] instead of killing the process, like the `finally`
+/// that releases the video writers in Ultralytics, and a second one exits. Off restores the
+/// handler that was there before.
+#[allow(unsafe_code)]
+fn stop_on_ctrl_c(on: bool) {
+    #[cfg(unix)]
+    {
+        use std::sync::atomic::AtomicUsize;
+        const SIGINT: i32 = 2;
+        static PREV: AtomicUsize = AtomicUsize::new(0); // SIG_DFL
+        // SAFETY: the libc signature with `sighandler_t` as an address, so the `SIG_DFL` (0) and
+        // `SIG_IGN` (1) sentinels round-trip; both calls are async-signal-safe.
+        unsafe extern "C" {
+            safe fn signal(signum: i32, handler: usize) -> usize;
+        }
+        extern "C" fn handle(_: i32) {
+            STOP.store(true, Ordering::Relaxed);
+            signal(SIGINT, 0);
+        }
+        if on {
+            PREV.store(
+                signal(SIGINT, handle as extern "C" fn(i32) as usize),
+                Ordering::Relaxed,
+            );
+        } else {
+            signal(SIGINT, PREV.load(Ordering::Relaxed));
+        }
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: the kernel32 signature; std always links kernel32.
+        unsafe extern "system" {
+            safe fn SetConsoleCtrlHandler(
+                handler: Option<extern "system" fn(u32) -> i32>,
+                add: i32,
+            ) -> i32;
+        }
+        extern "system" fn handle(_: u32) -> i32 {
+            i32::from(!STOP.swap(true, Ordering::Relaxed))
+        }
+        SetConsoleCtrlHandler(Some(handle), i32::from(on));
+    }
 }
 
 /// Whether a `runs/<task>/predictN` directory is needed for this run.
