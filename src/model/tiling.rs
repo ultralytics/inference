@@ -11,7 +11,7 @@
 )]
 
 use image::{DynamicImage, GenericImageView};
-use ndarray::{Array2, Array3, Axis, s};
+use ndarray::{Array2, Array3, Axis, aview1, s};
 
 use super::YOLOModel;
 use crate::error::{InferenceError, Result};
@@ -41,39 +41,25 @@ fn tile_windows(h: u32, w: u32, (th, tw): (u32, u32)) -> Vec<Window> {
         .collect()
 }
 
-/// Axis-aligned extent `[x1, y1, x2, y2]` of a box row: `xyxy`, or the corners of an `xywhr` box.
-fn extent(row: &[f32], rotated: bool) -> [f32; 4] {
-    if !rotated {
-        return [row[0], row[1], row[2], row[3]];
-    }
-    let (sin, cos) = row[4].sin_cos();
-    let (hw, hh) = (row[2] / 2.0, row[3] / 2.0);
-    let (dx, dy) = (
-        hw.mul_add(cos.abs(), hh * sin.abs()),
-        hw.mul_add(sin.abs(), hh * cos.abs()),
-    );
-    [row[0] - dx, row[1] - dy, row[0] + dx, row[1] + dy]
-}
-
 /// `(box, score, class)` for the `idx` rows, whose first `K` columns are the box.
-fn tuples<const K: usize>(rows: &[Vec<f32>], idx: &[usize]) -> Vec<([f32; K], f32, usize)> {
+fn tuples<const K: usize>(data: &Array2<f32>, idx: &[usize]) -> Vec<([f32; K], f32, usize)> {
     idx.iter()
         .map(|&i| {
             (
-                std::array::from_fn(|j| rows[i][j]),
-                rows[i][K],
-                rows[i][K + 1] as usize,
+                std::array::from_fn(|j| data[[i, j]]),
+                data[[i, K]],
+                data[[i, K + 1]] as usize,
             )
         })
         .collect()
 }
 
 /// Per-class NMS over the `idx` rows, returning the kept indices best first.
-fn nms(rows: &[Vec<f32>], idx: &[usize], rotated: bool, iou: f32, max_det: usize) -> Vec<usize> {
+fn nms(data: &Array2<f32>, idx: &[usize], rotated: bool, iou: f32, max_det: usize) -> Vec<usize> {
     let kept = if rotated {
-        nms_rotated_per_class(&tuples::<5>(rows, idx), iou, max_det)
+        nms_rotated_per_class(&tuples::<5>(data, idx), iou, max_det)
     } else {
-        nms_per_class(&tuples::<4>(rows, idx), iou, max_det)
+        nms_per_class(&tuples::<4>(data, idx), iou, max_det)
     };
     kept.into_iter().map(|k| idx[k]).collect()
 }
@@ -84,7 +70,7 @@ fn nms(rows: &[Vec<f32>], idx: &[usize], rotated: bool, iou: f32, max_det: usize
 /// its own interior edges. Fragments are dropped before NMS and restored afterwards when no kept
 /// box covers more than half of them. Returns the kept row indices, best first.
 fn merge_rows(
-    rows: &[Vec<f32>],
+    data: &Array2<f32>,
     wins: &[Window],
     all: &[Window],
     shape: (u32, u32),
@@ -93,60 +79,58 @@ fn merge_rows(
     max_det: usize,
 ) -> Vec<usize> {
     let border = [0.0, 0.0, shape.1 as f32, shape.0 as f32];
-    let ext: Vec<[f32; 4]> = rows.iter().map(|r| extent(r, rotated)).collect();
+    let ext = if rotated {
+        Obb::new(data.clone(), shape).xyxy()
+    } else {
+        data.slice(s![.., ..4]).to_owned()
+    };
+    let ext: Vec<[f32; 4]> = ext
+        .rows()
+        .into_iter()
+        .map(|e| [e[0], e[1], e[2], e[3]])
+        .collect();
     let win_f = |w: &Window| w.map(|v| v as f32);
-    let mut fragment: Vec<bool> = ext
+    // Whether edge `k` of extent `e` lies more than 2 pixels inside edge `k` of window `r`.
+    let inside = |e: &[f32; 4], r: [f32; 4], k: usize| {
+        if k < 2 {
+            r[k] + 2.0 < e[k]
+        } else {
+            r[k] - 2.0 > e[k]
+        }
+    };
+    let fragment: Vec<bool> = ext
         .iter()
         .zip(wins)
         .map(|(e, w)| {
             let own = win_f(w);
-            (0..4).any(|k| {
-                let touches = if k < 2 {
-                    e[k] <= own[k] + 2.0
-                } else {
-                    e[k] >= own[k] - 2.0
-                };
-                touches && own[k] != border[k]
-            })
+            (0..4).any(|k| !inside(e, own, k) && own[k] != border[k])
+                && all
+                    .iter()
+                    .map(win_f)
+                    .any(|r| (0..4).all(|k| inside(e, r, k) || r[k] == border[k]))
         })
         .collect();
-    for (i, f) in fragment.iter_mut().enumerate() {
-        if *f {
-            let e = ext[i];
-            *f = all.iter().map(win_f).any(|r| {
-                (0..4).all(|k| {
-                    let clear = if k < 2 {
-                        r[k] + 2.0 < e[k]
-                    } else {
-                        r[k] - 2.0 > e[k]
-                    };
-                    clear || r[k] == border[k]
-                })
-            });
-        }
-    }
-    let valid: Vec<usize> = (0..rows.len()).filter(|&i| !fragment[i]).collect();
-    let mut keep = nms(rows, &valid, rotated, iou, max_det);
-    let lone: Vec<usize> = (0..rows.len()).filter(|&i| fragment[i]).collect();
+    let (lone, valid): (Vec<usize>, Vec<usize>) = (0..ext.len()).partition(|&i| fragment[i]);
+    let mut keep = nms(data, &valid, rotated, iou, max_det);
     if lone.is_empty() {
         return keep;
     }
-    let area = |e: &[f32; 4]| (e[2] - e[0]).max(0.0) * (e[3] - e[1]).max(0.0);
+    let area = |e: [f32; 4]| (e[2] - e[0]).max(0.0) * (e[3] - e[1]).max(0.0);
     let uncovered = |&i: &usize| {
+        let a = ext[i];
         !keep.iter().any(|&k| {
-            let (a, b) = (ext[i], ext[k]);
-            let inter = [
+            let b = ext[k];
+            area([
                 a[0].max(b[0]),
                 a[1].max(b[1]),
                 a[2].min(b[2]),
                 a[3].min(b[3]),
-            ];
-            area(&inter) > area(&a) / 2.0
+            ]) > area(a) / 2.0
         })
     };
-    let restored: Vec<usize> = lone.iter().copied().filter(uncovered).collect();
+    let restored: Vec<usize> = lone.into_iter().filter(uncovered).collect();
     keep.extend(restored);
-    nms(rows, &keep, rotated, iou, max_det)
+    nms(data, &keep, rotated, iou, max_det)
 }
 
 /// Offset every tile's boxes or oriented boxes (and pose keypoints) to source coordinates, merge
@@ -159,28 +143,27 @@ fn merge_detections(
     config: &InferenceConfig,
 ) {
     let shape = out.orig_shape;
-    let data = |t: &Results| {
-        if rotated {
-            t.obb.as_ref().map(|o| o.data.clone())
-        } else {
-            t.boxes.as_ref().map(|b| b.data.clone())
-        }
-    };
-    let (mut rows, mut wins, mut src) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut parts, mut wins, mut src) = (Vec::new(), Vec::new(), Vec::new());
     for (t, win) in tiles.iter().zip(windows) {
-        let Some(d) = data(t) else { continue };
-        for (i, r) in d.rows().into_iter().enumerate() {
-            let mut row = r.to_vec();
-            for k in 0..if rotated { 2 } else { 4 } {
-                row[k] += win[k % 2] as f32;
-            }
-            rows.push(row);
-            wins.push(*win);
-            src.push((t, i));
+        let data = if rotated {
+            t.obb.as_ref().map(|o| &o.data)
+        } else {
+            t.boxes.as_ref().map(|b| &b.data)
+        };
+        let Some(mut d) = data.cloned() else { continue };
+        // `xyxy` moves both corners and `xywhr` its center.
+        for k in 0..if rotated { 2 } else { 4 } {
+            d.column_mut(k).mapv_inplace(|v| v + win[k % 2] as f32);
         }
+        wins.extend(std::iter::repeat_n(*win, d.nrows()));
+        src.extend((0..d.nrows()).map(|i| (t, i)));
+        parts.push(d);
     }
+    let views: Vec<_> = parts.iter().map(|p| p.view()).collect();
+    let data = ndarray::concatenate(Axis(0), &views)
+        .unwrap_or_else(|_| Array2::zeros((0, if rotated { 7 } else { 6 })));
     let keep = merge_rows(
-        &rows,
+        &data,
         &wins,
         windows,
         shape,
@@ -188,25 +171,22 @@ fn merge_detections(
         config.iou_threshold,
         config.max_det,
     );
-    let cols = rows.first().map_or(if rotated { 7 } else { 6 }, Vec::len);
-    let merged = Array2::from_shape_fn((keep.len(), cols), |(i, c)| rows[keep[i]][c]);
+    let merged = data.select(Axis(0), &keep);
     if rotated {
         out.obb = Some(Obb::new(merged, shape));
     } else {
         out.boxes = Some(Boxes::new(merged, shape));
     }
     if let Some(k0) = &tiles[0].keypoints {
-        let (nk, kd) = (k0.data.shape()[1], k0.data.shape()[2]);
+        let (_, nk, kd) = k0.data.dim();
         let mut k = Array3::<f32>::zeros((keep.len(), nk, kd));
         for (o, &i) in keep.iter().enumerate() {
             let (t, row) = src[i];
             let Some(kpts) = &t.keypoints else { continue };
             let mut dst = k.index_axis_mut(Axis(0), o);
             dst.assign(&kpts.data.index_axis(Axis(0), row));
-            for j in 0..nk {
-                dst[[j, 0]] += wins[i][0] as f32;
-                dst[[j, 1]] += wins[i][1] as f32;
-            }
+            let mut xy = dst.slice_mut(s![.., ..2]);
+            xy += &aview1(&[wins[i][0] as f32, wins[i][1] as f32]);
         }
         out.keypoints = Some(Keypoints::new(k, shape));
     }
@@ -316,8 +296,7 @@ impl YOLOModel {
                 .map(|&[x1, y1, x2, y2]| image.crop_imm(x1, y1, x2 - x1, y2 - y1))
                 .collect();
             let refs: Vec<_> = crops.iter().collect();
-            let paths = vec![path.clone(); crops.len()];
-            for mut r in self.predict_internal(&refs, &paths)? {
+            for mut r in self.predict_internal(&refs, &vec![path.clone(); crops.len()])? {
                 tiles.push(r.pop().ok_or_else(|| {
                     InferenceError::InferenceError("tile returned no result".into())
                 })?);
@@ -375,33 +354,27 @@ mod tests {
             (w.len(), w[1], w[4]),
             (16, [512, 0, 1152, 384], [0, 307, 640, 691])
         );
-    }
-
-    #[test]
-    fn test_small_images_get_one_window() {
+        // An image no larger than the window gets one window.
         assert_eq!(tile_windows(300, 500, (640, 640)), [[0, 0, 500, 300]]);
         assert_eq!(tile_windows(640, 640, (640, 640)), [[0, 0, 640, 640]]);
     }
 
     #[test]
-    fn test_merge_drops_a_cut_fragment_another_window_sees_whole() {
+    fn test_merge_drops_a_cut_fragment_only_when_another_window_sees_it_whole() {
         // Two 100x100 windows overlapping on x = 50..100 of a 150x100 image. A person cut by the
-        // first window's right edge (x = 100) is seen whole by the second window.
+        // first window's right edge (x = 100) goes when the second window sees it whole, and stays
+        // when nothing else covers it.
         let windows = [[0, 0, 100, 100], [50, 0, 150, 100]];
-        let cut = vec![60.0, 10.0, 100.0, 90.0, 0.9, 0.0];
-        let whole = vec![60.0, 10.0, 110.0, 90.0, 0.8, 0.0];
-        let rows = [cut, whole];
-        let wins = [windows[0], windows[1]];
-        let keep = merge_rows(&rows, &wins, &windows, (100, 150), false, 0.5, 300);
-        assert_eq!(keep, [1]);
-    }
-
-    #[test]
-    fn test_merge_keeps_a_cut_box_nothing_else_covers() {
-        let windows = [[0, 0, 100, 100], [50, 0, 150, 100]];
-        let cut = vec![60.0, 10.0, 100.0, 90.0, 0.9, 0.0];
-        let keep = merge_rows(&[cut], &[windows[0]], &windows, (100, 150), false, 0.5, 300);
-        assert_eq!(keep, [0]);
+        let rows = ndarray::array![
+            [60.0, 10.0, 100.0, 90.0, 0.9, 0.0], // cut
+            [60.0, 10.0, 110.0, 90.0, 0.8, 0.0], // whole
+        ];
+        let merge = |n: usize| {
+            let rows = rows.slice(s![..n, ..]).to_owned();
+            merge_rows(&rows, &windows[..n], &windows, (100, 150), false, 0.5, 300)
+        };
+        assert_eq!(merge(2), [1]);
+        assert_eq!(merge(1), [0]);
     }
 
     fn blank(h: u32, w: u32) -> Results {
@@ -415,28 +388,25 @@ mod tests {
     }
 
     #[test]
-    fn test_semantic_tiles_keep_the_most_central_pixel() {
+    fn test_dense_tiles_merge_by_distance_to_the_edge() {
         // Two 5x5 windows overlapping on columns 3 and 4 of an 8-wide image. Column 3 is nearer the
-        // center of the first window and column 4 of the second, so each tile wins its own side.
+        // center of the first window and column 4 of the second.
         let windows = [[0, 0, 5, 5], [3, 0, 8, 5]];
         let mut tiles = [blank(5, 5), blank(5, 5)];
-        tiles[0].semantic_mask = Some(SemanticMask::new(Array2::from_elem((5, 5), 1), (5, 5)));
-        tiles[1].semantic_mask = Some(SemanticMask::new(Array2::from_elem((5, 5), 2), (5, 5)));
+        for (t, v) in tiles.iter_mut().zip([1u16, 4]) {
+            t.semantic_mask = Some(SemanticMask::new(Array2::from_elem((5, 5), v), (5, 5)));
+            t.depth = Some(DepthMap::new(
+                Array2::from_elem((5, 5), f32::from(v)),
+                (5, 5),
+            ));
+        }
         let mut out = blank(5, 8);
         merge_dense(&mut out, &tiles, &windows, true);
-        let map = out.semantic_mask.unwrap().data;
-        assert_eq!(map.row(2).to_vec(), [1, 1, 1, 1, 2, 2, 2, 2]);
-    }
-
-    #[test]
-    fn test_depth_tiles_blend_by_distance_to_the_edge() {
-        let windows = [[0, 0, 5, 5], [3, 0, 8, 5]];
-        let mut tiles = [blank(5, 5), blank(5, 5)];
-        tiles[0].depth = Some(DepthMap::new(Array2::from_elem((5, 5), 1.0), (5, 5)));
-        tiles[1].depth = Some(DepthMap::new(Array2::from_elem((5, 5), 4.0), (5, 5)));
-        let mut out = blank(5, 8);
         merge_dense(&mut out, &tiles, &windows, false);
-        // Column 3 weighs 2 and 1: (1 * 2 + 4 * 1) / 3 = 2. Column 4 weighs 1 and 2: 3.
+        // A class map keeps each pixel's most central tile, so each tile wins its own side.
+        let map = out.semantic_mask.unwrap().data;
+        assert_eq!(map.row(2).to_vec(), [1, 1, 1, 1, 4, 4, 4, 4]);
+        // Depth blends: column 3 weighs 2 and 1, (1 * 2 + 4 * 1) / 3 = 2, and column 4 gives 3.
         let depth = out.depth.unwrap().data;
         assert_eq!(
             depth.row(2).to_vec(),
