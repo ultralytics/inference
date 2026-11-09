@@ -96,6 +96,10 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_RECT, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub rect: bool,
 
+    /// Tile size for overlapping-window inference on large images (bare `--tile` uses `--imgsz`)
+    #[arg(long, num_args = 0..=1, default_missing_value = "0")]
+    pub tile: Option<u32>,
+
     /// Batch size for inference
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub batch: u32,

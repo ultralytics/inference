@@ -22,24 +22,18 @@ use crate::cli::args::PredictArgs;
 use crate::task::Task;
 use crate::{error, verbose, warn};
 
-/// Run the `predict` command from parsed arguments.
-pub fn run_prediction(args: &PredictArgs) {
-    run_prediction_with_tile(args, None);
-}
-
 /// Run the `predict` command end to end.
 ///
 /// Loads (downloading if needed) the model, iterates the source, and prints, annotates, and
 /// saves results according to `args`. Errors are reported to stderr and exit the process,
-/// since this is the CLI entry point. A `tile` runs every image on overlapping windows of that
-/// size, and `Some(0)` uses the inference size.
+/// since this is the CLI entry point.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
     clippy::too_many_lines,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation
 )]
-pub fn run_prediction_with_tile(args: &PredictArgs, tile: Option<u32>) {
+pub fn run_prediction(args: &PredictArgs) {
     // Parse arguments - use default model if not specified
     let (model_path, model_is_default) = resolve_model_path(args);
     let source_path = &args.source;
@@ -59,11 +53,10 @@ pub fn run_prediction_with_tile(args: &PredictArgs, tile: Option<u32>) {
     }
 
     // Load model first so we can determine appropriate default source based on task
-    let mut config = build_inference_config(args, device).unwrap_or_else(|e| {
+    let config = build_inference_config(args, device).unwrap_or_else(|e| {
         error!("{e}");
         process::exit(1);
     });
-    config.tile = tile;
 
     let mut model = match YOLOModel::load_with_config(model_path, config) {
         Ok(m) => m,
@@ -504,6 +497,10 @@ fn build_inference_config(
         config = config.with_imgsz(sz, sz);
     }
 
+    if let Some(tile) = args.tile {
+        config = config.with_tile(tile);
+    }
+
     if let Some(d) = device {
         config = config.with_device(d);
     }
@@ -602,6 +599,7 @@ mod tests {
             max_det: InferenceConfig::DEFAULT_MAX_DET,
             imgsz: None,
             rect: InferenceConfig::DEFAULT_RECT,
+            tile: None,
             batch: 1,
             quantize: InferenceConfig::DEFAULT_QUANTIZE,
             half: false,
@@ -673,6 +671,7 @@ mod tests {
             max_det: 77,
             imgsz: Some(512),
             rect: false,
+            tile: None,
             batch: 4,
             quantize: Some(Quantization::Fp16),
             half: false,
