@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 #[cfg(feature = "visualize")]
 use std::time::Duration;
@@ -255,8 +256,10 @@ pub fn run_prediction(args: &PredictArgs) {
         state.0.take()
     });
 
-    // Set when the viewer is closed; stops reading the source, which also stops the decoder.
-    let quit = std::cell::Cell::new(false);
+    // Set when the viewer is closed or on Ctrl+C; stops reading the source, which also stops the
+    // decoder, and lets queued saves and the video trailer finish.
+    STOP.store(false, Ordering::Relaxed);
+    stop_on_ctrl_c();
 
     // Use BatchProcessor for centralized batch management
     {
@@ -378,7 +381,7 @@ pub fn run_prediction(args: &PredictArgs) {
                                     && (is_video
                                         || v.wait(Duration::from_millis(200)).unwrap_or(true));
                                 if !open {
-                                    quit.set(true);
+                                    STOP.store(true, Ordering::Relaxed);
                                 }
                             }
                         }
@@ -396,7 +399,7 @@ pub fn run_prediction(args: &PredictArgs) {
         // not abandon the rest of the source, so skip it and carry on like Ultralytics does.
         let (mut read, mut skipped) = (0usize, 0usize);
         for item in frames {
-            if quit.get() {
+            if STOP.load(Ordering::Relaxed) {
                 break;
             }
             let (img, meta) = match item {
@@ -510,6 +513,43 @@ fn build_inference_config(
     }
 
     Ok(config)
+}
+
+/// Set by Ctrl+C or a closed viewer to end the run after the current batch.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// Make the first Ctrl+C set [`STOP`] instead of killing the process, like the `finally` that
+/// releases the video writers in Ultralytics. A second Ctrl+C gets the default action and exits.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn stop_on_ctrl_c() {
+    const SIGINT: i32 = 2;
+    const SIG_DFL: usize = 0;
+    unsafe extern "C" {
+        fn signal(signum: i32, handler: usize) -> usize;
+    }
+    extern "C" fn handle(_: i32) {
+        STOP.store(true, Ordering::Relaxed);
+        // SAFETY: `signal` is async-signal-safe; this restores the default action.
+        unsafe { signal(SIGINT, SIG_DFL) };
+    }
+    // SAFETY: `handle` only stores an atomic and calls `signal`, both async-signal-safe.
+    unsafe { signal(SIGINT, handle as extern "C" fn(i32) as usize) };
+}
+
+/// Make the first Ctrl+C set [`STOP`] instead of killing the process, like the `finally` that
+/// releases the video writers in Ultralytics. A second Ctrl+C falls through to the default exit.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn stop_on_ctrl_c() {
+    unsafe extern "system" {
+        fn SetConsoleCtrlHandler(handler: Option<extern "system" fn(u32) -> i32>, add: i32) -> i32;
+    }
+    extern "system" fn handle(_: u32) -> i32 {
+        i32::from(!STOP.swap(true, Ordering::Relaxed))
+    }
+    // SAFETY: kernel32 is always linked on Windows and `handle` only touches an atomic.
+    unsafe { SetConsoleCtrlHandler(Some(handle), 1) };
 }
 
 /// Whether a `runs/<task>/predictN` directory is needed for this run.
