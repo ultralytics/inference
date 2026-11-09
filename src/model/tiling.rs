@@ -23,19 +23,20 @@ use crate::utils::{nms_per_class, nms_rotated_per_class};
 /// A tile window as `[x1, y1, x2, y2]` in source pixels.
 type Window = [u32; 4];
 
-/// Windows covering an `h` x `w` image with 20% overlap and the last window aligned to the edge.
-fn tile_windows(h: u32, w: u32, size: u32) -> Vec<Window> {
-    let starts = |len: u32| -> Vec<u32> {
+/// Windows of `th` x `tw` covering an `h` x `w` image with 20% overlap and the last window aligned
+/// to the edge.
+fn tile_windows(h: u32, w: u32, (th, tw): (u32, u32)) -> Vec<Window> {
+    let starts = |len: u32, size: u32| -> Vec<u32> {
         let last = len.saturating_sub(size);
         let step = ((8 * size + 5) / 10).max(1); // round(size * 0.8)
         (0..last).step_by(step as usize).chain([last]).collect()
     };
-    let xs = starts(w);
-    starts(h)
+    let xs = starts(w, tw);
+    starts(h, th)
         .into_iter()
         .flat_map(|y| {
             xs.iter()
-                .map(move |&x| [x, y, (x + size).min(w), (y + size).min(h)])
+                .map(move |&x| [x, y, (x + tw).min(w), (y + th).min(h)])
         })
         .collect()
 }
@@ -274,8 +275,9 @@ fn merge_dense(out: &mut Results, tiles: &[Results], windows: &[Window], semanti
 }
 
 impl YOLOModel {
-    /// Run inference on overlapping `tile` x `tile` windows of a large image and merge them back
-    /// into one result in source coordinates, like the Ultralytics `tile` argument.
+    /// Run inference on overlapping windows of a large image and merge them back into one result
+    /// in source coordinates, like the Ultralytics `tile` argument. Windows are the configured
+    /// `tile` square, or the inference size when it is `0`.
     ///
     /// Windows overlap by 20% and the last window in each direction is aligned to the image edge.
     /// Detection, pose and oriented boxes are offset to source coordinates and merged with NMS
@@ -290,11 +292,17 @@ impl YOLOModel {
         &mut self,
         image: &DynamicImage,
         path: String,
-        tile: u32,
     ) -> Result<Vec<Results>> {
         let task = self.metadata.task;
+        let size = match self.config.tile.unwrap_or_default() {
+            0 => {
+                let (th, tw) = self.imgsz();
+                (th as u32, tw as u32)
+            }
+            tile => (tile, tile),
+        };
         let (w, h) = image.dimensions();
-        let windows = tile_windows(h, w, tile);
+        let windows = tile_windows(h, w, size);
         if windows == [[0, 0, w, h]] {
             let mut results = self.predict_internal(&[image], &[path])?;
             return Ok(results.pop().unwrap_or_default());
@@ -353,20 +361,26 @@ mod tests {
     #[test]
     fn test_tile_windows_match_the_documented_counts() {
         // Counts from the Ultralytics tiling guide: 1920x1080 at 640 and 3840x2160 at 1280 both run 8.
-        assert_eq!(tile_windows(1080, 1920, 640).len(), 8);
-        assert_eq!(tile_windows(2160, 3840, 1280).len(), 8);
+        assert_eq!(tile_windows(1080, 1920, (640, 640)).len(), 8);
+        assert_eq!(tile_windows(2160, 3840, (1280, 1280)).len(), 8);
         // The last window is aligned to the edge and the others step by round(0.8 * size).
-        let w = tile_windows(1080, 1920, 640);
+        let w = tile_windows(1080, 1920, (640, 640));
         assert_eq!(w[0], [0, 0, 640, 640]);
         assert_eq!(w[1], [512, 0, 1152, 640]);
         assert_eq!(w[3], [1280, 0, 1920, 640]);
         assert_eq!(w[7], [1280, 440, 1920, 1080]);
+        // A non-square inference size steps each axis by its own side, as Ultralytics does.
+        let w = tile_windows(1080, 1920, (384, 640));
+        assert_eq!(
+            (w.len(), w[1], w[4]),
+            (16, [512, 0, 1152, 384], [0, 307, 640, 691])
+        );
     }
 
     #[test]
     fn test_small_images_get_one_window() {
-        assert_eq!(tile_windows(300, 500, 640), [[0, 0, 500, 300]]);
-        assert_eq!(tile_windows(640, 640, 640), [[0, 0, 640, 640]]);
+        assert_eq!(tile_windows(300, 500, (640, 640)), [[0, 0, 500, 300]]);
+        assert_eq!(tile_windows(640, 640, (640, 640)), [[0, 0, 640, 640]]);
     }
 
     #[test]
@@ -477,7 +491,8 @@ mod tests {
         let image = image::open("assets/bus.jpg").unwrap();
         let name = || "bus.jpg".to_string();
 
-        let tiled = model.predict_tiled(&image, name(), 320).unwrap().remove(0);
+        model.config.tile = Some(320);
+        let tiled = model.predict_tiled(&image, name()).unwrap().remove(0);
         let found = tiled.boxes.unwrap().data;
         assert!(found.nrows().abs_diff(20) <= 3, "{} boxes", found.nrows());
         for (x1, y1, x2, y2, conf, cls) in GOLDEN {
@@ -492,8 +507,10 @@ mod tests {
             assert!(hit, "no match for class {cls} box {x1} {y1} {x2} {y2}");
         }
 
+        model.config.tile = Some(5000);
+        let wide = model.predict_tiled(&image, name()).unwrap().remove(0);
+        model.config.tile = None;
         let plain = model.predict_image(&image, name()).unwrap().remove(0);
-        let wide = model.predict_tiled(&image, name(), 5000).unwrap().remove(0);
         assert_eq!(plain.boxes.unwrap().data, wide.boxes.unwrap().data);
     }
 }

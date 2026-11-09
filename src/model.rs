@@ -1483,18 +1483,13 @@ impl YOLOModel {
     /// Vector of Results.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        if let Some(tile) = self.config.tile {
-            let tile = if tile == 0 {
-                self.imgsz().0 as u32
-            } else {
-                tile
-            };
-            return self.predict_tiled(image, path, tile);
-        }
-        let images = [image];
-        let paths = [path];
-        let mut results = self.predict_internal(&images, &paths)?;
-        let results = results.pop().unwrap_or_default();
+        let results = if self.config.tile.is_some() {
+            self.predict_tiled(image, path)?
+        } else {
+            self.predict_internal(&[image], &[path])?
+                .pop()
+                .unwrap_or_default()
+        };
         Self::log_first_result(&results);
         Ok(results)
     }
@@ -1916,7 +1911,7 @@ impl YOLOModel {
             return images
                 .iter()
                 .zip(paths)
-                .map(|(image, path)| self.predict_image(image, path.clone()))
+                .map(|(image, path)| self.predict_tiled(image, path.clone()))
                 .collect();
         }
         // Create vector of references
