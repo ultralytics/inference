@@ -86,6 +86,8 @@
 //!
 //! # Select task: auto-downloads the matching nano model
 //! ultralytics-inference predict --task segment
+//! ultralytics-inference predict --task semantic
+//! ultralytics-inference predict --task depth
 //! ultralytics-inference predict --task classify
 //! ultralytics-inference predict --task pose
 //! ultralytics-inference predict --task obb
@@ -163,20 +165,20 @@
 //! # Segmentation
 //! yolo export model=yolo26n-seg.pt format=onnx
 //!
-//! # Pose Estimation
-//! yolo export model=yolo26n-pose.pt format=onnx
-//!
-//! # Classification
-//! yolo export model=yolo26n-cls.pt format=onnx
-//!
-//! # Oriented Bounding Boxes
-//! yolo export model=yolo26n-obb.pt format=onnx
-//!
 //! # Semantic Segmentation (YOLO26 only)
 //! yolo export model=yolo26n-sem.pt format=onnx
 //!
 //! # Depth Estimation (YOLO26 only)
 //! yolo export model=yolo26n-depth.pt format=onnx
+//!
+//! # Classification
+//! yolo export model=yolo26n-cls.pt format=onnx
+//!
+//! # Pose Estimation
+//! yolo export model=yolo26n-pose.pt format=onnx
+//!
+//! # Oriented Bounding Boxes
+//! yolo export model=yolo26n-obb.pt format=onnx
 //!
 //! # RT-DETR (detection only; no prebuilt ONNX to download, so export it yourself)
 //! yolo export model=rtdetr-l.pt format=onnx
