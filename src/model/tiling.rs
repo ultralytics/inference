@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn test_semantic_tiles_keep_the_most_central_pixel() {
         // Two 5x5 windows overlapping on columns 3 and 4 of an 8-wide image. Column 3 is nearer the
-        // centre of the first window and column 4 of the second, so each tile wins its own side.
+        // center of the first window and column 4 of the second, so each tile wins its own side.
         let windows = [[0, 0, 5, 5], [3, 0, 8, 5]];
         let mut tiles = [blank(5, 5), blank(5, 5)];
         tiles[0].semantic_mask = Some(SemanticMask::new(Array2::from_elem((5, 5), 1), (5, 5)));
