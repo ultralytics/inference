@@ -1007,9 +1007,9 @@ pub fn annotate_texts(image: &DynamicImage, texts: &[crate::ocr::Text]) -> Dynam
     let (font_scale, thickness) = render_scale(img.width(), img.height());
     let font = label_font(texts.iter().any(|t| !t.text.is_ascii()));
     let mut labels = Labels::default();
+    let style = (Rgb([0, 255, 0]), font_scale, thickness);
     for t in texts {
         let label = format!(" {} {:.2} ", t.text, t.confidence);
-        let style = (Rgb([0, 255, 0]), font_scale, thickness);
         draw_quad(
             &mut img,
             font.as_ref(),
@@ -1021,6 +1021,7 @@ pub fn annotate_texts(image: &DynamicImage, texts: &[crate::ocr::Text]) -> Dynam
     }
     DynamicImage::ImageRgb8(img)
 }
+
 /// Blend a solid color rectangle over a region of `img` at the given `alpha` opacity.
 ///
 /// Pixels outside the image bounds are silently skipped. `alpha` is clamped to `[0.0, 1.0]`.

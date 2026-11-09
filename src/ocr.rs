@@ -16,10 +16,11 @@
     clippy::manual_midpoint
 )]
 
+use std::cmp::Ordering::Equal;
 use std::path::Path;
 
 use image::{DynamicImage, RgbImage, imageops};
-use ndarray::{Array4, Axis, s};
+use ndarray::{Array4, s};
 use ort::session::Session;
 use ort::value::TensorRef;
 
@@ -40,7 +41,8 @@ const REC_H: u32 = 48;
 const REC_MIN_W: u32 = 320;
 const REC_MAX_W: u32 = 3200;
 /// Orientation classifier input size and `ImageNet` normalization.
-const ORI_SIZE: (u32, u32) = (80, 160);
+const ORI_H: u32 = 80;
+const ORI_W: u32 = 160;
 const MEAN: [f32; 3] = [0.485, 0.456, 0.406];
 const STD: [f32; 3] = [0.229, 0.224, 0.225];
 
@@ -48,7 +50,7 @@ const STD: [f32; 3] = [0.229, 0.224, 0.225];
 pub type Polygon = [[f32; 2]; 4];
 
 /// One detected text, as in Ultralytics `SolutionResults.texts`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Text {
     /// Recognized text, empty when nothing was read.
     pub text: String,
@@ -129,32 +131,30 @@ impl TextRecognizer {
     /// Returns an error if recognition fails.
     pub fn read(&mut self, image: &DynamicImage, result: &Results) -> Result<Vec<Text>> {
         let rgb = image.to_rgb8();
-        let mut texts = Vec::new();
-        let mut crops = Vec::new();
-        let mut cropped = Vec::new();
-        for (i, (polygon, conf, obb)) in detections(result).into_iter().enumerate() {
+        let (mut texts, mut pending, mut crops) = (Vec::new(), Vec::new(), Vec::new());
+        for (i, (polygon, detection_confidence, obb)) in detections(result).into_iter().enumerate()
+        {
             let mut crop = if obb {
                 crop_obb(&rgb, polygon)
             } else {
                 crop_box(&rgb, polygon)
             };
             // Tall crops are read sideways, like PaddleOCR, for steep text.
-            if crop.width() > 0 && f64::from(crop.height()) >= 1.5 * f64::from(crop.width()) {
+            if f64::from(crop.height()) >= 1.5 * f64::from(crop.width()) {
                 crop = imageops::rotate270(&crop);
             }
-            if crop.width() > 0 && crop.height() > 0 {
-                cropped.push(i);
+            if !crop.is_empty() {
+                pending.push(i);
                 crops.push(crop);
             }
             texts.push(Text {
-                text: String::new(),
-                confidence: 0.0,
-                detection_confidence: conf,
+                detection_confidence,
                 detection_index: i,
                 polygon,
+                ..Text::default()
             });
         }
-        for (i, (text, confidence)) in cropped.into_iter().zip(self.recognize(&crops)?) {
+        for (i, (text, confidence)) in pending.into_iter().zip(self.recognize(&crops)?) {
             texts[i].text = text;
             texts[i].confidence = confidence;
         }
@@ -182,30 +182,18 @@ impl TextRecognizer {
         Ok(reads)
     }
 
-    /// Recognize crops in batches: each is resized to the recognizer height, normalized to
-    /// [-1, 1] in BGR order and zero-padded to the widest crop of its batch, then CTC decoded.
+    /// Recognize crops in batches, in BGR scaled to [-1, 1] and padded to the widest crop of
+    /// their batch, then CTC decode them.
     fn read_crops(&mut self, crops: &[RgbImage]) -> Result<Vec<(String, f32)>> {
         let mut reads = Vec::with_capacity(crops.len());
         for chunk in crops.chunks(BATCH) {
             let sizes: Vec<(u32, u32)> = chunk.iter().map(rec_width).collect();
-            let width = sizes.iter().map(|s| s.1).max().unwrap_or(REC_MIN_W) as usize;
-            let mut batch = Array4::<f32>::zeros((chunk.len(), 3, REC_H as usize, width));
-            for (i, (crop, &(resized, _))) in chunk.iter().zip(&sizes).enumerate() {
-                let t = resize(crop, (REC_H, resized));
-                for c in 0..3 {
-                    batch
-                        .slice_mut(s![i, c, .., ..resized as usize])
-                        .zip_mut_with(&t.slice(s![0, 2 - c, .., ..]), |o, &v| {
-                            *o = (v - 0.5) / 0.5;
-                        });
-                }
-            }
+            let batch = tensor(chunk, REC_H, &sizes, ([0.5; 3], [0.5; 3], true));
             let characters = &self.characters;
             run(&mut self.recognizer, &batch, |shape, probs| {
                 let classes = shape[2] as usize;
-                for row in probs.chunks(shape[1] as usize * classes) {
-                    reads.push(ctc_decode(row, classes, characters));
-                }
+                let rows = probs.chunks(shape[1] as usize * classes);
+                reads.extend(rows.map(|row| ctc_decode(row, classes, characters)));
             })?;
         }
         Ok(reads)
@@ -215,45 +203,24 @@ impl TextRecognizer {
     fn upside_down(&mut self, crops: &[RgbImage]) -> Result<Vec<usize>> {
         let mut flip = Vec::new();
         for (b, chunk) in crops.chunks(BATCH).enumerate() {
-            let (h, w) = (ORI_SIZE.0 as usize, ORI_SIZE.1 as usize);
-            let mut batch = Array4::<f32>::zeros((chunk.len(), 3, h, w));
-            for (i, crop) in chunk.iter().enumerate() {
-                let t = resize(crop, ORI_SIZE);
-                for c in 0..3 {
-                    batch.slice_mut(s![i, c, .., ..]).zip_mut_with(
-                        &t.slice(s![0, c, .., ..]),
-                        |o, &v| {
-                            *o = (v - MEAN[c]) / STD[c];
-                        },
-                    );
-                }
-            }
+            let sizes = &[(ORI_W, ORI_W); BATCH][..chunk.len()];
+            let batch = tensor(chunk, ORI_H, sizes, (MEAN, STD, false));
             run(&mut self.orientation, &batch, |_, scores| {
-                let turned = scores.chunks(2).map(|s| s[1] > s[0]);
-                flip.extend(
-                    turned
-                        .enumerate()
-                        .filter(|t| t.1)
-                        .map(|(i, _)| b * BATCH + i),
-                );
+                let turned = scores.chunks(2).enumerate().filter(|(_, s)| s[1] > s[0]);
+                flip.extend(turned.map(|(i, _)| b * BATCH + i));
             })?;
         }
         Ok(flip)
     }
 }
 
-/// Greedy CTC decoding: the best class per step, without repeats and blanks, scored by the
-/// mean probability of the kept steps.
+/// Greedy CTC decoding: the first best class per step, without repeats and blanks, scored by
+/// the mean probability of the kept steps.
 fn ctc_decode(probs: &[f32], classes: usize, characters: &[char]) -> (String, f32) {
     let (mut text, mut sum, mut kept, mut prev) = (String::new(), 0.0_f32, 0_usize, 0);
     for step in probs.chunks(classes) {
-        let (best, p) =
-            step.iter().enumerate().fold(
-                (0, f32::MIN),
-                |acc, (k, &v)| {
-                    if v > acc.1 { (k, v) } else { acc }
-                },
-            );
+        let first_max = |m: (usize, f32), (k, &v): (usize, &f32)| if v > m.1 { (k, v) } else { m };
+        let (best, p) = step.iter().enumerate().fold((0, f32::MIN), first_max);
         if best != 0 && best != prev {
             text.push(characters.get(best).copied().unwrap_or(' '));
             sum += p;
@@ -261,102 +228,96 @@ fn ctc_decode(probs: &[f32], classes: usize, characters: &[char]) -> (String, f3
         }
         prev = best;
     }
-    let confidence = if kept == 0 { 0.0 } else { sum / kept as f32 };
-    (text, confidence)
-}
-
-/// `(height, width)` resize of `crop` to `size`, as an RGB NCHW tensor in [0, 1], with the
-/// `OpenCV` `INTER_LINEAR` resize the YOLO preprocessing uses.
-fn resize(crop: &RgbImage, (h, w): (u32, u32)) -> Array4<f32> {
-    let geom = LetterboxGeometry {
-        new_w: w,
-        new_h: h,
-        pad_left: 0,
-        pad_top: 0,
-    };
-    let (cw, ch) = crop.dimensions();
-    fused_zerocopy_preprocess(crop.as_raw(), cw, ch, (h as usize, w as usize), &geom)
+    (text, if kept == 0 { 0.0 } else { sum / kept as f32 })
 }
 
 /// `(resized, padded)` recognizer widths of a crop: its width at the recognizer height, and
-/// that or the minimum width when it is narrower, capped at the maximum.
+/// that or the minimum width when it is narrower, both capped at the maximum.
 fn rec_width(crop: &RgbImage) -> (u32, u32) {
     let ratio = f64::from(crop.width()) / f64::from(crop.height());
     let padded = (f64::from(REC_H) * ratio.max(f64::from(REC_MIN_W) / f64::from(REC_H))) as u32;
-    if padded > REC_MAX_W {
-        return (REC_MAX_W, REC_MAX_W);
+    let resized = ((f64::from(REC_H) * ratio).ceil() as u32).min(padded);
+    (resized.min(REC_MAX_W), padded.min(REC_MAX_W))
+}
+
+/// A batch of `crops`, each resized to `height` and its `(resized, padded)` width with the
+/// `OpenCV` `INTER_LINEAR` resize of the YOLO preprocessing, normalized by `mean` and `std`, in
+/// BGR when `bgr`, and zero-padded to the widest padded width.
+fn tensor(
+    crops: &[RgbImage],
+    height: u32,
+    sizes: &[(u32, u32)],
+    (mean, std, bgr): ([f32; 3], [f32; 3], bool),
+) -> Array4<f32> {
+    let width = sizes.iter().map(|s| s.1).max().unwrap_or(0) as usize;
+    let mut batch = Array4::zeros((crops.len(), 3, height as usize, width));
+    for (i, (crop, &(w, _))) in crops.iter().zip(sizes).enumerate() {
+        let geom = LetterboxGeometry {
+            new_w: w,
+            new_h: height,
+            pad_left: 0,
+            pad_top: 0,
+        };
+        let (cw, ch) = crop.dimensions();
+        let size = (height as usize, w as usize);
+        let t = fused_zerocopy_preprocess(crop.as_raw(), cw, ch, size, &geom);
+        for c in 0..3 {
+            let src = t.slice(s![0, if bgr { 2 - c } else { c }, .., ..]);
+            batch
+                .slice_mut(s![i, c, .., ..w as usize])
+                .zip_mut_with(&src, |o, &v| *o = (v - mean[c]) / std[c]);
+        }
     }
-    (
-        (f64::from(REC_H) * ratio).ceil().min(f64::from(padded)) as u32,
-        padded,
-    )
+    batch
 }
 
 /// Run a batch and hand the output shape and values to `read`.
-fn run<R>(
+fn run(
     session: &mut Session,
     batch: &Array4<f32>,
-    read: impl FnOnce(&[i64], &[f32]) -> R,
-) -> Result<R> {
-    let input = TensorRef::from_array_view(batch.view())
-        .map_err(|e| InferenceError::InferenceError(format!("Failed to create input: {e}")))?;
-    let outputs = session
-        .run(ort::inputs![input])
-        .map_err(|e| InferenceError::InferenceError(format!("Inference failed: {e}")))?;
-    let (shape, data) = outputs[0]
-        .try_extract_tensor::<f32>()
-        .map_err(|e| InferenceError::InferenceError(format!("Failed to read output: {e}")))?;
-    Ok(read(shape, data))
+    read: impl FnOnce(&[i64], &[f32]),
+) -> Result<()> {
+    let fail = |e: ort::Error| InferenceError::InferenceError(e.to_string());
+    let input = TensorRef::from_array_view(batch.view()).map_err(fail)?;
+    let outputs = session.run(ort::inputs![input]).map_err(fail)?;
+    let (shape, data) = outputs[0].try_extract_tensor::<f32>().map_err(fail)?;
+    read(shape, data);
+    Ok(())
 }
 
 /// `(corners, confidence, oriented)` of every detection: the oriented box corners, or the box
 /// corners clockwise from the top left.
 fn detections(result: &Results) -> Vec<(Polygon, f32, bool)> {
     if let Some(obb) = &result.obb {
-        let corners = obb.xyxyxyxy();
-        return corners
-            .axis_iter(Axis(0))
-            .zip(obb.conf())
-            .map(|(c, &conf)| (std::array::from_fn(|i| [c[[i, 0]], c[[i, 1]]]), conf, true))
+        let (c, conf) = (obb.xyxyxyxy(), obb.conf());
+        let corners = |i| std::array::from_fn(|j| [c[[i, j, 0]], c[[i, j, 1]]]);
+        return (0..obb.len())
+            .map(|i| (corners(i), conf[i], true))
             .collect();
     }
-    result.boxes.as_ref().map_or_else(Vec::new, |boxes| {
-        boxes
-            .xyxy()
-            .rows()
-            .into_iter()
-            .zip(boxes.conf())
-            .map(|(b, &conf)| {
-                let polygon = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
-                (polygon, conf, false)
-            })
-            .collect()
-    })
+    let Some(boxes) = &result.boxes else {
+        return Vec::new();
+    };
+    let (b, conf) = (boxes.xyxy(), boxes.conf());
+    let corners = |i| {
+        let [x1, y1, x2, y2] = [0, 1, 2, 3].map(|k| b[[i, k]]);
+        [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+    };
+    (0..boxes.len())
+        .map(|i| (corners(i), conf[i], false))
+        .collect()
 }
 
-/// Crop an axis-aligned box, truncated to whole pixels and clipped to the image, as Ultralytics
-/// `save_one_box` does with no gain or padding.
+/// Crop an axis-aligned box like Ultralytics `save_one_box` with no gain or padding: `xyxy ->
+/// xywh -> xyxy` in f32, truncated toward zero and clipped to the image.
 fn crop_box(src: &RgbImage, p: Polygon) -> RgbImage {
-    let (x1, y1, x2, y2) = (p[0][0], p[0][1], p[2][0], p[2][1]);
-    // `xyxy -> xywh -> xyxy` in f32, then truncated toward zero.
+    let ([x1, y1], [x2, y2]) = (p[0], p[2]);
     let (cx, cy, w, h) = ((x1 + x2) / 2.0, (y1 + y2) / 2.0, x2 - x1, y2 - y1);
-    let clip = |v: f32, max: u32| (v.trunc().max(0.0) as u32).min(max);
-    let (left, top) = (
-        clip(cx - w / 2.0, src.width()),
-        clip(cy - h / 2.0, src.height()),
-    );
-    let (right, bottom) = (
-        clip(cx + w / 2.0, src.width()),
-        clip(cy + h / 2.0, src.height()),
-    );
-    imageops::crop_imm(
-        src,
-        left,
-        top,
-        right.saturating_sub(left),
-        bottom.saturating_sub(top),
-    )
-    .to_image()
+    // `as u32` truncates and stops at 0, and `crop_imm` clips the rest to the image.
+    let [left, top, right, bottom] =
+        [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0].map(|v| v as u32);
+    let (width, height) = (right.saturating_sub(left), bottom.saturating_sub(top));
+    imageops::crop_imm(src, left, top, width, height).to_image()
 }
 
 /// Warp an oriented box upright into a crop, as Ultralytics `save_one_box` does: the edge
@@ -368,28 +329,17 @@ fn crop_obb(src: &RgbImage, corners: Polygon) -> RgbImage {
     // `p[j] = corners[(j + end - 2) % 4]`, with `end` the corner ending the longest leftward run.
     let run = |i: usize| corners[(i + 3) % 4][0] - corners[i][0];
     let end = (1..4).fold(0, |best, i| if run(i) > run(best) { i } else { best });
-    let p = |j: usize| corners[(j + end + 2) % 4];
+    let [p0, p1, p2, _] = std::array::from_fn(|j| corners[(j + end + 2) % 4]);
     let side = |a: [f32; 2], b: [f32; 2]| {
         let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
         ((dx * dx + dy * dy).sqrt().round_ties_even() as u32).max(1)
     };
-    let (w, h) = (side(p(0), p(3)), side(p(0), p(1)));
+    let (w, h) = (side(p0, corners[(end + 1) % 4]), side(p0, p1));
     // The inverse map from the crop to the source: (0, 0) -> p2, (w, 0) -> p1, (w, h) -> p0.
-    let (p0, p1, p2) = (
-        p(0).map(f64::from),
-        p(1).map(f64::from),
-        p(2).map(f64::from),
-    );
+    let [p0, p1, p2] = [p0, p1, p2].map(|p| p.map(f64::from));
     let (wf, hf) = (f64::from(w), f64::from(h));
-    let m = [
-        (p1[0] - p2[0]) / wf,
-        (p0[0] - p1[0]) / hf,
-        p2[0],
-        (p1[1] - p2[1]) / wf,
-        (p0[1] - p1[1]) / hf,
-        p2[1],
-    ]
-    .map(|v| v as f32);
+    let row = |k: usize| [(p1[k] - p2[k]) / wf, (p0[k] - p1[k]) / hf, p2[k]].map(|v| v as f32);
+    let (mx, my) = (row(0), row(1));
     let (sw, sh) = (i64::from(src.width()), i64::from(src.height()));
     let pixel = |x: i64, y: i64| {
         if (0..sw).contains(&x) && (0..sh).contains(&y) {
@@ -401,26 +351,18 @@ fn crop_obb(src: &RgbImage, corners: Polygon) -> RgbImage {
     let simd = w - w % 16;
     RgbImage::from_fn(w, h, |x, y| {
         let (xf, yf) = (x as f32, y as f32);
-        let (sx, sy) = if x < simd {
-            (
-                m[0].mul_add(xf, yf * m[1] + m[2]),
-                m[3].mul_add(xf, yf * m[4] + m[5]),
-            )
-        } else {
-            (
-                xf.mul_add(m[0], yf * m[1]) + m[2],
-                xf.mul_add(m[3], yf * m[4]) + m[5],
-            )
+        let map = |m: [f32; 3]| {
+            if x < simd {
+                m[0].mul_add(xf, yf * m[1] + m[2])
+            } else {
+                xf.mul_add(m[0], yf * m[1]) + m[2]
+            }
         };
-        let (ix, iy) = (sx.floor(), sy.floor());
-        let (fx, fy) = (sx - ix, sy - iy);
-        let (ix, iy) = (ix as i64, iy as i64);
-        let (p00, p01, p10, p11) = (
-            pixel(ix, iy),
-            pixel(ix + 1, iy),
-            pixel(ix, iy + 1),
-            pixel(ix + 1, iy + 1),
-        );
+        let (sx, sy) = (map(mx), map(my));
+        let (fx, fy) = (sx - sx.floor(), sy - sy.floor());
+        let (ix, iy) = (sx.floor() as i64, sy.floor() as i64);
+        let (p00, p01) = (pixel(ix, iy), pixel(ix + 1, iy));
+        let (p10, p11) = (pixel(ix, iy + 1), pixel(ix + 1, iy + 1));
         image::Rgb(std::array::from_fn(|c| {
             let v0 = fx.mul_add(p01[c] - p00[c], p00[c]);
             let v1 = fx.mul_add(p11[c] - p10[c], p10[c]);
@@ -431,48 +373,46 @@ fn crop_obb(src: &RgbImage, corners: Polygon) -> RgbImage {
 
 /// Detection indices in reading order: polygons are grouped into lines by their center height,
 /// lines go top to bottom and each line left to right, as Ultralytics `OCR.reading_order` does.
-#[must_use]
-pub fn reading_order(polygons: &[Polygon]) -> Vec<usize> {
-    let mean_y = |p: &Polygon| f64::from((p[0][1] + p[1][1] + p[2][1] + p[3][1]) / 4.0);
-    let min_x = |p: &Polygon| p.iter().map(|c| c[0]).fold(f32::INFINITY, f32::min);
-    let height = |p: &Polygon| {
-        let ys = p.map(|c| c[1]);
-        f64::from(
-            ys.iter().copied().fold(f32::MIN, f32::max)
-                - ys.iter().copied().fold(f32::MAX, f32::min),
-        )
-    };
+fn reading_order(polygons: &[Polygon]) -> Vec<usize> {
+    // (mean y, min x, height) per polygon, in f32 like the NumPy corners.
+    let keys: Vec<(f32, f32, f32)> = polygons
+        .iter()
+        .map(|p| {
+            let ys = p.map(|c| c[1]);
+            let (lo, hi) = ys
+                .iter()
+                .fold((f32::MAX, f32::MIN), |m, &y| (m.0.min(y), m.1.max(y)));
+            let min_x = p.iter().map(|c| c[0]).fold(f32::INFINITY, f32::min);
+            (ys.iter().sum::<f32>() / 4.0, min_x, hi - lo)
+        })
+        .collect();
     let mut sorted: Vec<usize> = (0..polygons.len()).collect();
     sorted.sort_by(|&a, &b| {
-        let key = |i: usize| (mean_y(&polygons[i]), min_x(&polygons[i]));
-        key(a)
-            .partial_cmp(&key(b))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        (keys[a].0, keys[a].1)
+            .partial_cmp(&(keys[b].0, keys[b].1))
+            .unwrap_or(Equal)
     });
     // (mean center height, tallest text, members) per line.
     let mut lines: Vec<(f64, f64, Vec<usize>)> = Vec::new();
     for i in sorted {
-        let (y, h) = (mean_y(&polygons[i]), height(&polygons[i]));
+        let (y, h) = (f64::from(keys[i].0), f64::from(keys[i].2));
         match lines.last_mut() {
-            Some(line) if (y - line.0).abs() <= h.max(line.1).max(1.0) * 0.5 => {
-                let n = line.2.len() as f64;
-                line.0 = (line.0 * n + y) / (n + 1.0);
-                line.1 = line.1.max(h);
-                line.2.push(i);
+            Some((line_y, line_h, members))
+                if (y - *line_y).abs() <= h.max(*line_h).max(1.0) * 0.5 =>
+            {
+                let n = members.len() as f64;
+                *line_y = (*line_y * n + y) / (n + 1.0);
+                *line_h = line_h.max(h);
+                members.push(i);
             }
             _ => lines.push((y, h, vec![i])),
         }
     }
-    lines.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    lines.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Equal));
     lines
         .into_iter()
         .flat_map(|(_, _, mut members)| {
-            members.sort_by(|&a, &b| {
-                let key = |i: usize| (min_x(&polygons[i]), i);
-                key(a)
-                    .partial_cmp(&key(b))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            members.sort_by(|&a, &b| (keys[a].1, a).partial_cmp(&(keys[b].1, b)).unwrap_or(Equal));
             members
         })
         .collect()
