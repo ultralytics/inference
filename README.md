@@ -512,7 +512,7 @@ directly, linearly between its min and max.
 
 **Tiled Inference:**
 
-Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. Set `tile` in the config like `conf` or `imgsz` and every `predict` call is tiled. Windows overlap by 20%, boxes are mapped back to the source image, and duplicates are removed per class. Detection, segmentation, semantic segmentation, depth, classification, pose and OBB models are all supported:
+Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. Set `tile` in the config like `conf` or `imgsz` and every `predict` call is tiled. Windows overlap by 20%, boxes are mapped back to the source image, and duplicates are removed per class. With a dynamic batch export, `with_batch` (CLI `--batch`) runs several windows in one inference call. Detection, segmentation, semantic segmentation, depth, classification, pose and OBB models are all supported:
 
 ```rust
 use ultralytics_inference::{InferenceConfig, YOLOModel};

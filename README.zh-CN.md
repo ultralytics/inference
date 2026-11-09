@@ -508,7 +508,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **切片推理：**
 
-大图中的小目标可以切分为互相重叠的窗口分别推理，再合并回一个结果，与 Python 的 `tile` 参数一致。像 `conf` 或 `imgsz` 一样在配置中设置 `tile` 后，每次 `predict` 调用都会切片推理。窗口重叠 20%，框会映射回原图，并按类别去除重复结果。检测、实例分割、语义分割、深度、分类、姿态和旋转框模型均受支持：
+大图中的小目标可以切分为互相重叠的窗口分别推理，再合并回一个结果，与 Python 的 `tile` 参数一致。像 `conf` 或 `imgsz` 一样在配置中设置 `tile` 后，每次 `predict` 调用都会切片推理。窗口重叠 20%，框会映射回原图，并按类别去除重复结果。使用动态 batch 导出的模型时，`with_batch`（CLI 为 `--batch`）可在一次推理中运行多个窗口。检测、实例分割、语义分割、深度、分类、姿态和旋转框模型均受支持：
 
 ```rust
 use ultralytics_inference::{InferenceConfig, YOLOModel};

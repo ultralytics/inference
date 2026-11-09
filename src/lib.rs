@@ -281,7 +281,8 @@
 //!     .with_confidence(0.5)    // Confidence threshold
 //!     .with_iou(0.45)          // NMS IoU threshold
 //!     .with_max_det(300) // Max detections per image
-//!     .with_imgsz(640, 640);   // Input image size
+//!     .with_imgsz(640, 640)    // Input image size
+//!     .with_tile(640);         // Overlapping 640 pixel windows for large images
 //! ```
 //!
 //! ## Hardware Acceleration

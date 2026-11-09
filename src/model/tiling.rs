@@ -11,10 +11,10 @@
 )]
 
 use image::{DynamicImage, GenericImageView};
-use ndarray::{Array2, Array3, Axis, aview1, s};
+use ndarray::{Array, Array2, Array3, Axis, RemoveAxis, aview1, s};
 
 use super::YOLOModel;
-use crate::error::{InferenceError, Result};
+use crate::error::Result;
 use crate::inference::InferenceConfig;
 use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
@@ -55,11 +55,11 @@ fn tuples<const K: usize>(data: &Array2<f32>, idx: &[usize]) -> Vec<([f32; K], f
 }
 
 /// Per-class NMS over the `idx` rows, returning the kept indices best first.
-fn nms(data: &Array2<f32>, idx: &[usize], rotated: bool, iou: f32, max_det: usize) -> Vec<usize> {
+fn nms(data: &Array2<f32>, idx: &[usize], rotated: bool, c: &InferenceConfig) -> Vec<usize> {
     let kept = if rotated {
-        nms_rotated_per_class(&tuples::<5>(data, idx), iou, max_det)
+        nms_rotated_per_class(&tuples::<5>(data, idx), c.iou_threshold, c.max_det)
     } else {
-        nms_per_class(&tuples::<4>(data, idx), iou, max_det)
+        nms_per_class(&tuples::<4>(data, idx), c.iou_threshold, c.max_det)
     };
     kept.into_iter().map(|k| idx[k]).collect()
 }
@@ -75,8 +75,7 @@ fn merge_rows(
     all: &[Window],
     shape: (u32, u32),
     rotated: bool,
-    iou: f32,
-    max_det: usize,
+    config: &InferenceConfig,
 ) -> Vec<usize> {
     let border = [0.0, 0.0, shape.1 as f32, shape.0 as f32];
     let ext = if rotated {
@@ -111,7 +110,7 @@ fn merge_rows(
         })
         .collect();
     let (lone, valid): (Vec<usize>, Vec<usize>) = (0..ext.len()).partition(|&i| fragment[i]);
-    let mut keep = nms(data, &valid, rotated, iou, max_det);
+    let mut keep = nms(data, &valid, rotated, config);
     if lone.is_empty() {
         return keep;
     }
@@ -130,10 +129,10 @@ fn merge_rows(
     };
     let restored: Vec<usize> = lone.into_iter().filter(uncovered).collect();
     keep.extend(restored);
-    nms(data, &keep, rotated, iou, max_det)
+    nms(data, &keep, rotated, config)
 }
 
-/// Offset every tile's boxes (with pose keypoints) or oriented boxes to source coordinates, merge
+/// Offset every tile's boxes, masks, pose keypoints or oriented boxes to source coordinates, merge
 /// them with [`merge_rows`] and store the result in `out`.
 fn merge_detections(
     out: &mut Results,
@@ -143,8 +142,16 @@ fn merge_detections(
     config: &InferenceConfig,
 ) {
     let shape = out.orig_shape;
-    let (mut parts, mut wins, mut src) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut parts, mut kpts, mut masks, mut wins) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for (t, win) in tiles.iter().zip(windows) {
+        // Pose emits empty keypoints with no boxes when a tile finds nothing.
+        if let Some(k) = &t.keypoints {
+            let mut k = k.data.clone();
+            let mut xy = k.slice_mut(s![.., .., ..2]);
+            xy += &aview1(&[win[0] as f32, win[1] as f32]);
+            kpts.push(k);
+        }
         let data = if rotated {
             t.obb.as_ref().map(|o| &o.data)
         } else {
@@ -155,65 +162,37 @@ fn merge_detections(
         for k in 0..if rotated { 2 } else { 4 } {
             d.column_mut(k).mapv_inplace(|v| v + win[k % 2] as f32);
         }
+        if let Some(m) = &t.masks {
+            masks.extend(m.data.outer_iter());
+        }
         wins.extend(std::iter::repeat_n(*win, d.nrows()));
-        src.extend((0..d.nrows()).map(|i| (t, i)));
         parts.push(d);
     }
-    let views: Vec<_> = parts.iter().map(|p| p.view()).collect();
-    let data = ndarray::concatenate(Axis(0), &views)
-        .unwrap_or_else(|_| Array2::zeros((0, if rotated { 7 } else { 6 })));
-    let keep = merge_rows(
-        &data,
-        &wins,
-        windows,
-        shape,
-        rotated,
-        config.iou_threshold,
-        config.max_det,
-    );
+    let data = stack(&parts).unwrap_or_else(|| Array2::zeros((0, if rotated { 7 } else { 6 })));
+    let keep = merge_rows(&data, &wins, windows, shape, rotated, config);
     let merged = data.select(Axis(0), &keep);
     if rotated {
         out.obb = Some(Obb::new(merged, shape));
     } else {
         out.boxes = Some(Boxes::new(merged, shape));
     }
-    if let Some(k0) = &tiles[0].keypoints {
-        let (_, nk, kd) = k0.data.dim();
-        let mut k = Array3::<f32>::zeros((keep.len(), nk, kd));
-        for (o, &i) in keep.iter().enumerate() {
-            let (t, row) = src[i];
-            let Some(kpts) = &t.keypoints else { continue };
-            let mut dst = k.index_axis_mut(Axis(0), o);
-            dst.assign(&kpts.data.index_axis(Axis(0), row));
-            let mut xy = dst.slice_mut(s![.., ..2]);
-            xy += &aview1(&[wins[i][0] as f32, wins[i][1] as f32]);
-        }
-        out.keypoints = Some(Keypoints::new(k, shape));
-    }
-    out.masks = merge_masks(tiles, &wins, &src, &keep, shape);
-}
-
-/// Place the kept instance masks, each at its window origin, in a source-sized stack.
-fn merge_masks(
-    tiles: &[Results],
-    wins: &[Window],
-    src: &[(&Results, usize)],
-    keep: &[usize],
-    shape: (u32, u32),
-) -> Option<Masks> {
-    tiles.iter().any(|t| t.masks.is_some()).then(|| {
-        let mut data = Array3::<f32>::zeros((keep.len(), shape.0 as usize, shape.1 as usize));
+    out.keypoints = stack(&kpts).map(|k| Keypoints::new(k.select(Axis(0), &keep), shape));
+    // Each kept mask goes at its window origin in a source-sized stack.
+    out.masks = tiles.iter().any(|t| t.masks.is_some()).then(|| {
+        let mut data = Array3::zeros((keep.len(), shape.0 as usize, shape.1 as usize));
         for (o, &k) in keep.iter().enumerate() {
-            let Some(mask) = &src[k].0.masks else {
-                continue;
-            };
-            let m = mask.data.index_axis(Axis(0), src[k].1);
-            let (x, y) = (wins[k][0] as usize, wins[k][1] as usize);
+            let (m, [x, y, ..]) = (&masks[k], wins[k].map(|v| v as usize));
             data.slice_mut(s![o, y..y + m.nrows(), x..x + m.ncols()])
-                .assign(&m);
+                .assign(m);
         }
         Masks::new(data, shape)
-    })
+    });
+}
+
+/// Join tile arrays along their first axis, `None` when there are none.
+fn stack<D: RemoveAxis>(parts: &[Array<f32, D>]) -> Option<Array<f32, D>> {
+    let views: Vec<_> = parts.iter().map(|p| p.view()).collect();
+    ndarray::concatenate(Axis(0), &views).ok()
 }
 
 /// Stitch dense per-pixel tile outputs. Every window is weighted by its distance to the window
@@ -255,7 +234,9 @@ fn merge_dense(out: &mut Results, tiles: &[Results], windows: &[Window], semanti
 }
 
 /// Merge the tile results of `task` into `out`, which holds the source image, as
-/// `Results.merge_tiles` does in Ultralytics.
+/// `Results.merge_tiles` does in Ultralytics. Detection, segmentation, pose and oriented boxes go
+/// through [`merge_detections`], semantic and depth maps through [`merge_dense`], and
+/// classification averages the tile probabilities.
 fn merge_tiles(
     out: &mut Results,
     task: Task,
@@ -281,15 +262,9 @@ fn merge_tiles(
 }
 
 impl YOLOModel {
-    /// Run inference on overlapping windows of a large image and merge them back into one result
-    /// in source coordinates, like the Ultralytics `tile` argument. Windows are the configured
-    /// `tile` square, or the inference size when it is `0`.
-    ///
-    /// Windows overlap by 20% and the last window in each direction is aligned to the image edge.
-    /// Detection boxes are offset to source coordinates and merged with NMS using the configured
-    /// `IoU` and `max_det`, and segmentation places the kept masks in the source image. Semantic
-    /// maps keep the most central tile per pixel, depth maps blend the overlaps, classification
-    /// averages the tile probabilities, and pose and oriented boxes merge like detection.
+    /// Run inference on [`tile_windows`] of a large image and merge them back into one result in
+    /// source coordinates with [`merge_tiles`], like the Ultralytics `tile` argument. Windows are
+    /// the configured `tile` square, or the inference size when it is `0`.
     ///
     /// # Errors
     ///
@@ -299,11 +274,9 @@ impl YOLOModel {
         image: &DynamicImage,
         path: String,
     ) -> Result<Vec<Results>> {
+        let (th, tw) = self.imgsz();
         let size = match self.config.tile.unwrap_or_default() {
-            0 => {
-                let (th, tw) = self.imgsz();
-                (th as u32, tw as u32)
-            }
+            0 => (th as u32, tw as u32),
             tile => (tile, tile),
         };
         let (w, h) = image.dimensions();
@@ -321,11 +294,8 @@ impl YOLOModel {
                 .map(|&[x1, y1, x2, y2]| image.crop_imm(x1, y1, x2 - x1, y2 - y1))
                 .collect();
             let refs: Vec<_> = crops.iter().collect();
-            for mut r in self.predict_internal(&refs, &vec![path.clone(); crops.len()])? {
-                tiles.push(r.pop().ok_or_else(|| {
-                    InferenceError::InferenceError("tile returned no result".into())
-                })?);
-            }
+            let results = self.predict_internal(&refs, &vec![path.clone(); crops.len()])?;
+            tiles.extend(results.into_iter().flatten());
         }
 
         let mut out = tiles[0].clone();
@@ -351,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_tile_windows_match_the_documented_counts() {
-        // Counts from the Ultralytics tiling guide: 1920x1080 at 640 and 3840x2160 at 1280 both run 8.
+        // Ultralytics tiling guide counts: 1920x1080 at 640 and 3840x2160 at 1280 both run 8.
         assert_eq!(tile_windows(1080, 1920, (640, 640)).len(), 8);
         assert_eq!(tile_windows(2160, 3840, (1280, 1280)).len(), 8);
         // The last window is aligned to the edge and the others step by round(0.8 * size).
@@ -371,24 +341,6 @@ mod tests {
         assert_eq!(tile_windows(640, 640, (640, 640)), [[0, 0, 640, 640]]);
     }
 
-    #[test]
-    fn test_merge_drops_a_cut_fragment_only_when_another_window_sees_it_whole() {
-        // Two 100x100 windows overlapping on x = 50..100 of a 150x100 image. A person cut by the
-        // first window's right edge (x = 100) goes when the second window sees it whole, and stays
-        // when nothing else covers it.
-        let windows = [[0, 0, 100, 100], [50, 0, 150, 100]];
-        let rows = ndarray::array![
-            [60.0, 10.0, 100.0, 90.0, 0.9, 0.0], // cut
-            [60.0, 10.0, 110.0, 90.0, 0.8, 0.0], // whole
-        ];
-        let merge = |n: usize| {
-            let rows = rows.slice(s![..n, ..]).to_owned();
-            merge_rows(&rows, &windows[..n], &windows, (100, 150), false, 0.5, 300)
-        };
-        assert_eq!(merge(2), [1]);
-        assert_eq!(merge(1), [0]);
-    }
-
     fn blank(h: u32, w: u32) -> Results {
         Results::new(
             Array3::zeros((h as usize, w as usize, 3)),
@@ -397,21 +349,6 @@ mod tests {
             crate::results::Speed::default(),
             (h, w),
         )
-    }
-
-    #[test]
-    fn test_masks_land_at_their_window_offset() {
-        let windows = [[0, 0, 4, 2], [3, 0, 7, 2]];
-        let mut tiles = [blank(2, 4), blank(2, 4)];
-        tiles[1].masks = Some(Masks::new(Array3::ones((1, 2, 4)), (2, 4)));
-        let src = [(&tiles[1], 0)];
-        let wins = [windows[1]];
-        let masks = merge_masks(&tiles, &wins, &src, &[0], (2, 7)).unwrap();
-        assert_eq!(masks.data.shape(), [1, 2, 7]);
-        assert_eq!(
-            masks.data.index_axis(Axis(0), 0).row(0).to_vec(),
-            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
-        );
     }
 
     #[test]
@@ -443,37 +380,55 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_tiles_averages_probs_and_offsets_keypoints_and_oriented_boxes() {
-        // The same windows as the cut fragment test. The first window sees an object cut at x = 100
-        // that the second sees whole, so only the second copy is kept, moved by the window origin.
+    fn test_merge_tiles_offsets_every_task_and_drops_cut_fragments() {
+        // Two 100x100 windows overlapping on x = 50..100 of a 150x100 image. The first window
+        // sees an object cut by its right edge (x = 100) and the second sees it whole, so only
+        // the second copy is kept, moved by its window origin. Alone, the cut copy stays.
         let windows = [[0, 0, 100, 100], [50, 0, 150, 100]];
         let config = InferenceConfig::default();
         let mut tiles = [blank(100, 100), blank(100, 100)];
-        tiles[0].probs = Some(Probs::new(arr1(&[0.2, 0.8])));
-        tiles[1].probs = Some(Probs::new(arr1(&[0.6, 0.4])));
         for (t, cx) in tiles.iter_mut().zip([80.0, 35.0]) {
-            let (x1, x2) = (cx - 20.0, cx + 20.0);
-            let row = [[x1, 10.0, x2, 90.0, 0.9, 0.0]];
+            let row = [[cx - 20.0, 10.0, cx + 20.0, 90.0, 0.9, 0.0]];
             t.boxes = Some(Boxes::new(arr2(&row), (100, 100)));
-            let kpts = arr3(&[[[cx, 50.0, 1.0]]]);
-            t.keypoints = Some(Keypoints::new(kpts, (100, 100)));
+            t.masks = Some(Masks::new(Array3::ones((1, 100, 100)), (100, 100)));
+            t.probs = Some(Probs::new(arr1(&[cx, 1.0])));
+            t.keypoints = Some(Keypoints::new(arr3(&[[[cx, 50.0, 1.0]]]), (100, 100)));
             let row = [[cx, 50.0, 40.0, 80.0, 0.0, 0.9, 0.0]];
             t.obb = Some(Obb::new(arr2(&row), (100, 100)));
         }
-
-        let mut out = blank(100, 150);
-        merge_tiles(&mut out, Task::Classify, &tiles, &windows, &config);
-        assert_eq!(out.probs.as_ref().unwrap().data, arr1(&[0.4, 0.6]));
-        merge_tiles(&mut out, Task::Pose, &tiles, &windows, &config);
-        let boxes = arr2(&[[65.0, 10.0, 105.0, 90.0, 0.9, 0.0]]);
-        assert_eq!(out.boxes.as_ref().unwrap().data, boxes);
+        let merge = |task, n: usize| {
+            let mut out = blank(100, 150);
+            merge_tiles(&mut out, task, &tiles[..n], &windows[..n], &config);
+            out
+        };
+        let boxes = |r: Results| r.boxes.unwrap().data.into_raw_vec_and_offset().0;
         assert_eq!(
-            out.keypoints.as_ref().unwrap().data,
-            arr3(&[[[85.0, 50.0, 1.0]]])
+            boxes(merge(Task::Detect, 2)),
+            [65.0, 10.0, 105.0, 90.0, 0.9, 0.0]
         );
-        merge_tiles(&mut out, Task::Obb, &tiles, &windows, &config);
-        let obb = arr2(&[[85.0, 50.0, 40.0, 80.0, 0.0, 0.9, 0.0]]);
-        assert_eq!(out.obb.unwrap().data, obb);
+        assert_eq!(
+            boxes(merge(Task::Detect, 1)),
+            [60.0, 10.0, 100.0, 90.0, 0.9, 0.0]
+        );
+        let masks = merge(Task::Segment, 2).masks.unwrap().data;
+        assert_eq!(
+            (masks.shape(), masks[[0, 0, 49]], masks.sum()),
+            (&[1, 100, 150][..], 0.0, 1e4)
+        );
+        assert_eq!(
+            merge(Task::Classify, 2).probs.unwrap().data,
+            arr1(&[57.5, 1.0])
+        );
+        let pose = merge(Task::Pose, 2).keypoints.unwrap().data;
+        assert_eq!(pose, arr3(&[[[85.0, 50.0, 1.0]]]));
+        // A pose tile that finds nothing has no boxes but still an empty keypoints array.
+        let mut empty = [blank(100, 100)];
+        empty[0].keypoints = Some(Keypoints::new(Array3::zeros((0, 1, 3)), (100, 100)));
+        let mut out = blank(100, 150);
+        merge_tiles(&mut out, Task::Pose, &empty, &windows[..1], &config);
+        assert_eq!(out.keypoints.unwrap().data.shape(), [0, 1, 3]);
+        let obb = merge(Task::Obb, 2).obb.unwrap().data;
+        assert_eq!(obb, arr2(&[[85.0, 50.0, 40.0, 80.0, 0.0, 0.9, 0.0]]));
     }
 
     /// Bus photo at `tile=320` against Ultralytics 8.4.207 (`xyxy`, confidence, class), keeping
