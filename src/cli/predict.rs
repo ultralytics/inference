@@ -526,21 +526,30 @@ fn build_inference_config(
 static STOP: AtomicBool = AtomicBool::new(false);
 
 /// While `on`, the first Ctrl+C sets [`STOP`] instead of killing the process, like the `finally`
-/// that releases the video writers in Ultralytics, and a second one exits. Off restores the default.
+/// that releases the video writers in Ultralytics, and a second one exits. Off restores the
+/// handler that was there before.
 #[allow(unsafe_code)]
 fn stop_on_ctrl_c(on: bool) {
     #[cfg(unix)]
     {
+        type Handler = Option<extern "C" fn(i32)>;
         const SIGINT: i32 = 2;
-        // SAFETY: the libc signature, `None` is `SIG_DFL`, and both calls are async-signal-safe.
+        static PREV: Mutex<Handler> = Mutex::new(None);
+        // SAFETY: the libc signature with `None` as `SIG_DFL`; both calls are async-signal-safe.
+        // `SIG_IGN` comes back as a non-null value that is only ever handed back to `signal`.
         unsafe extern "C" {
-            safe fn signal(signum: i32, handler: Option<extern "C" fn(i32)>) -> usize;
+            safe fn signal(signum: i32, handler: Handler) -> Handler;
         }
         extern "C" fn handle(_: i32) {
             STOP.store(true, Ordering::Relaxed);
             signal(SIGINT, None);
         }
-        signal(SIGINT, on.then_some(handle as extern "C" fn(i32)));
+        let mut prev = PREV.lock().unwrap_or_else(PoisonError::into_inner);
+        if on {
+            *prev = signal(SIGINT, Some(handle));
+        } else {
+            signal(SIGINT, prev.take());
+        }
     }
     #[cfg(windows)]
     {
