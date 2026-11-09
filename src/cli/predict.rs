@@ -256,16 +256,13 @@ pub fn run_prediction(args: &PredictArgs) {
         let (lock, ready) = &*latest;
         let mut state = lock.lock().unwrap_or_else(PoisonError::into_inner);
         while state.0.is_none() && !state.1 && !STOP.load(Ordering::Relaxed) {
-            state = ready
+            (state, _) = ready
                 .wait_timeout(state, tick)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
+                .unwrap_or_else(PoisonError::into_inner);
         }
         state.0.take()
     });
 
-    // Set when the viewer is closed or on Ctrl+C; stops reading the source, which also stops the
-    // decoder, and lets queued saves and the video trailer finish.
     STOP.store(false, Ordering::Relaxed);
     stop_on_ctrl_c();
 
@@ -523,7 +520,8 @@ fn build_inference_config(
     Ok(config)
 }
 
-/// Set by Ctrl+C or a closed viewer to end the run after the current batch.
+/// Set by Ctrl+C or a closed viewer to stop reading the source, so queued saves and the video
+/// trailer still finish.
 static STOP: AtomicBool = AtomicBool::new(false);
 
 /// Make the first Ctrl+C set [`STOP`] instead of killing the process, like the `finally` that
@@ -532,13 +530,12 @@ static STOP: AtomicBool = AtomicBool::new(false);
 fn stop_on_ctrl_c() {
     #[cfg(unix)]
     {
-        use std::ffi::c_int;
-        const SIGINT: c_int = 2;
-        // SAFETY: the libc signature, with `None` as `SIG_DFL`; both handlers are async-signal-safe.
+        const SIGINT: i32 = 2;
+        // SAFETY: the libc signature, `None` is `SIG_DFL`, and both calls are async-signal-safe.
         unsafe extern "C" {
-            safe fn signal(signum: c_int, handler: Option<extern "C" fn(c_int)>) -> usize;
+            safe fn signal(signum: i32, handler: Option<extern "C" fn(i32)>) -> usize;
         }
-        extern "C" fn handle(_: c_int) {
+        extern "C" fn handle(_: i32) {
             STOP.store(true, Ordering::Relaxed);
             signal(SIGINT, None);
         }
@@ -546,14 +543,13 @@ fn stop_on_ctrl_c() {
     }
     #[cfg(windows)]
     {
-        // SAFETY: the kernel32 signature, which std always links on Windows.
+        // SAFETY: the kernel32 signature; std always links kernel32.
         unsafe extern "system" {
             safe fn SetConsoleCtrlHandler(
                 handler: Option<extern "system" fn(u32) -> i32>,
                 add: i32,
             ) -> i32;
         }
-        // Handled the first time; the second falls through to the default exit.
         extern "system" fn handle(_: u32) -> i32 {
             i32::from(!STOP.swap(true, Ordering::Relaxed))
         }
