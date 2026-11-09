@@ -147,6 +147,9 @@ pub struct InferenceConfig {
     /// Whether to use minimal padding (rectangular inference). Defaults to `true`. RT-DETR and depth
     /// models stretch to a square input instead, so they ignore it.
     pub rect: bool,
+    /// Tile size in pixels for overlapping-window inference on large images, like the Ultralytics `tile`
+    /// argument. `Some(0)` tiles at the inference size. Defaults to `None` (no tiling).
+    pub tile: Option<u32>,
     /// Class IDs to filter predictions. If `None`, all classes are returned.
     /// Useful for focusing on specific objects in multi-class detection tasks.
     pub classes: Option<Vec<usize>>,
@@ -182,6 +185,7 @@ impl Default for InferenceConfig {
             save: Self::DEFAULT_SAVE,
             save_frames: Self::DEFAULT_SAVE_FRAMES,
             rect: Self::DEFAULT_RECT,
+            tile: None,
             classes: None,
             cuda_preprocess: Self::DEFAULT_CUDA_PREPROCESS,
             cuda_memory_limit: None,
@@ -448,6 +452,17 @@ impl InferenceConfig {
         self
     }
 
+    /// Run predictions on overlapping windows of `tile` pixels and merge them, `0` uses the inference size.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_tile(mut self, tile: u32) -> Self {
+        self.tile = Some(tile);
+        self
+    }
+
     /// Set the class IDs to filter predictions.
     ///
     /// Only detections belonging to the specified classes will be returned.
@@ -526,6 +541,8 @@ mod tests {
         assert!((config.confidence_threshold - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
         assert!((config.iou_threshold - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
         assert_eq!(config.max_det, 300);
+        assert_eq!(config.tile, None);
+        assert_eq!(config.with_tile(0).tile, Some(0));
     }
 
     #[test]

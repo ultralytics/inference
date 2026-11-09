@@ -222,6 +222,9 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes 
 # With visualization and custom image size
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
 
+# Tiled inference for large images, small objects and video frames (20% window overlap, results merged)
+ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 640
+
 # Save individual frames for video input
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -244,7 +247,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.56 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -264,7 +267,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.56 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -304,6 +307,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--max-det`          |       | Maximum number of detections                                                                                                                                                                                                 | `300`                                                                        |
 | `--imgsz`            |       | Inference image size                                                                                                                                                                                                         | model metadata                                                               |
 | `--rect [<BOOL>]`    |       | Enable rectangular inference (minimal padding)                                                                                                                                                                               | `true`                                                                       |
+| `--tile [<TILE>]`    |       | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz`                                                                                                                                                     | off                                                                          |
 | `--batch`            |       | Batch size for inference                                                                                                                                                                                                     | `1`                                                                          |
 | `--quantize`         |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`                                                                                                                | Model precision                                                              |
 | `--save [<BOOL>]`    |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                                              | `true`                                                                       |
@@ -371,7 +375,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.56"
+ultralytics-inference = "0.0.57"
 ```
 
 ```toml
@@ -506,6 +510,19 @@ depth spends the color range on nearby detail rather than the distant background
 objects read warm and a few stray pixels cannot wash out the rest. `metric` colors depth
 directly, linearly between its min and max.
 
+**Tiled Inference:**
+
+Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. Set `tile` in the config like `conf` or `imgsz` and every `predict` call is tiled. Windows overlap by 20%, boxes are mapped back to the source image, and duplicates are removed per class. With a dynamic batch export, `with_batch` (CLI `--batch`) runs several windows in one inference call. Detection, segmentation, semantic segmentation, depth, classification, pose and OBB models are all supported:
+
+```rust
+use ultralytics_inference::{InferenceConfig, YOLOModel};
+
+// 640 pixel windows; with_tile(0) uses the inference size
+let config = InferenceConfig::new().with_tile(640);
+let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
+let results = model.predict("aerial.jpg")?;
+```
+
 **Pose Drawing:**
 
 `annotate_image_with_options` takes the keypoint options of Ultralytics `Results.plot`. A 17-keypoint (COCO-Pose)
@@ -616,7 +633,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.56", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.57", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 

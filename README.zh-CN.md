@@ -221,6 +221,9 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes 
 # 可视化并设置自定义图片尺寸
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
 
+# 对大图、小目标和视频帧进行切片推理（窗口重叠 20%，结果合并）
+ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 640
+
 # 为视频输入保存单帧
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -243,7 +246,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.56 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -263,7 +266,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.56 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -303,6 +306,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--max-det`          |      | 最大检测数量                                                                                                                                                                                 | `300`                                                           |
 | `--imgsz`            |      | 推理图片尺寸                                                                                                                                                                                 | 模型元数据                                                      |
 | `--rect [<BOOL>]`    |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
+| `--tile [<TILE>]`    |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
 | `--batch`            |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
 | `--quantize`         |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w32a32`、`w8a16` 或 `w8a32`                                                                                            | 模型精度                                                        |
 | `--save [<BOOL>]`    |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                                                       | `true`                                                          |
@@ -370,7 +374,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.56"
+ultralytics-inference = "0.0.57"
 ```
 
 ```toml
@@ -502,6 +506,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 细节而非远处背景，因此近处呈暖色，且少量离群像素不会冲淡其余部分；`metric` 则直接对深度在其
 最小值与最大值之间做线性着色。
 
+**切片推理：**
+
+大图中的小目标可以切分为互相重叠的窗口分别推理，再合并回一个结果，与 Python 的 `tile` 参数一致。像 `conf` 或 `imgsz` 一样在配置中设置 `tile` 后，每次 `predict` 调用都会切片推理。窗口重叠 20%，框会映射回原图，并按类别去除重复结果。使用动态 batch 导出的模型时，`with_batch`（CLI 为 `--batch`）可在一次推理中运行多个窗口。检测、实例分割、语义分割、深度、分类、姿态和旋转框模型均受支持：
+
+```rust
+use ultralytics_inference::{InferenceConfig, YOLOModel};
+
+// 640 像素窗口；with_tile(0) 使用推理尺寸
+let config = InferenceConfig::new().with_tile(640);
+let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
+let results = model.predict("aerial.jpg")?;
+```
+
 **姿态绘制：**
 
 `annotate_image_with_options` 接受与 Ultralytics `Results.plot` 相同的关键点选项。17 个关键点（COCO-Pose）的模型
@@ -612,7 +629,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.56", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.57", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 

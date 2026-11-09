@@ -36,6 +36,8 @@ use crate::results::{Results, Speed};
 use crate::task::Task;
 use crate::{verbose, warn};
 
+mod tiling;
+
 /// Serializes the tests that build an ORT session: providers compile into one shared
 /// cache, and two sessions building it at once collide there.
 #[cfg(test)]
@@ -1481,10 +1483,13 @@ impl YOLOModel {
     /// Vector of Results.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        let images = [image];
-        let paths = [path];
-        let mut results = self.predict_internal(&images, &paths)?;
-        let results = results.pop().unwrap_or_default();
+        let results = if self.config.tile.is_some() {
+            self.predict_tiled(image, path)?
+        } else {
+            self.predict_internal(&[image], &[path])?
+                .pop()
+                .unwrap_or_default()
+        };
         Self::log_first_result(&results);
         Ok(results)
     }
@@ -1902,6 +1907,15 @@ impl YOLOModel {
         images: &[DynamicImage],
         paths: &[String],
     ) -> Result<Vec<Vec<Results>>> {
+        if self.config.tile.is_some() {
+            return images
+                .iter()
+                .enumerate()
+                .map(|(i, image)| {
+                    self.predict_tiled(image, paths.get(i).cloned().unwrap_or_default())
+                })
+                .collect();
+        }
         // Create vector of references
         let image_refs: Vec<&DynamicImage> = images.iter().collect();
         self.predict_internal(&image_refs, paths)

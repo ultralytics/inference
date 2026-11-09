@@ -86,6 +86,8 @@
 //!
 //! # Select task: auto-downloads the matching nano model
 //! ultralytics-inference predict --task segment
+//! ultralytics-inference predict --task semantic
+//! ultralytics-inference predict --task depth
 //! ultralytics-inference predict --task classify
 //! ultralytics-inference predict --task pose
 //! ultralytics-inference predict --task obb
@@ -130,6 +132,7 @@
 //! | `--max-det` | | Maximum number of detections | `300` |
 //! | `--imgsz` | | Inference image size | Model metadata |
 //! | `--rect [<BOOL>]` | | Enable rectangular inference (minimal padding) | `true` |
+//! | `--tile [<TILE>]` | | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz` | off |
 //! | `--batch` | | Batch size for inference | `1` |
 //! | `--quantize` | | Inference precision (`8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`) | Model precision |
 //! | `--save [<BOOL>]` | | Save annotated results to runs/\<task\>/predict | `true` |
@@ -162,20 +165,20 @@
 //! # Segmentation
 //! yolo export model=yolo26n-seg.pt format=onnx
 //!
-//! # Pose Estimation
-//! yolo export model=yolo26n-pose.pt format=onnx
-//!
-//! # Classification
-//! yolo export model=yolo26n-cls.pt format=onnx
-//!
-//! # Oriented Bounding Boxes
-//! yolo export model=yolo26n-obb.pt format=onnx
-//!
 //! # Semantic Segmentation (YOLO26 only)
 //! yolo export model=yolo26n-sem.pt format=onnx
 //!
 //! # Depth Estimation (YOLO26 only)
 //! yolo export model=yolo26n-depth.pt format=onnx
+//!
+//! # Classification
+//! yolo export model=yolo26n-cls.pt format=onnx
+//!
+//! # Pose Estimation
+//! yolo export model=yolo26n-pose.pt format=onnx
+//!
+//! # Oriented Bounding Boxes
+//! yolo export model=yolo26n-obb.pt format=onnx
 //!
 //! # RT-DETR (detection only; no prebuilt ONNX to download, so export it yourself)
 //! yolo export model=rtdetr-l.pt format=onnx
@@ -280,7 +283,8 @@
 //!     .with_confidence(0.5)    // Confidence threshold
 //!     .with_iou(0.45)          // NMS IoU threshold
 //!     .with_max_det(300) // Max detections per image
-//!     .with_imgsz(640, 640);   // Input image size
+//!     .with_imgsz(640, 640)    // Input image size
+//!     .with_tile(640);         // Overlapping 640 pixel windows for large images
 //! ```
 //!
 //! ## Hardware Acceleration

@@ -18,6 +18,7 @@ use clap::{Args, Parser, Subcommand};
     --max-det <MAX_DET>    Maximum number of detections [default: 300]
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
     --rect [<BOOL>]        Enable rectangular inference (minimal padding) [default: true]
+    --tile [<TILE>]        Tile size for overlapping-window inference (bare uses --imgsz)
     --batch <BATCH>        Batch size for inference [default: 1]
     --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w32a32, w8a16, or w8a32
     --save [<BOOL>]        Save annotated images to runs/<task>/predict [default: true]
@@ -94,6 +95,10 @@ pub struct PredictArgs {
     /// Enable minimal padding (rectangular inference)
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_RECT, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
     pub rect: bool,
+
+    /// Tile size for overlapping-window inference on large images (bare `--tile` uses `--imgsz`)
+    #[arg(long, num_args = 0..=1, default_missing_value = "0")]
+    pub tile: Option<u32>,
 
     /// Batch size for inference
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
