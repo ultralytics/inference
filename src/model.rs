@@ -1910,8 +1910,10 @@ impl YOLOModel {
         if self.config.tile.is_some() {
             return images
                 .iter()
-                .zip(paths)
-                .map(|(image, path)| self.predict_tiled(image, path.clone()))
+                .enumerate()
+                .map(|(i, image)| {
+                    self.predict_tiled(image, paths.get(i).cloned().unwrap_or_default())
+                })
                 .collect();
         }
         // Create vector of references
