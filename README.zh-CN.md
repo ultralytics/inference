@@ -221,6 +221,9 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes 
 # 可视化并设置自定义图片尺寸
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
 
+# 对大图、小目标和视频帧进行切片推理（窗口重叠 20%，结果合并）
+ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 640
+
 # 为视频输入保存单帧
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -303,6 +306,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--max-det`          |      | 最大检测数量                                                                                                                                                                                 | `300`                                                           |
 | `--imgsz`            |      | 推理图片尺寸                                                                                                                                                                                 | 模型元数据                                                      |
 | `--rect [<BOOL>]`    |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
+| `--tile [<TILE>]`    |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
 | `--batch`            |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
 | `--quantize`         |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w32a32`、`w8a16` 或 `w8a32`                                                                                            | 模型精度                                                        |
 | `--save [<BOOL>]`    |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                                                       | `true`                                                          |
@@ -501,6 +505,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `disparity` 着色的是 `1/d` 而非 `d`，并裁剪到第 2 至第 98 百分位。取倒数后色彩范围会集中在近处
 细节而非远处背景，因此近处呈暖色，且少量离群像素不会冲淡其余部分；`metric` 则直接对深度在其
 最小值与最大值之间做线性着色。
+
+**切片推理：**
+
+大图中的小目标可以切分为互相重叠的窗口分别推理，再合并回一个结果，与 Python 的 `tile` 参数一致。像 `conf` 或 `imgsz` 一样在配置中设置 `tile` 后，每次 `predict` 调用都会切片推理。窗口重叠 20%，框会映射回原图，并按类别去除重复结果。检测、实例分割、姿态、旋转框、分类、语义分割和深度模型均受支持：
+
+```rust
+use ultralytics_inference::{InferenceConfig, YOLOModel};
+
+// 640 像素窗口；with_tile(0) 使用推理尺寸
+let config = InferenceConfig::new().with_tile(640);
+let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
+let results = model.predict("aerial.jpg")?;
+```
 
 **姿态绘制：**
 
