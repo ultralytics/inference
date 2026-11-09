@@ -20,6 +20,7 @@ use clap::{Args, Parser, Subcommand};
     --rect [<BOOL>]        Enable rectangular inference (minimal padding) [default: true]
     --tile [<TILE>]        Tile size for overlapping-window inference (bare uses --imgsz)
     --retina-masks         Build segmentation masks at the original image size [default: false]
+    --ocr                  Read the text in each detection with PaddleOCR [default model: yolo26n-text]
     --batch <BATCH>        Batch size for inference [default: 1]
     --quantize <QUANTIZE>  Precision: 8, 16, 32, int8, fp16, fp32, w8a8, w16a16, w32a32, w8a16, or w8a32
     --save [<BOOL>]        Save annotated images to runs/<task>/predict [default: true]
@@ -38,6 +39,7 @@ Examples:
     ultralytics-inference predict --task classify --source image.jpg
     ultralytics-inference predict --task pose
     ultralytics-inference predict --task obb --source aerial.jpg
+    ultralytics-inference predict --ocr --source sign.jpg
     ultralytics-inference predict --model yolo26n.onnx --source image.jpg
     ultralytics-inference predict --source video.mp4 --rect
     ultralytics-inference predict --source video.mp4 --save-frames
@@ -104,6 +106,11 @@ pub struct PredictArgs {
     /// Build segmentation masks at the original image size
     #[arg(long, default_value_t = false)]
     pub retina_masks: bool,
+
+    /// Read the text in each box or oriented box with `PaddleOCR`; without `--model` this runs the
+    /// yolo26n-text detector
+    #[arg(long, default_value_t = false)]
+    pub ocr: bool,
 
     /// Batch size for inference
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]

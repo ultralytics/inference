@@ -19,11 +19,12 @@ const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11", "yolov8"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 /// Variants only available for the yolo26 family.
-const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth"];
+const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth", "-text"];
 
 /// Every auto-downloadable model filename, as the cross product of family, size, and variant.
 ///
-/// `-sem` and `-depth` are only emitted for the `yolo26` family.
+/// `-sem`, `-depth` and `-text` are only emitted for the `yolo26` family, followed by the
+/// `PaddleOCR` models that read text.
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES
         .iter()
@@ -40,6 +41,13 @@ fn downloadable_models() -> Vec<String> {
                     .map(move |variant| format!("{family}{size}{variant}.onnx"))
             })
         })
+        .chain(
+            [
+                crate::ocr::DEFAULT_RECOGNIZER,
+                crate::ocr::DEFAULT_ORIENTATION,
+            ]
+            .map(String::from),
+        )
         .collect()
 }
 
@@ -53,6 +61,7 @@ fn supported_models_help() -> String {
         "-cls",
         "-pose",
         "-obb",
+        "-text (yolo26 only, OBB text detectors for --ocr)",
     ];
     let sizes_display = MODEL_SIZES.join(", ");
     let variants_joined = variants_display.join(", ");
@@ -496,6 +505,9 @@ mod tests {
         // `-sem` and `-depth` are yolo26-only variants.
         assert!(models.iter().any(|m| m == "yolo26n-sem.onnx"));
         assert!(models.iter().any(|m| m == "yolo26n-depth.onnx"));
+        assert!(models.iter().any(|m| m == "yolo26x-text.onnx"));
+        assert!(models.iter().any(|m| m == crate::ocr::DEFAULT_RECOGNIZER));
+        assert!(!models.iter().any(|m| m == "yolo11n-text.onnx"));
     }
 
     #[test]

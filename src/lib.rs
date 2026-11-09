@@ -113,6 +113,9 @@
 //! # Save individual frames for video input
 //! ultralytics-inference predict --source video.mp4 --save-frames
 //!
+//! # Read scene text with YOLO26-Text and PaddleOCR
+//! ultralytics-inference predict --ocr --source sign.jpg
+//!
 //! # Show help
 //! ultralytics-inference help
 //!
@@ -134,6 +137,7 @@
 //! | `--rect [<BOOL>]` | | Enable rectangular inference (minimal padding) | `true` |
 //! | `--tile [<TILE>]` | | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz` | off |
 //! | `--retina-masks` | | Build segmentation masks at the original image size instead of the inference size | `false` |
+//! | `--ocr` | | Read the text in each box or oriented box with `PaddleOCR`; without `--model` this runs `yolo26n-text.onnx` | `false` |
 //! | `--batch` | | Batch size for inference | `1` |
 //! | `--quantize` | | Inference precision (`8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`) | Model precision |
 //! | `--save [<BOOL>]` | | Save annotated results to runs/\<task\>/predict | `true` |
@@ -337,6 +341,7 @@
 //! | Module | Description |
 //! |--------|-------------|
 //! | [`model`] | Core [`YOLOModel`] for loading models and running inference |
+//! | [`ocr`] | Scene text OCR: `PaddleOCR` recognition of YOLO26-Text detections ([`ocr::TextRecognizer`]) |
 //! | [`results`] | Output types ([`Results`], [`Boxes`], [`Masks`], etc.) |
 //! | [`inference`] | [`InferenceConfig`] for customizing inference settings |
 //! | [`source`] | Input source handling ([`Source`], [`SourceIterator`]) |
@@ -435,6 +440,8 @@ pub mod download;
 pub mod io;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod model;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ocr;
 #[cfg(all(feature = "openvino-native", not(target_arch = "wasm32")))]
 mod openvino;
 #[cfg(not(target_arch = "wasm32"))]

@@ -159,6 +159,17 @@ fn font_bytes(unicode: bool) -> Option<&'static [u8]> {
     Some(bytes.get_or_init(|| data))
 }
 
+/// The label font, Arial Unicode for non-ASCII labels; `None` while it is not available.
+fn label_font(unicode: bool) -> Option<LabelFont> {
+    font_bytes(unicode).and_then(|data| {
+        Some(LabelFont {
+            glyphs: FontRef::try_from_slice(data).ok()?,
+            face: harfrust::Font::new(data, 0)?,
+            plans: RefCell::default(),
+        })
+    })
+}
+
 /// Overlay inference results onto `image` and return the annotated copy.
 ///
 /// Draws whichever result types are present: detection boxes with instance masks,
@@ -242,14 +253,7 @@ pub fn annotate_image_with_options(
     let mut img = image.to_rgb8();
 
     let labels = result.boxes.is_some() || result.obb.is_some() || result.probs.is_some();
-    let unicode = labels && result.names.values().any(|n| !n.is_ascii());
-    let font = font_bytes(unicode).and_then(|data| {
-        Some(LabelFont {
-            glyphs: FontRef::try_from_slice(data).ok()?,
-            face: harfrust::Font::new(data, 0)?,
-            plans: RefCell::default(),
-        })
-    });
+    let font = label_font(labels && result.names.values().any(|n| !n.is_ascii()));
 
     draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref());
@@ -964,35 +968,58 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont
         for i in 0..obb.len() {
             let class_id = cls[i] as usize;
             let color = Color::for_class(&result.colors, class_id);
-            let color = Rgb([color.0, color.1, color.2]);
-
-            for j in 0..4 {
-                let next_j = (j + 1) % 4;
-                let x1 = corners[[i, j, 0]];
-                let y1 = corners[[i, j, 1]];
-                let x2 = corners[[i, next_j, 0]];
-                let y2 = corners[[i, next_j, 1]];
-                draw_line_segment(img, x1, y1, x2, y2, color, thickness);
-            }
-
             let class_name = result.names.get(&class_id).map_or("object", String::as_str);
+            let quad = std::array::from_fn(|j| [corners[[i, j, 0]], corners[[i, j, 1]]]);
             let label = format!(" {} {:.2} ", class_name, conf[i]);
-
-            if let Some(f) = font {
-                draw_label(
-                    img,
-                    f,
-                    &mut labels,
-                    &label,
-                    color,
-                    font_scale,
-                    corners[[i, 0, 0]] as i32,
-                    corners[[i, 0, 1]] as i32,
-                    0,
-                );
-            }
+            let style = (Rgb([color.0, color.1, color.2]), font_scale, thickness);
+            draw_quad(img, font, &mut labels, quad, &label, style);
         }
     }
+}
+
+/// Draw the outline of `quad` and `label` at its first corner, in `(color, font size,
+/// thickness)`.
+#[allow(clippy::cast_possible_truncation)]
+fn draw_quad(
+    img: &mut image::RgbImage,
+    font: Option<&LabelFont>,
+    labels: &mut Labels,
+    quad: [[f32; 2]; 4],
+    label: &str,
+    (color, font_scale, thickness): (Rgb<u8>, f32, i32),
+) {
+    for (j, a) in quad.iter().enumerate() {
+        let b = quad[(j + 1) % 4];
+        draw_line_segment(img, a[0], a[1], b[0], b[1], color, thickness);
+    }
+    if let Some(f) = font {
+        let (x, y) = (quad[0][0] as i32, quad[0][1] as i32);
+        draw_label(img, f, labels, label, color, font_scale, x, y, 0);
+    }
+}
+
+/// Draw OCR texts on `image`: each outline in green with its text and recognition confidence,
+/// like Ultralytics `solutions.OCR`. The Unicode font is used when any text is non-ASCII.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn annotate_texts(image: &DynamicImage, texts: &[crate::ocr::Text]) -> DynamicImage {
+    let mut img = image.to_rgb8();
+    let (font_scale, thickness) = render_scale(img.width(), img.height());
+    let font = label_font(texts.iter().any(|t| !t.text.is_ascii()));
+    let mut labels = Labels::default();
+    for t in texts {
+        let label = format!(" {} {:.2} ", t.text, t.confidence);
+        let style = (Rgb([0, 255, 0]), font_scale, thickness);
+        draw_quad(
+            &mut img,
+            font.as_ref(),
+            &mut labels,
+            t.polygon,
+            &label,
+            style,
+        );
+    }
+    DynamicImage::ImageRgb8(img)
 }
 /// Blend a solid color rectangle over a region of `img` at the given `alpha` opacity.
 ///

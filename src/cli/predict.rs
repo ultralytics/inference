@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 #[cfg(feature = "annotate")]
-use crate::annotate::annotate_image;
+use crate::annotate::{annotate_image, annotate_texts};
 use crate::io::find_next_run_dir;
 
 #[cfg(feature = "visualize")]
@@ -20,6 +20,7 @@ use crate::{DISPLAY_NAME, InferenceConfig, Quantization, Results, VERSION, YOLOM
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
+use crate::ocr::{DEFAULT_ORIENTATION, DEFAULT_RECOGNIZER, TextRecognizer};
 use crate::task::Task;
 use crate::{error, verbose, warn};
 
@@ -80,11 +81,19 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     }
 
+    let mut reader = args.ocr.then(|| {
+        TextRecognizer::new(&model, DEFAULT_RECOGNIZER, DEFAULT_ORIENTATION).unwrap_or_else(|e| {
+            error!("Error loading the OCR models: {e}");
+            process::exit(1);
+        })
+    });
+
     // Determine source
     let source = source_path.as_ref().map_or_else(
         || {
             // Select default images based on model task
-            let default_urls = crate::download::default_images(model.task());
+            let task = if args.ocr { Task::Detect } else { model.task() };
+            let default_urls = crate::download::default_images(task);
 
             if verbose {
                 warn!(
@@ -280,6 +289,12 @@ pub fn run_prediction(args: &PredictArgs) {
                     .zip(metas.iter().zip(paths.iter().zip(images.iter())))
                 {
                     for result in results {
+                        let texts = reader.as_mut().map(|r| {
+                            r.read(img, &result).unwrap_or_else(|e| {
+                                error!("OCR failed: {e}");
+                                Vec::new()
+                            })
+                        });
                         // Get image dimensions from result
                         let inference_shape = result.inference_shape();
                         last_inference_shape =
@@ -294,8 +309,12 @@ pub fn run_prediction(args: &PredictArgs) {
                             } else {
                                 format!("image {}/{frames}", meta.frame_idx + 1)
                             };
+                            let read = texts.as_ref().map_or_else(String::new, |t| {
+                                let words: Vec<&str> = t.iter().map(|t| t.text.as_str()).collect();
+                                format!(" ({})", words.join(" "))
+                            });
                             verbose!(
-                                "{position} {image_path}: {}x{} {}, {:.1}ms",
+                                "{position} {image_path}: {}x{} {}{read}, {:.1}ms",
                                 inference_shape.0,
                                 inference_shape.1,
                                 result.detection_summary(),
@@ -341,7 +360,10 @@ pub fn run_prediction(args: &PredictArgs) {
 
                         #[cfg(feature = "annotate")]
                         if save {
-                            let annotated = annotate_image(img, &result, None);
+                            let annotated = texts.as_ref().map_or_else(
+                                || annotate_image(img, &result, None),
+                                |t| annotate_texts(img, t),
+                            );
 
                             if let Some(saver) = &mut result_saver
                                 && let Err(e) = saver.save_owned(is_video, meta, annotated)
@@ -378,7 +400,10 @@ pub fn run_prediction(args: &PredictArgs) {
                             }
 
                             if let Some(ref mut v) = viewer {
-                                let annotated = annotate_image(img, &result, None);
+                                let annotated = texts.as_ref().map_or_else(
+                                    || annotate_image(img, &result, None),
+                                    |t| annotate_texts(img, t),
+                                );
 
                                 // Images stay up briefly. Q, Esc or closing the window ends
                                 // the run, like the `q` key in Ultralytics.
@@ -466,10 +491,13 @@ pub fn run_prediction(args: &PredictArgs) {
 /// Returns the path and whether it came from the fallback (the caller downloads defaults).
 fn resolve_model_path(args: &PredictArgs) -> (String, bool) {
     let model_is_default = args.model.is_none();
-    let model_path = args
-        .model
-        .clone()
-        .unwrap_or_else(|| args.task.unwrap_or(Task::Detect).default_model());
+    let model_path = args.model.clone().unwrap_or_else(|| {
+        if args.ocr {
+            "yolo26n-text.onnx".to_owned()
+        } else {
+            args.task.unwrap_or(Task::Detect).default_model()
+        }
+    });
     (model_path, model_is_default)
 }
 
@@ -659,6 +687,7 @@ mod tests {
             rect: InferenceConfig::DEFAULT_RECT,
             tile: None,
             retina_masks: false,
+            ocr: false,
             batch: 1,
             quantize: InferenceConfig::DEFAULT_QUANTIZE,
             half: false,
@@ -732,6 +761,7 @@ mod tests {
             rect: false,
             tile: Some(320),
             retina_masks: true,
+            ocr: false,
             batch: 4,
             quantize: Some(Quantization::Fp16),
             half: false,

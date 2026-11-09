@@ -325,7 +325,7 @@ fn get_or_compute_x_lut(src_w: u32, dst_w: u32) -> Arc<Vec<XLutEntry>> {
 ///
 /// Combines bilinear resize, letterbox padding, and NCHW normalization
 /// in a single memory pass with parallel row processing.
-fn fused_zerocopy_preprocess(
+pub(crate) fn fused_zerocopy_preprocess(
     src_raw: &[u8],
     src_w: u32,
     src_h: u32,
