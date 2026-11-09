@@ -728,7 +728,7 @@ mod tests {
             max_det: 77,
             imgsz: Some(512),
             rect: false,
-            tile: None,
+            tile: Some(320),
             batch: 4,
             quantize: Some(Quantization::Fp16),
             half: false,
@@ -747,6 +747,7 @@ mod tests {
         assert_eq!(config.quantize, Some(Quantization::Fp16));
         assert_eq!(config.device, Some(crate::Device::IntelCpu));
         assert!(config.save_frames);
+        assert_eq!(config.tile, Some(320));
         assert!(!config.rect);
         assert_eq!(config.classes, Some(vec![0, 2, 5]));
     }

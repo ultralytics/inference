@@ -133,7 +133,7 @@ fn merge_rows(
     nms(data, &keep, rotated, iou, max_det)
 }
 
-/// Offset every tile's boxes or oriented boxes (and pose keypoints) to source coordinates, merge
+/// Offset every tile's boxes (with pose keypoints) or oriented boxes to source coordinates, merge
 /// them with [`merge_rows`] and store the result in `out`.
 fn merge_detections(
     out: &mut Results,
@@ -254,16 +254,42 @@ fn merge_dense(out: &mut Results, tiles: &[Results], windows: &[Window], semanti
     }
 }
 
+/// Merge the tile results of `task` into `out`, which holds the source image, as
+/// `Results.merge_tiles` does in Ultralytics.
+fn merge_tiles(
+    out: &mut Results,
+    task: Task,
+    tiles: &[Results],
+    windows: &[Window],
+    config: &InferenceConfig,
+) {
+    match task {
+        Task::Semantic | Task::Depth => {
+            merge_dense(out, tiles, windows, task == Task::Semantic);
+        }
+        Task::Classify => {
+            let sum = tiles
+                .iter()
+                .filter_map(|t| t.probs.as_ref())
+                .map(|p| p.data.clone());
+            out.probs = sum
+                .reduce(|a, b| a + b)
+                .map(|s| Probs::new(s / tiles.len() as f32));
+        }
+        _ => merge_detections(out, tiles, windows, task == Task::Obb, config),
+    }
+}
+
 impl YOLOModel {
     /// Run inference on overlapping windows of a large image and merge them back into one result
     /// in source coordinates, like the Ultralytics `tile` argument. Windows are the configured
     /// `tile` square, or the inference size when it is `0`.
     ///
     /// Windows overlap by 20% and the last window in each direction is aligned to the image edge.
-    /// Detection, pose and oriented boxes are offset to source coordinates and merged with NMS
-    /// using the configured `IoU` and `max_det`, and segmentation places the kept masks in the
-    /// source image. Classification averages the tile probabilities, semantic maps keep the most
-    /// central tile per pixel and depth maps blend the overlaps.
+    /// Detection boxes are offset to source coordinates and merged with NMS using the configured
+    /// `IoU` and `max_det`, and segmentation places the kept masks in the source image. Semantic
+    /// maps keep the most central tile per pixel, depth maps blend the overlaps, classification
+    /// averages the tile probabilities, and pose and oriented boxes merge like detection.
     ///
     /// # Errors
     ///
@@ -273,7 +299,6 @@ impl YOLOModel {
         image: &DynamicImage,
         path: String,
     ) -> Result<Vec<Results>> {
-        let task = self.metadata.task;
         let size = match self.config.tile.unwrap_or_default() {
             0 => {
                 let (th, tw) = self.imgsz();
@@ -314,21 +339,7 @@ impl YOLOModel {
             postprocess: total(|s| s.postprocess),
         };
 
-        match task {
-            Task::Classify => {
-                let sum = tiles
-                    .iter()
-                    .filter_map(|t| t.probs.as_ref())
-                    .map(|p| p.data.clone());
-                out.probs = sum
-                    .reduce(|a, b| a + b)
-                    .map(|s| Probs::new(s / tiles.len() as f32));
-            }
-            Task::Semantic | Task::Depth => {
-                merge_dense(&mut out, &tiles, &windows, task == Task::Semantic);
-            }
-            _ => merge_detections(&mut out, &tiles, &windows, task == Task::Obb, &self.config),
-        }
+        merge_tiles(&mut out, self.metadata.task, &tiles, &windows, &self.config);
         Ok(vec![out])
     }
 }
@@ -336,6 +347,7 @@ impl YOLOModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::{arr1, arr2, arr3};
 
     #[test]
     fn test_tile_windows_match_the_documented_counts() {
@@ -388,6 +400,21 @@ mod tests {
     }
 
     #[test]
+    fn test_masks_land_at_their_window_offset() {
+        let windows = [[0, 0, 4, 2], [3, 0, 7, 2]];
+        let mut tiles = [blank(2, 4), blank(2, 4)];
+        tiles[1].masks = Some(Masks::new(Array3::ones((1, 2, 4)), (2, 4)));
+        let src = [(&tiles[1], 0)];
+        let wins = [windows[1]];
+        let masks = merge_masks(&tiles, &wins, &src, &[0], (2, 7)).unwrap();
+        assert_eq!(masks.data.shape(), [1, 2, 7]);
+        assert_eq!(
+            masks.data.index_axis(Axis(0), 0).row(0).to_vec(),
+            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+        );
+    }
+
+    #[test]
     fn test_dense_tiles_merge_by_distance_to_the_edge() {
         // Two 5x5 windows overlapping on columns 3 and 4 of an 8-wide image. Column 3 is nearer the
         // center of the first window and column 4 of the second.
@@ -401,8 +428,9 @@ mod tests {
             ));
         }
         let mut out = blank(5, 8);
-        merge_dense(&mut out, &tiles, &windows, true);
-        merge_dense(&mut out, &tiles, &windows, false);
+        let config = InferenceConfig::default();
+        merge_tiles(&mut out, Task::Semantic, &tiles, &windows, &config);
+        merge_tiles(&mut out, Task::Depth, &tiles, &windows, &config);
         // A class map keeps each pixel's most central tile, so each tile wins its own side.
         let map = out.semantic_mask.unwrap().data;
         assert_eq!(map.row(2).to_vec(), [1, 1, 1, 1, 4, 4, 4, 4]);
@@ -415,18 +443,37 @@ mod tests {
     }
 
     #[test]
-    fn test_masks_land_at_their_window_offset() {
-        let windows = [[0, 0, 4, 2], [3, 0, 7, 2]];
-        let mut tiles = [blank(2, 4), blank(2, 4)];
-        tiles[1].masks = Some(Masks::new(Array3::ones((1, 2, 4)), (2, 4)));
-        let src = [(&tiles[1], 0)];
-        let wins = [windows[1]];
-        let masks = merge_masks(&tiles, &wins, &src, &[0], (2, 7)).unwrap();
-        assert_eq!(masks.data.shape(), [1, 2, 7]);
+    fn test_merge_tiles_averages_probs_and_offsets_keypoints_and_oriented_boxes() {
+        // The same windows as the cut fragment test. The first window sees an object cut at x = 100
+        // that the second sees whole, so only the second copy is kept, moved by the window origin.
+        let windows = [[0, 0, 100, 100], [50, 0, 150, 100]];
+        let config = InferenceConfig::default();
+        let mut tiles = [blank(100, 100), blank(100, 100)];
+        tiles[0].probs = Some(Probs::new(arr1(&[0.2, 0.8])));
+        tiles[1].probs = Some(Probs::new(arr1(&[0.6, 0.4])));
+        for (t, cx) in tiles.iter_mut().zip([80.0, 35.0]) {
+            let (x1, x2) = (cx - 20.0, cx + 20.0);
+            let row = [[x1, 10.0, x2, 90.0, 0.9, 0.0]];
+            t.boxes = Some(Boxes::new(arr2(&row), (100, 100)));
+            let kpts = arr3(&[[[cx, 50.0, 1.0]]]);
+            t.keypoints = Some(Keypoints::new(kpts, (100, 100)));
+            let row = [[cx, 50.0, 40.0, 80.0, 0.0, 0.9, 0.0]];
+            t.obb = Some(Obb::new(arr2(&row), (100, 100)));
+        }
+
+        let mut out = blank(100, 150);
+        merge_tiles(&mut out, Task::Classify, &tiles, &windows, &config);
+        assert_eq!(out.probs.as_ref().unwrap().data, arr1(&[0.4, 0.6]));
+        merge_tiles(&mut out, Task::Pose, &tiles, &windows, &config);
+        let boxes = arr2(&[[65.0, 10.0, 105.0, 90.0, 0.9, 0.0]]);
+        assert_eq!(out.boxes.as_ref().unwrap().data, boxes);
         assert_eq!(
-            masks.data.index_axis(Axis(0), 0).row(0).to_vec(),
-            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+            out.keypoints.as_ref().unwrap().data,
+            arr3(&[[[85.0, 50.0, 1.0]]])
         );
+        merge_tiles(&mut out, Task::Obb, &tiles, &windows, &config);
+        let obb = arr2(&[[85.0, 50.0, 40.0, 80.0, 0.0, 0.9, 0.0]]);
+        assert_eq!(out.obb.unwrap().data, obb);
     }
 
     /// Bus photo at `tile=320` against Ultralytics 8.4.207 (`xyxy`, confidence, class), keeping
@@ -476,6 +523,13 @@ mod tests {
             });
             assert!(hit, "no match for class {cls} box {x1} {y1} {x2} {y2}");
         }
+
+        // `tile = 0` uses the 640 inference size.
+        model.config.tile = Some(0);
+        let auto = model.predict_tiled(&image, name()).unwrap().remove(0);
+        model.config.tile = Some(640);
+        let sized = model.predict_tiled(&image, name()).unwrap().remove(0);
+        assert_eq!(auto.boxes.unwrap().data, sized.boxes.unwrap().data);
 
         model.config.tile = Some(5000);
         let wide = model.predict_tiled(&image, name()).unwrap().remove(0);
