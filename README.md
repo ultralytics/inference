@@ -222,6 +222,9 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg --classes 
 # With visualization and custom image size
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --imgsz 1280
 
+# Tiled inference for large images, small objects and video frames (20% window overlap, results merged)
+ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 640
+
 # Save individual frames for video input
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -304,6 +307,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--max-det`          |       | Maximum number of detections                                                                                                                                                                                                 | `300`                                                                        |
 | `--imgsz`            |       | Inference image size                                                                                                                                                                                                         | model metadata                                                               |
 | `--rect [<BOOL>]`    |       | Enable rectangular inference (minimal padding)                                                                                                                                                                               | `true`                                                                       |
+| `--tile [<TILE>]`    |       | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz`                                                                                                                                                     | off                                                                          |
 | `--batch`            |       | Batch size for inference                                                                                                                                                                                                     | `1`                                                                          |
 | `--quantize`         |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`                                                                                                                | Model precision                                                              |
 | `--save [<BOOL>]`    |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                                              | `true`                                                                       |
