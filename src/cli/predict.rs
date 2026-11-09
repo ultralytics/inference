@@ -264,7 +264,7 @@ pub fn run_prediction(args: &PredictArgs) {
     });
 
     STOP.store(false, Ordering::Relaxed);
-    stop_on_ctrl_c();
+    stop_on_ctrl_c(true);
 
     // Use BatchProcessor for centralized batch management
     {
@@ -437,6 +437,7 @@ pub fn run_prediction(args: &PredictArgs) {
     {
         error!("Failed to finish saving: {e}");
     }
+    stop_on_ctrl_c(false);
 
     // Print speed summary with inference tensor shape (after letterboxing)
     let num_results = result_count.max(1) as f64;
@@ -524,10 +525,10 @@ fn build_inference_config(
 /// trailer still finish.
 static STOP: AtomicBool = AtomicBool::new(false);
 
-/// Make the first Ctrl+C set [`STOP`] instead of killing the process, like the `finally` that
-/// releases the video writers in Ultralytics. A second Ctrl+C gets the default action and exits.
+/// While `on`, the first Ctrl+C sets [`STOP`] instead of killing the process, like the `finally`
+/// that releases the video writers in Ultralytics, and a second one exits. Off restores the default.
 #[allow(unsafe_code)]
-fn stop_on_ctrl_c() {
+fn stop_on_ctrl_c(on: bool) {
     #[cfg(unix)]
     {
         const SIGINT: i32 = 2;
@@ -539,7 +540,7 @@ fn stop_on_ctrl_c() {
             STOP.store(true, Ordering::Relaxed);
             signal(SIGINT, None);
         }
-        signal(SIGINT, Some(handle));
+        signal(SIGINT, on.then_some(handle as extern "C" fn(i32)));
     }
     #[cfg(windows)]
     {
@@ -553,7 +554,7 @@ fn stop_on_ctrl_c() {
         extern "system" fn handle(_: u32) -> i32 {
             i32::from(!STOP.swap(true, Ordering::Relaxed))
         }
-        SetConsoleCtrlHandler(Some(handle), 1);
+        SetConsoleCtrlHandler(Some(handle), i32::from(on));
     }
 }
 
