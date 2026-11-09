@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::process;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
@@ -532,6 +532,7 @@ static STOP: AtomicBool = AtomicBool::new(false);
 fn stop_on_ctrl_c(on: bool) {
     #[cfg(unix)]
     {
+        use std::sync::atomic::AtomicUsize;
         const SIGINT: i32 = 2;
         static PREV: AtomicUsize = AtomicUsize::new(0); // SIG_DFL
         // SAFETY: the libc signature with `sighandler_t` as an address, so the `SIG_DFL` (0) and
