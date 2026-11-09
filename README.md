@@ -512,20 +512,15 @@ directly, linearly between its min and max.
 
 **Tiled Inference:**
 
-Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. `set_tile` makes every `predict` call on the model tiled, and `predict_tiled` runs one decoded image directly. Windows overlap by 20%, boxes are mapped back to the source image, and duplicates are removed per class. Detection, segmentation, pose, oriented boxes, classification, semantic and depth models are all supported:
+Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. Set `tile` in the config like `conf` or `imgsz` and every `predict` call is tiled. Windows overlap by 20%, boxes are mapped back to the source image, and duplicates are removed per class. Detection, segmentation, pose, oriented boxes, classification, semantic and depth models are all supported:
 
 ```rust
-use ultralytics_inference::YOLOModel;
+use ultralytics_inference::{InferenceConfig, YOLOModel};
 
-let mut model = YOLOModel::load("yolo26n.onnx")?;
-
-// Every predict call now runs on 640 pixel windows; None turns it off again
-model.set_tile(Some(640));
+// 640 pixel windows; with_tile(0) uses the inference size
+let config = InferenceConfig::new().with_tile(640);
+let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
 let results = model.predict("aerial.jpg")?;
-
-// Or tile a single decoded image directly
-let image = image::open("aerial.jpg")?;
-let results = model.predict_tiled(&image, "aerial.jpg".into(), 640)?;
 ```
 
 **Pose Drawing:**

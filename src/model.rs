@@ -178,8 +178,6 @@ pub struct YOLOModel {
     execution_provider: String,
     /// Whether the model accepts dynamic input shapes.
     is_dynamic: bool,
-    /// Tile size in pixels when predictions run on overlapping windows, see [`Self::set_tile`].
-    tile: Option<u32>,
     /// Fast-path GPU preprocessor (`cuda-preprocess` feature only).
     ///
     /// Populated at load time when the user hasn't opted out and the device
@@ -726,7 +724,6 @@ impl YOLOModel {
             fp16_input,
             execution_provider: provider_name.to_string(),
             is_dynamic,
-            tile: None,
             #[cfg(feature = "cuda-preprocess")]
             cuda_preprocessor,
             #[cfg(feature = "cuda-preprocess")]
@@ -810,7 +807,6 @@ impl YOLOModel {
             fp16_input: false,
             execution_provider: "OpenVINO".to_owned(),
             is_dynamic: false,
-            tile: None,
             #[cfg(feature = "cuda-preprocess")]
             cuda_preprocessor: None,
             #[cfg(feature = "cuda-preprocess")]
@@ -1475,12 +1471,6 @@ impl YOLOModel {
         self.predict_image(&img, path.to_string_lossy().to_string())
     }
 
-    /// Run every prediction on overlapping `tile` x `tile` windows, merged per image by
-    /// [`Self::predict_tiled`]; `None` turns tiling off.
-    pub const fn set_tile(&mut self, tile: Option<u32>) {
-        self.tile = tile;
-    }
-
     /// Run inference on a `DynamicImage`.
     ///
     /// # Arguments
@@ -1493,7 +1483,12 @@ impl YOLOModel {
     /// Vector of Results.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn predict_image(&mut self, image: &DynamicImage, path: String) -> Result<Vec<Results>> {
-        if let Some(tile) = self.tile {
+        if let Some(tile) = self.config.tile {
+            let tile = if tile == 0 {
+                self.imgsz().0 as u32
+            } else {
+                tile
+            };
             return self.predict_tiled(image, path, tile);
         }
         let images = [image];
@@ -1917,7 +1912,7 @@ impl YOLOModel {
         images: &[DynamicImage],
         paths: &[String],
     ) -> Result<Vec<Vec<Results>>> {
-        if self.tile.is_some() {
+        if self.config.tile.is_some() {
             return images
                 .iter()
                 .zip(paths)

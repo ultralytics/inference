@@ -59,10 +59,11 @@ pub fn run_prediction_with_tile(args: &PredictArgs, tile: Option<u32>) {
     }
 
     // Load model first so we can determine appropriate default source based on task
-    let config = build_inference_config(args, device).unwrap_or_else(|e| {
+    let mut config = build_inference_config(args, device).unwrap_or_else(|e| {
         error!("{e}");
         process::exit(1);
     });
+    config.tile = tile;
 
     let mut model = match YOLOModel::load_with_config(model_path, config) {
         Ok(m) => m,
@@ -84,9 +85,6 @@ pub fn run_prediction_with_tile(args: &PredictArgs, tile: Option<u32>) {
         );
         process::exit(1);
     }
-
-    // A tile of 0 (bare `--tile`) tiles at the inference size, like the Ultralytics `tile=True`.
-    model.set_tile(tile.map(|t| if t == 0 { model.imgsz().0 as u32 } else { t }));
 
     // Determine source
     let source = source_path.as_ref().map_or_else(

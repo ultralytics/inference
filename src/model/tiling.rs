@@ -286,7 +286,7 @@ impl YOLOModel {
     /// # Errors
     ///
     /// Returns an error if `tile` is `0` or inference fails.
-    pub fn predict_tiled(
+    pub(super) fn predict_tiled(
         &mut self,
         image: &DynamicImage,
         path: String,
