@@ -200,12 +200,13 @@ impl TextRecognizer {
                         });
                 }
             }
-            let (shape, probs) = run(&mut self.recognizer, &batch)?;
-            let steps = shape[1];
-            let classes = shape[2];
-            for row in probs.chunks(steps * classes) {
-                reads.push(ctc_decode(row, classes, &self.characters));
-            }
+            let characters = &self.characters;
+            run(&mut self.recognizer, &batch, |shape, probs| {
+                let classes = shape[2] as usize;
+                for row in probs.chunks(shape[1] as usize * classes) {
+                    reads.push(ctc_decode(row, classes, characters));
+                }
+            })?;
         }
         Ok(reads)
     }
@@ -227,14 +228,15 @@ impl TextRecognizer {
                     );
                 }
             }
-            let (_, scores) = run(&mut self.orientation, &batch)?;
-            let turned = scores.chunks(2).map(|s| s[1] > s[0]);
-            flip.extend(
-                turned
-                    .enumerate()
-                    .filter(|t| t.1)
-                    .map(|(i, _)| b * BATCH + i),
-            );
+            run(&mut self.orientation, &batch, |_, scores| {
+                let turned = scores.chunks(2).map(|s| s[1] > s[0]);
+                flip.extend(
+                    turned
+                        .enumerate()
+                        .filter(|t| t.1)
+                        .map(|(i, _)| b * BATCH + i),
+                );
+            })?;
         }
         Ok(flip)
     }
@@ -290,8 +292,12 @@ fn rec_width(crop: &RgbImage) -> (u32, u32) {
     )
 }
 
-/// Run a batch and return the output shape and values.
-fn run(session: &mut Session, batch: &Array4<f32>) -> Result<(Vec<usize>, Vec<f32>)> {
+/// Run a batch and hand the output shape and values to `read`.
+fn run<R>(
+    session: &mut Session,
+    batch: &Array4<f32>,
+    read: impl FnOnce(&[i64], &[f32]) -> R,
+) -> Result<R> {
     let input = TensorRef::from_array_view(batch.view())
         .map_err(|e| InferenceError::InferenceError(format!("Failed to create input: {e}")))?;
     let outputs = session
@@ -300,7 +306,7 @@ fn run(session: &mut Session, batch: &Array4<f32>) -> Result<(Vec<usize>, Vec<f3
     let (shape, data) = outputs[0]
         .try_extract_tensor::<f32>()
         .map_err(|e| InferenceError::InferenceError(format!("Failed to read output: {e}")))?;
-    Ok((shape.iter().map(|&d| d as usize).collect(), data.to_vec()))
+    Ok(read(shape, data))
 }
 
 /// `(corners, confidence, oriented)` of every detection: the oriented box corners, or the box
