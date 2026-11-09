@@ -3,8 +3,8 @@
 use std::path::Path;
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
-#[cfg(feature = "visualize")]
 use std::time::Duration;
 
 #[cfg(feature = "annotate")]
@@ -242,17 +242,25 @@ pub fn run_prediction(args: &PredictArgs) {
         slot.0.lock().unwrap_or_else(PoisonError::into_inner).1 = true;
         slot.1.notify_one();
     });
+    // Both waits wake up to check `STOP`, so Ctrl+C still ends a run whose source has stalled.
+    let tick = Duration::from_millis(100);
     let frames = std::iter::from_fn(move || {
         if !webcam {
-            return receiver.recv().ok();
+            loop {
+                match receiver.recv_timeout(tick) {
+                    Err(RecvTimeoutError::Timeout) if !STOP.load(Ordering::Relaxed) => {}
+                    item => return item.ok(),
+                }
+            }
         }
         let (lock, ready) = &*latest;
-        let mut state = ready
-            .wait_while(
-                lock.lock().unwrap_or_else(PoisonError::into_inner),
-                |(frame, done)| frame.is_none() && !*done,
-            )
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut state = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        while state.0.is_none() && !state.1 && !STOP.load(Ordering::Relaxed) {
+            state = ready
+                .wait_timeout(state, tick)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
         state.0.take()
     });
 
@@ -415,7 +423,7 @@ pub fn run_prediction(args: &PredictArgs) {
         }
         batch_processor.flush();
         // Like Ultralytics, a source with nothing to predict on is an error, not an empty run.
-        if read == 0 {
+        if read == 0 && !STOP.load(Ordering::Relaxed) {
             error!(
                 "No images or videos found in '{}'",
                 source_path.as_deref().unwrap_or_default()
@@ -520,36 +528,37 @@ static STOP: AtomicBool = AtomicBool::new(false);
 
 /// Make the first Ctrl+C set [`STOP`] instead of killing the process, like the `finally` that
 /// releases the video writers in Ultralytics. A second Ctrl+C gets the default action and exits.
-#[cfg(unix)]
 #[allow(unsafe_code)]
 fn stop_on_ctrl_c() {
-    const SIGINT: i32 = 2;
-    const SIG_DFL: usize = 0;
-    unsafe extern "C" {
-        fn signal(signum: i32, handler: usize) -> usize;
+    #[cfg(unix)]
+    {
+        use std::ffi::c_int;
+        const SIGINT: c_int = 2;
+        // SAFETY: the libc signature, with `None` as `SIG_DFL`; both handlers are async-signal-safe.
+        unsafe extern "C" {
+            safe fn signal(signum: c_int, handler: Option<extern "C" fn(c_int)>) -> usize;
+        }
+        extern "C" fn handle(_: c_int) {
+            STOP.store(true, Ordering::Relaxed);
+            signal(SIGINT, None);
+        }
+        signal(SIGINT, Some(handle));
     }
-    extern "C" fn handle(_: i32) {
-        STOP.store(true, Ordering::Relaxed);
-        // SAFETY: `signal` is async-signal-safe; this restores the default action.
-        unsafe { signal(SIGINT, SIG_DFL) };
+    #[cfg(windows)]
+    {
+        // SAFETY: the kernel32 signature, which std always links on Windows.
+        unsafe extern "system" {
+            safe fn SetConsoleCtrlHandler(
+                handler: Option<extern "system" fn(u32) -> i32>,
+                add: i32,
+            ) -> i32;
+        }
+        // Handled the first time; the second falls through to the default exit.
+        extern "system" fn handle(_: u32) -> i32 {
+            i32::from(!STOP.swap(true, Ordering::Relaxed))
+        }
+        SetConsoleCtrlHandler(Some(handle), 1);
     }
-    // SAFETY: `handle` only stores an atomic and calls `signal`, both async-signal-safe.
-    unsafe { signal(SIGINT, handle as extern "C" fn(i32) as usize) };
-}
-
-/// Make the first Ctrl+C set [`STOP`] instead of killing the process, like the `finally` that
-/// releases the video writers in Ultralytics. A second Ctrl+C falls through to the default exit.
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn stop_on_ctrl_c() {
-    unsafe extern "system" {
-        fn SetConsoleCtrlHandler(handler: Option<extern "system" fn(u32) -> i32>, add: i32) -> i32;
-    }
-    extern "system" fn handle(_: u32) -> i32 {
-        i32::from(!STOP.swap(true, Ordering::Relaxed))
-    }
-    // SAFETY: kernel32 is always linked on Windows and `handle` only touches an atomic.
-    unsafe { SetConsoleCtrlHandler(Some(handle), 1) };
 }
 
 /// Whether a `runs/<task>/predictN` directory is needed for this run.
