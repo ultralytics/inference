@@ -344,12 +344,12 @@ On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds t
 | `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                 |
 | `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                     |
 | `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                      |
-| `predict --ocr`                                   | `yolo26n-text.onnx`    | Nano YOLO26-Text detector plus the PaddleOCR models, auto-downloaded |
+| `predict --ocr`                                   | `yolo26n-text.onnx`\*  | Nano YOLO26-Text detector plus the PaddleOCR models, auto-downloaded |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | Task read from model metadata                                        |
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, proceeds normally                         |
 | `predict --task segment --model yolo26n.onnx`     | error                  | `--task` conflicts with model metadata (`detect`), exits with error  |
 
-\* `semantic` (semantic segmentation) and `depth` (depth estimation) are YOLO26-only.
+\* `semantic` (semantic segmentation), `depth` (depth estimation) and the `-text` scene text detectors are YOLO26-only.
 
 **Auto-downloadable models:**
 
@@ -361,7 +361,7 @@ YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are suppor
 | YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                  |
 | YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                  |
 
-\* `-sem` (semantic segmentation) and `-depth` (depth estimation) are YOLO26-only.
+\* `-sem` (semantic segmentation), `-depth` (depth estimation) and `-text` (scene text) are YOLO26-only.
 
 **Source Options:**
 
@@ -555,6 +555,8 @@ for text in ocr.read(&image, &result)? {
     println!("{} {:.2}", text.text, text.confidence);
 }
 ```
+
+`predict --ocr` and `annotate_texts` draw the texts like Python, and `--line-width`, `--show-labels` and `--show-conf` apply to them too.
 
 **Drawing:**
 

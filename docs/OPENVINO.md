@@ -96,6 +96,7 @@ The run prints `Using OpenVINO Runtime` when the native path is active.
 - The NPU runs at batch 1, and larger batches are split into single images.
 - The export fixes the precision (FP32, FP16 or INT8), so `--quantize` has no effect and prints a warning.
 - Only `cpu` and the Intel devices (`intel:cpu`, `intel:gpu`, `intel:npu`) are accepted, other devices give an error.
+- With `--ocr`, the PaddleOCR text recognizer runs on the CPU, or on the detector's CPU or GPU when the build also has the `openvino` feature. On `intel:npu` it runs on the CPU, since its input width changes with every crop.
 - Depth models skip the graph's final upsample and are resampled on the host. NPU depth values still differ from the CPU, an NPU precision limit also seen in Python.
 
 [gpu]: https://docs.openvino.ai/2026/get-started/install-openvino/configurations/configurations-intel-gpu.html

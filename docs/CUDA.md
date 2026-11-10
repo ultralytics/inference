@@ -232,6 +232,13 @@ axis. A model whose input pins `[16, 3, 640, 640]` always runs 16 images at a ti
 a larger request is split into chunks of 16, and a shorter one is padded with its
 last image, so `--batch 1` on it still pays for 16.
 
+With `--ocr`, the PaddleOCR text recognizer runs on the same GPU through the CUDA EP, also for a
+`tensorrt` detector, since its input width changes with every crop:
+
+```bash
+ultralytics-inference predict --ocr --source sign.jpg --device cuda:0
+```
+
 [`YOLOModel::predict_image`]: https://docs.rs/ultralytics-inference/latest/ultralytics_inference/model/struct.YOLOModel.html#method.predict_image
 
 ## Troubleshooting

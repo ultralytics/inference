@@ -343,12 +343,12 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                  |
 | `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                  |
 | `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                  |
-| `predict --ocr`                                   | `yolo26n-text.onnx`    | nano YOLO26-Text 文字检测模型和 PaddleOCR 模型，自动下载 |
+| `predict --ocr`                                   | `yolo26n-text.onnx`\*  | nano YOLO26-Text 文字检测模型和 PaddleOCR 模型，自动下载 |
 | `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | 从模型元数据读取任务                                     |
 | `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` 与元数据一致，正常执行                          |
 | `predict --task segment --model yolo26n.onnx`     | error                  | `--task` 与模型元数据（`detect`）冲突，程序以错误退出。  |
 
-\* `semantic`（语义分割）和 `depth`（深度估计）仅支持 YOLO26。
+\* `semantic`（语义分割）、`depth`（深度估计）和 `-text` 场景文字检测模型仅支持 YOLO26。
 
 **可自动下载的模型：**
 
@@ -360,7 +360,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 | YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                  |
 | YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                  |
 
-\* `-sem`（语义分割）和 `-depth`（深度估计）仅支持 YOLO26。
+\* `-sem`（语义分割）、`-depth`（深度估计）和 `-text`（场景文字）仅支持 YOLO26。
 
 **输入源选项：**
 
@@ -551,6 +551,8 @@ for text in ocr.read(&image, &result)? {
     println!("{} {:.2}", text.text, text.confidence);
 }
 ```
+
+`predict --ocr` 和 `annotate_texts` 按 Python 的方式绘制文字，`--line-width`、`--show-labels` 和 `--show-conf` 同样适用。
 
 **绘制：**
 

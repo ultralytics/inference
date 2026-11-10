@@ -241,6 +241,8 @@ the model), pass the same `wasmUrl` you gave `YOLO.load`.
   `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` binaries. If your bundler does not serve this package's
   own `ultralytics_inference_web_bg.wasm`, pass its URL as `wasmUrl`.
 
+- **Native only**: scene text OCR (`--ocr`, `TextRecognizer`) and tiled inference (`--tile`) are in the
+  [Rust crate](https://github.com/ultralytics/inference) and not in this package.
 - **Telemetry**: `ort-web` can report the page domain to pyke on first session
   creation. This package turns that off, so nothing is sent. See the
   [ort-web docs](https://ort.pyke.io/backends/web) for what it would send.

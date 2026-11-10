@@ -224,6 +224,8 @@ await annotate(canvas, img, results, { keypointRadius: 4, skeleton: [[0, 1]] });
   `ort.wasm.min.js`）和 `ort-wasm-simd-threaded.{jsep,asyncify,}.{mjs,wasm}` 二进制文件。如果打包工具没有提供本包自带的
   `ultralytics_inference_web_bg.wasm`，可通过 `wasmUrl` 传入其 URL。
 
+- **仅限原生**：场景文字识别（`--ocr`、`TextRecognizer`）和切片推理（`--tile`）属于
+  [Rust crate](https://github.com/ultralytics/inference)，本包不包含。
 - **遥测**：`ort-web` 可以在首次创建会话时向 pyke 上报页面域名。本包已将其关闭，不会发送任何数据。
   上报内容见 [ort-web 文档](https://ort.pyke.io/backends/web)。
 
