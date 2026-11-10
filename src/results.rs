@@ -846,8 +846,8 @@ impl Boxes {
 /// Holds the raw mask tensor. Polygon `xy`/`xyn` contours are not derived.
 #[derive(Debug, Clone)]
 pub struct Masks {
-    /// Binary masks with shape (N, H, W) at the original image size, 1.0 inside each object,
-    /// like Ultralytics with `retina_masks=True`.
+    /// Binary masks with shape (N, H, W), 1.0 inside each object, at the model input size like
+    /// Ultralytics, or at the original image size with `retina_masks` or tiling.
     pub data: Array3<f32>,
     /// Original image shape (height, width).
     pub orig_shape: (u32, u32),

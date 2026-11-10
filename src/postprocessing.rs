@@ -739,18 +739,118 @@ fn mask_geometry(mh: usize, mw: usize, oh: u32, ow: u32) -> (usize, [usize; 4]) 
         p if p % 2 == 0 => 2,
         _ => 4,
     };
-    let (uh, uw) = (mh * f, mw * f);
+    (f, content_crop(mh * f, mw * f, oh, ow))
+}
+
+/// The letterbox content `[left, top, width, height]` of a `uh×uw` mask grid for an `oh×ow`
+/// image, as Ultralytics `scale_masks` crops it.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn content_crop(uh: usize, uw: usize, oh: u32, ow: u32) -> [usize; 4] {
+    let (h, w) = (f64::from(oh), f64::from(ow));
     let gain = (uh as f64 / h).min(uw as f64 / w);
-    let (nh, nw) = (fit(gain, h), fit(gain, w));
+    let fit = |n: f64| ((n * gain).round_ties_even() as usize).max(1);
+    let (nh, nw) = (fit(h), fit(w));
     let offset = |n: usize, m: usize| ((n - m) as f64 / 2.0 - 0.1).round_ties_even() as usize;
-    (f, [offset(uw, nw), offset(uh, nh), nw, nh])
+    [offset(uw, nw), offset(uh, nh), nw, nh]
+}
+
+/// Binary `mask` at the model input size scaled to the `oh×ow` image like Ultralytics
+/// `scale_masks`, as its annotator draws it: the letterbox content resized bilinearly and kept
+/// above 0.5. Source positions and weights are computed in f32 like PyTorch `interpolate`, which
+/// puts some edges of a binary mask a hair above 0.5 where exact math would tie.
+///
+/// Only the image pixels sampling a set mask pixel are returned, with their top-left `[x, y]`.
+#[cfg(feature = "annotate")]
+#[must_use]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+pub(crate) fn scale_mask(
+    mask: &ArrayView2<f32>,
+    (oh, ow): (u32, u32),
+) -> (Array2<f32>, [usize; 2]) {
+    let (uh, uw) = mask.dim();
+    let [left, top, nw, nh] = content_crop(uh, uw, oh, ow);
+    let content = mask.slice(s![top..top + nh, left..left + nw]);
+    let taps = |n: usize, out: u32| -> Vec<(usize, usize, f32)> {
+        let scale = n as f32 / out as f32;
+        (0..out)
+            .map(|i| {
+                let src = scale.mul_add(i as f32 + 0.5, -0.5).max(0.0);
+                let i0 = (src as usize).min(n - 1);
+                (i0, (i0 + 1).min(n - 1), (src - i0 as f32).clamp(0.0, 1.0))
+            })
+            .collect()
+    };
+    let (xs, ys) = (taps(nw, ow), taps(nh, oh));
+    let set = content
+        .indexed_iter()
+        .filter(|&(_, &v)| v > 0.0)
+        .map(|(i, _)| i);
+    let Some([y_lo, y_hi, x_lo, x_hi]) = set.fold(None, |b: Option<[usize; 4]>, (y, x)| {
+        Some(b.map_or([y, y, x, x], |[a, b, c, d]| {
+            [a.min(y), b.max(y), c.min(x), d.max(x)]
+        }))
+    }) else {
+        return (Array2::zeros((0, 0)), [0, 0]);
+    };
+    // Taps only grow, so the pixels sampling `lo..=hi` are one run.
+    let run = |taps: &[(usize, usize, f32)], lo: usize, hi: usize| {
+        let a = taps.iter().position(|t| t.1 >= lo).unwrap_or(taps.len());
+        let b = taps.iter().rposition(|t| t.0 <= hi).map_or(0, |b| b + 1);
+        a..b.max(a)
+    };
+    let (xr, yr) = (run(&xs, x_lo, x_hi), run(&ys, y_lo, y_hi));
+    let out = Array2::from_shape_fn((yr.len(), xr.len()), |(y, x)| {
+        let ((y0, y1, ly), (x0, x1, lx)) = (ys[yr.start + y], xs[xr.start + x]);
+        let row = |r| lx.mul_add(content[[r, x1]], (1.0 - lx) * content[[r, x0]]);
+        f32::from(u8::from(ly.mul_add(row(y1), (1.0 - ly) * row(y0)) > 0.5))
+    });
+    (out, [xr.start, yr.start])
+}
+
+/// The pixels `[first, last]` of a box side `a..b` kept like Ultralytics `crop_mask`, which
+/// keeps `a <= x < b`, on a grid of `n`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn box_span(a: f32, b: f32, n: u32) -> Option<(usize, usize)> {
+    let (lo, hi) = (
+        a.max(0.0).ceil() as usize,
+        (b.max(0.0).ceil() as usize).min(n as usize),
+    );
+    (lo < hi).then(|| (lo, hi - 1))
+}
+
+/// Write the resized `logits` of the box at `(x, y)` into `mask_out` as 1.0 where above 0,
+/// returning the box's inclusive bounds when any pixel is kept.
+fn put_logits(
+    mut mask_out: ArrayViewMut2<f32>,
+    (x, y): (usize, usize),
+    logits: &Image,
+) -> Option<(usize, usize, usize, usize)> {
+    let (w, h) = (logits.width() as usize, logits.height() as usize);
+    let src = bytemuck::cast_slice::<u8, f32>(logits.buffer());
+    let src = ArrayView2::from_shape((h, w), src).expect("resized buffer is h*w");
+    let mut any = false;
+    mask_out
+        .slice_mut(s![y..y + h, x..x + w])
+        .zip_mut_with(&src, |o, &v| {
+            any |= v > 0.0;
+            *o = f32::from(u8::from(v > 0.0));
+        });
+    any.then_some((x, y, x + w - 1, y + h - 1))
 }
 
 /// One instance mask like Ultralytics `process_mask_native`: the prototype logits upsampled
-/// by `f`, cropped to the letterbox content, resized to the original image size and kept where
-/// above 0 inside the box `x1 <= x < x2, y1 <= y < y2`, as 1.0 in `mask_out`. Only the box
-/// pixels and their neighbors are resized, each from the same coefficients as a full-frame
-/// resize.
+/// by `f`, cropped to the letterbox content, resized to the `ow×oh` image and kept where above
+/// 0 inside the box `x1 <= x < x2, y1 <= y < y2`, as 1.0 in `mask_out`. With `f` 1 and no crop
+/// this is `process_mask` at the model input size. Only the box pixels and their neighbors
+/// are resized, each from the same coefficients as a full-frame resize.
 ///
 /// Returns the inclusive bounds of the pixels written when any of them is kept.
 #[allow(
@@ -759,22 +859,15 @@ fn mask_geometry(mh: usize, mw: usize, oh: u32, ow: u32) -> (usize, [usize; 4]) 
     clippy::cast_sign_loss
 )]
 fn apply_mask_proto(
-    mut mask_out: ArrayViewMut2<f32>,
+    mask_out: ArrayViewMut2<f32>,
     logits: &[f32],
     box_data: &ArrayView1<f32>,
     (mw, mh): (usize, usize),
     (ow, oh): (u32, u32),
     (f, [left, top, nw, nh]): (usize, [usize; 4]),
 ) -> Option<(usize, usize, usize, usize)> {
-    let span = |a: f32, b: f32, n: u32| {
-        let (lo, hi) = (
-            a.max(0.0).ceil() as usize,
-            (b.max(0.0).ceil() as usize).min(n as usize),
-        );
-        (lo < hi).then(|| (lo, hi - 1))
-    };
-    let (x_start, x_end) = span(box_data[0], box_data[2], ow)?;
-    let (y_start, y_end) = span(box_data[1], box_data[3], oh)?;
+    let (x_start, x_end) = box_span(box_data[0], box_data[2], ow)?;
+    let (y_start, y_end) = box_span(box_data[1], box_data[3], oh)?;
 
     // The content window the box pixels sample: their span plus two pixels of neighbors. It
     // only meets the content edge where a full-frame resize would clamp too.
@@ -817,17 +910,7 @@ fn apply_mask_proto(
         box_h as f64 * sy,
     ];
     let out = bilinear(&content, (ww, wh), (box_w, box_h), crop)?;
-
-    let src = bytemuck::cast_slice::<u8, f32>(out.buffer());
-    let src = ArrayView2::from_shape((box_h, box_w), src).expect("resized buffer is box_h*box_w");
-    let mut any = false;
-    mask_out
-        .slice_mut(s![y_start..=y_end, x_start..=x_end])
-        .zip_mut_with(&src, |o, &v| {
-            any |= v > 0.0;
-            *o = f32::from(u8::from(v > 0.0));
-        });
-    any.then_some((x_start, y_start, x_end, y_end))
+    put_logits(mask_out, (x_start, y_start), &out)
 }
 
 /// The `boxes` rows at `keep`, without copying when all are kept.
@@ -840,7 +923,9 @@ fn select_rows(boxes: Array2<f32>, keep: &[usize]) -> Array2<f32> {
 }
 
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
-/// to the original image size. Shared by the standard and end2end segment post-processors.
+/// to the original image size with `retina_masks`, tiling or `on_mask`, otherwise to the model
+/// input size like Ultralytics, cropped to `input` (the input-scale boxes and the `(h, w)`
+/// input size). Shared by the standard and end2end segment post-processors.
 ///
 /// `protos_data` is the flat `[num_masks, mh, mw]` prototype output; `mask_coeffs` is
 /// `[N, num_masks]` and `boxes_data` `[N, ..]` (both indexed by kept detection). Returns the
@@ -855,7 +940,9 @@ fn build_instance_masks(
     mh: usize,
     mw: usize,
     boxes_data: &Array2<f32>,
+    input: (&Array2<f32>, (u32, u32)),
     preprocess: &PreprocessResult,
+    config: &InferenceConfig,
     on_mask: Option<&mut MaskSink<'_>>,
 ) -> Option<(Vec<usize>, Option<Array3<f32>>)> {
     // Protos: [1, num_masks, mh, mw] -> [num_masks, mh*mw]
@@ -870,15 +957,21 @@ fn build_instance_masks(
     let masks_flat = mask_coeffs.dot(&protos);
 
     let (oh, ow) = preprocess.orig_shape;
-    let geometry = mask_geometry(mh, mw, oh, ow);
+    // Original size masks with `retina_masks`, tiling or streaming, otherwise input size ones
+    // cropped to the input-scale boxes.
+    let native = config.retina_masks || config.tile.is_some() || on_mask.is_some();
+    let (crop_boxes, (h, w), geometry) = if native {
+        (boxes_data, (oh, ow), mask_geometry(mh, mw, oh, ow))
+    } else {
+        (input.0, input.1, (1, [0, 0, mw, mh]))
+    };
     let apply =
         |mask_out: ArrayViewMut2<f32>, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
             let logits = mask_flat.to_vec();
-            apply_mask_proto(mask_out, &logits, &box_data, (mw, mh), (ow, oh), geometry)
+            apply_mask_proto(mask_out, &logits, &box_data, (mw, mh), (w, h), geometry)
         };
     if let Some(on_mask) = on_mask {
-        let (h, w) = (oh as usize, ow as usize);
-        let mut mask = Array2::<f32>::zeros((h, w));
+        let mut mask = Array2::<f32>::zeros((h as usize, w as usize));
         let mut keep = Vec::new();
         for (i, (mask_flat, box_data)) in masks_flat
             .outer_iter()
@@ -898,11 +991,11 @@ fn build_instance_masks(
     }
 
     let n = boxes_data.nrows();
-    let mut masks_data = Array3::zeros((n, oh as usize, ow as usize));
+    let mut masks_data = Array3::zeros((n, h as usize, w as usize));
     let mut filled = ndarray::Array1::from_elem(n, false);
     let zip = Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter())
+        .and(crop_boxes.outer_iter())
         .and(&mut filled);
     // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
     #[cfg(not(target_arch = "wasm32"))]
@@ -985,8 +1078,15 @@ fn postprocess_segment(
     // Each kept row's mask coefficients follow its class scores.
     let start = 4 + nc;
     let mut mask_coeffs = Array2::zeros((kept_rows.len(), num_masks));
-    for (mut coeffs, &row) in mask_coeffs.outer_iter_mut().zip(&kept_rows) {
+    let mut input_boxes = Array2::zeros((kept_rows.len(), 4));
+    for ((mut coeffs, mut bbox), &row) in mask_coeffs
+        .outer_iter_mut()
+        .zip(input_boxes.outer_iter_mut())
+        .zip(&kept_rows)
+    {
         coeffs.assign(&output_2d.slice(s![row, start..start + num_masks]));
+        let r = output_2d.row(row);
+        bbox.assign(&ArrayView1::from(&xywh_to_xyxy(r[0], r[1], r[2], r[3])));
     }
 
     // Protos: [1, 32, 160, 160] -> [32, 25600]
@@ -1018,7 +1118,9 @@ fn postprocess_segment(
         mh,
         mw,
         &boxes_data,
+        (&input_boxes, results.inference_shape()),
         preprocess,
+        config,
         on_mask,
     );
     let (boxes_data, masks_data) = match built {
@@ -1430,6 +1532,7 @@ fn postprocess_segment_end2end(
 
     let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_coeffs: Vec<f32> = Vec::with_capacity(user_cap * num_masks);
+    let mut flat_input: Vec<f32> = Vec::with_capacity(user_cap * 4);
 
     decode_end2end(
         output0,
@@ -1441,6 +1544,7 @@ fn postprocess_segment_end2end(
         None,
         |base, bbox, conf, cls| {
             flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+            flat_input.extend_from_slice(&output0[base..base + 4]);
             let coeff_start = base + 6;
             flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
         },
@@ -1455,6 +1559,8 @@ fn postprocess_segment_end2end(
         Array2::from_shape_vec((num_kept, 6), flat_boxes).expect("flat length matches (n, 6)");
     let mask_coeffs = Array2::from_shape_vec((num_kept, num_masks), flat_coeffs)
         .expect("flat length matches (n, num_masks)");
+    let input_boxes =
+        Array2::from_shape_vec((num_kept, 4), flat_input).expect("flat length matches (n, 4)");
 
     // Protos -> masks (mirrors standard segment path).
     let (mh, mw) = (shape1[2], shape1[3]);
@@ -1465,7 +1571,9 @@ fn postprocess_segment_end2end(
         mh,
         mw,
         &boxes_data,
+        (&input_boxes, results.inference_shape()),
         preprocess,
+        config,
         on_mask,
     ) else {
         return results;
@@ -1986,9 +2094,11 @@ mod tests {
             [3.5, 3.5, 3.5, 3.5, 0.6, 3.0]
         ];
         let pre = unit_preprocess((8, 8));
-        let Some((keep, Some(full))) =
-            build_instance_masks(&coeffs, &protos, 2, 4, 4, &boxes, &pre, None)
-        else {
+        let config = InferenceConfig::new().with_retina_masks(true);
+        let input = (&boxes, (8, 8));
+        let Some((keep, Some(full))) = build_instance_masks(
+            &coeffs, &protos, 2, 4, 4, &boxes, input, &pre, &config, None,
+        ) else {
             panic!("dense masks should be built");
         };
         // The first mask's logits are never above 0 and the last box is degenerate, so both
@@ -2000,8 +2110,18 @@ mod tests {
             assert_eq!(bbox, boxes.row(keep[index]));
             index += 1;
         };
-        let streamed =
-            build_instance_masks(&coeffs, &protos, 2, 4, 4, &boxes, &pre, Some(&mut sink));
+        let streamed = build_instance_masks(
+            &coeffs,
+            &protos,
+            2,
+            4,
+            4,
+            &boxes,
+            input,
+            &pre,
+            &config,
+            Some(&mut sink),
+        );
         assert_eq!(streamed, Some((keep.clone(), None)));
         assert_eq!(index, keep.len());
     }

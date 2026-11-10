@@ -738,18 +738,29 @@ fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&Lab
 
                 mask_present = true;
 
-                let x1 = xyxy[[i, 0]].max(0.0).min(width as f32) as u32;
-                let y1 = xyxy[[i, 1]].max(0.0).min(height as f32) as u32;
-                let x2 = xyxy[[i, 2]].max(0.0).min(width as f32) as u32;
-                let y2 = xyxy[[i, 3]].max(0.0).min(height as f32) as u32;
+                // Original-size masks only fill their box; input-size ones are scaled to the
+                // image first like the Ultralytics annotator, which can spill past the box.
+                let plane = masks.data.index_axis(ndarray::Axis(0), i);
+                let w = width as usize;
+                let scaled;
+                let (region, [x, y]) = if plane.dim() == (height as usize, w) {
+                    let side = |v: f32, n: u32| v.max(0.0).min(n as f32).ceil() as usize;
+                    let (x1, y1) = (side(xyxy[[i, 0]], width), side(xyxy[[i, 1]], height));
+                    let (x2, y2) = (side(xyxy[[i, 2]], width), side(xyxy[[i, 3]], height));
+                    (
+                        plane.slice_move(ndarray::s![y1..y2.max(y1), x1..x2.max(x1)]),
+                        [x1, y1],
+                    )
+                } else {
+                    scaled = crate::postprocessing::scale_mask(&plane, (height, width));
+                    (scaled.0.view(), scaled.1)
+                };
 
                 // Row slices instead of per-pixel `[[i, y, x]]` and `get_pixel_mut` indexing.
-                let plane = masks.data.index_axis(ndarray::Axis(0), i);
-                let (w, x1, x2) = (width as usize, x1 as usize, x2 as usize);
                 let samples = overlay.as_flat_samples_mut().samples;
-                for y in y1 as usize..y2 as usize {
-                    let hits = plane.slice(ndarray::s![y, x1..x2]);
-                    let row = &mut samples[(y * w + x1) * 3..(y * w + x2) * 3];
+                for (dy, hits) in region.outer_iter().enumerate() {
+                    let start = ((y + dy) * w + x) * 3;
+                    let row = &mut samples[start..start + hits.len() * 3];
                     let (pixels, _) = row.as_chunks_mut::<3>();
                     for (m, px) in hits.iter().zip(pixels) {
                         if *m > 0.5 {

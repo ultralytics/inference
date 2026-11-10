@@ -150,6 +150,10 @@ pub struct InferenceConfig {
     /// Tile size in pixels for overlapping-window inference on large images, like the Ultralytics `tile`
     /// argument. `Some(0)` tiles at the inference size. Defaults to `None` (no tiling).
     pub tile: Option<u32>,
+    /// Whether to build segmentation masks at the original image size like the Ultralytics
+    /// `retina_masks` argument, instead of the model input size. Defaults to `false`. Tiling and
+    /// streamed masks always use the original size.
+    pub retina_masks: bool,
     /// Class IDs to filter predictions. If `None`, all classes are returned.
     /// Useful for focusing on specific objects in multi-class detection tasks.
     pub classes: Option<Vec<usize>>,
@@ -186,6 +190,7 @@ impl Default for InferenceConfig {
             save_frames: Self::DEFAULT_SAVE_FRAMES,
             rect: Self::DEFAULT_RECT,
             tile: None,
+            retina_masks: false,
             classes: None,
             cuda_preprocess: Self::DEFAULT_CUDA_PREPROCESS,
             cuda_memory_limit: None,
@@ -463,6 +468,17 @@ impl InferenceConfig {
         self
     }
 
+    /// Set whether to build segmentation masks at the original image size like Ultralytics `retina_masks`.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_retina_masks(mut self, retina_masks: bool) -> Self {
+        self.retina_masks = retina_masks;
+        self
+    }
+
     /// Set the class IDs to filter predictions.
     ///
     /// Only detections belonging to the specified classes will be returned.
@@ -542,6 +558,8 @@ mod tests {
         assert!((config.iou_threshold - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
         assert_eq!(config.max_det, 300);
         assert_eq!(config.tile, None);
+        assert!(!config.retina_masks);
+        assert!(config.clone().with_retina_masks(true).retina_masks);
         assert_eq!(config.with_tile(0).tile, Some(0));
     }
 
