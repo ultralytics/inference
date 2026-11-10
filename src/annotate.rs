@@ -1006,15 +1006,18 @@ fn draw_quad(
 #[must_use]
 pub fn annotate_texts(image: &DynamicImage, texts: &[crate::ocr::Text]) -> DynamicImage {
     let mut img = image.to_rgb8();
-    let (font_scale, thickness) = render_scale(img.width(), img.height());
-    let font = label_font(texts.iter().any(|t| !t.text.is_ascii()));
-    let mut labels = Labels {
-        text_color: Some(Rgb([0, 0, 0])),
-        ..Labels::default()
-    };
-    let style = (Rgb([0, 255, 0]), font_scale, thickness);
+    let unicode = texts.iter().any(|t| !t.text.is_ascii());
+    let font = label_font(unicode);
+    // Python draws 2 px lines and 21 px labels (cv2 font at scale 2/3), or 14 px labels (12 pt
+    // TrueType font) for all texts when any is non-ASCII.
+    let style = (Rgb([0, 255, 0]), if unicode { 14.0 } else { 21.0 }, 2);
     for t in texts {
-        let label = format!(" {} {:.2} ", t.text, t.confidence);
+        // Labels of their own stay at their boxes and may overlap, as in Python.
+        let mut labels = Labels {
+            text_color: Some(Rgb([0, 0, 0])),
+            ..Labels::default()
+        };
+        let label = format!("{} {:.2}", t.text, t.confidence);
         draw_quad(
             &mut img,
             font.as_ref(),
