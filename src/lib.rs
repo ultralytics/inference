@@ -365,7 +365,7 @@
 //! | `visualize` | Real-time window display for `--show` (default) |
 //! | `video` | Video file decoding/encoding (requires `FFmpeg`) |
 //! | `cuda` | NVIDIA CUDA acceleration |
-//! | `tensorrt` | NVIDIA `TensorRT` optimization |
+//! | `tensorrt` | NVIDIA `TensorRT` optimization (includes `cuda`) |
 //! | `cuda-preprocess` | GPU preprocessing with zero-copy `TensorRT` input |
 //! | `coreml` | Apple `CoreML` (macOS/iOS) |
 //! | `openvino` | Intel `OpenVINO` (Linux and Windows x64) |

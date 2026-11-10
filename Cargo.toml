@@ -165,7 +165,8 @@ annotate = ["imageproc", "ab_glyph", "harfrust", "unicode-bidi"]
 
 # NVIDIA GPU acceleration
 cuda = ["ort/cuda"]
-tensorrt = ["ort/tensorrt"]
+# Also builds `cuda`, which runs what TensorRT cannot, such as the OCR recognizer
+tensorrt = ["cuda", "ort/tensorrt"]
 cuda-preprocess = ["cuda", "tensorrt", "dep:cudarc"]
 
 # AMD GPU acceleration

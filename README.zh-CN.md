@@ -695,7 +695,7 @@ ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --
 | `visualize`       | 为 `--show` 提供实时窗口显示（默认）                                                     |
 | `video`           | 视频文件解码/编码（需要 FFmpeg）                                                         |
 | `cuda`            | NVIDIA CUDA 支持                                                                         |
-| `tensorrt`        | NVIDIA TensorRT 优化                                                                     |
+| `tensorrt`        | NVIDIA TensorRT 优化（包含 `cuda`）                                                      |
 | `cuda-preprocess` | GPU 预处理 + TensorRT 零拷贝输入（需要 CUDA toolkit；见 [`docs/CUDA.md`](docs/CUDA.md)） |
 | `coreml`          | Apple CoreML（macOS/iOS）                                                                |
 | `openvino`        | Intel OpenVINO（Linux 和 Windows x64）                                                   |

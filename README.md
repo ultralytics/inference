@@ -699,7 +699,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `visualize`       | Real-time window display for `--show` (default)                                                       |
 | `video`           | Video file decoding/encoding (requires FFmpeg)                                                        |
 | `cuda`            | NVIDIA CUDA support                                                                                   |
-| `tensorrt`        | NVIDIA TensorRT optimization                                                                          |
+| `tensorrt`        | NVIDIA TensorRT optimization (includes `cuda`)                                                        |
 | `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
 | `coreml`          | Apple CoreML (macOS/iOS)                                                                              |
 | `openvino`        | Intel OpenVINO (Linux and Windows x64)                                                                |

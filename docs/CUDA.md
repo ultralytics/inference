@@ -8,7 +8,7 @@
 | `tensorrt`        | ORT TensorRT EP (FP16, engine cache, opt-level 5)   | NVIDIA GPU with TensorRT installed; 2–3× faster than `cuda`                                      |
 | `cuda-preprocess` | GPU-side preprocess + zero-copy device input to TRT | maximum throughput; `YOLOModel::predict_image` transparently uses a fused CUDA preprocess kernel |
 
-`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required: `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
+`tensorrt` implies `cuda`, and `cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required: `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
 
 ## Requirements
 
@@ -233,7 +233,7 @@ a larger request is split into chunks of 16, and a shorter one is padded with it
 last image, so `--batch 1` on it still pays for 16.
 
 With `--ocr`, the PaddleOCR text recognizer runs on the same GPU through the CUDA EP, also for a
-`tensorrt` detector, since its input width changes with every crop:
+`tensorrt` detector (the `tensorrt` feature builds `cuda` too), since its input width changes with every crop:
 
 ```bash
 ultralytics-inference predict --ocr --source sign.jpg --device cuda:0
