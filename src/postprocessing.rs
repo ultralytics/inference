@@ -752,7 +752,7 @@ fn mask_geometry(mh: usize, mw: usize, oh: u32, ow: u32) -> (usize, [usize; 4]) 
 /// pixels and their neighbors are resized, each from the same coefficients as a full-frame
 /// resize.
 ///
-/// Returns the inclusive bounds of the pixels written, if any.
+/// Returns the inclusive bounds of the pixels written when any of them is kept.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
@@ -820,23 +820,33 @@ fn apply_mask_proto(
 
     let src = bytemuck::cast_slice::<u8, f32>(out.buffer());
     let src = ArrayView2::from_shape((box_h, box_w), src).expect("resized buffer is box_h*box_w");
+    let mut any = false;
     mask_out
         .slice_mut(s![y_start..=y_end, x_start..=x_end])
-        .zip_mut_with(&src, |o, &v| *o = f32::from(u8::from(v > 0.0)));
-    Some((x_start, y_start, x_end, y_end))
+        .zip_mut_with(&src, |o, &v| {
+            any |= v > 0.0;
+            *o = f32::from(u8::from(v > 0.0));
+        });
+    any.then_some((x_start, y_start, x_end, y_end))
 }
 
-enum BuiltMasks {
-    Full(Array3<f32>),
-    Streamed,
+/// The `boxes` rows at `keep`, without copying when all are kept.
+fn select_rows(boxes: Array2<f32>, keep: &[usize]) -> Array2<f32> {
+    if keep.len() == boxes.nrows() {
+        boxes
+    } else {
+        boxes.select(ndarray::Axis(0), keep)
+    }
 }
 
 /// Combine per-detection mask coefficients with the prototype masks, then crop/resize each
 /// to the original image size. Shared by the standard and end2end segment post-processors.
 ///
 /// `protos_data` is the flat `[num_masks, mh, mw]` prototype output; `mask_coeffs` is
-/// `[N, num_masks]` and `boxes_data` `[N, ..]` (both indexed by kept detection). Returns
-/// `None` (skip masks) when `protos_data` cannot reshape to `(num_masks, mh*mw)`.
+/// `[N, num_masks]` and `boxes_data` `[N, ..]` (both indexed by kept detection). Returns the
+/// detections whose mask has a pixel, the others being dropped like in Ultralytics, and their
+/// masks unless `on_mask` streamed them; `None` (skip masks) when `protos_data` cannot reshape
+/// to `(num_masks, mh*mw)`.
 #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
 fn build_instance_masks(
     mask_coeffs: &Array2<f32>,
@@ -847,7 +857,7 @@ fn build_instance_masks(
     boxes_data: &Array2<f32>,
     preprocess: &PreprocessResult,
     on_mask: Option<&mut MaskSink<'_>>,
-) -> Option<BuiltMasks> {
+) -> Option<(Vec<usize>, Option<Array3<f32>>)> {
     // Protos: [1, num_masks, mh, mw] -> [num_masks, mh*mw]
     let protos = match ArrayView2::from_shape((num_masks, mh * mw), protos_data) {
         Ok(view) => view,
@@ -869,32 +879,44 @@ fn build_instance_masks(
     if let Some(on_mask) = on_mask {
         let (h, w) = (oh as usize, ow as usize);
         let mut mask = Array2::<f32>::zeros((h, w));
-        for (mask_flat, box_data) in masks_flat.outer_iter().zip(boxes_data.outer_iter()) {
-            let bounds = apply(mask.view_mut(), mask_flat, box_data);
-            on_mask(mask.view(), box_data);
-            if let Some((x_start, y_start, x_end, y_end)) = bounds {
+        let mut keep = Vec::new();
+        for (i, (mask_flat, box_data)) in masks_flat
+            .outer_iter()
+            .zip(boxes_data.outer_iter())
+            .enumerate()
+        {
+            if let Some((x_start, y_start, x_end, y_end)) =
+                apply(mask.view_mut(), mask_flat, box_data)
+            {
+                on_mask(mask.view(), box_data);
+                keep.push(i);
                 mask.slice_mut(s![y_start..=y_end, x_start..=x_end])
                     .fill(0.0);
             }
         }
-        return Some(BuiltMasks::Streamed);
+        return Some((keep, None));
     }
 
-    let mut masks_data = Array3::zeros((boxes_data.nrows(), oh as usize, ow as usize));
+    let n = boxes_data.nrows();
+    let mut masks_data = Array3::zeros((n, oh as usize, ow as usize));
+    let mut filled = ndarray::Array1::from_elem(n, false);
     let zip = Zip::from(masks_data.outer_iter_mut())
         .and(masks_flat.outer_iter())
-        .and(boxes_data.outer_iter());
+        .and(boxes_data.outer_iter())
+        .and(&mut filled);
     // rayon on native, sequential on wasm (no threads); see `crate::parallel`.
     #[cfg(not(target_arch = "wasm32"))]
-    zip.par_for_each(|mask, coeffs, bbox| {
-        let _ = apply(mask, coeffs, bbox);
-    });
+    zip.par_for_each(|mask, coeffs, bbox, filled| *filled = apply(mask, coeffs, bbox).is_some());
     #[cfg(target_arch = "wasm32")]
-    zip.for_each(|mask, coeffs, bbox| {
-        let _ = apply(mask, coeffs, bbox);
-    });
+    zip.for_each(|mask, coeffs, bbox, filled| *filled = apply(mask, coeffs, bbox).is_some());
 
-    Some(BuiltMasks::Full(masks_data))
+    let keep: Vec<usize> = (0..n).filter(|&i| filled[i]).collect();
+    let masks_data = if keep.len() == n {
+        masks_data
+    } else {
+        masks_data.select(ndarray::Axis(0), &keep)
+    };
+    Some((keep, Some(masks_data)))
 }
 
 /// Post-process segmentation model output.
@@ -989,7 +1011,7 @@ fn postprocess_segment(
         );
     }
 
-    let masks_data = build_instance_masks(
+    let built = build_instance_masks(
         &mask_coeffs,
         output1,
         num_masks,
@@ -999,8 +1021,12 @@ fn postprocess_segment(
         preprocess,
         on_mask,
     );
+    let (boxes_data, masks_data) = match built {
+        Some((keep, masks)) => (select_rows(boxes_data, &keep), masks),
+        None => (boxes_data, None),
+    };
     results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
-    if let Some(BuiltMasks::Full(masks_data)) = masks_data {
+    if let Some(masks_data) = masks_data {
         results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
     }
 
@@ -1432,7 +1458,7 @@ fn postprocess_segment_end2end(
 
     // Protos -> masks (mirrors standard segment path).
     let (mh, mw) = (shape1[2], shape1[3]);
-    let Some(masks_data) = build_instance_masks(
+    let Some((keep, masks_data)) = build_instance_masks(
         &mask_coeffs,
         output1,
         num_masks,
@@ -1445,8 +1471,11 @@ fn postprocess_segment_end2end(
         return results;
     };
 
-    results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
-    if let BuiltMasks::Full(masks_data) = masks_data {
+    results.boxes = Some(Boxes::new(
+        select_rows(boxes_data, &keep),
+        preprocess.orig_shape,
+    ));
+    if let Some(masks_data) = masks_data {
         results.masks = Some(Masks::new(masks_data, preprocess.orig_shape));
     }
     results
@@ -1957,22 +1986,24 @@ mod tests {
             [3.5, 3.5, 3.5, 3.5, 0.6, 3.0]
         ];
         let pre = unit_preprocess((8, 8));
-        let Some(BuiltMasks::Full(full)) =
+        let Some((keep, Some(full))) =
             build_instance_masks(&coeffs, &protos, 2, 4, 4, &boxes, &pre, None)
         else {
             panic!("dense masks should be built");
         };
+        // The first mask's logits are never above 0 and the last box is degenerate, so both
+        // are dropped like in Ultralytics.
+        assert_eq!(keep, [1, 2]);
         let mut index = 0;
         let mut sink = |mask: ArrayView2<'_, f32>, bbox: ArrayView1<'_, f32>| {
             assert_eq!(mask, full.index_axis(ndarray::Axis(0), index));
-            assert_eq!(bbox, boxes.row(index));
+            assert_eq!(bbox, boxes.row(keep[index]));
             index += 1;
         };
-        assert!(matches!(
-            build_instance_masks(&coeffs, &protos, 2, 4, 4, &boxes, &pre, Some(&mut sink)),
-            Some(BuiltMasks::Streamed)
-        ));
-        assert_eq!(index, boxes.nrows());
+        let streamed =
+            build_instance_masks(&coeffs, &protos, 2, 4, 4, &boxes, &pre, Some(&mut sink));
+        assert_eq!(streamed, Some((keep.clone(), None)));
+        assert_eq!(index, keep.len());
     }
 
     /// Class names `class0..class{nc-1}`.
