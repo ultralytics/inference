@@ -64,7 +64,8 @@ pub struct Text {
     pub polygon: Polygon,
 }
 
-/// `PaddleOCR` recognition for the boxes or oriented boxes of a YOLO text detector.
+/// Text recognition for the boxes or oriented boxes of a YOLO text detector, with `PaddleOCR`
+/// or a function of your own.
 ///
 /// # Example
 ///
@@ -81,7 +82,18 @@ pub struct Text {
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub struct TextRecognizer {
+pub struct TextRecognizer(Backend);
+
+/// A function reading `(text, confidence)` from an RGB crop.
+type Recognize = Box<dyn FnMut(&RgbImage) -> (String, f32) + Send>;
+
+enum Backend {
+    Paddle(Paddle),
+    Custom(Recognize),
+}
+
+/// The `PaddleOCR` recognizer and text-line orientation classifier.
+struct Paddle {
     recognizer: Session,
     orientation: Session,
     /// CTC classes: the blank, the dictionary, then a space.
@@ -116,11 +128,27 @@ impl TextRecognizer {
             .chain(dictionary.split('\n').filter_map(|c| c.chars().next()))
             .chain([' '])
             .collect();
-        Ok(Self {
+        Ok(Self(Backend::Paddle(Paddle {
             recognizer,
             orientation,
             characters,
-        })
+        })))
+    }
+
+    /// Read texts with `recognize` instead of `PaddleOCR`, like Ultralytics
+    /// `recognizer=<callable>`: it gets each non-empty RGB crop on its own and returns the text and
+    /// its confidence, without the orientation check.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use ultralytics_inference::ocr::TextRecognizer;
+    ///
+    /// let ocr = TextRecognizer::custom(|crop| (format!("{}x{}", crop.width(), crop.height()), 1.0));
+    /// ```
+    #[must_use]
+    pub fn custom(recognize: impl FnMut(&RgbImage) -> (String, f32) + Send + 'static) -> Self {
+        Self(Backend::Custom(Box::new(recognize)))
     }
 
     /// Read the text in every box or oriented box of a detector `result` on `image`, in reading
@@ -154,7 +182,11 @@ impl TextRecognizer {
                 ..Text::default()
             });
         }
-        for (i, (text, confidence)) in pending.into_iter().zip(self.recognize(&crops)?) {
+        let reads = match &mut self.0 {
+            Backend::Paddle(paddle) => paddle.recognize(&crops)?,
+            Backend::Custom(recognize) => crops.iter().map(recognize).collect(),
+        };
+        for (i, (text, confidence)) in pending.into_iter().zip(reads) {
             texts[i].text = text;
             texts[i].confidence = confidence;
         }
@@ -164,7 +196,9 @@ impl TextRecognizer {
             .map(|i| texts[i].clone())
             .collect())
     }
+}
 
+impl Paddle {
     /// Read every crop, then read the crops the classifier finds upside down again turned by 180
     /// degrees and keep the more confident reading.
     fn recognize(&mut self, crops: &[RgbImage]) -> Result<Vec<(String, f32)>> {
@@ -472,6 +506,33 @@ mod tests {
         ];
         assert_eq!(reading_order(&polygons), [2, 0, 1, 3]);
         assert_eq!(reading_order(&[]), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn test_custom_recognizer_reads_each_box_crop_in_reading_order() {
+        use crate::results::{Boxes, Speed};
+        let mut result = Results::new(
+            ndarray::Array3::zeros((40, 60, 3)),
+            String::new(),
+            std::sync::Arc::default(),
+            Speed::default(),
+            (40, 60),
+        );
+        // A box on the second line, one on the first, and one outside the image.
+        let data = ndarray::array![
+            [0.0, 20.0, 30.0, 30.0, 0.8, 0.0],
+            [10.0, 0.0, 50.0, 10.0, 0.9, 0.0],
+            [70.0, 0.0, 80.0, 10.0, 0.7, 0.0],
+        ];
+        result.boxes = Some(Boxes::new(data, (40, 60)));
+        let mut ocr = TextRecognizer::custom(|c| (format!("{}x{}", c.width(), c.height()), 0.5));
+        let image = DynamicImage::new_rgb8(60, 40);
+        let texts = ocr.read(&image, &result).unwrap();
+        let read: Vec<_> = texts
+            .iter()
+            .map(|t| (t.text.as_str(), t.detection_index))
+            .collect();
+        assert_eq!(read, [("40x10", 1), ("", 2), ("30x10", 0)]);
     }
 
     /// The bus photo through YOLO26n-Text and PP-OCRv6 reads its destination sign. Skips when the
