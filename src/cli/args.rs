@@ -107,7 +107,7 @@ pub struct PredictArgs {
     #[arg(long, default_value_t = false)]
     pub retina_masks: bool,
 
-    /// Read the text in each box or oriented box with `PaddleOCR`; without `--model` this runs the
+    /// Read the text in each box, oriented box or mask with `PaddleOCR`; without `--model` this runs the
     /// yolo26n-text detector
     #[arg(long, default_value_t = false)]
     pub ocr: bool,

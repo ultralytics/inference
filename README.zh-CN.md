@@ -311,7 +311,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--rect [<BOOL>]`    |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
 | `--tile [<TILE>]`    |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
 | `--retina-masks`     |      | 以原图尺寸生成分割掩码，而不是推理尺寸                                                                                                                                                       | `false`                                                         |
-| `--ocr`              |      | 使用 PaddleOCR 识别每个框或旋转框中的文字；省略 `--model` 时使用 `yolo26n-text.onnx`                                                                                                         | `false`                                                         |
+| `--ocr`              |      | 使用 PaddleOCR 识别每个框、旋转框或掩码中的文字；省略 `--model` 时使用 `yolo26n-text.onnx`                                                                                                   | `false`                                                         |
 | `--batch`            |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
 | `--quantize`         |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w32a32`、`w8a16` 或 `w8a32`                                                                                            | 模型精度                                                        |
 | `--save [<BOOL>]`    |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                                                       | `true`                                                          |
@@ -533,7 +533,7 @@ let results = model.predict("aerial.jpg")?;
 
 **场景文字识别（OCR）：**
 
-YOLO26-Text 检测模型以旋转框找到文字，`TextRecognizer` 使用 PaddleOCR PP-OCRv6 识别，与 Python 中 `recognizer="paddleocr"` 的 `solutions.OCR` 一致。每个裁剪区域都会转正，方向分类模型判断为倒置的文字会旋转 180 度后再次识别，结果按阅读顺序返回。识别模型与检测模型运行在同一设备上；未启用 `openvino` feature 时，原生 OpenVINO IR 检测模型的识别模型运行在 CPU 上：
+YOLO26-Text 检测模型以旋转框找到文字，`TextRecognizer` 使用 PaddleOCR PP-OCRv6 识别，与 Python 中 `recognizer="paddleocr"` 的 `solutions.OCR` 一致。也支持检测模型的框和分割模型的掩码，掩码按其轮廓的最小外接矩形裁剪识别，并保留轮廓作为多边形。每个裁剪区域都会转正，方向分类模型判断为倒置的文字会旋转 180 度后再次识别，结果按阅读顺序返回。识别模型与检测模型运行在同一设备上；未启用 `openvino` feature 时，原生 OpenVINO IR 检测模型的识别模型运行在 CPU 上：
 
 ```rust
 use ultralytics_inference::YOLOModel;

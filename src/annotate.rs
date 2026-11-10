@@ -970,31 +970,32 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont
             let class_id = cls[i] as usize;
             let color = Color::for_class(&result.colors, class_id);
             let class_name = result.names.get(&class_id).map_or("object", String::as_str);
-            let quad = std::array::from_fn(|j| [corners[[i, j, 0]], corners[[i, j, 1]]]);
+            let quad: [[f32; 2]; 4] =
+                std::array::from_fn(|j| [corners[[i, j, 0]], corners[[i, j, 1]]]);
             let label = format!(" {} {:.2} ", class_name, conf[i]);
             let style = (Rgb([color.0, color.1, color.2]), font_scale, thickness);
-            draw_quad(img, font, &mut labels, quad, &label, style);
+            draw_polygon(img, font, &mut labels, &quad, &label, style);
         }
     }
 }
 
-/// Draw the outline of `quad` and `label` above the top-left corner of its enclosing box, like
-/// Ultralytics `box_label` for polygons, in `(color, font size, thickness)`.
+/// Draw the closed outline through `points` and `label` above the top-left corner of its
+/// enclosing box, like Ultralytics `box_label` for polygons, in `(color, font size, thickness)`.
 #[allow(clippy::cast_possible_truncation)]
-fn draw_quad(
+fn draw_polygon(
     img: &mut image::RgbImage,
     font: Option<&LabelFont>,
     labels: &mut Labels,
-    quad: [[f32; 2]; 4],
+    points: &[[f32; 2]],
     label: &str,
     (color, font_scale, thickness): (Rgb<u8>, f32, i32),
 ) {
-    for (j, a) in quad.iter().enumerate() {
-        let b = quad[(j + 1) % 4];
+    for (j, a) in points.iter().enumerate() {
+        let b = points[(j + 1) % points.len()];
         draw_line_segment(img, a[0], a[1], b[0], b[1], color, thickness);
     }
     if let Some(f) = font {
-        let min = |k: usize| quad.iter().map(|p| p[k]).fold(f32::INFINITY, f32::min);
+        let min = |k: usize| points.iter().map(|p| p[k]).fold(f32::INFINITY, f32::min);
         let (x, y) = ((min(0) as i32).max(0), (min(1) as i32).max(0));
         draw_label(img, f, labels, label, color, font_scale, x, y, y);
     }
@@ -1018,11 +1019,11 @@ pub fn annotate_texts(image: &DynamicImage, texts: &[crate::ocr::Text]) -> Dynam
             ..Labels::default()
         };
         let label = format!("{} {:.2}", t.text, t.confidence);
-        draw_quad(
+        draw_polygon(
             &mut img,
             font.as_ref(),
             &mut labels,
-            t.polygon,
+            &t.polygon,
             &label,
             style,
         );
