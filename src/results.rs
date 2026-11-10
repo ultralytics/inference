@@ -843,7 +843,8 @@ impl Boxes {
 
 /// Per-instance segmentation masks produced by the `segment` task.
 ///
-/// Holds the raw mask tensor. Polygon `xy`/`xyn` contours are not derived.
+/// Holds the binary mask tensor, with mask outlines on the original image in [`xy`](Self::xy)
+/// and [`xyn`](Self::xyn).
 #[derive(Debug, Clone)]
 pub struct Masks {
     /// Binary masks with shape (N, H, W), 1.0 inside each object, at the model input size like
@@ -889,8 +890,199 @@ impl Masks {
         self.data.is_empty()
     }
 
-    // Note: this type exposes the raw mask tensor only. Polygon xy/xyn
-    // contour properties are not derived yet.
+    /// The outline of each mask in image pixels, `(points, 2)` per mask, like Ultralytics
+    /// `Masks.xy`: the outer contours of the pixels above 0.5, traced like `OpenCV`
+    /// `findContours` with `RETR_EXTERNAL` and `CHAIN_APPROX_SIMPLE`, joined at their closest
+    /// points and scaled from the mask size to the image like `scale_coords`. A mask without
+    /// pixels has no points.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    pub fn xy(&self) -> Vec<Array2<f32>> {
+        let (_, mh, mw) = self.data.dim();
+        let (oh, ow) = self.orig_shape;
+        let [left, top, nw, nh] = crate::postprocessing::content_crop(mh, mw, oh, ow);
+        // Python's f64 gains, which NumPy rounds to f32 for f32 points.
+        let gain = [nw as f64 / f64::from(ow), nh as f64 / f64::from(oh)].map(|g| g as f32);
+        let (pad, size) = ([left as f32, top as f32], [ow as f32, oh as f32]);
+        self.data
+            .outer_iter()
+            .map(|mask| {
+                let points = merge_segments(external_contours(&mask));
+                Array2::from_shape_fn((points.len(), 2), |(i, k)| {
+                    ((points[i][k] as f32 - pad[k]) / gain[k]).clamp(0.0, size[k])
+                })
+            })
+            .collect()
+    }
+
+    /// The outlines of [`xy`](Self::xy) normalized by the image width and height.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn xyn(&self) -> Vec<Array2<f32>> {
+        let (h, w) = (self.orig_shape.0 as f32, self.orig_shape.1 as f32);
+        let mut outlines = self.xy();
+        for points in &mut outlines {
+            points.column_mut(0).mapv_inplace(|x| x / w);
+            points.column_mut(1).mapv_inplace(|y| y / h);
+        }
+        outlines
+    }
+}
+
+/// `OpenCV` chain code steps: right, then counterclockwise in image coordinates.
+const CHAIN: [[isize; 2]; 8] = [
+    [1, 0],
+    [1, -1],
+    [0, -1],
+    [-1, -1],
+    [-1, 0],
+    [-1, 1],
+    [0, 1],
+    [1, 1],
+];
+
+/// Outer contours of the pixels above 0.5, in the points and order of `OpenCV` 5
+/// `findContours(RETR_EXTERNAL, CHAIN_APPROX_SIMPLE)`: Suzuki border following over the mask
+/// padded by one pixel, keeping the points where the direction changes, newest contour first.
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+fn external_contours(mask: &ArrayView2<f32>) -> Vec<Vec<[i32; 2]>> {
+    let (h, w) = mask.dim();
+    let pw = w + 2;
+    // 0 background, 1 foreground, then OpenCV's marks for traced pixels.
+    let mut img = vec![0_i8; (h + 2) * pw];
+    for ((y, x), &v) in mask.indexed_iter() {
+        img[(y + 1) * pw + x + 1] = i8::from(v > 0.5);
+    }
+    let mut contours = Vec::new();
+    // OpenCV's `lnbd`: the last border pixel met, whose mark tells whether a new outer border
+    // lies inside an earlier one.
+    let mut last = 0;
+    for y in 1..=h {
+        let (mut x, mut prev) = (1, 0_i8);
+        while x <= w {
+            let p = img[y * pw + x];
+            if p != prev {
+                if prev == 0 && p == 1 && img[y * pw + last] <= 0 {
+                    contours.push(trace(&mut img, pw, x, y));
+                    (last, prev) = (x, img[y * pw + x]);
+                    x += 1;
+                    continue;
+                }
+                if p == 0 && prev > 1 {
+                    last = x - 1;
+                }
+                if p & !1 != 0 {
+                    last = x;
+                }
+                prev = p;
+            }
+            x += 1;
+        }
+        last = 0;
+    }
+    contours.reverse();
+    contours
+}
+
+/// Follow the outer border starting at padded pixel `(x, y)` like `OpenCV`
+/// `icvFetchContourEx`, marking it in `img` and returning its corner points without the padding.
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn trace(img: &mut [i8], pw: usize, x: usize, y: usize) -> Vec<[i32; 2]> {
+    const NEW: i8 = 2;
+    const RIGHT: i8 = NEW | i8::MIN;
+    let at = |i: usize, s: usize| {
+        (i as isize + CHAIN[s % 8][0] + CHAIN[s % 8][1] * pw as isize) as usize
+    };
+    let i0 = y * pw + x;
+    let mut pt = [x as i32 - 1, y as i32 - 1];
+    // The first neighbor clockwise from the left, which is background.
+    let mut s = (0..8)
+        .map(|k| (11 - k) % 8)
+        .find(|&s| img[at(i0, s)] != 0)
+        .unwrap_or(4);
+    if s == 4 {
+        img[i0] = RIGHT;
+        return vec![pt];
+    }
+    let (i1, mut i3, mut prev_s) = (at(i0, s), i0, s ^ 4);
+    let mut points = Vec::new();
+    loop {
+        let s_end = s;
+        let mut t = s + 1;
+        while img[at(i3, t)] == 0 {
+            t += 1;
+        }
+        let i4 = at(i3, t);
+        s = t % 8;
+        if s.wrapping_sub(1) < s_end {
+            img[i3] = RIGHT;
+        } else if img[i3] == 1 {
+            img[i3] = NEW;
+        }
+        if s != prev_s {
+            points.push(pt);
+        }
+        prev_s = s;
+        pt = [pt[0] + CHAIN[s][0] as i32, pt[1] + CHAIN[s][1] as i32];
+        if i4 == i0 && i3 == i1 {
+            return points;
+        }
+        i3 = i4;
+        s = (s + 4) % 8;
+    }
+}
+
+/// One outline from several contours, as Ultralytics `merge_multi_segment` joins them: each
+/// pair of neighbors meets at its closest points, and the middle contours are walked there and
+/// back so the outline returns to the first one.
+fn merge_segments(mut segments: Vec<Vec<[i32; 2]>>) -> Vec<[i32; 2]> {
+    if segments.len() < 2 {
+        return segments.pop().unwrap_or_default();
+    }
+    let n = segments.len();
+    let mut ends = vec![Vec::new(); n];
+    for i in 1..n {
+        let (a, b) = closest(&segments[i - 1], &segments[i]);
+        ends[i - 1].push(a);
+        ends[i].push(b);
+    }
+    let mut out = Vec::new();
+    for (i, segment) in segments.iter_mut().enumerate() {
+        let mut idx = ends[i].clone();
+        if idx.len() == 2 && idx[0] > idx[1] {
+            idx = idx.iter().map(|&k| segment.len() - 1 - k).collect();
+            segment.reverse();
+        }
+        segment.rotate_left(idx[0]);
+        segment.push(segment[0]);
+        if i == 0 || i == n - 1 {
+            out.extend_from_slice(segment);
+        } else {
+            out.extend_from_slice(&segment[..=idx[1] - idx[0]]);
+        }
+    }
+    for i in (1..n - 1).rev() {
+        out.extend_from_slice(&segments[i][ends[i][1].abs_diff(ends[i][0])..]);
+    }
+    out
+}
+
+/// Indices of the closest pair of points between `a` and `b`, the first in row-major order.
+fn closest(a: &[[i32; 2]], b: &[[i32; 2]]) -> (usize, usize) {
+    let mut best = (0, 0, i64::MAX);
+    for (i, p) in a.iter().enumerate() {
+        for (j, q) in b.iter().enumerate() {
+            let d = i64::from(p[0] - q[0]).pow(2) + i64::from(p[1] - q[1]).pow(2);
+            if d < best.2 {
+                best = (i, j, d);
+            }
+        }
+    }
+    (best.0, best.1)
 }
 
 /// Skeletal keypoints produced by the `pose` task, one set per detected object.
@@ -1383,6 +1575,45 @@ mod tests {
         assert_eq!(masks.orig_shape, (16, 16));
         let empty = Masks::new(Array3::zeros((0, 8, 8)), (16, 16));
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_masks_xy_joins_outer_contours_like_opencv() {
+        // A ring, a single pixel and a block; the second mask is empty.
+        let rows = [
+            "........", ".###....", ".#.#..#.", ".###....", ".....###", ".....###",
+        ];
+        let mut data = Array3::zeros((2, 6, 8));
+        for (y, row) in rows.iter().enumerate() {
+            for (x, c) in row.chars().enumerate() {
+                data[[0, y, x]] = if c == '#' { 0.9 } else { 0.1 };
+            }
+        }
+        let masks = Masks::new(data, (6, 8));
+        // Ultralytics `masks2segments` on OpenCV 5 `findContours`: the outlines newest first,
+        // joined at their closest points and walked back.
+        let expected: [[u8; 2]; 13] = [
+            [5, 4],
+            [5, 5],
+            [7, 5],
+            [7, 4],
+            [5, 4],
+            [6, 2],
+            [3, 3],
+            [3, 1],
+            [1, 1],
+            [1, 3],
+            [3, 3],
+            [6, 2],
+            [6, 2],
+        ];
+        let xy = masks.xy();
+        assert_eq!(
+            xy[0],
+            Array2::from_shape_fn((13, 2), |(i, k)| f32::from(expected[i][k]))
+        );
+        assert_eq!(xy[1].dim(), (0, 2));
+        assert_eq!(masks.xyn()[0].row(0).to_vec(), [5.0 / 8.0, 4.0 / 6.0]);
     }
 
     #[test]

@@ -445,6 +445,12 @@ if let Some(ref boxes) = result.boxes {
     let conf = boxes.conf();      // 置信度
     let cls = boxes.cls();        // 类别 ID
 }
+
+// 分割掩码轮廓，与 Ultralytics masks.xy 一致
+if let Some(ref masks) = result.masks {
+    let xy = masks.xy();          // 每个掩码一个 (点数, 2) 数组，单位为像素
+    let xyn = masks.xyn();        // 归一化 [0-1]
+}
 ```
 
 **选择设备：**

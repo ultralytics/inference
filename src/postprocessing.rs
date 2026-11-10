@@ -749,7 +749,7 @@ fn mask_geometry(mh: usize, mw: usize, oh: u32, ow: u32) -> (usize, [usize; 4]) 
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn content_crop(uh: usize, uw: usize, oh: u32, ow: u32) -> [usize; 4] {
+pub(crate) fn content_crop(uh: usize, uw: usize, oh: u32, ow: u32) -> [usize; 4] {
     let (h, w) = (f64::from(oh), f64::from(ow));
     let gain = (uh as f64 / h).min(uw as f64 / w);
     let fit = |n: f64| ((n * gain).round_ties_even() as usize).max(1);

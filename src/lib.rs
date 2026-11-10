@@ -324,7 +324,7 @@
 //! The [`Results`] struct provides access to inference outputs:
 //!
 //! - [`Boxes`] - Bounding boxes with `xyxy()`, `xywh()`, `xyxyn()`, `xywhn()`, `conf()`, `cls()` methods
-//! - [`Masks`] - Segmentation masks with `data`, `orig_shape` fields
+//! - [`Masks`] - Segmentation masks with `data`, `orig_shape` fields and `xy()`, `xyn()` outlines
 //! - [`SemanticMask`] - Per-pixel class map with `class_ids()`, `classes_present()` methods
 //! - [`DepthMap`] - Per-pixel depth map with `min_depth()`, `max_depth()`, `colorize(colormap, viz)` methods
 //! - [`Probs`] - Classification probabilities with `top1()`, `top5()`, `top1conf()`, `top5conf()` methods
