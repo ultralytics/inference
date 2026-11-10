@@ -537,7 +537,7 @@ let results = model.predict("aerial.jpg")?;
 
 **Scene Text OCR:**
 
-YOLO26-Text detectors find words as oriented boxes, and `TextRecognizer` reads them with PaddleOCR PP-OCRv6, the same as the Python `solutions.OCR` with `recognizer="paddleocr"`. Each crop is turned upright, text the orientation classifier finds upside down is read again turned around, and the texts come back in reading order. The recognizer runs on the detector's device:
+YOLO26-Text detectors find words as oriented boxes, and `TextRecognizer` reads them with PaddleOCR PP-OCRv6, the same as the Python `solutions.OCR` with `recognizer="paddleocr"`. Each crop is turned upright, text the orientation classifier finds upside down is read again turned around, and the texts come back in reading order. The recognizer runs on the detector's device, or on the CPU for a native OpenVINO IR detector built without the `openvino` feature:
 
 ```rust
 use ultralytics_inference::YOLOModel;

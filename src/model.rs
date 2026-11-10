@@ -1447,8 +1447,9 @@ impl YOLOModel {
     }
 
     /// Load a helper ONNX model, such as an OCR recognizer, on this model's device. Its input
-    /// shape changes from call to call, so CUDA and `TensorRT` run it on CUDA, `OpenVINO` on its
-    /// CPU or GPU (the NPU needs static shapes), and everything else on the CPU.
+    /// shape changes from call to call, so CUDA and `TensorRT` run it on CUDA, `OpenVINO`
+    /// (also a native IR model with the `openvino` feature) on its CPU or GPU (the NPU needs
+    /// static shapes), and everything else on the CPU.
     ///
     /// # Errors
     ///
@@ -1475,7 +1476,7 @@ impl YOLOModel {
                 Some(Self::build_cuda_ep(id, None, self.config.cuda_memory_limit))
             }
             #[cfg(feature = "openvino")]
-            "OpenVINOExecutionProvider" => {
+            "OpenVINOExecutionProvider" | "OpenVINO" => {
                 let gpu = self.config.device == Some(crate::Device::IntelGpu);
                 Some(Self::build_openvino_ep(
                     &path,

@@ -533,7 +533,7 @@ let results = model.predict("aerial.jpg")?;
 
 **场景文字识别（OCR）：**
 
-YOLO26-Text 检测模型以旋转框找到文字，`TextRecognizer` 使用 PaddleOCR PP-OCRv6 识别，与 Python 中 `recognizer="paddleocr"` 的 `solutions.OCR` 一致。每个裁剪区域都会转正，方向分类模型判断为倒置的文字会旋转 180 度后再次识别，结果按阅读顺序返回。识别模型与检测模型运行在同一设备上：
+YOLO26-Text 检测模型以旋转框找到文字，`TextRecognizer` 使用 PaddleOCR PP-OCRv6 识别，与 Python 中 `recognizer="paddleocr"` 的 `solutions.OCR` 一致。每个裁剪区域都会转正，方向分类模型判断为倒置的文字会旋转 180 度后再次识别，结果按阅读顺序返回。识别模型与检测模型运行在同一设备上；未启用 `openvino` feature 时，原生 OpenVINO IR 检测模型的识别模型运行在 CPU 上：
 
 ```rust
 use ultralytics_inference::YOLOModel;
