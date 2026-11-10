@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 #[cfg(feature = "annotate")]
-use crate::annotate::annotate_image;
+use crate::annotate::{AnnotateOptions, annotate_image_with_options};
 use crate::io::find_next_run_dir;
 
 #[cfg(feature = "visualize")]
@@ -41,6 +41,14 @@ pub fn run_prediction(args: &PredictArgs) {
     let save = args.save;
     let save_frames = args.save_frames;
     let save_json = args.save_json;
+    #[cfg(feature = "annotate")]
+    let draw = AnnotateOptions {
+        line_width: args.line_width,
+        show_boxes: args.show_boxes,
+        show_labels: args.show_labels,
+        show_conf: args.show_conf,
+        ..AnnotateOptions::default()
+    };
     let verbose = args.verbose;
     let batch_size = args.batch as usize;
     let device = parse_device_arg(args.device.as_deref()).unwrap_or_else(|e| {
@@ -341,7 +349,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
                         #[cfg(feature = "annotate")]
                         if save {
-                            let annotated = annotate_image(img, &result, None);
+                            let annotated = annotate_image_with_options(img, &result, &draw);
 
                             if let Some(saver) = &mut result_saver
                                 && let Err(e) = saver.save_owned(is_video, meta, annotated)
@@ -378,7 +386,7 @@ pub fn run_prediction(args: &PredictArgs) {
                             }
 
                             if let Some(ref mut v) = viewer {
-                                let annotated = annotate_image(img, &result, None);
+                                let annotated = annotate_image_with_options(img, &result, &draw);
 
                                 // Images stay up briefly. Q, Esc or closing the window ends
                                 // the run, like the `q` key in Ultralytics.
@@ -666,6 +674,10 @@ mod tests {
             save_frames: InferenceConfig::DEFAULT_SAVE_FRAMES,
             save_json: false,
             show: false,
+            show_labels: true,
+            show_conf: true,
+            show_boxes: true,
+            line_width: None,
             device: None,
             verbose: true,
             classes: None,
