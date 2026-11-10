@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for result in &results {
         if let Some(masks) = &result.masks {
             println!("segment: {} instance masks", masks.len());
-            // masks.data is Array3<f32> of shape [N, H, W] (per-pixel mask probabilities).
+            // masks.data is Array3<f32> of shape [N, H, W], 1.0 inside each object.
             println!("  raw data shape {:?}", masks.data.shape());
             println!("{:?}", masks.data);
         } else if let Some(keypoints) = &result.keypoints {
