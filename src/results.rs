@@ -890,18 +890,27 @@ impl Masks {
         self.data.is_empty()
     }
 
-    /// The outline of each mask in pixels, `(points, 2)` per mask, like Ultralytics `Masks.xy`
-    /// with `retina_masks=True`: the outer contours of the pixels above 0.5, traced like `OpenCV`
-    /// `findContours` with `RETR_EXTERNAL` and `CHAIN_APPROX_SIMPLE` and joined at their closest
-    /// points. A mask without pixels has no points.
+    /// The outline of each mask in image pixels, `(points, 2)` per mask, like Ultralytics
+    /// `Masks.xy`: the outer contours of the pixels above 0.5, traced like `OpenCV`
+    /// `findContours` with `RETR_EXTERNAL` and `CHAIN_APPROX_SIMPLE`, joined at their closest
+    /// points and scaled from the mask size to the image like `scale_coords`. A mask without
+    /// pixels has no points.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
     pub fn xy(&self) -> Vec<Array2<f32>> {
+        let (_, mh, mw) = self.data.dim();
+        let (oh, ow) = self.orig_shape;
+        let [left, top, nw, nh] = crate::postprocessing::content_crop(mh, mw, oh, ow);
+        // Python's f64 gains, which NumPy rounds to f32 for f32 points.
+        let gain = [nw as f64 / f64::from(ow), nh as f64 / f64::from(oh)].map(|g| g as f32);
+        let (pad, size) = ([left as f32, top as f32], [ow as f32, oh as f32]);
         self.data
             .outer_iter()
             .map(|mask| {
                 let points = merge_segments(external_contours(&mask));
-                Array2::from_shape_fn((points.len(), 2), |(i, k)| points[i][k] as f32)
+                Array2::from_shape_fn((points.len(), 2), |(i, k)| {
+                    ((points[i][k] as f32 - pad[k]) / gain[k]).clamp(0.0, size[k])
+                })
             })
             .collect()
     }
