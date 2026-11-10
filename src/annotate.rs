@@ -529,11 +529,12 @@ fn layout(font: &LabelFont, scale: PxScale, text: &str) -> (Vec<(GlyphId, f64, f
 type GlyphCache = HashMap<(u16, u32, u32, u32), Option<(i32, i32, usize, Vec<f32>)>>;
 
 /// The labels drawn so far in a frame: where they sit, so the next one avoids them, and the
-/// glyphs they rasterized.
+/// glyphs they rasterized. Their text takes `text_color`, or a color contrasting with the fill.
 #[derive(Default)]
 struct Labels {
     placed: Vec<Rect>,
     glyphs: GlyphCache,
+    text_color: Option<Rgb<u8>>,
 }
 
 /// Draw the `glyphs` of a [`layout`] at `(x, y)`, taking each glyph's coverage from `cache` when
@@ -685,7 +686,7 @@ fn draw_label(
         let Color(r, g, b) = Color(color[0], color[1], color[2]).text_color();
         draw_text(
             img,
-            Rgb([r, g, b]),
+            labels.text_color.unwrap_or(Rgb([r, g, b])),
             (text_x, text_y),
             scale,
             &font.glyphs,
@@ -977,8 +978,8 @@ fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont
     }
 }
 
-/// Draw the outline of `quad` and `label` at its first corner, in `(color, font size,
-/// thickness)`.
+/// Draw the outline of `quad` and `label` above the top-left corner of its enclosing box, like
+/// Ultralytics `box_label` for polygons, in `(color, font size, thickness)`.
 #[allow(clippy::cast_possible_truncation)]
 fn draw_quad(
     img: &mut image::RgbImage,
@@ -993,20 +994,24 @@ fn draw_quad(
         draw_line_segment(img, a[0], a[1], b[0], b[1], color, thickness);
     }
     if let Some(f) = font {
-        let (x, y) = (quad[0][0] as i32, quad[0][1] as i32);
-        draw_label(img, f, labels, label, color, font_scale, x, y, 0);
+        let min = |k: usize| quad.iter().map(|p| p[k]).fold(f32::INFINITY, f32::min);
+        let (x, y) = ((min(0) as i32).max(0), (min(1) as i32).max(0));
+        draw_label(img, f, labels, label, color, font_scale, x, y, y);
     }
 }
 
-/// Draw OCR texts on `image`: each outline in green with its text and recognition confidence,
-/// like Ultralytics `solutions.OCR`. The Unicode font is used when any text is non-ASCII.
+/// Draw OCR texts on `image`: each outline in green with its text and recognition confidence in
+/// black, like Ultralytics `solutions.OCR`. The Unicode font is used when any text is non-ASCII.
 #[cfg(not(target_arch = "wasm32"))]
 #[must_use]
 pub fn annotate_texts(image: &DynamicImage, texts: &[crate::ocr::Text]) -> DynamicImage {
     let mut img = image.to_rgb8();
     let (font_scale, thickness) = render_scale(img.width(), img.height());
     let font = label_font(texts.iter().any(|t| !t.text.is_ascii()));
-    let mut labels = Labels::default();
+    let mut labels = Labels {
+        text_color: Some(Rgb([0, 0, 0])),
+        ..Labels::default()
+    };
     let style = (Rgb([0, 255, 0]), font_scale, thickness);
     for t in texts {
         let label = format!(" {} {:.2} ", t.text, t.confidence);
