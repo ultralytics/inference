@@ -843,8 +843,8 @@ impl Boxes {
 
 /// Per-instance segmentation masks produced by the `segment` task.
 ///
-/// Holds the mask tensor at the original image size, with mask outlines in [`xy`](Self::xy) and
-/// [`xyn`](Self::xyn).
+/// Holds the binary mask tensor, with mask outlines on the original image in [`xy`](Self::xy)
+/// and [`xyn`](Self::xyn).
 #[derive(Debug, Clone)]
 pub struct Masks {
     /// Binary masks with shape (N, H, W), 1.0 inside each object, at the model input size like
