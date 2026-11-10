@@ -8,7 +8,7 @@
 | `tensorrt`        | ORT TensorRT EP (FP16, engine cache, opt-level 5)   | NVIDIA GPU with TensorRT installed; 2–3× faster than `cuda`                                      |
 | `cuda-preprocess` | GPU-side preprocess + zero-copy device input to TRT | maximum throughput; `YOLOModel::predict_image` transparently uses a fused CUDA preprocess kernel |
 
-`cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required: `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
+`tensorrt` implies `cuda`, and `cuda-preprocess` implies `cuda` + `tensorrt`. When it's compiled in, no API change is required: `YOLOModel::predict_image` automatically routes through the GPU preprocess path on CUDA/TensorRT devices. Opt out per-model with [`InferenceConfig::with_cuda_preprocess(false)`](https://docs.rs/ultralytics-inference/latest/ultralytics_inference/inference/struct.InferenceConfig.html#method.with_cuda_preprocess).
 
 ## Requirements
 
@@ -39,9 +39,9 @@ Add the feature you need in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.57", features = ["tensorrt"] }
+ultralytics-inference = { version = "0.0.58", features = ["tensorrt"] }
 # or, for the fastest path:
-ultralytics-inference = { version = "0.0.57", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.58", features = ["cuda-preprocess"] }
 ```
 
 Then `cargo build --release`: no extra flags needed.
@@ -71,7 +71,7 @@ If you need to pin a specific version at compile time instead, override the cuda
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.57", features = ["cuda-preprocess"] }
+ultralytics-inference = { version = "0.0.58", features = ["cuda-preprocess"] }
 # Replace the default feature with a pinned one (e.g. CUDA 12.8):
 cudarc = { version = "0.19", default-features = false, features = ["driver", "nvrtc", "dynamic-loading", "cuda-12080"] }
 ```
@@ -231,6 +231,13 @@ The model should be exported with a matching batch size, or with a dynamic batch
 axis. A model whose input pins `[16, 3, 640, 640]` always runs 16 images at a time:
 a larger request is split into chunks of 16, and a shorter one is padded with its
 last image, so `--batch 1` on it still pays for 16.
+
+With `--ocr`, the PaddleOCR text recognizer runs on the same GPU through the CUDA EP, also for a
+`tensorrt` detector (the `tensorrt` feature builds `cuda` too), since its input width changes with every crop:
+
+```bash
+ultralytics-inference predict --ocr --source sign.jpg --device cuda:0
+```
 
 [`YOLOModel::predict_image`]: https://docs.rs/ultralytics-inference/latest/ultralytics_inference/model/struct.YOLOModel.html#method.predict_image
 

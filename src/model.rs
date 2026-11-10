@@ -89,6 +89,15 @@ impl Backend {
     }
 }
 
+/// The configured intra-op thread count, or every available core when it is 0.
+fn intra_threads(config: &InferenceConfig) -> usize {
+    if config.num_threads > 0 {
+        config.num_threads
+    } else {
+        std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
+    }
+}
+
 /// The ONNX Runtime environment every model in this process shares. ONNX Runtime allows one
 /// environment per process, so the first load builds it and later loads clone the handle.
 fn ort_environment() -> Result<ort::environment::Environment> {
@@ -338,13 +347,7 @@ impl YOLOModel {
         #[cfg(all(feature = "tensorrt", not(feature = "cuda-preprocess")))]
         let cuda_graph = false;
 
-        // Determine optimal thread count based on available parallelism
-        let num_threads = if config.num_threads > 0 {
-            config.num_threads
-        } else {
-            // Use all available cores for intra-op parallelism (single inference)
-            std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
-        };
+        let num_threads = intra_threads(&config);
 
         // Create ONNX Runtime session with optimizations
         let mut session_builder = Session::builder(&ort_environment()?).map_err(|e| {
@@ -1441,6 +1444,55 @@ impl YOLOModel {
     #[must_use]
     pub fn execution_provider(&self) -> &str {
         &self.execution_provider
+    }
+
+    /// Load a helper ONNX model, such as an OCR recognizer, on this model's device. Its input
+    /// shape changes from call to call, so CUDA and `TensorRT` run it on CUDA, `OpenVINO`
+    /// (also a native IR model with the `openvino` feature) on its CPU or GPU (the NPU needs
+    /// static shapes), and everything else on the CPU.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file is missing and not downloadable, or fails to load.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn companion_session(&self, path: &Path) -> Result<Session> {
+        let path = if path.exists() {
+            path.to_path_buf()
+        } else {
+            try_download_model(path)?
+        };
+        let load_error = |e: &dyn std::fmt::Display| {
+            InferenceError::ModelLoadError(format!("Failed to load {}: {e}", path.display()))
+        };
+        let mut builder = Session::builder(&ort_environment()?).map_err(|e| load_error(&e))?;
+        let ep: Option<ort::ep::ExecutionProviderDispatch> = match self.execution_provider.as_str()
+        {
+            #[cfg(feature = "cuda")]
+            "CUDAExecutionProvider" | "TensorRTExecutionProvider" => {
+                let id = match self.config.device {
+                    Some(crate::Device::Cuda(i) | crate::Device::TensorRt(i)) => i as i32,
+                    _ => 0,
+                };
+                Some(Self::build_cuda_ep(id, None, self.config.cuda_memory_limit))
+            }
+            #[cfg(feature = "openvino")]
+            "OpenVINOExecutionProvider" | "OpenVINO" => {
+                let gpu = self.config.device == Some(crate::Device::IntelGpu);
+                Some(Self::build_openvino_ep(
+                    &path,
+                    if gpu { "GPU" } else { "CPU" },
+                ))
+            }
+            _ => None,
+        };
+        if let Some(ep) = ep {
+            ep.register(&mut builder).map_err(|e| load_error(&e))?;
+        }
+        builder
+            .with_intra_threads(intra_threads(&self.config))
+            .map_err(|e| load_error(&e))?
+            .commit_from_file(&path)
+            .map_err(|e| load_error(&e))
     }
 
     /// Run inference on an image file.

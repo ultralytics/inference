@@ -225,6 +225,9 @@ ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --i
 # Tiled inference for large images, small objects and video frames (20% window overlap, results merged)
 ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 640
 
+# Read scene text: YOLO26-Text finds the words and PaddleOCR reads them (auto-downloads yolo26n-text.onnx and the OCR models)
+ultralytics-inference predict --ocr --source sign.jpg
+
 # Save individual frames for video input
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -247,7 +250,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.58 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -267,7 +270,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.58 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -309,6 +312,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--rect [<BOOL>]`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                                               | `true`                                                                       |
 | `--tile [<TILE>]`        |       | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz`                                                                                                                                                     | off                                                                          |
 | `--retina-masks`         |       | Build segmentation masks at the original image size instead of the inference size                                                                                                                                            | `false`                                                                      |
+| `--ocr`                  |       | Read the text in each box, oriented box or mask with PaddleOCR; without `--model` this runs `yolo26n-text.onnx`                                                                                                              | `false`                                                                      |
 | `--batch`                |       | Batch size for inference                                                                                                                                                                                                     | `1`                                                                          |
 | `--quantize`             |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`                                                                                                                | Model precision                                                              |
 | `--save [<BOOL>]`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                                              | `true`                                                                       |
@@ -331,32 +335,33 @@ On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds t
 
 **Task and Model Resolution:**
 
-| Invocation                                        | Model used             | Notes                                                               |
-| ------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
-| `predict`                                         | `yolo26n.onnx`         | Default detect model, auto-downloaded                               |
-| `predict --task segment`                          | `yolo26n-seg.onnx`     | Nano seg model, auto-downloaded                                     |
-| `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | Nano semantic segmentation model, auto-downloaded (YOLO26 only)     |
-| `predict --task depth`                            | `yolo26n-depth.onnx`\* | Nano depth estimation model, auto-downloaded (YOLO26 only)          |
-| `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                |
-| `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                    |
-| `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                     |
-| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | Task read from model metadata                                       |
-| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, proceeds normally                        |
-| `predict --task segment --model yolo26n.onnx`     | error                  | `--task` conflicts with model metadata (`detect`), exits with error |
+| Invocation                                        | Model used             | Notes                                                                |
+| ------------------------------------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `predict`                                         | `yolo26n.onnx`         | Default detect model, auto-downloaded                                |
+| `predict --task segment`                          | `yolo26n-seg.onnx`     | Nano seg model, auto-downloaded                                      |
+| `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | Nano semantic segmentation model, auto-downloaded (YOLO26 only)      |
+| `predict --task depth`                            | `yolo26n-depth.onnx`\* | Nano depth estimation model, auto-downloaded (YOLO26 only)           |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | Nano classify model, auto-downloaded                                 |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | Nano pose model, auto-downloaded                                     |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | Nano OBB model, auto-downloaded                                      |
+| `predict --ocr`                                   | `yolo26n-text.onnx`\*  | Nano YOLO26-Text detector plus the PaddleOCR models, auto-downloaded |
+| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | Task read from model metadata                                        |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` matches metadata, proceeds normally                         |
+| `predict --task segment --model yolo26n.onnx`     | error                  | `--task` conflicts with model metadata (`detect`), exits with error  |
 
-\* `semantic` (semantic segmentation) and `depth` (depth estimation) are YOLO26-only.
+\* `semantic` (semantic segmentation), `depth` (depth estimation) and the `-text` scene text detectors are YOLO26-only.
 
 **Auto-downloadable models:**
 
-YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation and `-depth` for depth estimation:
+YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation, `-depth` for depth estimation and `-text` for the OBB text detectors that `--ocr` reads with the PaddleOCR `PP-OCRv6_medium_rec.onnx` recognizer and `PP-LCNet_x0_25_textline_ori.onnx` orientation classifier (Apache-2.0):
 
-| Family | Variants                                                                                              |
-| ------ | ----------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-sem`\*, `-depth`\*, `-cls`, `-pose`, `-obb` |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                       |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                       |
+| Family | Variants                                                                                                         |
+| ------ | ---------------------------------------------------------------------------------------------------------------- |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-sem`\*, `-depth`\*, `-cls`, `-pose`, `-obb`, `-text`\* |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                  |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                  |
 
-\* `-sem` (semantic segmentation) and `-depth` (depth estimation) are YOLO26-only.
+\* `-sem` (semantic segmentation), `-depth` (depth estimation) and `-text` (scene text) are YOLO26-only.
 
 **Source Options:**
 
@@ -380,7 +385,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.57"
+ultralytics-inference = "0.0.58"
 ```
 
 ```toml
@@ -534,6 +539,25 @@ let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
 let results = model.predict("aerial.jpg")?;
 ```
 
+**Scene Text OCR:**
+
+YOLO26-Text detectors find words as oriented boxes, and `TextRecognizer` reads them with PaddleOCR PP-OCRv6, the same as the Python `solutions.OCR` with `recognizer="paddleocr"`. Boxes of detection models and masks of segmentation models work too, a mask being read from the minimum-area rectangle around its outline, which it keeps as its polygon. Each crop is turned upright, text the orientation classifier finds upside down is read again turned around, and the texts come back in reading order. The recognizer runs on the detector's device, or on the CPU for a native OpenVINO IR detector built without the `openvino` feature:
+
+```rust
+use ultralytics_inference::YOLOModel;
+use ultralytics_inference::ocr::{DEFAULT_ORIENTATION, DEFAULT_RECOGNIZER, TextRecognizer};
+
+let mut detector = YOLOModel::load("yolo26n-text.onnx")?;
+let mut ocr = TextRecognizer::new(&detector, DEFAULT_RECOGNIZER, DEFAULT_ORIENTATION)?;
+let image = image::open("sign.jpg")?;
+let result = detector.predict_image(&image, "sign.jpg".into())?.remove(0);
+for text in ocr.read(&image, &result)? {
+    println!("{} {:.2}", text.text, text.confidence);
+}
+```
+
+`predict --ocr` and `annotate_texts` draw the texts like Python, and `--line-width`, `--show-labels` and `--show-conf` apply to them too.
+
 **Drawing:**
 
 `annotate_image_with_options` draws like Ultralytics `Results.plot` and takes its options: `line_width`, `show_boxes`,
@@ -565,6 +589,7 @@ inference/
 │   ├── lib.rs              # Library entry point and public exports
 │   ├── main.rs             # CLI application
 │   ├── model.rs            # YOLOModel - ONNX session and inference
+│   ├── ocr.rs              # Scene text OCR (YOLO26-Text + PaddleOCR)
 │   ├── openvino.rs         # Native OpenVINO IR runtime (openvino-native feature)
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask, DepthMap
 │   ├── preprocessing.rs    # Image preprocessing (letterbox, stretch for RT-DETR and depth, normalize, SIMD)
@@ -647,7 +672,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.57", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.58", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 
@@ -674,7 +699,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `visualize`       | Real-time window display for `--show` (default)                                                       |
 | `video`           | Video file decoding/encoding (requires FFmpeg)                                                        |
 | `cuda`            | NVIDIA CUDA support                                                                                   |
-| `tensorrt`        | NVIDIA TensorRT optimization                                                                          |
+| `tensorrt`        | NVIDIA TensorRT optimization (includes `cuda`)                                                        |
 | `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
 | `coreml`          | Apple CoreML (macOS/iOS)                                                                              |
 | `openvino`        | Intel OpenVINO (Linux and Windows x64)                                                                |
@@ -863,6 +888,7 @@ On Apple M4 the fastest setting is 4 threads, one per performance core; adding t
 - [x] Rectangular inference support and optimization
 - [x] Class filtering support
 - [x] Auto-download all YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes n/s/m/l/x, all tasks)
+- [x] Scene text OCR with YOLO26-Text and PaddleOCR (`--ocr`)
 - [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
 - [x] WebAssembly (WASM) browser inference on WebGPU (npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo))
 

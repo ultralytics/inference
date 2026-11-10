@@ -224,6 +224,9 @@ ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --show --i
 # 对大图、小目标和视频帧进行切片推理（窗口重叠 20%，结果合并）
 ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 640
 
+# 场景文字识别：YOLO26-Text 检测文字，PaddleOCR 识别（自动下载 yolo26n-text.onnx 和 OCR 模型）
+ultralytics-inference predict --ocr --source sign.jpg
+
 # 为视频输入保存单帧
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -246,7 +249,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.58 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -266,7 +269,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.57 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.58 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -308,6 +311,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--rect [<BOOL>]`        |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
 | `--tile [<TILE>]`        |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
 | `--retina-masks`         |      | 以原图尺寸生成分割掩码，而不是推理尺寸                                                                                                                                                       | `false`                                                         |
+| `--ocr`                  |      | 使用 PaddleOCR 识别每个框、旋转框或掩码中的文字；省略 `--model` 时使用 `yolo26n-text.onnx`                                                                                                   | `false`                                                         |
 | `--batch`                |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
 | `--quantize`             |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w32a32`、`w8a16` 或 `w8a32`                                                                                            | 模型精度                                                        |
 | `--save [<BOOL>]`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                                                       | `true`                                                          |
@@ -330,32 +334,33 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 **任务和模型解析：**
 
-| 调用方式                                          | 使用模型               | 说明                                                    |
-| ------------------------------------------------- | ---------------------- | ------------------------------------------------------- |
-| `predict`                                         | `yolo26n.onnx`         | 默认检测模型，自动下载                                  |
-| `predict --task segment`                          | `yolo26n-seg.onnx`     | nano 分割模型，自动下载                                 |
-| `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | nano 语义分割模型，自动下载（仅 YOLO26）                |
-| `predict --task depth`                            | `yolo26n-depth.onnx`\* | nano 深度估计模型，自动下载（仅 YOLO26）                |
-| `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                 |
-| `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                 |
-| `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                 |
-| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | 从模型元数据读取任务                                    |
-| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` 与元数据一致，正常执行                         |
-| `predict --task segment --model yolo26n.onnx`     | error                  | `--task` 与模型元数据（`detect`）冲突，程序以错误退出。 |
+| 调用方式                                          | 使用模型               | 说明                                                     |
+| ------------------------------------------------- | ---------------------- | -------------------------------------------------------- |
+| `predict`                                         | `yolo26n.onnx`         | 默认检测模型，自动下载                                   |
+| `predict --task segment`                          | `yolo26n-seg.onnx`     | nano 分割模型，自动下载                                  |
+| `predict --task semantic`                         | `yolo26n-sem.onnx`\*   | nano 语义分割模型，自动下载（仅 YOLO26）                 |
+| `predict --task depth`                            | `yolo26n-depth.onnx`\* | nano 深度估计模型，自动下载（仅 YOLO26）                 |
+| `predict --task classify`                         | `yolo26n-cls.onnx`     | nano 分类模型，自动下载                                  |
+| `predict --task pose`                             | `yolo26n-pose.onnx`    | nano 姿态模型，自动下载                                  |
+| `predict --task obb`                              | `yolo26n-obb.onnx`     | nano OBB 模型，自动下载                                  |
+| `predict --ocr`                                   | `yolo26n-text.onnx`\*  | nano YOLO26-Text 文字检测模型和 PaddleOCR 模型，自动下载 |
+| `predict --model yolo26l-seg.onnx`                | `yolo26l-seg.onnx`     | 从模型元数据读取任务                                     |
+| `predict --task segment --model yolo26l-seg.onnx` | `yolo26l-seg.onnx`     | `--task` 与元数据一致，正常执行                          |
+| `predict --task segment --model yolo26n.onnx`     | error                  | `--task` 与模型元数据（`detect`）冲突，程序以错误退出。  |
 
-\* `semantic`（语义分割）和 `depth`（深度估计）仅支持 YOLO26。
+\* `semantic`（语义分割）、`depth`（深度估计）和 `-text` 场景文字检测模型仅支持 YOLO26。
 
 **可自动下载的模型：**
 
-YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并覆盖标准任务变体。YOLO26 还包含用于语义分割的 `-sem` 和用于深度估计的 `-depth`：
+YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并覆盖标准任务变体。YOLO26 还包含用于语义分割的 `-sem`、用于深度估计的 `-depth`，以及 `--ocr` 使用的 `-text` 旋转框文字检测模型，文字由 PaddleOCR 的 `PP-OCRv6_medium_rec.onnx` 识别模型和 `PP-LCNet_x0_25_textline_ori.onnx` 方向分类模型识别（Apache-2.0）：
 
-| 系列   | 变体                                                                                                  |
-| ------ | ----------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-sem`\*、`-depth`\*、`-cls`、`-pose`、`-obb` |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                       |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                       |
+| 系列   | 变体                                                                                                             |
+| ------ | ---------------------------------------------------------------------------------------------------------------- |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-sem`\*、`-depth`\*、`-cls`、`-pose`、`-obb`、`-text`\* |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                  |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                  |
 
-\* `-sem`（语义分割）和 `-depth`（深度估计）仅支持 YOLO26。
+\* `-sem`（语义分割）、`-depth`（深度估计）和 `-text`（场景文字）仅支持 YOLO26。
 
 **输入源选项：**
 
@@ -379,7 +384,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.57"
+ultralytics-inference = "0.0.58"
 ```
 
 ```toml
@@ -530,6 +535,25 @@ let mut model = YOLOModel::load_with_config("yolo26n.onnx", config)?;
 let results = model.predict("aerial.jpg")?;
 ```
 
+**场景文字识别（OCR）：**
+
+YOLO26-Text 检测模型以旋转框找到文字，`TextRecognizer` 使用 PaddleOCR PP-OCRv6 识别，与 Python 中 `recognizer="paddleocr"` 的 `solutions.OCR` 一致。也支持检测模型的框和分割模型的掩码，掩码按其轮廓的最小外接矩形裁剪识别，并保留轮廓作为多边形。每个裁剪区域都会转正，方向分类模型判断为倒置的文字会旋转 180 度后再次识别，结果按阅读顺序返回。识别模型与检测模型运行在同一设备上；未启用 `openvino` feature 时，原生 OpenVINO IR 检测模型的识别模型运行在 CPU 上：
+
+```rust
+use ultralytics_inference::YOLOModel;
+use ultralytics_inference::ocr::{DEFAULT_ORIENTATION, DEFAULT_RECOGNIZER, TextRecognizer};
+
+let mut detector = YOLOModel::load("yolo26n-text.onnx")?;
+let mut ocr = TextRecognizer::new(&detector, DEFAULT_RECOGNIZER, DEFAULT_ORIENTATION)?;
+let image = image::open("sign.jpg")?;
+let result = detector.predict_image(&image, "sign.jpg".into())?.remove(0);
+for text in ocr.read(&image, &result)? {
+    println!("{} {:.2}", text.text, text.confidence);
+}
+```
+
+`predict --ocr` 和 `annotate_texts` 按 Python 的方式绘制文字，`--line-width`、`--show-labels` 和 `--show-conf` 同样适用。
+
 **绘制：**
 
 `annotate_image_with_options` 与 Ultralytics `Results.plot` 的绘制方式一致并接受其选项：`line_width`、`show_boxes`、
@@ -561,6 +585,7 @@ inference/
 │   ├── lib.rs              # 库入口和公开导出
 │   ├── main.rs             # CLI 应用
 │   ├── model.rs            # YOLOModel - ONNX session 和推理
+│   ├── ocr.rs              # 场景文字识别（YOLO26-Text + PaddleOCR）
 │   ├── openvino.rs         # 原生 OpenVINO IR 运行时（openvino-native feature）
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask, DepthMap
 │   ├── preprocessing.rs    # 图片预处理（letterbox、RT-DETR 和深度模型的拉伸缩放、normalize、SIMD）
@@ -643,7 +668,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.57", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.58", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 
@@ -670,7 +695,7 @@ ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --
 | `visualize`       | 为 `--show` 提供实时窗口显示（默认）                                                     |
 | `video`           | 视频文件解码/编码（需要 FFmpeg）                                                         |
 | `cuda`            | NVIDIA CUDA 支持                                                                         |
-| `tensorrt`        | NVIDIA TensorRT 优化                                                                     |
+| `tensorrt`        | NVIDIA TensorRT 优化（包含 `cuda`）                                                      |
 | `cuda-preprocess` | GPU 预处理 + TensorRT 零拷贝输入（需要 CUDA toolkit；见 [`docs/CUDA.md`](docs/CUDA.md)） |
 | `coreml`          | Apple CoreML（macOS/iOS）                                                                |
 | `openvino`        | Intel OpenVINO（Linux 和 Windows x64）                                                   |
@@ -856,6 +881,7 @@ Apple M4 MacBook Pro（10 核 CPU，ONNX Runtime 1.28，release 构建，100 张
 - [x] 矩形推理支持和优化。
 - [x] 类别过滤支持。
 - [x] 自动下载所有 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（所有 n/s/m/l/x 尺寸、所有任务）。
+- [x] 使用 YOLO26-Text 和 PaddleOCR 进行场景文字识别（`--ocr`）。
 - [x] `--task` CLI 参数：省略 `--model` 时选择并自动下载匹配的 nano 模型；任务和模型元数据冲突时退出并报错。
 - [x] 通过 WebGPU 的 WebAssembly（WASM）浏览器推理（npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo)）。
 

@@ -159,6 +159,26 @@ fn font_bytes(unicode: bool) -> Option<&'static [u8]> {
     Some(bytes.get_or_init(|| data))
 }
 
+/// The label font, Arial Unicode for non-ASCII text: at the TrueType size `em` when given, as
+/// Ultralytics draws with PIL (`PxScale` is the line height, not the em), or else sized to match
+/// the `OpenCV` text of line width `lw`. `None` while the font is not available.
+#[allow(clippy::cast_precision_loss)]
+fn label_font(unicode: bool, em: Option<f32>, lw: i32) -> Option<LabelFont> {
+    let data = font_bytes(unicode)?;
+    let glyphs = FontRef::try_from_slice(data).ok()?;
+    let scale = match em {
+        Some(em) => em * glyphs.height_unscaled() / glyphs.units_per_em()?,
+        None => 10.5 * lw as f32,
+    };
+    Some(LabelFont {
+        glyphs,
+        face: harfrust::Font::new(data, 0)?,
+        plans: RefCell::default(),
+        scale: PxScale::from(scale),
+        pil: em.is_some(),
+    })
+}
+
 /// Overlay inference results onto `image` and return the annotated copy.
 ///
 /// Draws whichever result types are present: detection boxes with instance masks,
@@ -266,22 +286,8 @@ pub fn annotate_image_with_options(
     // side (PIL sizes are em sizes, `PxScale` is the line height), and other box labels are sized
     // to match the OpenCV Hershey text of the line width.
     let pil = unicode || result.probs.is_some();
-    let font = font_bytes(unicode).and_then(|data| {
-        let glyphs = FontRef::try_from_slice(data).ok()?;
-        let em = (side / 2.0 * 0.035).round_ties_even().max(12.0) as f32;
-        let scale = if pil {
-            em * glyphs.height_unscaled() / glyphs.units_per_em()?
-        } else {
-            10.5 * lw as f32
-        };
-        Some(LabelFont {
-            glyphs,
-            face: harfrust::Font::new(data, 0)?,
-            plans: RefCell::default(),
-            scale: PxScale::from(scale),
-            pil,
-        })
-    });
+    let em = (side / 2.0 * 0.035).round_ties_even().max(12.0) as f32;
+    let font = label_font(unicode, pil.then_some(em), lw);
 
     draw_semantic_mask(&mut img, result);
     draw_detection(&mut img, result, font.as_ref(), options, lw);
@@ -663,7 +669,7 @@ fn draw_label(
     font: &LabelFont,
     cache: &mut GlyphCache,
     label: &str,
-    color: Rgb<u8>,
+    (color, text): (Rgb<u8>, Rgb<u8>),
     lw: i32,
     (x, y): (i32, i32),
 ) {
@@ -686,8 +692,6 @@ fn draw_label(
         (false, true) => y - 2 - ascent,
         (false, false) => y + h - 1 - ascent,
     };
-    let text = Color(color[0], color[1], color[2]).text_color();
-    let text = Rgb([text.0, text.1, text.2]);
     // OpenCV strokes its text `lw - 1` px thick, bolder than Arial, so the glyphs are thickened
     // by half the line width.
     let stroke = if font.pil {
@@ -744,32 +748,94 @@ fn draw_detection(
         let class_id = cls as usize;
         let Color(r, g, b) = Color::for_class(&result.colors, class_id);
         let color = Rgb([r, g, b]);
-        let points: Vec<[i32; 2]> = corners.iter().map(|&[x, y]| [x as i32, y as i32]).collect();
-        for (k, &a) in points.iter().enumerate() {
-            draw_line(img, a, points[(k + 1) % points.len()], color, lw);
-        }
-
         let name = result.names.get(&class_id).map_or("object", String::as_str);
         let name = id.map_or_else(|| name.to_string(), |id| format!("id:{} {name}", id as i64));
         let label = match (options.show_labels, options.show_conf) {
-            (true, true) => format!("{name} {conf:.2}"),
-            (true, false) => name,
-            (false, true) => format!("{conf:.2}"),
-            (false, false) => continue,
+            (true, true) => Some(format!("{name} {conf:.2}")),
+            (true, false) => Some(name),
+            (false, true) => Some(format!("{conf:.2}")),
+            (false, false) => None,
         };
-        if let Some(font) = font {
-            let corner = |k: usize| points.iter().map(|p| p[k]).min().unwrap_or(0).max(0);
-            draw_label(
-                img,
-                font,
-                &mut cache,
-                &label,
-                color,
-                lw,
-                (corner(0), corner(1)),
-            );
-        }
+        let text = Color(r, g, b).text_color();
+        let colors = (color, Rgb([text.0, text.1, text.2]));
+        draw_shape(
+            img,
+            font,
+            &mut cache,
+            &corners,
+            label.as_deref(),
+            colors,
+            lw,
+        );
     }
+}
+
+/// Draw the closed outline through `corners` and its `label` above the top-left corner of their
+/// enclosing box, like Ultralytics `box_label`, in `(outline and fill, text)` colors.
+#[allow(clippy::cast_possible_truncation)]
+fn draw_shape(
+    img: &mut image::RgbImage,
+    font: Option<&LabelFont>,
+    cache: &mut GlyphCache,
+    corners: &[[f32; 2]],
+    label: Option<&str>,
+    colors: (Rgb<u8>, Rgb<u8>),
+    lw: i32,
+) {
+    let points: Vec<[i32; 2]> = corners.iter().map(|&[x, y]| [x as i32, y as i32]).collect();
+    for (k, &a) in points.iter().enumerate() {
+        draw_line(img, a, points[(k + 1) % points.len()], colors.0, lw);
+    }
+    if let (Some(font), Some(label)) = (font, label) {
+        let corner = |k: usize| points.iter().map(|p| p[k]).min().unwrap_or(0).max(0);
+        draw_label(img, font, cache, label, colors, lw, (corner(0), corner(1)));
+    }
+}
+
+/// Draw OCR texts on `image` like Ultralytics `solutions.OCR`, in green with black labels.
+///
+/// Of `options`, only `line_width` (2 when `None`, like Ultralytics solutions), `show_labels` and
+/// `show_conf` apply.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss
+)]
+pub fn annotate_texts(
+    image: &DynamicImage,
+    texts: &[crate::ocr::Text],
+    options: &AnnotateOptions,
+) -> DynamicImage {
+    let mut img = image.to_rgb8();
+    let lw = options
+        .line_width
+        .map_or(2, |lw| lw.min(i32::MAX as u32) as i32);
+    // Python draws every label with PIL at 6 px per line width, at least 12, once any is
+    // non-ASCII.
+    let unicode = texts.iter().any(|t| !t.text.is_ascii());
+    let font = label_font(unicode, unicode.then_some((lw * 6).max(12) as f32), lw);
+    let mut cache = GlyphCache::new();
+    let colors = (Rgb([0, 255, 0]), Rgb([0, 0, 0]));
+    for t in texts {
+        let label = match (options.show_labels, options.show_conf) {
+            (true, true) => format!("{} {:.2}", t.text, t.confidence),
+            (true, false) => t.text.clone(),
+            (false, _) => String::new(),
+        };
+        let label = Some(label.as_str()).filter(|l| !l.is_empty());
+        draw_shape(
+            &mut img,
+            font.as_ref(),
+            &mut cache,
+            &t.polygon,
+            label,
+            colors,
+            lw,
+        );
+    }
+    DynamicImage::ImageRgb8(img)
 }
 
 /// Blend the instance masks over `img` like the Ultralytics annotator: every mask covering a
