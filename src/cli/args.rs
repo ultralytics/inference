@@ -26,6 +26,10 @@ use clap::{Args, Parser, Subcommand};
     --save-frames          Save individual frames for video input (instead of video file)
     --save-json            Save semantic segmentation class-map PNGs for external evaluation
     --show                 Display results in a window [default: false]
+    --show-labels [<BOOL>] Show class names in box labels [default: true]
+    --show-conf [<BOOL>]   Show confidences in box labels [default: true]
+    --show-boxes [<BOOL>]  Draw boxes and their labels [default: true]
+    --line-width <WIDTH>   Box line width in pixels, which also sizes labels [default: from image size]
     --device <DEVICE>      Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, migraphx:0, xnnpack)
     --verbose [<BOOL>]     Show verbose output [default: true]
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
@@ -44,7 +48,8 @@ Examples:
     ultralytics-inference predict --source 0 --conf 0.5 --show
     ultralytics-inference predict --source assets/ --save --quantize 16
     ultralytics-inference predict --source image.jpg --device cuda:0
-    ultralytics-inference predict --source image.jpg --classes 0"#)]
+    ultralytics-inference predict --source image.jpg --classes 0
+    ultralytics-inference predict --source image.jpg --line-width 4 --show-conf false"#)]
 pub struct Cli {
     #[command(subcommand)]
     /// Subcommand to execute.
@@ -132,6 +137,22 @@ pub struct PredictArgs {
     /// Display results in a window
     #[arg(long, default_value_t = false)]
     pub show: bool,
+
+    /// Show class names in box labels
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
+    pub show_labels: bool,
+
+    /// Show confidences in box labels
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
+    pub show_conf: bool,
+
+    /// Draw boxes and their labels
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
+    pub show_boxes: bool,
+
+    /// Box line width in pixels, which also sizes labels [default: from image size]
+    #[arg(long)]
+    pub line_width: Option<u32>,
 
     /// Device to use (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, migraphx:0, xnnpack)
     #[arg(long)]

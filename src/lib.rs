@@ -140,6 +140,10 @@
 //! | `--save-frames` | | Save individual frames for video input | `false` |
 //! | `--save-json` | | Save semantic segmentation class-map PNGs for external evaluation | `false` |
 //! | `--show` | | Display results in a window | `false` |
+//! | `--show-labels [<BOOL>]` | | Show class names in box labels | `true` |
+//! | `--show-conf [<BOOL>]` | | Show confidences in box labels | `true` |
+//! | `--show-boxes [<BOOL>]` | | Draw boxes and their labels | `true` |
+//! | `--line-width` | | Box line width in pixels, which also sizes labels | from image size |
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, migraphx:0, xnnpack) | auto (best available provider; `cpu` when no accelerator feature is enabled) |
 //! | `--verbose [<BOOL>]` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
