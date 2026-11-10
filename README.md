@@ -446,6 +446,12 @@ if let Some(ref boxes) = result.boxes {
     let conf = boxes.conf();      // Confidence scores
     let cls = boxes.cls();        // Class IDs
 }
+
+// Segmentation mask outlines, like Ultralytics masks.xy
+if let Some(ref masks) = result.masks {
+    let xy = masks.xy();          // One (points, 2) array per mask, in pixels
+    let xyn = masks.xyn();        // Normalized [0-1]
+}
 ```
 
 **Selecting a Device:**
