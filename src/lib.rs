@@ -133,6 +133,7 @@
 //! | `--imgsz` | | Inference image size | Model metadata |
 //! | `--rect [<BOOL>]` | | Enable rectangular inference (minimal padding) | `true` |
 //! | `--tile [<TILE>]` | | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz` | off |
+//! | `--retina-masks` | | Build segmentation masks at the original image size instead of the inference size | `false` |
 //! | `--batch` | | Batch size for inference | `1` |
 //! | `--quantize` | | Inference precision (`8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`) | Model precision |
 //! | `--save [<BOOL>]` | | Save annotated results to runs/\<task\>/predict | `true` |

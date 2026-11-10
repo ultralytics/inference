@@ -495,6 +495,7 @@ fn build_inference_config(
         .with_half(args.half)
         .with_save_frames(args.save_frames)
         .with_rect(args.rect)
+        .with_retina_masks(args.retina_masks)
         .with_max_det(args.max_det);
 
     if let Some(quantize) = args.quantize {
@@ -657,6 +658,7 @@ mod tests {
             imgsz: None,
             rect: InferenceConfig::DEFAULT_RECT,
             tile: None,
+            retina_masks: false,
             batch: 1,
             quantize: InferenceConfig::DEFAULT_QUANTIZE,
             half: false,
@@ -729,6 +731,7 @@ mod tests {
             imgsz: Some(512),
             rect: false,
             tile: Some(320),
+            retina_masks: true,
             batch: 4,
             quantize: Some(Quantization::Fp16),
             half: false,
@@ -748,6 +751,7 @@ mod tests {
         assert_eq!(config.device, Some(crate::Device::IntelCpu));
         assert!(config.save_frames);
         assert_eq!(config.tile, Some(320));
+        assert!(config.retina_masks);
         assert!(!config.rect);
         assert_eq!(config.classes, Some(vec![0, 2, 5]));
     }
