@@ -846,36 +846,11 @@ fn put_logits(
     any.then_some((x, y, x + w - 1, y + h - 1))
 }
 
-/// One instance mask at the model input size like Ultralytics `process_mask` with
-/// `upsample=True`: the prototype logits resized bilinearly to `iw×ih` and kept above 0 inside
-/// the input-scale box. Only the box pixels are resized.
-#[allow(clippy::cast_precision_loss)]
-fn apply_mask_input(
-    mask_out: ArrayViewMut2<f32>,
-    logits: &[f32],
-    input_box: &ArrayView1<f32>,
-    (mw, mh): (usize, usize),
-    (iw, ih): (u32, u32),
-) -> Option<(usize, usize, usize, usize)> {
-    let (x_start, x_end) = box_span(input_box[0], input_box[2], iw)?;
-    let (y_start, y_end) = box_span(input_box[1], input_box[3], ih)?;
-    let (box_w, box_h) = (x_end - x_start + 1, y_end - y_start + 1);
-    let (sx, sy) = (mw as f64 / f64::from(iw), mh as f64 / f64::from(ih));
-    let crop = [
-        x_start as f64 * sx,
-        y_start as f64 * sy,
-        box_w as f64 * sx,
-        box_h as f64 * sy,
-    ];
-    let out = bilinear(logits, (mw, mh), (box_w, box_h), crop)?;
-    put_logits(mask_out, (x_start, y_start), &out)
-}
-
 /// One instance mask like Ultralytics `process_mask_native`: the prototype logits upsampled
-/// by `f`, cropped to the letterbox content, resized to the original image size and kept where
-/// above 0 inside the box `x1 <= x < x2, y1 <= y < y2`, as 1.0 in `mask_out`. Only the box
-/// pixels and their neighbors are resized, each from the same coefficients as a full-frame
-/// resize.
+/// by `f`, cropped to the letterbox content, resized to the `ow×oh` image and kept where above
+/// 0 inside the box `x1 <= x < x2, y1 <= y < y2`, as 1.0 in `mask_out`. With `f` 1 and no crop
+/// this is `process_mask` at the model input size. Only the box pixels and their neighbors
+/// are resized, each from the same coefficients as a full-frame resize.
 ///
 /// Returns the inclusive bounds of the pixels written when any of them is kept.
 #[allow(
@@ -982,23 +957,21 @@ fn build_instance_masks(
     let masks_flat = mask_coeffs.dot(&protos);
 
     let (oh, ow) = preprocess.orig_shape;
-    let geometry = mask_geometry(mh, mw, oh, ow);
+    // Original size masks with `retina_masks`, tiling or streaming, otherwise input size ones
+    // cropped to the input-scale boxes.
     let native = config.retina_masks || config.tile.is_some() || on_mask.is_some();
-    let input = (!native).then_some(input);
-    let apply = |mask_out: ArrayViewMut2<f32>,
-                 mask_flat: ArrayView1<f32>,
-                 box_data: ArrayView1<f32>| {
-        let logits = mask_flat.to_vec();
-        match input {
-            Some((_, (ih, iw))) => {
-                apply_mask_input(mask_out, &logits, &box_data, (mw, mh), (iw, ih))
-            }
-            None => apply_mask_proto(mask_out, &logits, &box_data, (mw, mh), (ow, oh), geometry),
-        }
+    let (crop_boxes, (h, w), geometry) = if native {
+        (boxes_data, (oh, ow), mask_geometry(mh, mw, oh, ow))
+    } else {
+        (input.0, input.1, (1, [0, 0, mw, mh]))
     };
+    let apply =
+        |mask_out: ArrayViewMut2<f32>, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
+            let logits = mask_flat.to_vec();
+            apply_mask_proto(mask_out, &logits, &box_data, (mw, mh), (w, h), geometry)
+        };
     if let Some(on_mask) = on_mask {
-        let (h, w) = (oh as usize, ow as usize);
-        let mut mask = Array2::<f32>::zeros((h, w));
+        let mut mask = Array2::<f32>::zeros((h as usize, w as usize));
         let mut keep = Vec::new();
         for (i, (mask_flat, box_data)) in masks_flat
             .outer_iter()
@@ -1018,7 +991,6 @@ fn build_instance_masks(
     }
 
     let n = boxes_data.nrows();
-    let (crop_boxes, (h, w)) = input.unwrap_or((boxes_data, (oh, ow)));
     let mut masks_data = Array3::zeros((n, h as usize, w as usize));
     let mut filled = ndarray::Array1::from_elem(n, false);
     let zip = Zip::from(masks_data.outer_iter_mut())
