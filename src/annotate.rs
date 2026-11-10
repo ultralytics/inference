@@ -16,8 +16,6 @@ use crate::visualizer::skeleton::{KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETO
 use ab_glyph::{Font, FontRef, GlyphId, PxScale, ScaleFont, point};
 use harfrust::{Buffer, Direction, Script, ShapeOptions, ShapePlan, ShapePlanKey, ShaperFont};
 use image::{DynamicImage, Rgb};
-use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut};
-use imageproc::rect::Rect;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -36,6 +34,7 @@ const ASSETS_URL: &str = "https://github.com/ultralytics/assets/releases/downloa
 /// human skeleton, and any other keypoint layout with one palette color per keypoint and no
 /// lines; set [`skeleton`](Self::skeleton) to connect the keypoints of a custom model.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // the Ultralytics `plot` switches
 pub struct AnnotateOptions {
     /// Maximum number of classification labels to show.
     pub top_k: usize,
@@ -45,6 +44,15 @@ pub struct AnnotateOptions {
     pub depth_viz: DepthViz,
     /// Depth overlay opacity in `0.0..=1.0` (see [`annotate_image_with`]).
     pub depth_alpha: f32,
+    /// Box and outline width in pixels, which also sizes box labels (`line_width`). `None` takes
+    /// 0.3% of the mean image side, at least 2, like Ultralytics.
+    pub line_width: Option<u32>,
+    /// Draw boxes and oriented boxes with their labels (`show_boxes`).
+    pub show_boxes: bool,
+    /// Put the class name in box labels (`show_labels`).
+    pub show_labels: bool,
+    /// Put the confidence in box labels (`show_conf`).
+    pub show_conf: bool,
     /// Keypoint radius in pixels (`kpt_radius`).
     pub kpt_radius: i32,
     /// Draw the lines between keypoints (`kpt_line`).
@@ -65,6 +73,10 @@ impl Default for AnnotateOptions {
             colormap: Colormap::default(),
             depth_viz: DepthViz::default(),
             depth_alpha: DEPTH_ALPHA,
+            line_width: None,
+            show_boxes: true,
+            show_labels: true,
+            show_conf: true,
             kpt_radius: 5,
             kpt_line: true,
             kpt_conf: 0.25,
@@ -72,18 +84,6 @@ impl Default for AnnotateOptions {
             skeleton: None,
         }
     }
-}
-
-/// Dynamic render scale derived from image size (reference 640x640).
-///
-/// Returns the box/OBB label font size (11 px at 640 and below) and the base line thickness,
-/// both growing with the longer side.
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-fn render_scale(width: u32, height: u32) -> (f32, i32) {
-    let max_dim = width.max(height) as f32;
-    let scale_factor = (max_dim / 640.0).max(1.0);
-    let thickness = (1.0 * scale_factor).round().max(1.0) as i32;
-    (11.0 * scale_factor, thickness)
 }
 
 /// Load and decode the image at `path` by its contents.
@@ -159,14 +159,23 @@ fn font_bytes(unicode: bool) -> Option<&'static [u8]> {
     Some(bytes.get_or_init(|| data))
 }
 
-/// The label font, Arial Unicode for non-ASCII labels; `None` while it is not available.
-fn label_font(unicode: bool) -> Option<LabelFont> {
-    font_bytes(unicode).and_then(|data| {
-        Some(LabelFont {
-            glyphs: FontRef::try_from_slice(data).ok()?,
-            face: harfrust::Font::new(data, 0)?,
-            plans: RefCell::default(),
-        })
+/// The label font, Arial Unicode for non-ASCII text: at the TrueType size `em` when given, as
+/// Ultralytics draws with PIL (`PxScale` is the line height, not the em), or else sized to match
+/// the `OpenCV` text of line width `lw`. `None` while the font is not available.
+#[allow(clippy::cast_precision_loss)]
+fn label_font(unicode: bool, em: Option<f32>, lw: i32) -> Option<LabelFont> {
+    let data = font_bytes(unicode)?;
+    let glyphs = FontRef::try_from_slice(data).ok()?;
+    let scale = match em {
+        Some(em) => em * glyphs.height_unscaled() / glyphs.units_per_em()?,
+        None => 10.5 * lw as f32,
+    };
+    Some(LabelFont {
+        glyphs,
+        face: harfrust::Font::new(data, 0)?,
+        plans: RefCell::default(),
+        scale: PxScale::from(scale),
+        pil: em.is_some(),
     })
 }
 
@@ -245,20 +254,44 @@ pub fn annotate_image_with(
 /// # }
 /// ```
 #[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss
+)]
 pub fn annotate_image_with_options(
     image: &DynamicImage,
     result: &Results,
     options: &AnnotateOptions,
 ) -> DynamicImage {
     let mut img = image.to_rgb8();
+    let (width, height) = img.dimensions();
+    let side = f64::from(width) + f64::from(height);
+    // Ultralytics sums the image shape with its 3 channels for the line width.
+    let lw = options.line_width.map_or_else(
+        || {
+            (f64::midpoint(side, 3.0) * 0.003)
+                .round_ties_even()
+                .max(2.0) as i32
+        },
+        |lw| lw.min(i32::MAX as u32) as i32,
+    );
 
-    let labels = result.boxes.is_some() || result.obb.is_some() || result.probs.is_some();
-    let font = label_font(labels && result.names.values().any(|n| !n.is_ascii()));
+    let box_labels = options.show_boxes
+        && (options.show_labels || options.show_conf)
+        && (result.boxes.is_some() || result.obb.is_some());
+    let unicode =
+        (box_labels || result.probs.is_some()) && result.names.values().any(|n| !n.is_ascii());
+    // Like Ultralytics, classification and non-ASCII names use a TrueType font at 3.5% of the mean
+    // side (PIL sizes are em sizes, `PxScale` is the line height), and other box labels are sized
+    // to match the OpenCV Hershey text of the line width.
+    let pil = unicode || result.probs.is_some();
+    let em = (side / 2.0 * 0.035).round_ties_even().max(12.0) as f32;
+    let font = label_font(unicode, pil.then_some(em), lw);
 
     draw_semantic_mask(&mut img, result);
-    draw_detection(&mut img, result, font.as_ref());
-    draw_pose(&mut img, result, options);
-    draw_obb(&mut img, result, font.as_ref());
+    draw_detection(&mut img, result, font.as_ref(), options, lw);
+    draw_pose(&mut img, result, options, lw);
     draw_classification(&mut img, result, font.as_ref(), options.top_k);
 
     draw_depth_map(
@@ -314,65 +347,47 @@ fn draw_depth_map(
         });
 }
 
-/// Draw a thick line segment between two points using Bresenham's algorithm.
-///
-/// # Arguments
-///
-/// * `img` - Target image to draw on.
-/// * `x1`, `y1` - Start point coordinates.
-/// * `x2`, `y2` - End point coordinates.
-/// * `color` - RGB color of the line.
-/// * `thickness` - Line width in pixels; 1 draws a single-pixel line.
+/// Draw a line from `a` to `b` like `OpenCV`'s thick lines: every pixel within half the
+/// `thickness`, rounded up, of the segment, so ends and corners come out round. A thickness of 1
+/// draws a one-pixel line.
 #[allow(
-    clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
 )]
-fn draw_line_segment(
-    img: &mut image::RgbImage,
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-    color: Rgb<u8>,
-    thickness: i32,
-) {
-    let (width, height) = img.dimensions();
-
-    // Bresenham's line algorithm with thickness
-    let dx = (x2 - x1).abs();
-    let dy = (y2 - y1).abs();
-    let sx = if x1 < x2 { 1.0 } else { -1.0 };
-    let sy = if y1 < y2 { 1.0 } else { -1.0 };
-    let mut err = dx - dy;
-
-    let mut x = x1;
-    let mut y = y1;
-
-    loop {
-        // Draw a thick point, skipping pixels outside the image so off-frame parts are clipped
-        let half_t = thickness / 2;
-        for tx in -half_t..=half_t {
-            for ty in -half_t..=half_t {
-                let (px, py) = (x as i32 + tx, y as i32 + ty);
-                if px >= 0 && py >= 0 && px < width as i32 && py < height as i32 {
-                    img.put_pixel(px as u32, py as u32, color);
-                }
+fn draw_line(img: &mut image::RgbImage, a: [i32; 2], b: [i32; 2], color: Rgb<u8>, thickness: i32) {
+    let half = if thickness > 1 {
+        (thickness + 1) / 2
+    } else {
+        0
+    };
+    let reach = half as f32 + 0.5;
+    let (width, height) = (img.width() as f32, img.height() as f32);
+    let [ax, ay, bx, by] = [a[0], a[1], b[0], b[1]].map(|v| v as f32);
+    let (dx, dy) = (bx - ax, by - ay);
+    let len2 = dx.mul_add(dx, dy * dy);
+    let rows = (ay.min(by) - reach).ceil().max(0.0) as u32
+        ..((ay.max(by) + reach).floor() + 1.0).min(height) as u32;
+    for py in rows {
+        let fy = py as f32 - ay;
+        // Columns within reach of the infinite line on this row, then of the segment itself.
+        let (mut lo, mut hi) = (ax.min(bx) - reach, ax.max(bx) + reach);
+        if dy != 0.0 {
+            let (center, spread) = (fy * dx / dy, reach * len2.sqrt() / dy.abs());
+            lo = lo.max(ax + center - spread);
+            hi = hi.min(ax + center + spread);
+        }
+        for px in lo.ceil().max(0.0) as u32..(hi.floor() + 1.0).min(width) as u32 {
+            let fx = px as f32 - ax;
+            let t = if len2 > 0.0 {
+                (fx.mul_add(dx, fy * dy) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let (ex, ey) = (t.mul_add(-dx, fx), t.mul_add(-dy, fy));
+            if ex.mul_add(ex, ey * ey) <= reach * reach {
+                img.put_pixel(px, py, color);
             }
-        }
-
-        if (x - x2).abs() < 1.0 && (y - y2).abs() < 1.0 {
-            break;
-        }
-
-        let e2 = 2.0 * err;
-        if e2 > -dy {
-            err -= dy;
-            x += sx;
-        }
-        if e2 < dx {
-            err += dx;
-            y += sy;
         }
     }
 }
@@ -446,6 +461,10 @@ struct LabelFont {
     glyphs: FontRef<'static>,
     face: harfrust::Font,
     plans: RefCell<Vec<ShapePlan>>,
+    /// Text size.
+    scale: PxScale,
+    /// Size labels by their text like Ultralytics PIL text, instead of like its `OpenCV` text.
+    pil: bool,
 }
 
 /// The runs of `text` in drawing order from left to right, as byte range, direction and script:
@@ -528,17 +547,9 @@ fn layout(font: &LabelFont, scale: PxScale, text: &str) -> (Vec<(GlyphId, f64, f
 /// its label: labels such as `person 0.87` and `person 0.86` share every glyph but the last.
 type GlyphCache = HashMap<(u16, u32, u32, u32), Option<(i32, i32, usize, Vec<f32>)>>;
 
-/// The labels drawn so far in a frame: where they sit, so the next one avoids them, and the
-/// glyphs they rasterized. Their text takes `text_color`, or a color contrasting with the fill.
-#[derive(Default)]
-struct Labels {
-    placed: Vec<Rect>,
-    glyphs: GlyphCache,
-    text_color: Option<Rgb<u8>>,
-}
-
 /// Draw the `glyphs` of a [`layout`] at `(x, y)`, taking each glyph's coverage from `cache` when
-/// an earlier label already rasterized it.
+/// an earlier label already rasterized it. A `stroke` above 1 thickens the text by that many
+/// pixels, like `OpenCV` drawing its strokes thick, in one pass over the label.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -548,328 +559,365 @@ fn draw_text(
     img: &mut image::RgbImage,
     color: Rgb<u8>,
     (x, y): (i32, i32),
-    scale: PxScale,
-    font: &FontRef,
+    font: &LabelFont,
     glyphs: &[(GlyphId, f64, f64)],
     cache: &mut GlyphCache,
+    stroke: usize,
 ) {
-    let ascent = font.as_scaled(scale).ascent();
+    let scale = font.scale;
+    let ascent = font.glyphs.as_scaled(scale).ascent();
+    let keys: Vec<_> = glyphs
+        .iter()
+        .map(|&(id, pen_x, pen_y)| {
+            let at = point(pen_x as f32, pen_y as f32 + ascent);
+            let key = (id.0, scale.y.to_bits(), at.x.to_bits(), at.y.to_bits());
+            cache.entry(key).or_insert_with(|| {
+                let outlined = font
+                    .glyphs
+                    .outline_glyph(id.with_scale_and_position(scale, at))?;
+                let bounds = outlined.px_bounds();
+                let cols = bounds.width() as usize;
+                let mut coverage = vec![0.0; cols * bounds.height() as usize];
+                outlined.draw(|gx, gy, v| coverage[gy as usize * cols + gx as usize] = v);
+                Some((
+                    bounds.min.x as i32,
+                    bounds.min.y as i32,
+                    cols.max(1),
+                    coverage,
+                ))
+            });
+            key
+        })
+        .collect();
+    let pieces: Vec<_> = keys.iter().filter_map(|key| cache[key].as_ref()).collect();
+    let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+        pieces.iter().map(|p| p.0).min(),
+        pieces.iter().map(|p| p.1).min(),
+        pieces.iter().map(|p| p.0 + p.2 as i32).max(),
+        pieces.iter().map(|p| p.1 + (p.3.len() / p.2) as i32).max(),
+    ) else {
+        return;
+    };
+
+    // The label's coverage in one buffer, grown by the stroke to the right and down.
+    let stroke = stroke.max(1);
+    let (cols, rows) = (
+        (x1 - x0) as usize + stroke - 1,
+        (y1 - y0) as usize + stroke - 1,
+    );
+    let mut coverage = vec![0.0_f32; cols * rows];
+    for (gx, gy, gw, glyph) in pieces {
+        for (row, line) in glyph.chunks(*gw).enumerate() {
+            let start = ((gy - y0) as usize + row) * cols + (gx - x0) as usize;
+            for (dst, &v) in coverage[start..start + line.len()].iter_mut().zip(line) {
+                *dst = dst.max(v);
+            }
+        }
+    }
+    // Thicken by taking the most coverage of the `stroke` pixels to the left, then above,
+    // walking backwards so every read sees the unthickened value.
+    if stroke > 1 {
+        for row in coverage.chunks_mut(cols) {
+            for i in (1..cols).rev() {
+                row[i] = row[i.saturating_sub(stroke - 1)..=i]
+                    .iter()
+                    .fold(0.0, |a, &b| b.max(a));
+            }
+        }
+        for i in (cols..cols * rows).rev() {
+            let top = (i / cols).saturating_sub(stroke - 1);
+            coverage[i] = (top..=i / cols).fold(0.0, |a, r| coverage[r * cols + i % cols].max(a));
+        }
+    }
+
     let (width, height) = (i64::from(img.width()), i64::from(img.height()));
-    for &(id, pen_x, pen_y) in glyphs {
-        let at = point(pen_x as f32, pen_y as f32 + ascent);
-        let key = (id.0, scale.y.to_bits(), at.x.to_bits(), at.y.to_bits());
-        let glyph = cache.entry(key).or_insert_with(|| {
-            let outlined = font.outline_glyph(id.with_scale_and_position(scale, at))?;
-            let bounds = outlined.px_bounds();
-            let w = bounds.width() as usize;
-            let mut coverage = vec![0.0; w * bounds.height() as usize];
-            outlined.draw(|gx, gy, v| coverage[gy as usize * w + gx as usize] = v);
-            Some((bounds.min.x as i32, bounds.min.y as i32, w, coverage))
-        });
-        let Some((min_x, min_y, w, coverage)) = glyph else {
-            continue;
-        };
-        for (row, line) in coverage.chunks((*w).max(1)).enumerate() {
-            let py = i64::from(y + *min_y) + row as i64;
-            for (col, &v) in line.iter().enumerate() {
-                let px = i64::from(x + *min_x) + col as i64;
-                if v > 0.0 && (0..width).contains(&px) && (0..height).contains(&py) {
-                    let pixel = img.get_pixel_mut(px as u32, py as u32);
-                    let v = v.clamp(0.0, 1.0);
-                    *pixel = imageproc::pixelops::weighted_sum(*pixel, color, 1.0 - v, v);
-                }
+    let shift = (stroke as i32 - 1) / 2;
+    for (row, line) in coverage.chunks(cols).enumerate() {
+        let py = i64::from(y + y0 - shift) + row as i64;
+        for (col, &v) in line.iter().enumerate() {
+            let px = i64::from(x + x0 - shift) + col as i64;
+            if v > 0.0 && (0..width).contains(&px) && (0..height).contains(&py) {
+                let pixel = img.get_pixel_mut(px as u32, py as u32);
+                let v = v.clamp(0.0, 1.0);
+                *pixel = imageproc::pixelops::weighted_sum(*pixel, color, 1.0 - v, v);
             }
         }
     }
 }
 
-/// Draw a class label with a filled background rectangle, avoiding overlap with previously placed labels.
-///
-/// The label is positioned above `(anchor_x, anchor_y)`. If that position would clip
-/// the top edge, the label falls back to `top_fallback_y`. Up to 10 downward shifts
-/// are attempted to avoid collision with labels already in `labels`.
-///
-/// # Arguments
-///
-/// * `img` - Target image to draw on.
-/// * `font` - Loaded font used for measuring and rendering glyphs.
-/// * `labels` - Labels already drawn in this frame; updated in place.
-/// * `label` - Text to render inside the background box.
-/// * `color` - Background fill color; text color is chosen automatically for contrast.
-/// * `font_scale` - Font size in pixels.
-/// * `anchor_x` - Horizontal anchor: left edge of the associated bounding box.
-/// * `anchor_y` - Vertical anchor: top edge of the associated bounding box.
-/// * `top_fallback_y` - Y position to use when the label would clip above the image.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss,
-    clippy::too_many_arguments
-)]
+/// The width and height of a [`layout`] like the box PIL measures for text: its advance and its
+/// lowest glyph pixel below the top of the line.
+#[allow(clippy::cast_possible_truncation)]
+fn text_size(font: &LabelFont, glyphs: &[(GlyphId, f64, f64)], advance: f64) -> (i32, i32) {
+    let ascent = font.glyphs.as_scaled(font.scale).ascent();
+    let bottom = glyphs
+        .iter()
+        .filter_map(|&(id, x, y)| {
+            let at = point(x as f32, y as f32 + ascent);
+            font.glyphs
+                .outline_glyph(id.with_scale_and_position(font.scale, at))
+        })
+        .fold(0.0, |bottom, glyph| glyph.px_bounds().max.y.max(bottom));
+    (advance.ceil() as i32, bottom as i32)
+}
+
+/// Draw `label` on a `color` box at the top-left corner `(x, y)` of a shape like the Ultralytics
+/// annotator: above the shape when it fits, else inside it, and moved left to stay in the image.
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 fn draw_label(
     img: &mut image::RgbImage,
     font: &LabelFont,
-    labels: &mut Labels,
+    cache: &mut GlyphCache,
     label: &str,
-    color: Rgb<u8>,
-    font_scale: f32,
-    anchor_x: i32,
-    anchor_y: i32,
-    top_fallback_y: i32,
+    (color, text): (Rgb<u8>, Rgb<u8>),
+    lw: i32,
+    (x, y): (i32, i32),
 ) {
-    let (width, height) = img.dimensions();
-    let scale = PxScale::from(font_scale);
-    let (glyphs, advance) = layout(font, scale, label);
-    let text_w = advance.ceil() as i32;
-    let text_h = scale.y.ceil() as i32;
-
-    // A missing or degenerate font can produce a zero-width label. imageproc's
-    // Rect::of_size panics on a zero dimension, and an empty label has nothing
-    // to draw, so bail out early.
-    if text_w <= 0 || text_h <= 0 {
-        return;
-    }
-
-    let mut text_x = anchor_x;
-    let mut text_y = anchor_y - text_h;
-
-    if text_y < 0 {
-        text_y = top_fallback_y;
-    }
-    if text_x < 0 {
-        text_x = 0;
-    }
-    if text_x + text_w >= width as i32 {
-        text_x = width as i32 - text_w - 1;
-    }
-    if text_y + text_h >= height as i32 {
-        text_y = height as i32 - text_h - 1;
-    }
-
-    let mut attempts = 0;
-    let max_attempts = 10;
-    let mut current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-
-    while attempts < max_attempts {
-        if !labels
-            .placed
-            .iter()
-            .any(|existing| rect_intersect(&current_rect, existing))
-        {
-            break;
-        }
-
-        text_y += text_h;
-        if text_y + text_h >= height as i32 {
-            text_y = anchor_y - text_h;
-            if text_y < 0 {
-                text_y = top_fallback_y;
-            }
-            text_x += 10;
-            if text_x + text_w >= width as i32 {
-                break;
-            }
-        }
-
-        current_rect = Rect::at(text_x, text_y).of_size(text_w as u32, text_h as u32);
-        attempts += 1;
-    }
-
-    labels.placed.push(current_rect);
-
-    if text_x >= 0
-        && text_y >= 0
-        && text_x + text_w < width as i32
-        && text_y + text_h < height as i32
-    {
-        draw_filled_rect_mut(img, current_rect, color);
-        let Color(r, g, b) = Color(color[0], color[1], color[2]).text_color();
-        draw_text(
-            img,
-            labels.text_color.unwrap_or(Rgb([r, g, b])),
-            (text_x, text_y),
-            scale,
-            &font.glyphs,
-            &glyphs,
-            &mut labels.glyphs,
-        );
-    }
+    let (glyphs, advance) = layout(font, font.scale, label);
+    // OpenCV text of line width `lw` is `9 * lw` tall, and Ultralytics pads it by 3.
+    let (w, h) = if font.pil {
+        text_size(font, &glyphs, advance)
+    } else {
+        (advance.round() as i32, 9 * lw + 3)
+    };
+    let outside = y >= h;
+    let x = x.min(img.width() as i32 - w);
+    let top = if outside { y - h } else { y };
+    draw_transparent_rect(img, x, top, w + 1, h + 1, color, 1.0);
+    // PIL text hangs from the top of the box; OpenCV text sits on a baseline 2 px above the box
+    // bottom, or 1 px when inside.
+    let ascent = font.glyphs.as_scaled(font.scale).ascent().round() as i32;
+    let text_y = match (font.pil, outside) {
+        (true, _) => top,
+        (false, true) => y - 2 - ascent,
+        (false, false) => y + h - 1 - ascent,
+    };
+    // OpenCV strokes its text `lw - 1` px thick, bolder than Arial, so the glyphs are thickened
+    // by half the line width.
+    let stroke = if font.pil {
+        1
+    } else {
+        usize::try_from((lw + 1) / 2).unwrap_or(1)
+    };
+    draw_text(img, text, (x, text_y), font, &glyphs, cache, stroke);
 }
 
-/// Draw detection boxes, optional instance masks, and class labels onto `img`.
-///
-/// Instance masks are blended at 50% opacity before boxes are drawn on top.
-/// Labels are positioned above each box; overlap between labels is resolved
-/// by shifting downward up to 10 times.
-///
-/// # Arguments
-///
-/// * `img` - Target image to draw on.
-/// * `result` - Inference results; only `boxes` and `masks` fields are read.
-/// * `font` - Optional loaded font; labels are skipped when `None`.
+/// Draw instance masks, then boxes or oriented boxes with their labels like the Ultralytics
+/// annotator, from the last box to the first.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     clippy::cast_possible_wrap
 )]
-fn draw_detection(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
-    let (width, height) = img.dimensions();
+fn draw_detection(
+    img: &mut image::RgbImage,
+    result: &Results,
+    font: Option<&LabelFont>,
+    options: &AnnotateOptions,
+    lw: i32,
+) {
+    draw_masks(img, result);
+    if !options.show_boxes {
+        return;
+    }
+    // Each shape as its corners, class, confidence and track ID.
+    let shapes: Vec<_> = if let Some(ref obb) = result.obb {
+        let (c, cls, conf, id) = (obb.xyxyxyxy(), obb.cls(), obb.conf(), obb.id());
+        (0..obb.len())
+            .map(|i| {
+                let corners = (0..4).map(|j| [c[[i, j, 0]], c[[i, j, 1]]]).collect();
+                (corners, cls[i], conf[i], id.map(|id| id[i]))
+            })
+            .collect()
+    } else if let Some(ref boxes) = result.boxes {
+        let (b, cls, conf, id) = (boxes.xyxy(), boxes.cls(), boxes.conf(), boxes.id());
+        (0..boxes.len())
+            .map(|i| {
+                let [x1, y1, x2, y2] = [b[[i, 0]], b[[i, 1]], b[[i, 2]], b[[i, 3]]];
+                let corners = vec![[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+                (corners, cls[i], conf[i], id.map(|id| id[i]))
+            })
+            .collect()
+    } else {
+        return;
+    };
 
-    let (font_scale, thickness) = render_scale(width, height);
-
-    if let Some(ref boxes) = result.boxes {
-        let xyxy = boxes.xyxy();
-        let conf = boxes.conf();
-        let cls = boxes.cls();
-
-        // Overlay copy so overlapping masks compose against the original pixels. Only the
-        // mask path needs it, so a box-only result (detect/pose/obb) never pays for it.
-        let mut overlay = result.masks.is_some().then(|| img.clone());
-        let mut mask_present = false;
-
-        // Draw masks onto the overlay
-        if let (Some(masks), Some(overlay)) = (result.masks.as_ref(), overlay.as_mut()) {
-            let mask_n = masks.data.dim().0;
-
-            for i in 0..boxes.len() {
-                if i >= mask_n {
-                    break;
-                }
-
-                let class_id = cls[i] as usize;
-                let color = Color::for_class(&result.colors, class_id);
-                let color = Rgb([color.0, color.1, color.2]);
-
-                mask_present = true;
-
-                // Original-size masks only fill their box; input-size ones are scaled to the
-                // image first like the Ultralytics annotator, which can spill past the box.
-                let plane = masks.data.index_axis(ndarray::Axis(0), i);
-                let w = width as usize;
-                let scaled;
-                let (region, [x, y]) = if plane.dim() == (height as usize, w) {
-                    let side = |v: f32, n: u32| v.max(0.0).min(n as f32).ceil() as usize;
-                    let (x1, y1) = (side(xyxy[[i, 0]], width), side(xyxy[[i, 1]], height));
-                    let (x2, y2) = (side(xyxy[[i, 2]], width), side(xyxy[[i, 3]], height));
-                    (
-                        plane.slice_move(ndarray::s![y1..y2.max(y1), x1..x2.max(x1)]),
-                        [x1, y1],
-                    )
-                } else {
-                    scaled = crate::postprocessing::scale_mask(&plane, (height, width));
-                    (scaled.0.view(), scaled.1)
-                };
-
-                // Row slices instead of per-pixel `[[i, y, x]]` and `get_pixel_mut` indexing.
-                let samples = overlay.as_flat_samples_mut().samples;
-                for (dy, hits) in region.outer_iter().enumerate() {
-                    let start = ((y + dy) * w + x) * 3;
-                    let row = &mut samples[start..start + hits.len() * 3];
-                    let (pixels, _) = row.as_chunks_mut::<3>();
-                    for (m, px) in hits.iter().zip(pixels) {
-                        if *m > 0.5 {
-                            *px = color.0;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Blend overlay with original image. Walking the two sample buffers directly keeps
-        // this a linear pass; `get_pixel_mut` recomputed the offset for all 300k+ pixels.
-        if let Some(overlay) = overlay.filter(|_| mask_present) {
-            let alpha = 0.5;
-            let overlay = overlay.as_raw();
-            img.as_flat_samples_mut()
-                .samples
-                .par_chunks_mut(BLEND_CHUNK * 3)
-                .enumerate()
-                .for_each(|(c, dst)| {
-                    let src = &overlay[c * BLEND_CHUNK * 3..];
-                    for (px, src) in dst.iter_mut().zip(src) {
-                        *px = f32::from(*src).mul_add(alpha, f32::from(*px) * (1.0 - alpha)) as u8;
-                    }
-                });
-        }
-
-        let mut labels = Labels::default();
-
-        // Draw boxes and labels
-        for i in 0..boxes.len() {
-            let class_id = cls[i] as usize;
-            let confidence = conf[i];
-
-            let mut x1 = xyxy[[i, 0]].round() as i32;
-            let mut y1 = xyxy[[i, 1]].round() as i32;
-            let mut x2 = xyxy[[i, 2]].round() as i32;
-            let mut y2 = xyxy[[i, 3]].round() as i32;
-
-            if x1 > x2 {
-                std::mem::swap(&mut x1, &mut x2);
-            }
-            if y1 > y2 {
-                std::mem::swap(&mut y1, &mut y2);
-            }
-
-            x1 = x1.max(0).min(width as i32 - 1);
-            y1 = y1.max(0).min(height as i32 - 1);
-            x2 = x2.max(0).min(width as i32 - 1);
-            y2 = y2.max(0).min(height as i32 - 1);
-
-            if x2 <= x1 || y2 <= y1 {
-                continue;
-            }
-
-            let color = Color::for_class(&result.colors, class_id);
-            let color = Rgb([color.0, color.1, color.2]);
-
-            // Draw box
-            for t in 0..thickness {
-                let tx1 = (x1 + t).min(x2);
-                let ty1 = (y1 + t).min(y2);
-                let tx2 = (x2 - t).max(tx1);
-                let ty2 = (y2 - t).max(ty1);
-                if tx2 > tx1 && ty2 > ty1 {
-                    let rect = Rect::at(tx1, ty1).of_size((tx2 - tx1) as u32, (ty2 - ty1) as u32);
-                    draw_hollow_rect_mut(img, rect, color);
-                }
-            }
-
-            // Draw label
-            let class_name = result.names.get(&class_id).map_or("object", String::as_str);
-            let label = format!(" {class_name} {confidence:.2} ");
-
-            if let Some(f) = font {
-                draw_label(img, f, &mut labels, &label, color, font_scale, x1, y1, y1);
-            }
-        }
+    let mut cache = GlyphCache::new();
+    for (corners, cls, conf, id) in shapes.into_iter().rev() {
+        let class_id = cls as usize;
+        let Color(r, g, b) = Color::for_class(&result.colors, class_id);
+        let color = Rgb([r, g, b]);
+        let name = result.names.get(&class_id).map_or("object", String::as_str);
+        let name = id.map_or_else(|| name.to_string(), |id| format!("id:{} {name}", id as i64));
+        let label = match (options.show_labels, options.show_conf) {
+            (true, true) => Some(format!("{name} {conf:.2}")),
+            (true, false) => Some(name),
+            (false, true) => Some(format!("{conf:.2}")),
+            (false, false) => None,
+        };
+        let text = Color(r, g, b).text_color();
+        let colors = (color, Rgb([text.0, text.1, text.2]));
+        draw_shape(
+            img,
+            font,
+            &mut cache,
+            &corners,
+            label.as_deref(),
+            colors,
+            lw,
+        );
     }
 }
 
-/// Return `true` if rectangles `r1` and `r2` overlap.
-fn rect_intersect(r1: &Rect, r2: &Rect) -> bool {
-    let r1_left = r1.left();
-    let r1_right = r1.right();
-    let r1_top = r1.top();
-    let r1_bottom = r1.bottom();
-
-    let r2_left = r2.left();
-    let r2_right = r2.right();
-    let r2_top = r2.top();
-    let r2_bottom = r2.bottom();
-
-    !(r2_left >= r1_right || r2_right <= r1_left || r2_top >= r1_bottom || r2_bottom <= r1_top)
+/// Draw the closed outline through `corners` and its `label` above the top-left corner of their
+/// enclosing box, like Ultralytics `box_label`, in `(outline and fill, text)` colors.
+#[allow(clippy::cast_possible_truncation)]
+fn draw_shape(
+    img: &mut image::RgbImage,
+    font: Option<&LabelFont>,
+    cache: &mut GlyphCache,
+    corners: &[[f32; 2]],
+    label: Option<&str>,
+    colors: (Rgb<u8>, Rgb<u8>),
+    lw: i32,
+) {
+    let points: Vec<[i32; 2]> = corners.iter().map(|&[x, y]| [x as i32, y as i32]).collect();
+    for (k, &a) in points.iter().enumerate() {
+        draw_line(img, a, points[(k + 1) % points.len()], colors.0, lw);
+    }
+    if let (Some(font), Some(label)) = (font, label) {
+        let corner = |k: usize| points.iter().map(|p| p[k]).min().unwrap_or(0).max(0);
+        draw_label(img, font, cache, label, colors, lw, (corner(0), corner(1)));
+    }
 }
 
-/// Draw pose keypoints and the lines between them, styled by the keypoint fields of `options`.
-#[allow(clippy::cast_possible_truncation)]
-fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOptions) {
+/// Draw OCR texts on `image` like Ultralytics `solutions.OCR`, in green with black labels.
+///
+/// Of `options`, only `line_width` (2 when `None`, like Ultralytics solutions), `show_labels` and
+/// `show_conf` apply.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss
+)]
+pub fn annotate_texts(
+    image: &DynamicImage,
+    texts: &[crate::ocr::Text],
+    options: &AnnotateOptions,
+) -> DynamicImage {
+    let mut img = image.to_rgb8();
+    let lw = options
+        .line_width
+        .map_or(2, |lw| lw.min(i32::MAX as u32) as i32);
+    // Python draws every label with PIL at 6 px per line width, at least 12, once any is
+    // non-ASCII.
+    let unicode = texts.iter().any(|t| !t.text.is_ascii());
+    let font = label_font(unicode, unicode.then_some((lw * 6).max(12) as f32), lw);
+    let mut cache = GlyphCache::new();
+    let colors = (Rgb([0, 255, 0]), Rgb([0, 0, 0]));
+    for t in texts {
+        let label = match (options.show_labels, options.show_conf) {
+            (true, true) => format!("{} {:.2}", t.text, t.confidence),
+            (true, false) => t.text.clone(),
+            (false, _) => String::new(),
+        };
+        let label = Some(label.as_str()).filter(|l| !l.is_empty());
+        draw_shape(
+            &mut img,
+            font.as_ref(),
+            &mut cache,
+            &t.polygon,
+            label,
+            colors,
+            lw,
+        );
+    }
+    DynamicImage::ImageRgb8(img)
+}
+
+/// Blend the instance masks over `img` like the Ultralytics annotator: every mask covering a
+/// pixel halves it, then half the brightest of their class colors is added per channel, in `f32`
+/// steps like `PyTorch`.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::suboptimal_flops // PyTorch rounds each multiply and add
+)]
+fn draw_masks(img: &mut image::RgbImage, result: &Results) {
+    let (Some(boxes), Some(masks)) = (result.boxes.as_ref(), result.masks.as_ref()) else {
+        return;
+    };
+    let count = boxes.len().min(masks.data.dim().0);
+    if count == 0 {
+        return;
+    }
     let (width, height) = img.dimensions();
+    let (xyxy, cls) = (boxes.xyxy(), boxes.cls());
+    let w = width as usize;
 
-    // Dynamic scale factor and thickness based on image size (reference 640x640)
-    let (_, thickness) = render_scale(width, height);
+    // Per pixel, the brightest class color of the masks covering it and how many cover it.
+    let mut cover = vec![[0u8; 4]; w * height as usize];
+    for i in 0..count {
+        let color = Color::for_class(&result.colors, cls[i] as usize);
 
+        // Original-size masks only fill their box; input-size ones are scaled to the image
+        // first like the Ultralytics annotator, which can spill past the box.
+        let plane = masks.data.index_axis(ndarray::Axis(0), i);
+        let scaled;
+        let (region, [x, y]) = if plane.dim() == (height as usize, w) {
+            let side = |v: f32, n: u32| v.max(0.0).min(n as f32).ceil() as usize;
+            let (x1, y1) = (side(xyxy[[i, 0]], width), side(xyxy[[i, 1]], height));
+            let (x2, y2) = (side(xyxy[[i, 2]], width), side(xyxy[[i, 3]], height));
+            (
+                plane.slice_move(ndarray::s![y1..y2.max(y1), x1..x2.max(x1)]),
+                [x1, y1],
+            )
+        } else {
+            scaled = crate::postprocessing::scale_mask(&plane, (height, width));
+            (scaled.0.view(), scaled.1)
+        };
+
+        for (dy, hits) in region.outer_iter().enumerate() {
+            let start = (y + dy) * w + x;
+            for (m, px) in hits.iter().zip(&mut cover[start..start + hits.len()]) {
+                if *m > 0.5 {
+                    *px = [
+                        px[0].max(color.0),
+                        px[1].max(color.1),
+                        px[2].max(color.2),
+                        px[3].saturating_add(1),
+                    ];
+                }
+            }
+        }
+    }
+
+    // Rows are independent, so blend them across cores; `crate::parallel` is sequential on wasm.
+    let alpha = 0.5_f32;
+    img.as_flat_samples_mut()
+        .samples
+        .par_chunks_mut(BLEND_CHUNK * 3)
+        .enumerate()
+        .for_each(|(c, dst)| {
+            let cover = &cover[c * BLEND_CHUNK..];
+            for (px, cover) in dst.as_chunks_mut::<3>().0.iter_mut().zip(cover) {
+                let keep = (0..cover[3]).fold(1.0_f32, |keep, _| keep * (1.0 - alpha));
+                for (channel, &tint) in px.iter_mut().zip(cover) {
+                    let tint = f32::from(tint) / 255.0 * alpha;
+                    *channel = ((f32::from(*channel) / 255.0 * keep + tint) * 255.0) as u8;
+                }
+            }
+        });
+}
+
+/// Draw pose keypoints and the lines between them like the Ultralytics annotator, styled by the
+/// keypoint fields of `options`, with lines half the line width `lw`.
+#[allow(clippy::cast_possible_truncation)]
+fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOptions, lw: i32) {
     if let Some(ref keypoints) = result.keypoints {
         let kpt_data = &keypoints.data;
         let n_persons = kpt_data.shape()[0];
@@ -910,7 +958,16 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
             _ => kpt_color(start),
         };
 
-        for person_idx in 0..n_persons {
+        let point = |p: usize, k: usize| [kpt_data[[p, k, 0]] as i32, kpt_data[[p, k, 1]] as i32];
+
+        for person_idx in (0..n_persons).rev() {
+            for kpt_idx in 0..n_kpts {
+                if visible(person_idx, kpt_idx) {
+                    let [x, y] = point(person_idx, kpt_idx);
+                    let c = kpt_color(kpt_idx);
+                    draw_filled_circle(img, x, y, options.kpt_radius, Rgb([c.0, c.1, c.2]));
+                }
+            }
             if options.kpt_line {
                 for (limb_idx, &[kpt_a, kpt_b]) in skeleton.iter().enumerate() {
                     if kpt_a >= n_kpts
@@ -920,115 +977,16 @@ fn draw_pose(img: &mut image::RgbImage, result: &Results, options: &AnnotateOpti
                     {
                         continue;
                     }
-                    let x1 = kpt_data[[person_idx, kpt_a, 0]];
-                    let y1 = kpt_data[[person_idx, kpt_a, 1]];
-                    let x2 = kpt_data[[person_idx, kpt_b, 0]];
-                    let y2 = kpt_data[[person_idx, kpt_b, 1]];
-                    let color = limb_color(limb_idx, kpt_a);
-                    let color = Rgb([color.0, color.1, color.2]);
-                    draw_line_segment(img, x1, y1, x2, y2, color, thickness);
-                }
-            }
-
-            for kpt_idx in 0..n_kpts {
-                if visible(person_idx, kpt_idx) {
-                    let x = kpt_data[[person_idx, kpt_idx, 0]];
-                    let y = kpt_data[[person_idx, kpt_idx, 1]];
-                    let color = kpt_color(kpt_idx);
-                    let color = Rgb([color.0, color.1, color.2]);
-                    draw_filled_circle(img, x as i32, y as i32, options.kpt_radius, color);
+                    let (a, b) = (point(person_idx, kpt_a), point(person_idx, kpt_b));
+                    if a.into_iter().chain(b).min() < Some(0) {
+                        continue;
+                    }
+                    let c = limb_color(limb_idx, kpt_a);
+                    draw_line(img, a, b, Rgb([c.0, c.1, c.2]), (lw + 1) / 2);
                 }
             }
         }
     }
-}
-
-/// Draw oriented bounding boxes and class labels onto `img`.
-///
-/// Each box is drawn as four line segments connecting its rotated corners.
-/// Labels are positioned at the first corner of each box.
-///
-/// # Arguments
-///
-/// * `img` - Target image to draw on.
-/// * `result` - Inference results; only the `obb` field is read.
-/// * `font` - Optional loaded font; labels are skipped when `None`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn draw_obb(img: &mut image::RgbImage, result: &Results, font: Option<&LabelFont>) {
-    let (width, height) = img.dimensions();
-
-    let (font_scale, thickness) = render_scale(width, height);
-
-    if let Some(ref obb) = result.obb {
-        let corners = obb.xyxyxyxy();
-        let conf = obb.conf();
-        let cls = obb.cls();
-
-        let mut labels = Labels::default();
-
-        for i in 0..obb.len() {
-            let class_id = cls[i] as usize;
-            let color = Color::for_class(&result.colors, class_id);
-            let class_name = result.names.get(&class_id).map_or("object", String::as_str);
-            let quad: [[f32; 2]; 4] =
-                std::array::from_fn(|j| [corners[[i, j, 0]], corners[[i, j, 1]]]);
-            let label = format!(" {} {:.2} ", class_name, conf[i]);
-            let style = (Rgb([color.0, color.1, color.2]), font_scale, thickness);
-            draw_polygon(img, font, &mut labels, &quad, &label, style);
-        }
-    }
-}
-
-/// Draw the closed outline through `points` and `label` above the top-left corner of its
-/// enclosing box, like Ultralytics `box_label` for polygons, in `(color, font size, thickness)`.
-#[allow(clippy::cast_possible_truncation)]
-fn draw_polygon(
-    img: &mut image::RgbImage,
-    font: Option<&LabelFont>,
-    labels: &mut Labels,
-    points: &[[f32; 2]],
-    label: &str,
-    (color, font_scale, thickness): (Rgb<u8>, f32, i32),
-) {
-    for (j, a) in points.iter().enumerate() {
-        let b = points[(j + 1) % points.len()];
-        draw_line_segment(img, a[0], a[1], b[0], b[1], color, thickness);
-    }
-    if let Some(f) = font {
-        let min = |k: usize| points.iter().map(|p| p[k]).fold(f32::INFINITY, f32::min);
-        let (x, y) = ((min(0) as i32).max(0), (min(1) as i32).max(0));
-        draw_label(img, f, labels, label, color, font_scale, x, y, y);
-    }
-}
-
-/// Draw OCR texts on `image`: each outline in green with its text and recognition confidence in
-/// black, like Ultralytics `solutions.OCR`. The Unicode font is used when any text is non-ASCII.
-#[cfg(not(target_arch = "wasm32"))]
-#[must_use]
-pub fn annotate_texts(image: &DynamicImage, texts: &[crate::ocr::Text]) -> DynamicImage {
-    let mut img = image.to_rgb8();
-    let unicode = texts.iter().any(|t| !t.text.is_ascii());
-    let font = label_font(unicode);
-    // Python draws 2 px lines and 21 px labels (cv2 font at scale 2/3), or 14 px labels (12 pt
-    // TrueType font) for all texts when any is non-ASCII.
-    let style = (Rgb([0, 255, 0]), if unicode { 14.0 } else { 21.0 }, 2);
-    for t in texts {
-        // Labels of their own stay at their boxes and may overlap, as in Python.
-        let mut labels = Labels {
-            text_color: Some(Rgb([0, 0, 0])),
-            ..Labels::default()
-        };
-        let label = format!("{} {:.2}", t.text, t.confidence);
-        draw_polygon(
-            &mut img,
-            font.as_ref(),
-            &mut labels,
-            &t.polygon,
-            &label,
-            style,
-        );
-    }
-    DynamicImage::ImageRgb8(img)
 }
 
 /// Blend a solid color rectangle over a region of `img` at the given `alpha` opacity.
@@ -1052,8 +1010,8 @@ fn draw_transparent_rect(
     img: &mut image::RgbImage,
     x: i32,
     y: i32,
-    w: u32,
-    h: u32,
+    w: i32,
+    h: i32,
     color: Rgb<u8>,
     alpha: f32,
 ) {
@@ -1063,14 +1021,8 @@ fn draw_transparent_rect(
     let tint = color.0.map(|c| f32::from(c) * alpha);
 
     // Clamp the rectangle to the image once, then blend whole row slices.
-    let (x0, x1) = (
-        x.clamp(0, width as i32),
-        (x + w as i32).clamp(0, width as i32),
-    );
-    let (y0, y1) = (
-        y.clamp(0, height as i32),
-        (y + h as i32).clamp(0, height as i32),
-    );
+    let (x0, x1) = (x.clamp(0, width as i32), (x + w).clamp(0, width as i32));
+    let (y0, y1) = (y.clamp(0, height as i32), (y + h).clamp(0, height as i32));
     let width = width as usize;
     let samples = img.as_flat_samples_mut().samples;
     for py in y0 as usize..y1 as usize {
@@ -1078,94 +1030,41 @@ fn draw_transparent_rect(
         let (pixels, _) = row.as_chunks_mut::<3>();
         for pixel in pixels {
             for (channel, tint) in pixel.iter_mut().zip(tint) {
-                *channel = f32::from(*channel).mul_add(inv_alpha, tint) as u8;
+                *channel = f32::from(*channel).mul_add(inv_alpha, tint + 0.5) as u8;
             }
         }
     }
 }
 
-/// Draw top-k classification probabilities onto `img` with a semi-transparent backing box.
-///
-/// The list is rendered at the top-left corner with a 40% opacity black background to keep text readable over any image content.
-///
-/// # Arguments
-///
-/// * `img` - Target image to draw on.
-/// * `result` - Inference results; only the `probs` field is read.
-/// * `font` - Optional loaded font; output is skipped when `None`.
-/// * `top_k` - Maximum number of class entries to display.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_wrap
-)]
+/// Draw the top-k classification probabilities like the Ultralytics annotator: one `name score`
+/// line per class from 3% of the height in from the top-left corner, each on a gray box at half
+/// opacity.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn draw_classification(
     img: &mut image::RgbImage,
     result: &Results,
     font: Option<&LabelFont>,
     top_k: usize,
 ) {
-    if let Some(ref probs) = result.probs {
-        let top_indices = probs.top_k(top_k);
-        let (width, _height) = img.dimensions();
-
-        if let Some(f) = font {
-            // Adaptive font scale based on image width
-            let scale_factor = (width as f32 / 600.0).clamp(0.6, 2.0);
-            let base_size = 30.0;
-            let scale = PxScale::from(base_size * scale_factor);
-            let line_height = (scale.y * 1.2) as i32;
-
-            let x_pos = (20.0 * scale_factor) as i32;
-            let mut y_pos = (20.0 * scale_factor) as i32;
-
-            // Calculate max text width for background box
-            let mut max_width = 0;
-            let mut entries = Vec::new();
-
-            for &class_id in &top_indices {
-                let score = probs.data[class_id];
-                let class_name = result.names.get(&class_id).map_or("class", String::as_str);
-
-                let (glyphs, advance) = layout(f, scale, &format!("{class_name} {score:.2}"));
-                max_width = max_width.max(advance.ceil() as u32);
-                entries.push(glyphs);
-            }
-
-            // Draw background for all entries with padding
-            let box_height = (entries.len() as i32 * line_height) + 10;
-            let box_width = max_width + 20;
-
-            if !entries.is_empty() {
-                draw_transparent_rect(
-                    img,
-                    x_pos - 5,
-                    y_pos - 5,
-                    box_width,
-                    box_height as u32,
-                    Rgb([0, 0, 0]),
-                    0.4, // 40% opacity black tint
-                );
-            }
-
-            let mut cache = GlyphCache::new();
-            for glyphs in entries {
-                // Draw text (white)
-                let white = Rgb([255, 255, 255]);
-                draw_text(
-                    img,
-                    white,
-                    (x_pos, y_pos),
-                    scale,
-                    &f.glyphs,
-                    &glyphs,
-                    &mut cache,
-                );
-
-                y_pos += line_height;
-            }
-        }
+    let (Some(probs), Some(font)) = (result.probs.as_ref(), font) else {
+        return;
+    };
+    let x = (f64::from(img.height()) * 0.03).round_ties_even() as i32;
+    let mut y = x;
+    let mut cache = GlyphCache::new();
+    for class_id in probs.top_k(top_k) {
+        let name = result
+            .names
+            .get(&class_id)
+            .map_or_else(|| class_id.to_string(), Clone::clone);
+        let text = format!("{name} {:.2}", probs.data[class_id]);
+        let (glyphs, advance) = layout(font, font.scale, &text);
+        let (w, h) = text_size(font, &glyphs, advance);
+        let gray = Rgb([64, 64, 64]);
+        draw_transparent_rect(img, x, y, w + 2, h + 2, gray, 128.0 / 255.0);
+        let white = Rgb([255, 255, 255]);
+        draw_text(img, white, (x, y), font, &glyphs, &mut cache, 1);
+        y += h;
     }
 }
 
@@ -1204,6 +1103,8 @@ mod tests {
             glyphs: FontRef::try_from_slice(data).unwrap(),
             face: harfrust::Font::new(data, 0).unwrap(),
             plans: RefCell::default(),
+            scale: PxScale::from(20.0),
+            pil: true,
         };
         let ids = |text| -> Vec<u16> {
             let (glyphs, _) = layout(&font, PxScale::from(20.0), text);
@@ -1220,16 +1121,16 @@ mod tests {
     }
 
     #[test]
-    fn test_draw_line_segment() {
+    fn test_draw_line_is_as_thick_as_opencv() {
         let mut img = image::RgbImage::new(100, 100);
         let color = Rgb([255, 0, 0]);
-        // Draw horizontal line
-        draw_line_segment(&mut img, 10.0, 10.0, 50.0, 10.0, color, 1);
-
-        // Check a pixel in the middle
-        assert_eq!(*img.get_pixel(30, 10), color);
-        // Check pixel outside
-        assert_eq!(*img.get_pixel(30, 20), Rgb([0, 0, 0]));
+        // OpenCV covers 1, 3, 5 and 5 rows for thickness 1 to 4.
+        for (thickness, rows) in [(1, 1), (2, 3), (3, 5), (4, 5)] {
+            img.fill(0);
+            draw_line(&mut img, [10, 50], [60, 50], color, thickness);
+            let drawn = (0..100).filter(|&y| *img.get_pixel(30, y) == color).count();
+            assert_eq!(drawn, rows, "thickness {thickness}");
+        }
     }
 
     #[test]
@@ -1261,15 +1162,6 @@ mod tests {
             Speed::default(),
             (128, 128),
         )
-    }
-
-    #[test]
-    fn test_render_scale_grows_with_image() {
-        let (small_font, small_thick) = render_scale(64, 64);
-        let (big_font, big_thick) = render_scale(2000, 2000);
-        assert!(big_font >= small_font);
-        assert!(big_thick >= small_thick);
-        assert!(small_thick >= 1);
     }
 
     #[test]
@@ -1384,7 +1276,6 @@ mod tests {
 
     #[test]
     fn test_annotate_many_overlapping_boxes() {
-        // Overlapping boxes exercise the label-collision avoidance and rect_intersect paths.
         let names = HashMap::from([(0usize, "person".to_string()), (1, "car".to_string())]);
         let mut r = base_results(names);
         r.boxes = Some(Boxes::new(

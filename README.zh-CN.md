@@ -299,28 +299,32 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 **CLI 选项：**
 
-| 选项                 | 简写 | 说明                                                                                                                                                                                         | 默认值                                                          |
-| -------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `--model`            | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                                                                              | `yolo26n.onnx`                                                  |
-| `--task`             |      | 任务类型（`detect`、`segment`、`semantic`\*、`depth`\*、`classify`、`pose`、`obb`）；省略 `--model` 时选择 nano 模型                                                                         | `detect`                                                        |
-| `--source`           | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                                                                           | 与任务相关的 Ultralytics URL 资源                               |
-| `--conf`             |      | 置信度阈值                                                                                                                                                                                   | `0.25`                                                          |
-| `--iou`              |      | NMS IoU 阈值                                                                                                                                                                                 | `0.5`                                                           |
-| `--max-det`          |      | 最大检测数量                                                                                                                                                                                 | `300`                                                           |
-| `--imgsz`            |      | 推理图片尺寸                                                                                                                                                                                 | 模型元数据                                                      |
-| `--rect [<BOOL>]`    |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
-| `--tile [<TILE>]`    |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
-| `--retina-masks`     |      | 以原图尺寸生成分割掩码，而不是推理尺寸                                                                                                                                                       | `false`                                                         |
-| `--ocr`              |      | 使用 PaddleOCR 识别每个框、旋转框或掩码中的文字；省略 `--model` 时使用 `yolo26n-text.onnx`                                                                                                   | `false`                                                         |
-| `--batch`            |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
-| `--quantize`         |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w32a32`、`w8a16` 或 `w8a32`                                                                                            | 模型精度                                                        |
-| `--save [<BOOL>]`    |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                                                       | `true`                                                          |
-| `--save-frames`      |      | 为视频输入保存单帧（而不是视频文件）                                                                                                                                                         | `false`                                                         |
-| `--save-json`        |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                                                                         | `false`                                                         |
-| `--show`             |      | 在窗口中显示结果                                                                                                                                                                             | `false`                                                         |
-| `--device`           |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、intel:cpu、intel:gpu、intel:npu、tensorrt:0、rocm:0、migraphx:0、xnnpack；每个设备需要启用对应 feature，请求的设备未编译或加载失败时会报错 | 自动（选择可用的最佳提供方；未启用任何加速 feature 时为 `cpu`） |
-| `--verbose [<BOOL>]` |      | 显示详细输出                                                                                                                                                                                 | `true`                                                          |
-| `--classes`          |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                                                                         | 所有类别                                                        |
+| 选项                     | 简写 | 说明                                                                                                                                                                                         | 默认值                                                          |
+| ------------------------ | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `--model`                | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                                                                              | `yolo26n.onnx`                                                  |
+| `--task`                 |      | 任务类型（`detect`、`segment`、`semantic`\*、`depth`\*、`classify`、`pose`、`obb`）；省略 `--model` 时选择 nano 模型                                                                         | `detect`                                                        |
+| `--source`               | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                                                                           | 与任务相关的 Ultralytics URL 资源                               |
+| `--conf`                 |      | 置信度阈值                                                                                                                                                                                   | `0.25`                                                          |
+| `--iou`                  |      | NMS IoU 阈值                                                                                                                                                                                 | `0.5`                                                           |
+| `--max-det`              |      | 最大检测数量                                                                                                                                                                                 | `300`                                                           |
+| `--imgsz`                |      | 推理图片尺寸                                                                                                                                                                                 | 模型元数据                                                      |
+| `--rect [<BOOL>]`        |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
+| `--tile [<TILE>]`        |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
+| `--retina-masks`         |      | 以原图尺寸生成分割掩码，而不是推理尺寸                                                                                                                                                       | `false`                                                         |
+| `--ocr`                  |      | 使用 PaddleOCR 识别每个框、旋转框或掩码中的文字；省略 `--model` 时使用 `yolo26n-text.onnx`                                                                                                   | `false`                                                         |
+| `--batch`                |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
+| `--quantize`             |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w32a32`、`w8a16` 或 `w8a32`                                                                                            | 模型精度                                                        |
+| `--save [<BOOL>]`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                                                       | `true`                                                          |
+| `--save-frames`          |      | 为视频输入保存单帧（而不是视频文件）                                                                                                                                                         | `false`                                                         |
+| `--save-json`            |      | 保存语义分割类别图 PNG，便于外部评估                                                                                                                                                         | `false`                                                         |
+| `--show`                 |      | 在窗口中显示结果                                                                                                                                                                             | `false`                                                         |
+| `--show-labels [<BOOL>]` |      | 在框标签中显示类别名称                                                                                                                                                                       | `true`                                                          |
+| `--show-conf [<BOOL>]`   |      | 在框标签中显示置信度                                                                                                                                                                         | `true`                                                          |
+| `--show-boxes [<BOOL>]`  |      | 绘制框及其标签                                                                                                                                                                               | `true`                                                          |
+| `--line-width`           |      | 框线宽（像素），同时决定标签大小                                                                                                                                                             | 按图片尺寸                                                      |
+| `--device`               |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、intel:cpu、intel:gpu、intel:npu、tensorrt:0、rocm:0、migraphx:0、xnnpack；每个设备需要启用对应 feature，请求的设备未编译或加载失败时会报错 | 自动（选择可用的最佳提供方；未启用任何加速 feature 时为 `cpu`） |
+| `--verbose [<BOOL>]`     |      | 显示详细输出                                                                                                                                                                                 | `true`                                                          |
+| `--classes`              |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                                                                         | 所有类别                                                        |
 
 `[<BOOL>]` 表示该标志的值是可选的：单独传入（`--rect`）即为 `true`，也可显式使用 `--rect false` 或 `--rect=false` 关闭。
 
@@ -548,9 +552,10 @@ for text in ocr.read(&image, &result)? {
 }
 ```
 
-**姿态绘制：**
+**绘制：**
 
-`annotate_image_with_options` 接受与 Ultralytics `Results.plot` 相同的关键点选项。17 个关键点（COCO-Pose）的模型
+`annotate_image_with_options` 与 Ultralytics `Results.plot` 的绘制方式一致并接受其选项：`line_width`、`show_boxes`、
+`show_labels` 和 `show_conf` 与同名 CLI 参数相同，关键点选项用于设置姿态样式。17 个关键点（COCO-Pose）的模型
 绘制人体骨架，其他关键点布局为每个关键点使用一种调色板颜色且不连线，`skeleton` 可为自定义模型连接关键点，每条连线使用其
 起始关键点的颜色：
 
@@ -558,6 +563,8 @@ for text in ocr.read(&image, &result)? {
 use ultralytics_inference::annotate::{AnnotateOptions, annotate_image_with_options};
 
 let options = AnnotateOptions {
+    line_width: Some(3),
+    show_conf: false,
     kpt_radius: 5,
     kpt_conf: 0.25,
     skeleton: Some(vec![[0, 1], [1, 2]]),
