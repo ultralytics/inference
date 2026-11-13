@@ -453,8 +453,6 @@ pub mod ocr;
 mod openvino;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source;
-#[cfg(all(feature = "track", not(target_arch = "wasm32")))]
-pub mod tracker;
 
 // CUDA-side preprocess + zero-copy device input - internal fast path used by
 // `YOLOModel` when the `cuda-preprocess` feature is enabled and the device is
@@ -465,6 +463,8 @@ mod cuda_inference;
 pub mod preprocessing;
 pub mod results;
 pub mod task;
+#[cfg(feature = "track")]
+pub mod tracker;
 pub mod utils;
 
 pub use device::Device;
@@ -478,7 +478,7 @@ pub use results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, Semant
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::{Source, SourceIterator, SourceMeta};
 pub use task::Task;
-#[cfg(all(feature = "track", not(target_arch = "wasm32")))]
+#[cfg(feature = "track")]
 pub use tracker::{GmcMethod, Tracker, TrackerConfig, TrackerType};
 
 /// Library version.

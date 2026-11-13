@@ -6,7 +6,7 @@
 //! hot loops run across all available cores exactly as before. On
 //! `wasm32-unknown-unknown` there are no OS threads and `rayon` cannot be built,
 //! so the module instead provides drop-in sequential shims with the same method
-//! names (`into_par_iter`, `par_chunks_mut`, `for_each_with`). This lets the
+//! names (`into_par_iter`, `par_chunks_mut`, `for_each_with`, `flat_map_iter`). This lets the
 //! shared image pipeline compile for the browser without sprinkling `cfg`
 //! attributes across every call site.
 
@@ -68,6 +68,16 @@ mod shim {
             for item in self {
                 op(&mut init, item);
             }
+        }
+
+        /// Map each item to an iterator and flatten them (mirrors rayon's `flat_map_iter`), for
+        /// the tracker.
+        #[cfg(feature = "track")]
+        fn flat_map_iter<U: IntoIterator, F: FnMut(Self::Item) -> U>(
+            self,
+            op: F,
+        ) -> core::iter::FlatMap<Self, U, F> {
+            self.flat_map(op)
         }
     }
 

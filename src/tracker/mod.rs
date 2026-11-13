@@ -58,15 +58,17 @@ mod gmc;
 mod kalman_filter;
 mod matching;
 mod oc_sort;
+#[cfg(not(target_arch = "wasm32"))]
 mod reid;
 mod track_tracker;
 
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 
-use ndarray::{Array2, Axis};
+use ndarray::{Array2, Array3, Axis};
 
 use crate::error::Result;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::YOLOModel;
 use crate::results::{Boxes, Keypoints, Masks, Obb, Results};
 use crate::utils::{calculate_iou, calculate_probiou};
@@ -77,6 +79,10 @@ type Mat8 = [[f64; 8]; 8];
 type Row = ([f32; 4], Option<f32>, f32, f32);
 /// A 2x3 affine camera motion from the previous frame to the current one.
 type Warp = [[f64; 3]; 2];
+/// The `ReID` features of `[x, y, w, h]` boxes of an image, `None` where a crop is empty. A
+/// function, so the tracker builds where no `ReID` model runs, like the browser.
+type Embed =
+    Box<dyn FnMut(&Array3<u8>, &[[f32; 4]]) -> Result<Vec<Option<Vec<f32>>>> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum State {
@@ -261,7 +267,7 @@ pub struct Tracker {
     frame_id: u32,
     last_id: u64,
     gmc: Option<gmc::Gmc>,
-    reid: Option<reid::Reid>,
+    reid: Option<Embed>,
 }
 
 impl Tracker {
@@ -271,14 +277,25 @@ impl Tracker {
     /// # Errors
     ///
     /// Returns an error if the `ReID` model cannot be downloaded or loaded.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(config: TrackerConfig, model: &YOLOModel) -> Result<Self> {
         let reid = (config.tracker_type.gmc_reid() && config.with_reid)
             .then(|| reid::Reid::new(model, &config.model))
-            .transpose()?;
+            .transpose()?
+            .map(|mut r| {
+                Box::new(move |img: &Array3<u8>, b: &[[f32; 4]]| r.embed(img, b)) as Embed
+            });
         Ok(Self::with_reid(config, reid))
     }
 
-    fn with_reid(config: TrackerConfig, reid: Option<reid::Reid>) -> Self {
+    /// A tracker without the `ReID` model of `with_reid`, which [`Tracker::new`] loads, so it
+    /// matches by motion alone. The browser build has only this one.
+    #[must_use]
+    pub fn without_reid(config: TrackerConfig) -> Self {
+        Self::with_reid(config, None)
+    }
+
+    fn with_reid(config: TrackerConfig, reid: Option<Embed>) -> Self {
         let gmc = config.tracker_type.gmc_reid() && config.gmc_method == GmcMethod::SparseOptFlow;
         Self {
             config,
@@ -352,7 +369,7 @@ impl Tracker {
         let order: Vec<usize> = high.iter().chain(&low).copied().collect();
         let crops: Vec<[f32; 4]> = order[..embedded].iter().map(|&i| rows[i].0).collect();
         let feats = match &mut self.reid {
-            Some(r) => r.embed(&result.orig_img, &crops)?,
+            Some(embed) => embed(&result.orig_img, &crops)?,
             None => Vec::new(),
         };
         let det = |(k, &i): (usize, &usize)| {
@@ -447,7 +464,7 @@ mod tests {
             TrackerType::FastTrack,
             TrackerType::TrackTrack,
         ] {
-            let mut tracker = Tracker::with_reid(kind.into(), None);
+            let mut tracker = Tracker::without_reid(kind.into());
             let mut ids = Vec::new();
             for step in 0..6u8 {
                 let dx = f32::from(step) * 4.0;
@@ -466,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_tracker_hides_new_tracks_until_confirmed() {
-        let mut tracker = Tracker::with_reid(TrackerType::ByteTrack.into(), None);
+        let mut tracker = Tracker::without_reid(TrackerType::ByteTrack.into());
         let mut r = frame(&[]);
         tracker.update(&mut r).unwrap();
         let mut r = frame(&[[10.0, 10.0, 60.0, 90.0, 0.9, 0.0]]);
