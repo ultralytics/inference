@@ -796,7 +796,8 @@ console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 ```
 
 通过 `{ device: "webgpu" | "cpu" }` 选择加速器（默认 `"auto"`），并读取
-`model.device` 查看实际使用的设备。
+`model.device` 查看实际使用的设备。`model.track(frame)` 在视频帧上运行同样的跟踪器，详见
+[目标跟踪](web/README.zh-CN.md#目标跟踪)。
 
 后端会根据模型格式自动选择（优先使用扩展名，否则读取模型字节），因此切换后端只取决于
 加载的模型。LiteRT.js（Google 的 Web 版 LiteRT）是可选项，且在 WebGPU 上

@@ -109,6 +109,24 @@ async function frame() {
 }
 ```
 
+### 目标跟踪
+
+`track()` 像 Ultralytics 的 `model.track(persist=True)` 一样跨视频帧跟踪目标：轨迹在多次调用之间延续，每个保留的框都带有
+`id`。它接受 `predict()` 的选项以及 `tracker`，可选 `botsort.yaml`（默认）、`bytetrack.yaml`、`ocsort.yaml`、
+`deepocsort.yaml`、`fasttrack.yaml` 和 `tracktrack.yaml`，适用于 ONNX 和 LiteRT 的检测、分割、姿态和 OBB 模型：
+
+```ts
+async function frame() {
+  const results = await model.track(video, { tracker: "bytetrack.yaml" });
+  console.log(results.boxes.map((box) => box.id));
+  await annotate(canvas, video, results); // 标签显示为 "id:1 person 87%"
+  requestAnimationFrame(frame);
+}
+```
+
+处理新视频前请调用 `model.resetTracker()`。跟踪器使用 Ultralytics 的默认设置，因此只有原生 crate 才能运行的 ReID
+外观匹配保持关闭，与 Python 中的默认值一致。
+
 ## ✨ 模型
 
 <a href="https://docs.ultralytics.com/tasks" target="_blank">
@@ -144,8 +162,8 @@ GitHub release 资源不会返回 `Access-Control-Allow-Origin`，因此浏览�
 | ------------------ | -------------------------------------------------------------------- | --------------------- |
 | `task`             | `string`                                                             | 全部                  |
 | `width` / `height` | `number`                                                             | 全部                  |
-| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color }[]`                       | detect、segment、pose |
-| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`                    | obb                   |
+| `boxes`            | `{ x1, y1, x2, y2, id?, conf, cls, name, color }[]`                  | detect、segment、pose |
+| `obb`              | `{ x, y, w, h, angle, id?, conf, cls, name, color }[]`               | obb                   |
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                                | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, top5names, color } \| null` | classify              |
 | `masks`            | `Uint8Array`（RGBA 叠加层，`width*height*4`）                        | segment、semantic     |
