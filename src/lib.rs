@@ -116,6 +116,9 @@
 //! # Read scene text with YOLO26-Text and PaddleOCR
 //! ultralytics-inference predict --ocr --source sign.jpg
 //!
+//! # Read Korean, Cyrillic, Arabic and other scripts with a PaddleOCR language model
+//! ultralytics-inference predict --ocr korean_PP-OCRv5_mobile_rec --source sign.jpg
+//!
 //! # Show help
 //! ultralytics-inference help
 //!
@@ -137,7 +140,7 @@
 //! | `--rect [<BOOL>]` | | Enable rectangular inference (minimal padding) | `true` |
 //! | `--tile [<TILE>]` | | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz` | off |
 //! | `--retina-masks` | | Build segmentation masks at the original image size instead of the inference size | `false` |
-//! | `--ocr` | | Read the text in each box, oriented box or mask with `PaddleOCR`; without `--model` this runs `yolo26n-text.onnx` | `false` |
+//! | `--ocr [<RECOGNIZER>]` | | Read the text in each box, oriented box or mask with `PaddleOCR`; bare `--ocr` uses PP-OCRv6, or name a PP-OCRv5 language model like `korean_PP-OCRv5_mobile_rec`; without `--model` this runs `yolo26n-text.onnx` | off |
 //! | `--batch` | | Batch size for inference | `1` |
 //! | `--quantize` | | Inference precision (`8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`) | Model precision |
 //! | `--save [<BOOL>]` | | Save annotated results to runs/\<task\>/predict | `true` |

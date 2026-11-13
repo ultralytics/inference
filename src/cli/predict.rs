@@ -20,7 +20,7 @@ use crate::{DISPLAY_NAME, InferenceConfig, Quantization, Results, VERSION, YOLOM
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
-use crate::ocr::{DEFAULT_ORIENTATION, DEFAULT_RECOGNIZER, TextRecognizer};
+use crate::ocr::{DEFAULT_ORIENTATION, TextRecognizer};
 use crate::task::Task;
 use crate::{error, verbose, warn};
 
@@ -89,8 +89,8 @@ pub fn run_prediction(args: &PredictArgs) {
         process::exit(1);
     }
 
-    let mut reader = args.ocr.then(|| {
-        TextRecognizer::new(&model, DEFAULT_RECOGNIZER, DEFAULT_ORIENTATION).unwrap_or_else(|e| {
+    let mut reader = args.ocr.as_ref().map(|recognizer| {
+        TextRecognizer::new(&model, recognizer, DEFAULT_ORIENTATION).unwrap_or_else(|e| {
             error!("Error loading the OCR models: {e}");
             process::exit(1);
         })
@@ -100,7 +100,11 @@ pub fn run_prediction(args: &PredictArgs) {
     let source = source_path.as_ref().map_or_else(
         || {
             // Select default images based on model task
-            let task = if args.ocr { Task::Detect } else { model.task() };
+            let task = if args.ocr.is_some() {
+                Task::Detect
+            } else {
+                model.task()
+            };
             let default_urls = crate::download::default_images(task);
 
             if verbose {
@@ -500,7 +504,7 @@ pub fn run_prediction(args: &PredictArgs) {
 fn resolve_model_path(args: &PredictArgs) -> (String, bool) {
     let model_is_default = args.model.is_none();
     let model_path = args.model.clone().unwrap_or_else(|| {
-        if args.ocr {
+        if args.ocr.is_some() {
             "yolo26n-text.onnx".to_owned()
         } else {
             args.task.unwrap_or(Task::Detect).default_model()
@@ -695,7 +699,7 @@ mod tests {
             rect: InferenceConfig::DEFAULT_RECT,
             tile: None,
             retina_masks: false,
-            ocr: false,
+            ocr: None,
             batch: 1,
             quantize: InferenceConfig::DEFAULT_QUANTIZE,
             half: false,
@@ -773,7 +777,7 @@ mod tests {
             rect: false,
             tile: Some(320),
             retina_masks: true,
-            ocr: false,
+            ocr: None,
             batch: 4,
             quantize: Some(Quantization::Fp16),
             half: false,
