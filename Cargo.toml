@@ -43,7 +43,7 @@ include = [
 # module is crate-private and `with_cuda_preprocess` is always compiled), so this
 # explicit set documents the entire public surface.
 [package.metadata.docs.rs]
-features = ["annotate", "visualize", "video"]
+features = ["annotate", "visualize", "video", "track"]
 rustdoc-args = ["--cfg", "docsrs"]
 targets = ["x86_64-unknown-linux-gnu"]
 
@@ -160,6 +160,9 @@ visualize = ["minifb", "annotate"]
 # Video file support (requires ffmpeg installed on system)
 video = ["dep:ffmpeg-next"]
 
+# Multi-object tracking (the `track` CLI command and `Tracker`)
+track = []
+
 # Image annotation support (for --save feature in CLI)
 annotate = ["imageproc", "ab_glyph", "harfrust", "unicode-bidi"]
 
@@ -201,7 +204,7 @@ nvidia = ["cuda", "tensorrt"]
 amd = ["rocm", "migraphx"]
 intel = ["openvino", "onednn"]
 mobile = ["nnapi", "coreml", "qnn"]
-all = ["annotate", "visualize", "video"]
+all = ["annotate", "visualize", "video", "track"]
 
 [dev-dependencies]
 # Testing dependencies
