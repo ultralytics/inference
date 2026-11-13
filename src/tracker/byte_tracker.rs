@@ -6,7 +6,7 @@
 use ndarray::Array2;
 
 use super::matching::{assign, fuse, matrix};
-use super::{State, Track, Tracker, TrackerConfig, TrackerType, pair};
+use super::{State, Track, Tracker, TrackerConfig, TrackerType, Warp, pair};
 use crate::utils::calculate_iou;
 
 impl Track {
@@ -61,7 +61,7 @@ impl Tracker {
 
     /// One `BYTETracker.update` step for every tracker but `TrackTrack`.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn step(&mut self, dets: Vec<Track>, n_h: usize) {
+    pub(super) fn step(&mut self, dets: Vec<Track>, n_h: usize, warp: Option<Warp>) {
         let c = self.config.clone();
         let (kind, frame) = (c.tracker_type, self.frame_id);
         // One arena: tracked tracks, lost tracks, then high and low score detections.
@@ -74,6 +74,11 @@ impl Tracker {
             .collect();
         for &i in &pool {
             all[i].predict();
+        }
+        if let Some(h) = warp {
+            for &i in pool.iter().chain(&unconfirmed) {
+                all[i].warp(&h);
+            }
         }
         let (mut activated, mut refind, mut lost) = (Vec::new(), Vec::new(), Vec::new());
         // Correct track `t` with detection `d`: activated if it was tracked, found again if lost.

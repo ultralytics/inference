@@ -479,7 +479,7 @@ pub use results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, Semant
 pub use source::{Source, SourceIterator, SourceMeta};
 pub use task::Task;
 #[cfg(all(feature = "track", not(target_arch = "wasm32")))]
-pub use tracker::{Tracker, TrackerConfig, TrackerType};
+pub use tracker::{GmcMethod, Tracker, TrackerConfig, TrackerType};
 
 /// Library version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

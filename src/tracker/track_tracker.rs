@@ -10,7 +10,7 @@
 use ndarray::{Array2, ArrayView1, s};
 
 use super::matching::matrix;
-use super::{State, Track, Tracker, pair};
+use super::{State, Track, Tracker, Warp, pair};
 use crate::utils::calculate_iou;
 
 /// Frames over which corner motion is measured.
@@ -171,7 +171,7 @@ impl Tracker {
 
     /// One `TRACKTRACK.update` step.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn step_tracktrack(&mut self, dets: Vec<Track>, n_h: usize) {
+    pub(super) fn step_tracktrack(&mut self, dets: Vec<Track>, n_h: usize, warp: Option<Warp>) {
         let c = self.config.clone();
         let (frame, step) = (self.frame_id, f64::from(c.reduce_step));
         let (mut all, n_t, n_l) = self.arena(dets);
@@ -183,6 +183,9 @@ impl Tracker {
             .filter(|&i| i >= n_t || all[i].state == State::Tracked)
             .collect();
         for &i in pool.iter().chain(&unconfirmed) {
+            if let Some(h) = &warp {
+                all[i].warp(h);
+            }
             all[i].predict();
         }
         let (mut activated, mut refind, mut lost) = (Vec::new(), Vec::new(), Vec::new());

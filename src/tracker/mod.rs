@@ -2,7 +2,8 @@
 
 //! Multi-object tracking, ported from the Ultralytics trackers.
 //!
-//! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`.
+//! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`, with sparse
+//! optical flow camera motion compensation.
 //!
 //! Feed each frame's [`Results`] to [`Tracker::update`] in order. Like `model.track()` in
 //! Ultralytics, it keeps the tracked detections, replaces their boxes with the Kalman filter
@@ -39,6 +40,7 @@
 mod byte_tracker;
 mod config;
 mod fast_tracker;
+mod gmc;
 mod kalman_filter;
 mod matching;
 mod oc_sort;
@@ -51,11 +53,13 @@ use ndarray::{Array2, Axis};
 
 use crate::results::{Boxes, Keypoints, Masks, Obb, Results};
 use crate::utils::{calculate_iou, calculate_probiou};
-pub use config::{TrackerConfig, TrackerType};
+pub use config::{GmcMethod, TrackerConfig, TrackerType};
 
 type Mat8 = [[f64; 8]; 8];
 /// A detection row: center box, angle of an oriented box, score and class.
 type Row = ([f32; 4], Option<f32>, f32, f32);
+/// A 2x3 affine camera motion from the previous frame to the current one.
+type Warp = [[f64; 3]; 2];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum State {
@@ -227,18 +231,21 @@ pub struct Tracker {
     lost: Vec<Track>,
     frame_id: u32,
     last_id: u64,
+    gmc: Option<gmc::Gmc>,
 }
 
 impl Tracker {
     /// Create a tracker with the settings of `config`.
     #[must_use]
-    pub const fn new(config: TrackerConfig) -> Self {
+    pub fn new(config: TrackerConfig) -> Self {
+        let gmc = config.tracker_type.gmc_reid() && config.gmc_method == GmcMethod::SparseOptFlow;
         Self {
             config,
             tracked: Vec::new(),
             lost: Vec::new(),
             frame_id: 0,
             last_id: 0,
+            gmc: gmc.then(gmc::Gmc::default),
         }
     }
 
@@ -270,6 +277,7 @@ impl Tracker {
                 .collect()
         });
         self.frame_id += 1;
+        let warp = self.gmc.as_mut().map(|g| g.apply(&result.orig_img));
 
         // High and low score rows; `TrackTrack` keeps degenerate boxes, the others drop them
         // since an aspect ratio of a zero height is infinite.
@@ -288,9 +296,9 @@ impl Tracker {
         let det = |&i: &usize| Track::new(kind, rows[i], i);
         let dets: Vec<Track> = high.iter().chain(&low).map(det).collect();
         if kind == TrackerType::TrackTrack {
-            self.step_tracktrack(dets, high.len());
+            self.step_tracktrack(dets, high.len(), warp);
         } else {
-            self.step(dets, high.len());
+            self.step(dets, high.len(), warp);
         }
         self.write(result);
     }

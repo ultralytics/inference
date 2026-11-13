@@ -12,13 +12,14 @@ use crate::error::{InferenceError, Result};
 pub enum TrackerType {
     /// `ByteTrack`: two association stages, high then low score detections.
     ByteTrack,
-    /// `BoT-SORT`, the Ultralytics default: `ByteTrack` with a center-width-height Kalman state.
+    /// `BoT-SORT`, the Ultralytics default: `ByteTrack` with a center-width-height Kalman state
+    /// and camera motion compensation.
     #[default]
     BotSort,
     /// `OC-SORT`: `ByteTrack` with motion direction costs, observation-centric recovery and
     /// re-update.
     OcSort,
-    /// `Deep OC-SORT`: `OC-SORT` with its own thresholds.
+    /// `Deep OC-SORT`: `OC-SORT` with optional camera motion compensation.
     DeepOcSort,
     /// `FastTrack`: `ByteTrack` with occlusion handling.
     FastTrack,
@@ -58,6 +59,34 @@ impl TrackerType {
     pub(super) const fn ocsort(self) -> bool {
         matches!(self, Self::OcSort | Self::DeepOcSort)
     }
+
+    /// Whether it can compensate camera motion and match by appearance.
+    pub(super) const fn gmc_reid(self) -> bool {
+        matches!(self, Self::BotSort | Self::DeepOcSort | Self::TrackTrack)
+    }
+}
+
+/// Camera motion compensation method, the `gmc_method` of the Ultralytics tracker configs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GmcMethod {
+    /// No compensation.
+    None,
+    /// Corners tracked by pyramidal Lucas-Kanade optical flow, fitted with a RANSAC similarity.
+    SparseOptFlow,
+}
+
+impl FromStr for GmcMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "sparseOptFlow" => Ok(Self::SparseOptFlow),
+            "none" | "None" => Ok(Self::None),
+            _ => Err(format!(
+                "Unsupported gmc_method '{s}', expected sparseOptFlow or none"
+            )),
+        }
+    }
 }
 
 /// Tracker settings, the keys of the Ultralytics tracker YAML configs.
@@ -80,6 +109,8 @@ pub struct TrackerConfig {
     pub match_thresh: f32,
     /// Weigh the `IoU` by the detection score when matching.
     pub fuse_score: bool,
+    /// Camera motion compensation (`BoT-SORT`, `Deep OC-SORT`, `TrackTrack`).
+    pub gmc_method: GmcMethod,
     /// Frames over which `OC-SORT` measures the motion direction.
     pub delta_t: u32,
     /// Weight of the `OC-SORT` motion direction cost.
@@ -129,6 +160,7 @@ impl Default for TrackerConfig {
             track_buffer: 30,
             match_thresh: 0.8,
             fuse_score: true,
+            gmc_method: GmcMethod::SparseOptFlow,
             delta_t: 3,
             inertia: 0.2,
             use_byte: false,
@@ -162,6 +194,7 @@ impl From<TrackerType> for TrackerConfig {
             TrackerType::DeepOcSort => Self {
                 track_high_thresh: 0.3,
                 new_track_thresh: 0.3,
+                gmc_method: GmcMethod::None,
                 ..base
             },
             TrackerType::TrackTrack => Self {
@@ -231,7 +264,7 @@ impl TrackerConfig {
             };
             set_keys!(config, key, value;
                 track_high_thresh, track_low_thresh, new_track_thresh, track_buffer, match_thresh,
-                fuse_score, delta_t, inertia, use_byte, reset_velocity_offset_occ,
+                fuse_score, gmc_method, delta_t, inertia, use_byte, reset_velocity_offset_occ,
                 reset_pos_offset_occ, enlarge_bbox_occ, dampen_motion_occ,
                 active_occ_to_lost_thresh, occ_cover_thresh, occ_reappear_window, init_iou_suppress,
                 lost_match_thr, conf_weight, angle_weight, penalty_p, reduce_step, tai_thr,
@@ -257,6 +290,7 @@ mod tests {
         assert_eq!(c.tracker_type, TrackerType::DeepOcSort);
         assert_eq!((c.track_buffer, c.fuse_score), (60, false));
         assert!((c.track_high_thresh - 0.3).abs() < f32::EPSILON);
-        assert!(TrackerConfig::from_yaml("track_buffer: 60").is_err());
+        assert!(TrackerConfig::from_yaml("gmc_method: orb").is_err());
+        assert!(TrackerConfig::from_yaml("tracker_type: botsort\ngmc_method: orb").is_err());
     }
 }
