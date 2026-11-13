@@ -228,6 +228,9 @@ ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 64
 # Read scene text: YOLO26-Text finds the words and PaddleOCR reads them (auto-downloads yolo26n-text.onnx and the OCR models)
 ultralytics-inference predict --ocr --source sign.jpg
 
+# Read Korean, Cyrillic, Arabic and other scripts with a PaddleOCR language model
+ultralytics-inference predict --ocr korean_PP-OCRv5_mobile_rec --source sign.jpg
+
 # Save individual frames for video input
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -312,7 +315,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--rect [<BOOL>]`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                                               | `true`                                                                       |
 | `--tile [<TILE>]`        |       | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz`                                                                                                                                                     | off                                                                          |
 | `--retina-masks`         |       | Build segmentation masks at the original image size instead of the inference size                                                                                                                                            | `false`                                                                      |
-| `--ocr`                  |       | Read the text in each box, oriented box or mask with PaddleOCR; without `--model` this runs `yolo26n-text.onnx`                                                                                                              | `false`                                                                      |
+| `--ocr [<RECOGNIZER>]`   |       | Read the text in each box, oriented box or mask with PaddleOCR; bare `--ocr` uses PP-OCRv6, or name a PP-OCRv5 language model; without `--model` this runs `yolo26n-text.onnx`                                               | off                                                                          |
 | `--batch`                |       | Batch size for inference                                                                                                                                                                                                     | `1`                                                                          |
 | `--quantize`             |       | Inference precision: `8`, `16`, `32`, `int8`, `fp16`, `fp32`, `w8a8`, `w16a16`, `w32a32`, `w8a16`, or `w8a32`                                                                                                                | Model precision                                                              |
 | `--save [<BOOL>]`        |       | Save annotated results to runs/\<task\>/predict                                                                                                                                                                              | `true`                                                                       |
@@ -353,7 +356,7 @@ On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds t
 
 **Auto-downloadable models:**
 
-YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation, `-depth` for depth estimation and `-text` for the OBB text detectors that `--ocr` reads with the PaddleOCR `PP-OCRv6_medium_rec.onnx` recognizer and `PP-LCNet_x0_25_textline_ori.onnx` orientation classifier (Apache-2.0):
+YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation, `-depth` for depth estimation and `-text` for the OBB text detectors that `--ocr` reads with the PaddleOCR `PP-OCRv6_medium_rec.onnx` recognizer, its PP-OCRv5 language models and the `PP-LCNet_x0_25_textline_ori.onnx` orientation classifier (Apache-2.0):
 
 | Family | Variants                                                                                                         |
 | ------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -555,6 +558,22 @@ for text in ocr.read(&image, &result)? {
     println!("{} {:.2}", text.text, text.confidence);
 }
 ```
+
+PP-OCRv6 reads Chinese, Japanese and Latin-script languages. For other scripts, pass a PaddleOCR PP-OCRv5 language model as the recognizer, the same as Python `recognizer="korean_PP-OCRv5_mobile_rec"`, with `--ocr korean_PP-OCRv5_mobile_rec` or `TextRecognizer::new(&detector, "korean_PP-OCRv5_mobile_rec", DEFAULT_ORIENTATION)`. It downloads on first use. Pick the model for your text, since OCR does not detect the language:
+
+| Recognizer                       | Script and example languages                                        |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `korean_PP-OCRv5_mobile_rec`     | Korean (Hangul) and Latin letters                                   |
+| `cyrillic_PP-OCRv5_mobile_rec`   | Cyrillic: Russian, Ukrainian, Bulgarian, Serbian, Kazakh, Mongolian |
+| `eslav_PP-OCRv5_mobile_rec`      | East Slavic Cyrillic: Russian, Ukrainian, Belarusian                |
+| `arabic_PP-OCRv5_mobile_rec`     | Arabic script: Arabic, Persian, Urdu, Uyghur                        |
+| `devanagari_PP-OCRv5_mobile_rec` | Devanagari: Hindi, Marathi, Nepali                                  |
+| `th_PP-OCRv5_mobile_rec`         | Thai                                                                |
+| `el_PP-OCRv5_mobile_rec`         | Greek, including accented letters and final `ς`                     |
+| `ta_PP-OCRv5_mobile_rec`         | Tamil                                                               |
+| `te_PP-OCRv5_mobile_rec`         | Telugu                                                              |
+| `latin_PP-OCRv5_mobile_rec`      | Latin-script languages, in a smaller and faster model than PP-OCRv6 |
+| `en_PP-OCRv5_mobile_rec`         | English, in a smaller and faster model than PP-OCRv6                |
 
 `predict --ocr` and `annotate_texts` draw the texts like Python, and `--line-width`, `--show-labels` and `--show-conf` apply to them too.
 

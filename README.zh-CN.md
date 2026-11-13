@@ -227,6 +227,9 @@ ultralytics-inference predict --model yolo26n.onnx --source aerial.jpg --tile 64
 # 场景文字识别：YOLO26-Text 检测文字，PaddleOCR 识别（自动下载 yolo26n-text.onnx 和 OCR 模型）
 ultralytics-inference predict --ocr --source sign.jpg
 
+# 使用 PaddleOCR 语言模型识别韩文、西里尔文、阿拉伯文等文字
+ultralytics-inference predict --ocr korean_PP-OCRv5_mobile_rec --source sign.jpg
+
 # 为视频输入保存单帧
 ultralytics-inference predict --model yolo26n.onnx --source video.mp4 --save-frames
 
@@ -311,7 +314,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--rect [<BOOL>]`        |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
 | `--tile [<TILE>]`        |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
 | `--retina-masks`         |      | 以原图尺寸生成分割掩码，而不是推理尺寸                                                                                                                                                       | `false`                                                         |
-| `--ocr`                  |      | 使用 PaddleOCR 识别每个框、旋转框或掩码中的文字；省略 `--model` 时使用 `yolo26n-text.onnx`                                                                                                   | `false`                                                         |
+| `--ocr [<RECOGNIZER>]`   |      | 使用 PaddleOCR 识别每个框、旋转框或掩码中的文字；不带值时使用 PP-OCRv6，也可指定 PP-OCRv5 语言模型；省略 `--model` 时使用 `yolo26n-text.onnx`                                                | 关闭                                                            |
 | `--batch`                |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
 | `--quantize`             |      | 推理精度：`8`、`16`、`32`、`int8`、`fp16`、`fp32`、`w8a8`、`w16a16`、`w32a32`、`w8a16` 或 `w8a32`                                                                                            | 模型精度                                                        |
 | `--save [<BOOL>]`        |      | 将标注结果保存到 runs/\<task\>/predict                                                                                                                                                       | `true`                                                          |
@@ -352,7 +355,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 **可自动下载的模型：**
 
-YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并覆盖标准任务变体。YOLO26 还包含用于语义分割的 `-sem`、用于深度估计的 `-depth`，以及 `--ocr` 使用的 `-text` 旋转框文字检测模型，文字由 PaddleOCR 的 `PP-OCRv6_medium_rec.onnx` 识别模型和 `PP-LCNet_x0_25_textline_ori.onnx` 方向分类模型识别（Apache-2.0）：
+YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并覆盖标准任务变体。YOLO26 还包含用于语义分割的 `-sem`、用于深度估计的 `-depth`，以及 `--ocr` 使用的 `-text` 旋转框文字检测模型，文字由 PaddleOCR 的 `PP-OCRv6_medium_rec.onnx` 识别模型、其 PP-OCRv5 语言模型和 `PP-LCNet_x0_25_textline_ori.onnx` 方向分类模型识别（Apache-2.0）：
 
 | 系列   | 变体                                                                                                             |
 | ------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -551,6 +554,22 @@ for text in ocr.read(&image, &result)? {
     println!("{} {:.2}", text.text, text.confidence);
 }
 ```
+
+PP-OCRv6 可识别中文、日文和拉丁字母语言。其他文字可将 PaddleOCR PP-OCRv5 语言模型作为识别模型，与 Python 中 `recognizer="korean_PP-OCRv5_mobile_rec"` 一致，使用 `--ocr korean_PP-OCRv5_mobile_rec` 或 `TextRecognizer::new(&detector, "korean_PP-OCRv5_mobile_rec", DEFAULT_ORIENTATION)`，首次使用时自动下载。OCR 不会自动判断语言，请按文字选择模型：
+
+| 识别模型                         | 文字与示例语言                                                     |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `korean_PP-OCRv5_mobile_rec`     | 韩文（Hangul）和拉丁字母                                           |
+| `cyrillic_PP-OCRv5_mobile_rec`   | 西里尔文：俄语、乌克兰语、保加利亚语、塞尔维亚语、哈萨克语、蒙古语 |
+| `eslav_PP-OCRv5_mobile_rec`      | 东斯拉夫西里尔文：俄语、乌克兰语、白俄罗斯语                       |
+| `arabic_PP-OCRv5_mobile_rec`     | 阿拉伯字母：阿拉伯语、波斯语、乌尔都语、维吾尔语                   |
+| `devanagari_PP-OCRv5_mobile_rec` | 天城文：印地语、马拉地语、尼泊尔语                                 |
+| `th_PP-OCRv5_mobile_rec`         | 泰文                                                               |
+| `el_PP-OCRv5_mobile_rec`         | 希腊文，包括带重音字母和词尾 `ς`                                   |
+| `ta_PP-OCRv5_mobile_rec`         | 泰米尔文                                                           |
+| `te_PP-OCRv5_mobile_rec`         | 泰卢固文                                                           |
+| `latin_PP-OCRv5_mobile_rec`      | 拉丁字母语言，比 PP-OCRv6 更小更快                                 |
+| `en_PP-OCRv5_mobile_rec`         | 英文，比 PP-OCRv6 更小更快                                         |
 
 `predict --ocr` 和 `annotate_texts` 按 Python 的方式绘制文字，`--line-width`、`--show-labels` 和 `--show-conf` 同样适用。
 
