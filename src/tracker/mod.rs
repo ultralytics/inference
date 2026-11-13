@@ -5,9 +5,22 @@
 //! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`, with sparse
 //! optical flow camera motion compensation and `ReID` appearance features from an ONNX model.
 //!
-//! Feed each frame's [`Results`] to [`Tracker::update`] in order. Like `model.track()` in
-//! Ultralytics, it keeps the tracked detections, replaces their boxes with the Kalman filter
-//! estimate and adds a track id to every row, which [`Boxes::id`] and [`Obb::id`] then return.
+//! [`YOLOModel::track`] runs it like `model.track(persist=True)` in Ultralytics: it keeps the
+//! tracked detections, replaces their boxes with the Kalman filter estimate and adds a track id
+//! to every row, which [`Boxes::id`] and [`Obb::id`] then return.
+//!
+//! ```no_run
+//! use ultralytics_inference::YOLOModel;
+//!
+//! let mut model = YOLOModel::load("yolo26n.onnx")?;
+//! for frame in ["frame1.jpg", "frame2.jpg"] {
+//!     let results = model.track(frame, "bytetrack.yaml")?;
+//!     println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
+//! }
+//! # Ok::<(), ultralytics_inference::InferenceError>(())
+//! ```
+//!
+//! A [`Tracker`] does the same for your own [`Results`]: feed it each frame's in order.
 //!
 //! ```no_run
 //! use ultralytics_inference::{Tracker, TrackerConfig, YOLOModel};
@@ -17,7 +30,6 @@
 //! for frame in ["frame1.jpg", "frame2.jpg"] {
 //!     let mut results = model.predict(frame)?;
 //!     tracker.update(&mut results[0])?;
-//!     println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
 //! }
 //! # Ok::<(), ultralytics_inference::InferenceError>(())
 //! ```

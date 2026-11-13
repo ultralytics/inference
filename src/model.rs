@@ -195,6 +195,9 @@ pub struct YOLOModel {
     /// standard CPU preprocess path runs.
     #[cfg(feature = "cuda-preprocess")]
     cuda_preprocessor: Option<crate::cuda_inference::CudaPreprocessor>,
+    /// The tracker of [`Self::track`], with the tracker name or YAML it was loaded from.
+    #[cfg(feature = "track")]
+    tracker: Option<(String, crate::tracker::Tracker)>,
 }
 
 #[allow(
@@ -724,6 +727,8 @@ impl YOLOModel {
             output_names,
             config,
             warmed_up: false,
+            #[cfg(feature = "track")]
+            tracker: None,
             fp16_input,
             execution_provider: provider_name.to_string(),
             is_dynamic,
@@ -807,6 +812,8 @@ impl YOLOModel {
             },
             metadata,
             warmed_up: false,
+            #[cfg(feature = "track")]
+            tracker: None,
             fp16_input: false,
             execution_provider: "OpenVINO".to_owned(),
             is_dynamic: false,
@@ -1521,6 +1528,78 @@ impl YOLOModel {
         })?;
 
         self.predict_image(&img, path.to_string_lossy().to_string())
+    }
+
+    /// Run inference on an image file and track its objects across calls, like Ultralytics
+    /// `model.track(source, tracker=..., persist=True)`.
+    ///
+    /// `tracker` is a tracker name (`botsort`, `bytetrack.yaml`, ...) or a YAML file with the keys
+    /// of the Ultralytics tracker configs. Tracks carry over between calls until `tracker`
+    /// changes or [`Self::reset_tracker`] is called, as before a new video. Like Ultralytics, a
+    /// confidence threshold left at its 0.25 default drops to 0.1, since trackers need the
+    /// low-score detections.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image can't be loaded, inference fails, or the tracker or its
+    /// `ReID` model can't be loaded.
+    #[cfg(feature = "track")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn track<P: AsRef<Path>>(&mut self, path: P, tracker: &str) -> Result<Vec<Results>> {
+        self.tracked(tracker, |model| model.predict(path))
+    }
+
+    /// [`Self::track`] on a `DynamicImage`, such as a video frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if inference fails, or the tracker or its `ReID` model can't be loaded.
+    #[cfg(feature = "track")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn track_image(
+        &mut self,
+        image: &DynamicImage,
+        path: String,
+        tracker: &str,
+    ) -> Result<Vec<Results>> {
+        self.tracked(tracker, |model| model.predict_image(image, path))
+    }
+
+    /// Forget the tracks of [`Self::track`], to start a new video.
+    #[cfg(feature = "track")]
+    pub fn reset_tracker(&mut self) {
+        self.tracker = None;
+    }
+
+    /// Run `predict` with the confidence trackers need and track its results with `tracker`.
+    #[cfg(feature = "track")]
+    fn tracked(
+        &mut self,
+        tracker: &str,
+        predict: impl FnOnce(&mut Self) -> Result<Vec<Results>>,
+    ) -> Result<Vec<Results>> {
+        use crate::tracker::{Tracker, TrackerConfig};
+        if self
+            .tracker
+            .as_ref()
+            .is_none_or(|(name, _)| name != tracker)
+        {
+            let new = Tracker::new(TrackerConfig::load(tracker)?, self)?;
+            self.tracker = Some((tracker.to_owned(), new));
+        }
+        let conf = self.config.confidence_threshold;
+        if (conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON {
+            self.config.confidence_threshold = 0.1;
+        }
+        let results = predict(self);
+        self.config.confidence_threshold = conf;
+        let mut results = results?;
+        if let Some((_, t)) = &mut self.tracker {
+            for result in &mut results {
+                t.update(result)?;
+            }
+        }
+        Ok(results)
     }
 
     /// Run inference on a `DynamicImage`.

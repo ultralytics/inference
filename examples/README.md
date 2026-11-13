@@ -11,12 +11,13 @@ Runnable examples for the [`ultralytics-inference`](https://crates.io/crates/ult
 
 ## 📂 Examples
 
-| Example                 | Feature    | Description                                                          | Run                                                |
-| ----------------------- | ---------- | -------------------------------------------------------------------- | -------------------------------------------------- |
-| [basic](basic.rs)       | none       | Load a YOLO or RT-DETR model, run inference, print detections        | `cargo run --example basic`                        |
-| [config](config.rs)     | none       | Set confidence, IoU, image size, and device                          | `cargo run --example config`                       |
-| [tasks](tasks.rs)       | none       | Summary for every task, plus raw arrays for segment, semantic, depth | `cargo run --example tasks`                        |
-| [annotate](annotate.rs) | `annotate` | Draw boxes and labels, save the annotated image                      | `cargo run --example annotate --features annotate` |
+| Example                 | Feature          | Description                                                          | Run                                                |
+| ----------------------- | ---------------- | -------------------------------------------------------------------- | -------------------------------------------------- |
+| [basic](basic.rs)       | none             | Load a YOLO or RT-DETR model, run inference, print detections        | `cargo run --example basic`                        |
+| [config](config.rs)     | none             | Set confidence, IoU, image size, and device                          | `cargo run --example config`                       |
+| [tasks](tasks.rs)       | none             | Summary for every task, plus raw arrays for segment, semantic, depth | `cargo run --example tasks`                        |
+| [annotate](annotate.rs) | `annotate`       | Draw boxes and labels, save the annotated image                      | `cargo run --example annotate --features annotate` |
+| [track](track.rs)       | `track`, `video` | Track objects across video frames, like Ultralytics `model.track()`  | `cargo run --example track --features track,video` |
 
 ## ✅ How to Run
 
@@ -38,6 +39,10 @@ cargo run --example config
 
 # Annotate and save to runs/predict/annotated_*.jpg
 cargo run --example annotate --features annotate
+
+# Track objects in the sample video, or your own video with a tracker name or YAML file
+cargo run --example track --features track,video
+cargo run --example track --features track,video -- path/to/video.mp4 bytetrack.yaml
 ```
 
 The `tasks` example defaults to detection and works with the other tasks when you pass their model. The matching sample image is downloaded automatically. The segment, semantic, and depth branches also print the raw output array, which `ndarray` truncates with `...`:

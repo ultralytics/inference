@@ -79,6 +79,10 @@ name = "tasks"
 name = "annotate"
 required-features = ["annotate"]
 
+[[example]]
+name = "track"
+required-features = ["track", "video"]
+
 [dependencies]
 # Core - Image loading and processing. The default formats minus `avif`, which only
 # adds an AVIF encoder (rav1e) and is the slowest part of the build.
