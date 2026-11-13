@@ -107,7 +107,9 @@ struct Paddle {
 
 impl TextRecognizer {
     /// Load a recognizer and an orientation classifier, each an ONNX path that is downloaded
-    /// when missing and known, on the device of `detector`.
+    /// when missing and known, on the device of `detector`. The recognizer is
+    /// [`DEFAULT_RECOGNIZER`] or a `PaddleOCR` PP-OCRv5 language model for other scripts, such as
+    /// `korean_PP-OCRv5_mobile_rec.onnx`.
     ///
     /// # Errors
     ///
