@@ -20,11 +20,25 @@ const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 /// Variants only available for the yolo26 family.
 const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth", "-text"];
+/// Scripts of the `PaddleOCR` PP-OCRv5 language recognizers, `{script}_PP-OCRv5_mobile_rec.onnx`.
+const OCR_LANGUAGES: &[&str] = &[
+    "arabic",
+    "cyrillic",
+    "devanagari",
+    "el",
+    "en",
+    "eslav",
+    "korean",
+    "latin",
+    "ta",
+    "te",
+    "th",
+];
 
 /// Every auto-downloadable model filename, as the cross product of family, size, and variant.
 ///
 /// `-sem`, `-depth` and `-text` are only emitted for the `yolo26` family, followed by the
-/// `PaddleOCR` models that read text.
+/// `PaddleOCR` models that read text and its language recognizers.
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES
         .iter()
@@ -47,6 +61,11 @@ fn downloadable_models() -> Vec<String> {
                 crate::ocr::DEFAULT_ORIENTATION,
             ]
             .map(String::from),
+        )
+        .chain(
+            OCR_LANGUAGES
+                .iter()
+                .map(|script| format!("{script}_PP-OCRv5_mobile_rec.onnx")),
         )
         .collect()
 }

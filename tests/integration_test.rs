@@ -25,7 +25,7 @@ fn predict_args(model: &str, task: Option<Task>, save_json: bool) -> PredictArgs
         rect: false,
         tile: None,
         retina_masks: false,
-        ocr: false,
+        ocr: None,
         batch: 1,
         quantize: None,
         half: false,
