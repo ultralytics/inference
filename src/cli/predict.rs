@@ -111,23 +111,7 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
     }
 
     #[cfg(feature = "track")]
-    let mut tracker = tracker.map(|t| {
-        if !model.task().has_boxes() {
-            error!(
-                "Task '{}' doesn't support tracking, valid tasks are detect, segment, pose, obb",
-                model.task()
-            );
-            process::exit(1);
-        }
-        crate::tracker::TrackerConfig::load(t)
-            .and_then(|c| crate::tracker::Tracker::new(c, &model))
-            .unwrap_or_else(|e| {
-                error!("{e}");
-                process::exit(1);
-            })
-    });
-    #[cfg(feature = "track")]
-    let mut tracked_path = None;
+    let mut tracker = tracker.map(|name| SourceTracker::load(&model, name));
     #[cfg(not(feature = "track"))]
     let _ = tracker;
 
@@ -343,19 +327,11 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
                     .zip(metas.iter().zip(paths.iter().zip(images.iter())))
                 {
                     for result in results {
-                        // A tracker starts over on each new video or image, like Ultralytics.
                         #[cfg(feature = "track")]
-                        let mut result = result;
-                        #[cfg(feature = "track")]
-                        if let Some(t) = tracker.as_mut() {
-                            if tracked_path.as_ref() != Some(image_path) {
-                                t.reset();
-                                tracked_path = Some(image_path.clone());
-                            }
-                            if let Err(e) = t.update(&mut result) {
-                                error!("Tracking failed: {e}");
-                            }
-                        }
+                        let result = match &mut tracker {
+                            Some(t) => t.update(image_path, result),
+                            None => result,
+                        };
                         let texts = reader.as_mut().map(|r| {
                             r.read(img, &result).unwrap_or_else(|e| {
                                 error!("OCR failed: {e}");
@@ -551,6 +527,53 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
 
     // Print footer
     verbose!("💡 Learn more at https://docs.ultralytics.com/modes/{mode}");
+}
+
+/// The tracker of the `track` command, which starts over on each new video or image like
+/// Ultralytics.
+#[cfg(feature = "track")]
+struct SourceTracker {
+    tracker: crate::tracker::Tracker,
+    /// The video or image the tracks belong to.
+    source: Option<String>,
+}
+
+#[cfg(feature = "track")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+impl SourceTracker {
+    /// Load the tracker `name` for `model`, exiting when the task has no boxes or the tracker
+    /// cannot be loaded.
+    fn load(model: &YOLOModel, name: &str) -> Self {
+        if !model.task().has_boxes() {
+            error!(
+                "Task '{}' doesn't support tracking, valid tasks are detect, segment, pose, obb",
+                model.task()
+            );
+            process::exit(1);
+        }
+        let tracker = crate::tracker::TrackerConfig::load(name)
+            .and_then(|c| crate::tracker::Tracker::new(c, model))
+            .unwrap_or_else(|e| {
+                error!("{e}");
+                process::exit(1);
+            });
+        Self {
+            tracker,
+            source: None,
+        }
+    }
+
+    /// Track `result`, a frame of `source`.
+    fn update(&mut self, source: &str, mut result: Results) -> Results {
+        if self.source.as_deref() != Some(source) {
+            self.tracker.reset();
+            self.source = Some(source.to_owned());
+        }
+        if let Err(e) = self.tracker.update(&mut result) {
+            error!("Tracking failed: {e}");
+        }
+        result
+    }
 }
 
 /// Resolve the model path from `--model`, falling back to the task's default nano model.
