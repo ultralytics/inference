@@ -267,6 +267,12 @@ fn weights(a: f32, b: f32) -> [i32; 4] {
     [w00, w01, w10, (1 << W_BITS) - w00 - w01 - w10]
 }
 
+/// Blend the top left, top right, bottom left and bottom right values `v` with the weights `w`
+/// of [`weights`].
+const fn mix(w: &[i32; 4], v: [i32; 4]) -> i32 {
+    v[0] * w[0] + v[1] * w[1] + v[2] * w[2] + v[3] * w[3]
+}
+
 /// A frame pyramid with the Scharr derivatives of each level.
 #[derive(Debug, Clone)]
 struct Pyramid(Vec<(Gray, Padded<[i16; 2]>)>);
@@ -350,15 +356,11 @@ impl Pyramid {
             let (r0, r1) = (&img.px[row..][..=WIN], &img.px[row + s..][..=WIN]);
             let (d0, d1) = (&deriv.px[row..][..=WIN], &deriv.px[row + s..][..=WIN]);
             for x in 0..WIN {
-                let p = |a: u8, b: u8, c: u8, d: u8| {
-                    let [a, b, c, d] = [a, b, c, d].map(i32::from);
-                    a * iw[0] + b * iw[1] + c * iw[2] + d * iw[3]
-                };
-                patch[0][y][x] = descale(p(r0[x], r0[x + 1], r1[x], r1[x + 1]), W_BITS - 5);
+                let p = [r0[x], r0[x + 1], r1[x], r1[x + 1]].map(i32::from);
+                patch[0][y][x] = descale(mix(&iw, p), W_BITS - 5);
                 for c in 0..2 {
-                    let g = |d: &[[i16; 2]], x: usize| i32::from(d[x][c]);
-                    let v = g(d0, x) * iw[0] + g(d0, x + 1) * iw[1] + g(d1, x) * iw[2];
-                    patch[c + 1][y][x] = descale(v + g(d1, x + 1) * iw[3], W_BITS);
+                    let g = [d0[x][c], d0[x + 1][c], d1[x][c], d1[x + 1][c]].map(i32::from);
+                    patch[c + 1][y][x] = descale(mix(&iw, g), W_BITS);
                 }
             }
             let [gx, gy] = [&patch[1][y], &patch[2][y]];
@@ -391,8 +393,8 @@ impl Pyramid {
                 let (r0, r1) = (&j_img.px[row..][..=WIN], &j_img.px[row + s..][..=WIN]);
                 let i = &patch[0][y];
                 let diff: [i32; WIN] = std::array::from_fn(|x| {
-                    let [a, b, c, d] = [r0[x], r0[x + 1], r1[x], r1[x + 1]].map(i32::from);
-                    descale(a * jw[0] + b * jw[1] + c * jw[2] + d * jw[3], W_BITS - 5) - i[x]
+                    let p = [r0[x], r0[x + 1], r1[x], r1[x + 1]].map(i32::from);
+                    descale(mix(&jw, p), W_BITS - 5) - i[x]
                 });
                 for c in 0..2 {
                     let g = &patch[c + 1][y];
