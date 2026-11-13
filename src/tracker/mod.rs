@@ -349,17 +349,17 @@ impl Tracker {
         // High and low score rows; `TrackTrack` keeps degenerate boxes, the others drop them
         // since an aspect ratio of a zero height is infinite.
         let c = &self.config;
-        let valid = |b: &[f32; 4]| kind == TrackerType::TrackTrack || (b[2] > 0.0 && b[3] > 0.0);
-        let high: Vec<usize> = (0..rows.len())
-            .filter(|&i| valid(&rows[i].0) && rows[i].2 >= c.track_high_thresh)
-            .collect();
-        let low: Vec<usize> = (0..rows.len())
-            .filter(|&i| {
-                valid(&rows[i].0)
-                    && rows[i].2 > c.track_low_thresh
-                    && rows[i].2 < c.track_high_thresh
-            })
-            .collect();
+        let (mut high, mut low) = (Vec::new(), Vec::new());
+        for (i, (b, _, score, _)) in rows.iter().enumerate() {
+            if kind != TrackerType::TrackTrack && !(b[2] > 0.0 && b[3] > 0.0) {
+                continue;
+            }
+            if *score >= c.track_high_thresh {
+                high.push(i);
+            } else if *score > c.track_low_thresh {
+                low.push(i);
+            }
+        }
         // Appearance features of the rows that can match by appearance.
         let embedded = if kind == TrackerType::TrackTrack {
             high.len()
