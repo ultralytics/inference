@@ -53,6 +53,7 @@ Request an Enterprise License for commercial use at [Ultralytics Licensing](http
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
 - ⬇️ **Auto Download** - Downloads supported YOLO26, YOLO11, and YOLOv8 ONNX models (sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
+- 🎞️ **Object Tracking** - ByteTrack, BoT-SORT, OC-SORT, Deep OC-SORT, FastTrack and TrackTrack with camera motion compensation and ReID, matching Ultralytics (`track` feature)
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
 ## ✨ Models
@@ -297,7 +298,16 @@ ultralytics-inference version
 
 # Run inference
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
+
+# Track objects in a video (`track` and `video` features)
+ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker bytetrack.yaml
 ```
+
+`track` takes every `predict` option plus `--tracker`, a tracker name (`bytetrack`, `botsort`, `ocsort`, `deepocsort`,
+`fasttrack`, `tracktrack`, with or without `.yaml`) or a YAML file with the keys of the
+[Ultralytics tracker configs](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers). Like
+Ultralytics it defaults to `botsort.yaml`, `--conf 0.1` and saving to `runs/<task>/track`. `with_reid: True` downloads
+`yolo26n-reid.onnx` for `model: auto`. Of the `gmc_method` values, `sparseOptFlow` and `none` are supported.
 
 `--help` and `--version` are also supported as standard flag aliases.
 
@@ -308,7 +318,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--model`                | `-m`  | Path to ONNX model file; auto-downloaded if a known YOLOv8/YOLO11/YOLO26 name                                                                                                                                                | `yolo26n.onnx`                                                               |
 | `--task`                 |       | Task type (`detect`, `segment`, `semantic`\*, `depth`\*, `classify`, `pose`, `obb`); selects nano model when `--model` is omitted                                                                                            | `detect`                                                                     |
 | `--source`               | `-s`  | Input source (image, directory, glob, video, webcam index, or URL)                                                                                                                                                           | Task-dependent Ultralytics URL assets                                        |
-| `--conf`                 |       | Confidence threshold                                                                                                                                                                                                         | `0.25`                                                                       |
+| `--conf`                 |       | Confidence threshold                                                                                                                                                                                                         | `0.25` (`0.1` for `track`)                                                   |
 | `--iou`                  |       | IoU threshold for NMS                                                                                                                                                                                                        | `0.5`                                                                        |
 | `--max-det`              |       | Maximum number of detections                                                                                                                                                                                                 | `300`                                                                        |
 | `--imgsz`                |       | Inference image size                                                                                                                                                                                                         | model metadata                                                               |
@@ -329,6 +339,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--device`               |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, migraphx:0, xnnpack; each needs its feature, and a requested device that is not built or fails to load is an error | auto (best available provider; `cpu` when no accelerator feature is enabled) |
 | `--verbose [<BOOL>]`     |       | Show verbose output                                                                                                                                                                                                          | `true`                                                                       |
 | `--classes`              |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                                                                  | all classes                                                                  |
+| `--tracker`              |       | `track` only: tracker name or YAML file                                                                                                                                                                                      | `botsort.yaml`                                                               |
 
 `[<BOOL>]` marks a flag whose value is optional: passing it bare (`--rect`) sets it to `true`, and an explicit `--rect false` or `--rect=false` turns it off.
 
@@ -356,15 +367,15 @@ On CPU, ONNX Runtime widens an FP16 ONNX graph to FP32 weights while it builds t
 
 **Auto-downloadable models:**
 
-YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation, `-depth` for depth estimation and `-text` for the OBB text detectors that `--ocr` reads with the PaddleOCR `PP-OCRv6_medium_rec.onnx` recognizer, its PP-OCRv5 language models and the `PP-LCNet_x0_25_textline_ori.onnx` orientation classifier (Apache-2.0):
+YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are supported for auto-download across the standard task variants. YOLO26 also includes `-sem` for semantic segmentation, `-depth` for depth estimation, `-reid` for tracking appearance features and `-text` for the OBB text detectors that `--ocr` reads with the PaddleOCR `PP-OCRv6_medium_rec.onnx` recognizer, its PP-OCRv5 language models and the `PP-LCNet_x0_25_textline_ori.onnx` orientation classifier (Apache-2.0):
 
-| Family | Variants                                                                                                         |
-| ------ | ---------------------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-sem`\*, `-depth`\*, `-cls`, `-pose`, `-obb`, `-text`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                  |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                  |
+| Family | Variants                                                                                                                    |
+| ------ | --------------------------------------------------------------------------------------------------------------------------- |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`, `yolo26{n,s,m,l,x}-seg.onnx`, `-sem`\*, `-depth`\*, `-cls`, `-pose`, `-obb`, `-text`\*, `-reid`\* |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`, `yolo11{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                             |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`, `yolov8{n,s,m,l,x}-seg.onnx`, `-cls`, `-pose`, `-obb`                                             |
 
-\* `-sem` (semantic segmentation), `-depth` (depth estimation) and `-text` (scene text) are YOLO26-only.
+\* `-sem` (semantic segmentation), `-depth` (depth estimation), `-text` (scene text) and `-reid` (tracking appearance) are YOLO26-only.
 
 **Source Options:**
 
@@ -598,6 +609,22 @@ let options = AnnotateOptions {
 let annotated = annotate_image_with_options(&image, &results[0], &options);
 ```
 
+**Tracking** (`track` feature):
+
+```rust
+use ultralytics_inference::YOLOModel;
+
+let mut model = YOLOModel::load("yolo26n.onnx")?;
+for frame in ["frame1.jpg", "frame2.jpg"] {
+    let results = model.track(frame, "bytetrack.yaml")?; // tracks carry over between calls
+    println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
+}
+```
+
+Like Ultralytics `model.track(persist=True)`, the tracker lives in the model until the tracker changes or
+`model.reset_tracker()` starts a new video. `model.track_image` takes decoded frames, such as those of a
+`SourceIterator` over a video (see the [track example](examples/track.rs)), and `Tracker` tracks your own `Results`.
+
 For runnable programs you can copy and adapt, see the [examples](examples/README.md) directory.
 
 ## 🗂️ Project Structure
@@ -630,7 +657,20 @@ inference/
 │   ├── cli/                # CLI module
 │   │   ├── mod.rs          # CLI module exports
 │   │   ├── args.rs         # CLI argument parsing
-│   │   └── predict.rs      # Predict command implementation
+│   │   └── predict.rs      # Predict and track command implementation
+│   ├── tracker/            # Object tracking (track feature), laid out like ultralytics/trackers
+│   │   ├── mod.rs          # Tracker and the shared track state
+│   │   ├── byte_tracker.rs # ByteTrack, which the others build on
+│   │   ├── bot_sort.rs     # BoT-SORT appearance matching
+│   │   ├── oc_sort.rs      # OC-SORT
+│   │   ├── deep_oc_sort.rs # Deep OC-SORT
+│   │   ├── fast_tracker.rs # FastTrack
+│   │   ├── track_tracker.rs # TrackTrack
+│   │   ├── config.rs       # TrackerType, TrackerConfig and YAML configs
+│   │   ├── kalman_filter.rs # Kalman filter
+│   │   ├── matching.rs     # Cost matrices and LAPJV assignment
+│   │   ├── gmc.rs          # Sparse optical flow camera motion compensation
+│   │   └── reid.rs         # ReID appearance features
 │   └── visualizer/         # Real-time visualization (minifb)
 ├── tests/
 │   ├── integration_test.rs # Integration tests
@@ -640,6 +680,7 @@ inference/
 │   ├── config.rs           # Set confidence, IoU, image size, and device
 │   ├── tasks.rs            # Summary for every task, plus raw arrays for segment, semantic, depth
 │   ├── annotate.rs         # Draw boxes and labels, save the annotated image
+│   ├── track.rs            # Track objects across video frames
 │   └── README.md           # Examples guide
 ├── assets/                 # Test images
 │   ├── boats.jpg
@@ -717,6 +758,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `annotate`        | Image annotation for `--save` (default)                                                               |
 | `visualize`       | Real-time window display for `--show` (default)                                                       |
 | `video`           | Video file decoding/encoding (requires FFmpeg)                                                        |
+| `track`           | Object tracking: the `track` command and `Tracker`                                                    |
 | `cuda`            | NVIDIA CUDA support                                                                                   |
 | `tensorrt`        | NVIDIA TensorRT optimization (includes `cuda`)                                                        |
 | `cuda-preprocess` | GPU preprocessing + zero-copy TensorRT input (needs CUDA toolkit; see [`docs/CUDA.md`](docs/CUDA.md)) |
@@ -740,7 +782,7 @@ Default features (enabled unless `--no-default-features` is passed): `annotate`,
 | `amd`             | Convenience: ROCm + MIGraphX                                                                          |
 | `intel`           | Convenience: OpenVINO + oneDNN                                                                        |
 | `mobile`          | Convenience: NNAPI + CoreML + QNN                                                                     |
-| `all`             | Convenience: annotate + visualize + video                                                             |
+| `all`             | Convenience: annotate + visualize + video + track                                                     |
 
 ## 🌐 Browser / WebGPU (WASM)
 
@@ -908,6 +950,7 @@ On Apple M4 the fastest setting is 4 threads, one per performance core; adding t
 - [x] Class filtering support
 - [x] Auto-download all YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes n/s/m/l/x, all tasks)
 - [x] Scene text OCR with YOLO26-Text and PaddleOCR (`--ocr`)
+- [x] Object tracking with all Ultralytics trackers (`track`)
 - [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
 - [x] WebAssembly (WASM) browser inference on WebGPU (npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo))
 
