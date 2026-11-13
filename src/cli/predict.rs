@@ -20,6 +20,8 @@ use crate::{DISPLAY_NAME, InferenceConfig, Quantization, Results, VERSION, YOLOM
 
 use crate::batch::BatchProcessor;
 use crate::cli::args::PredictArgs;
+#[cfg(feature = "track")]
+use crate::cli::args::TrackArgs;
 use crate::ocr::{DEFAULT_ORIENTATION, TextRecognizer};
 use crate::task::Task;
 use crate::{error, verbose, warn};
@@ -30,12 +32,27 @@ use crate::{error, verbose, warn};
 /// saves results according to `args`. Errors are reported to stderr and exit the process,
 /// since this is the CLI entry point.
 #[cfg_attr(coverage_nightly, coverage(off))]
+pub fn run_prediction(args: &PredictArgs) {
+    run(args, None);
+}
+
+/// Run the `track` command: [`run_prediction`] with a tracker over the frames, saving to
+/// `runs/<task>/track`.
+#[cfg(feature = "track")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn run_tracking(args: &TrackArgs) {
+    run(&args.predict, Some(&args.tracker));
+}
+
+/// Predict, and track with `tracker` (a tracker name or YAML file) when given.
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
     clippy::too_many_lines,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation
 )]
-pub fn run_prediction(args: &PredictArgs) {
+fn run(args: &PredictArgs, tracker: Option<&str>) {
+    let mode = tracker.map_or("predict", |_| "track");
     // Parse arguments - use default model if not specified
     let (model_path, model_is_default) = resolve_model_path(args);
     let source_path = &args.source;
@@ -63,10 +80,14 @@ pub fn run_prediction(args: &PredictArgs) {
     }
 
     // Load model first so we can determine appropriate default source based on task
-    let config = build_inference_config(args, device).unwrap_or_else(|e| {
+    let mut config = build_inference_config(args, device).unwrap_or_else(|e| {
         error!("{e}");
         process::exit(1);
     });
+    // Trackers need the low-confidence detections too, like Ultralytics `model.track()`.
+    if tracker.is_some() && args.conf.is_none() {
+        config = config.with_confidence(0.1);
+    }
 
     let mut model = match YOLOModel::load_with_config(model_path, config) {
         Ok(m) => m,
@@ -88,6 +109,30 @@ pub fn run_prediction(args: &PredictArgs) {
         );
         process::exit(1);
     }
+
+    #[cfg(feature = "track")]
+    let mut tracker = tracker.map(|t| {
+        if !matches!(
+            model.task(),
+            Task::Detect | Task::Segment | Task::Pose | Task::Obb
+        ) {
+            error!(
+                "Task '{}' doesn't support tracking, valid tasks are detect, segment, pose, obb",
+                model.task()
+            );
+            process::exit(1);
+        }
+        crate::tracker::TrackerConfig::load(t)
+            .and_then(|c| crate::tracker::Tracker::new(c, &model))
+            .unwrap_or_else(|e| {
+                error!("{e}");
+                process::exit(1);
+            })
+    });
+    #[cfg(feature = "track")]
+    let mut tracked_path = None;
+    #[cfg(not(feature = "track"))]
+    let _ = tracker;
 
     let mut reader = args.ocr.as_ref().map(|recognizer| {
         TextRecognizer::new(&model, recognizer, DEFAULT_ORIENTATION).unwrap_or_else(|e| {
@@ -146,7 +191,7 @@ pub fn run_prediction(args: &PredictArgs) {
 
     let save_dir: Option<std::path::PathBuf> = if need_predict_dir {
         let parent_dir = Path::new("runs").join(model.task().as_str());
-        let dir = find_next_run_dir(&parent_dir.to_string_lossy(), "predict");
+        let dir = find_next_run_dir(&parent_dir.to_string_lossy(), mode);
         if let Err(e) = crate::io::ensure_dir(Path::new(&dir)) {
             error!("Failed to create save directory '{dir}': {e}");
             process::exit(1);
@@ -301,6 +346,19 @@ pub fn run_prediction(args: &PredictArgs) {
                     .zip(metas.iter().zip(paths.iter().zip(images.iter())))
                 {
                     for result in results {
+                        // A tracker starts over on each new video or image, like Ultralytics.
+                        #[cfg(feature = "track")]
+                        let mut result = result;
+                        #[cfg(feature = "track")]
+                        if let Some(t) = tracker.as_mut() {
+                            if tracked_path.as_ref() != Some(image_path) {
+                                t.reset();
+                                tracked_path = Some(image_path.clone());
+                            }
+                            if let Err(e) = t.update(&mut result) {
+                                error!("Tracking failed: {e}");
+                            }
+                        }
                         let texts = reader.as_mut().map(|r| {
                             r.read(img, &result).unwrap_or_else(|e| {
                                 error!("OCR failed: {e}");
@@ -495,7 +553,7 @@ pub fn run_prediction(args: &PredictArgs) {
     }
 
     // Print footer
-    verbose!("💡 Learn more at https://docs.ultralytics.com/modes/predict");
+    verbose!("💡 Learn more at https://docs.ultralytics.com/modes/{mode}");
 }
 
 /// Resolve the model path from `--model`, falling back to the task's default nano model.
