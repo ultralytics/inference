@@ -86,7 +86,7 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
     });
     // Trackers need the low-confidence detections too, like Ultralytics `model.track()`.
     if tracker.is_some() && args.conf.is_none() {
-        config = config.with_confidence(0.1);
+        config = config.with_confidence(InferenceConfig::DEFAULT_TRACK_CONF);
     }
 
     let mut model = match YOLOModel::load_with_config(model_path, config) {

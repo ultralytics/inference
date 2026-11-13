@@ -1536,8 +1536,8 @@ impl YOLOModel {
     /// `tracker` is a tracker name (`botsort`, `bytetrack.yaml`, ...) or a YAML file with the keys
     /// of the Ultralytics tracker configs. Tracks carry over between calls until `tracker`
     /// changes or [`Self::reset_tracker`] is called, as before a new video. Like Ultralytics, a
-    /// confidence threshold left at its 0.25 default drops to 0.1, since trackers need the
-    /// low-score detections.
+    /// confidence threshold left at its default drops to
+    /// [`InferenceConfig::DEFAULT_TRACK_CONF`], since trackers need the low-score detections.
     ///
     /// # Errors
     ///
@@ -1589,7 +1589,7 @@ impl YOLOModel {
         }
         let conf = self.config.confidence_threshold;
         if (conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON {
-            self.config.confidence_threshold = 0.1;
+            self.config.confidence_threshold = InferenceConfig::DEFAULT_TRACK_CONF;
         }
         let results = predict(self);
         self.config.confidence_threshold = conf;

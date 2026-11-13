@@ -288,8 +288,8 @@ fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::Dynami
 }
 
 /// Build the shared `InferenceConfig` from the JS thresholds and class filter,
-/// keeping the Rust defaults for any threshold left unset. A tracker takes detections down to
-/// 0.1 confidence by default, like Ultralytics `model.track`.
+/// keeping the Rust defaults for any threshold left unset, with the tracking confidence
+/// default when tracking.
 fn make_config(
     conf: Option<f32>,
     iou: Option<f32>,
@@ -297,7 +297,7 @@ fn make_config(
     track: bool,
 ) -> InferenceConfig {
     let mut config = InferenceConfig::new();
-    if let Some(conf) = conf.or_else(|| track.then_some(0.1)) {
+    if let Some(conf) = conf.or_else(|| track.then_some(InferenceConfig::DEFAULT_TRACK_CONF)) {
         config = config.with_confidence(conf);
     }
     if let Some(iou) = iou {

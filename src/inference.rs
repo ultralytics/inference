@@ -201,6 +201,9 @@ impl Default for InferenceConfig {
 impl InferenceConfig {
     /// Default confidence threshold (0.0 to 1.0).
     pub const DEFAULT_CONF: f32 = 0.25;
+    /// Default confidence threshold when tracking, lower so trackers also see the low-score
+    /// detections, like Ultralytics `model.track()`.
+    pub const DEFAULT_TRACK_CONF: f32 = 0.1;
     /// Default `IoU` threshold for NMS (0.0 to 1.0).
     pub const DEFAULT_IOU: f32 = 0.5;
     /// Default maximum number of detections per image.
