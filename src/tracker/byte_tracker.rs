@@ -1,27 +1,38 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-//! `ByteTrack`: two association stages, high then low score detections, which `BoT-SORT`
-//! builds on.
+//! `ByteTrack`: two association stages, high then low score detections, which `BoT-SORT`,
+//! `OC-SORT` and `Deep OC-SORT` build on.
 
 use ndarray::Array2;
 
 use super::matching::{assign, fuse, matrix};
-use super::{State, Track, Tracker, pair};
+use super::{State, Track, Tracker, TrackerConfig, pair};
 
 impl Track {
     /// Start a track with a new id.
-    pub(super) const fn activate(&mut self, id: u64, frame: u32) {
+    pub(super) fn activate(&mut self, id: u64, frame: u32, c: &TrackerConfig) {
         self.id = id;
         self.state = State::Tracked;
         self.activated = frame == 1;
         (self.frame_id, self.start_frame) = (frame, frame);
+        if self.kind.ocsort() {
+            self.record(frame, self.xyxy(), c.delta_t as usize + 2);
+            self.saved = Some((self.mean, self.cov));
+        }
     }
 
     /// Correct a track with its matched detection.
-    pub(super) fn update(&mut self, det: &Self, frame: u32) {
+    pub(super) fn update(&mut self, det: &Self, frame: u32, c: &TrackerConfig) {
+        if self.kind.ocsort() {
+            self.record(frame, det.xyxy(), c.delta_t as usize + 2);
+        }
         self.kf_update(det.measurement());
         self.take_detection(det, frame);
         (self.state, self.activated) = (State::Tracked, true);
+        if self.kind.ocsort() {
+            self.saved = Some((self.mean, self.cov));
+            self.velocity = self.direction(c.delta_t);
+        }
     }
 }
 
@@ -30,14 +41,20 @@ impl Tracker {
     fn dists(&self, all: &[Track], tracks: &[usize], dets: &[usize]) -> Array2<f64> {
         let c = &self.config;
         let iou = matrix(tracks, dets, |t, d| f64::from(1.0 - all[t].iou(&all[d])));
-        fuse(&iou, c.fuse_score, all, dets)
+        let mut cost = fuse(&iou, c.fuse_score, all, dets);
+        if c.tracker_type.ocsort() {
+            cost.zip_mut_with(&self.direction_cost(all, tracks, dets), |a, b| {
+                *a += f64::from(c.inertia) * b;
+            });
+        }
+        cost
     }
 
     /// One `BYTETracker.update` step.
     #[allow(clippy::too_many_lines)]
     pub(super) fn step(&mut self, dets: Vec<Track>, n_h: usize) {
         let c = self.config.clone();
-        let frame = self.frame_id;
+        let (kind, frame) = (c.tracker_type, self.frame_id);
         // One arena: tracked tracks, lost tracks, then high and low score detections.
         let (mut all, n_t, n_l) = self.arena(dets);
         let high: Vec<usize> = (n_t + n_l..n_t + n_l + n_h).collect();
@@ -51,13 +68,16 @@ impl Tracker {
         }
         let (mut activated, mut refind, mut lost) = (Vec::new(), Vec::new(), Vec::new());
         // Correct track `t` with detection `d`: activated if it was tracked, found again if lost.
-        let mut apply = |all: &mut [Track], t: usize, d: usize| {
+        let mut apply = |all: &mut [Track], t: usize, d: usize, oru: bool| {
             let (track, det) = pair(all, t, d);
-            let tracked = track.state == State::Tracked;
-            track.update(det, frame);
-            if tracked {
+            if track.state == State::Tracked {
+                track.update(det, frame, &c);
                 activated.push(t);
             } else {
+                if oru {
+                    track.reupdate(det.xyxy(), frame);
+                }
+                track.update(det, frame, &c);
                 refind.push(t);
             }
         };
@@ -66,8 +86,13 @@ impl Tracker {
         let (matches, u_pool, u_high) =
             assign(&self.dists(&all, &pool, &high), f64::from(c.match_thresh));
         for (t, d) in matches {
-            apply(&mut all, pool[t], high[d]);
+            apply(&mut all, pool[t], high[d], false);
         }
+        let (u_pool, u_high) = if kind.ocsort() && !u_high.is_empty() {
+            self.recover(&mut all, (&pool, &high), &u_pool, &u_high, &mut apply)
+        } else {
+            (u_pool, u_high)
+        };
 
         // Second association: tracked tracks still unmatched with the low-score detections, by
         // IoU alone, since weighing low scores in would push the costs over the threshold.
@@ -76,14 +101,19 @@ impl Tracker {
             .map(|&t| pool[t])
             .filter(|&i| all[i].state == State::Tracked)
             .collect();
-        let iou = matrix(&rest, &low, |t, d| f64::from(1.0 - all[t].iou(&all[d])));
-        let (matches, u_rest, _) = assign(&iou, 0.5);
-        for (t, d) in matches {
-            apply(&mut all, rest[t], low[d]);
-        }
+        let u_rest: Vec<usize> = if kind.ocsort() && !c.use_byte {
+            rest
+        } else {
+            let iou = matrix(&rest, &low, |t, d| f64::from(1.0 - all[t].iou(&all[d])));
+            let (matches, u_rest, _) = assign(&iou, 0.5);
+            for (t, d) in matches {
+                apply(&mut all, rest[t], low[d], false);
+            }
+            u_rest.into_iter().map(|t| rest[t]).collect()
+        };
         for t in u_rest {
-            all[rest[t]].state = State::Lost;
-            lost.push(rest[t]);
+            all[t].state = State::Lost;
+            lost.push(t);
         }
 
         // Unconfirmed tracks with the high-score detections left; unmatched ones are removed.
@@ -91,7 +121,7 @@ impl Tracker {
         let (matches, u_unconfirmed, u_left) = assign(&self.dists(&all, &unconfirmed, &left), 0.7);
         for (t, d) in matches {
             let (track, det) = pair(&mut all, unconfirmed[t], left[d]);
-            track.update(det, frame);
+            track.update(det, frame, &c);
             activated.push(unconfirmed[t]);
         }
         for t in u_unconfirmed {
@@ -104,7 +134,7 @@ impl Tracker {
                 continue;
             }
             let id = self.next_id();
-            all[d].activate(id, frame);
+            all[d].activate(id, frame, &c);
             activated.push(d);
         }
         self.merge(all, n_t, n_l, (activated, refind, lost));

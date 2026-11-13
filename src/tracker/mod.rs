@@ -2,7 +2,7 @@
 
 //! Multi-object tracking, ported from the Ultralytics trackers.
 //!
-//! `ByteTrack` and `BoT-SORT`.
+//! `ByteTrack`, `BoT-SORT`, `OC-SORT` and `Deep OC-SORT`.
 //!
 //! Feed each frame's [`Results`] to [`Tracker::update`] in order. Like `model.track()` in
 //! Ultralytics, it keeps the tracked detections, replaces their boxes with the Kalman filter
@@ -40,7 +40,9 @@ mod byte_tracker;
 mod config;
 mod kalman_filter;
 mod matching;
+mod oc_sort;
 
+use std::collections::VecDeque;
 use std::f32::consts::PI;
 
 use ndarray::{Array2, Axis};
@@ -83,6 +85,14 @@ struct Track {
     idx: usize,
     frame_id: u32,
     start_frame: u32,
+    /// Recent observed `xyxy` boxes by frame, oldest first (`OC-SORT`).
+    observations: VecDeque<(u32, [f32; 4])>,
+    /// Latest observed box, `-1` before any (`OC-SORT`).
+    last_observation: [f32; 4],
+    /// Unit motion direction of the box center (`OC-SORT`).
+    velocity: Option<[f32; 2]>,
+    /// Kalman state after the latest observation (`OC-SORT`).
+    saved: Option<([f64; 8], Mat8)>,
 }
 
 impl Track {
@@ -104,6 +114,7 @@ impl Track {
             cls,
             angle,
             idx,
+            last_observation: [-1.0; 4],
             ..Self::default()
         }
     }
@@ -123,6 +134,15 @@ impl Track {
     /// The detection box as a Kalman measurement.
     const fn measurement(&self) -> [f64; 4] {
         [self.mean[0], self.mean[1], self.mean[2], self.mean[3]]
+    }
+
+    /// Remember an observed box, keeping the latest `keep`.
+    fn record(&mut self, frame: u32, xyxy: [f32; 4], keep: usize) {
+        self.last_observation = xyxy;
+        self.observations.push_back((frame, xyxy));
+        while self.observations.len() > keep {
+            self.observations.pop_front();
+        }
     }
 
     /// Box as `[x_center, y_center, width, height]` from the Kalman state.
@@ -151,6 +171,10 @@ impl Track {
             _ => calculate_iou(&self.xyxy(), &other.xyxy()),
         }
     }
+}
+
+fn center(b: &[f32; 4]) -> [f32; 2] {
+    [(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0]
 }
 
 /// The track at arena index `t` and the detection at `d`, which comes after every track.
@@ -319,7 +343,12 @@ mod tests {
 
     #[test]
     fn test_every_tracker_keeps_ids_across_frames() {
-        for kind in [TrackerType::ByteTrack, TrackerType::BotSort] {
+        for kind in [
+            TrackerType::ByteTrack,
+            TrackerType::BotSort,
+            TrackerType::OcSort,
+            TrackerType::DeepOcSort,
+        ] {
             let mut tracker = Tracker::new(kind.into());
             let mut ids = Vec::new();
             for step in 0..6u8 {

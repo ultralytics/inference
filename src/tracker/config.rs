@@ -15,6 +15,11 @@ pub enum TrackerType {
     /// `BoT-SORT`, the Ultralytics default: `ByteTrack` with a center-width-height Kalman state.
     #[default]
     BotSort,
+    /// `OC-SORT`: `ByteTrack` with motion direction costs, observation-centric recovery and
+    /// re-update.
+    OcSort,
+    /// `Deep OC-SORT`: `OC-SORT` with its own thresholds.
+    DeepOcSort,
 }
 
 impl FromStr for TrackerType {
@@ -26,8 +31,10 @@ impl FromStr for TrackerType {
         match s.trim_end_matches(".yaml").to_ascii_lowercase().as_str() {
             "bytetrack" => Ok(Self::ByteTrack),
             "botsort" => Ok(Self::BotSort),
+            "ocsort" => Ok(Self::OcSort),
+            "deepocsort" => Ok(Self::DeepOcSort),
             _ => Err(format!(
-                "Unknown tracker '{s}', expected bytetrack, botsort or a YAML file"
+                "Unknown tracker '{s}', expected bytetrack, botsort, ocsort, deepocsort or a YAML file"
             )),
         }
     }
@@ -36,7 +43,11 @@ impl FromStr for TrackerType {
 impl TrackerType {
     /// Whether the Kalman state is center, aspect ratio and height (otherwise width and height).
     pub(super) const fn xyah(self) -> bool {
-        matches!(self, Self::ByteTrack)
+        matches!(self, Self::ByteTrack | Self::OcSort | Self::DeepOcSort)
+    }
+
+    pub(super) const fn ocsort(self) -> bool {
+        matches!(self, Self::OcSort | Self::DeepOcSort)
     }
 }
 
@@ -60,6 +71,12 @@ pub struct TrackerConfig {
     pub match_thresh: f32,
     /// Weigh the `IoU` by the detection score when matching.
     pub fuse_score: bool,
+    /// Frames over which `OC-SORT` measures the motion direction.
+    pub delta_t: u32,
+    /// Weight of the `OC-SORT` motion direction cost.
+    pub inertia: f32,
+    /// Run the `ByteTrack` low-score association in `OC-SORT`.
+    pub use_byte: bool,
 }
 
 impl Default for TrackerConfig {
@@ -73,6 +90,9 @@ impl Default for TrackerConfig {
             track_buffer: 30,
             match_thresh: 0.8,
             fuse_score: true,
+            delta_t: 3,
+            inertia: 0.2,
+            use_byte: false,
         }
     }
 }
@@ -80,9 +100,17 @@ impl Default for TrackerConfig {
 impl From<TrackerType> for TrackerConfig {
     /// The values of the Ultralytics config of `tracker_type`.
     fn from(tracker_type: TrackerType) -> Self {
-        Self {
+        let base = Self {
             tracker_type,
             ..Self::default()
+        };
+        match tracker_type {
+            TrackerType::DeepOcSort => Self {
+                track_high_thresh: 0.3,
+                new_track_thresh: 0.3,
+                ..base
+            },
+            _ => base,
         }
     }
 }
@@ -142,7 +170,7 @@ impl TrackerConfig {
             };
             set_keys!(config, key, value;
                 track_high_thresh, track_low_thresh, new_track_thresh, track_buffer, match_thresh,
-                fuse_score);
+                fuse_score, delta_t, inertia, use_byte);
         }
         Ok(config)
     }
@@ -158,12 +186,12 @@ mod tests {
         assert_eq!("BoTSORT".parse(), Ok(TrackerType::BotSort));
         assert!("sort".parse::<TrackerType>().is_err());
         let c = TrackerConfig::from_yaml(
-            "tracker_type: bytetrack # comment\ntrack_buffer: 60\nfuse_score: False\n",
+            "tracker_type: deepocsort # comment\ntrack_buffer: 60\nfuse_score: False\n",
         )
         .unwrap();
-        assert_eq!(c.tracker_type, TrackerType::ByteTrack);
+        assert_eq!(c.tracker_type, TrackerType::DeepOcSort);
         assert_eq!((c.track_buffer, c.fuse_score), (60, false));
-        assert!((c.track_high_thresh - 0.25).abs() < f32::EPSILON);
+        assert!((c.track_high_thresh - 0.3).abs() < f32::EPSILON);
         assert!(TrackerConfig::from_yaml("track_buffer: 60").is_err());
     }
 }
