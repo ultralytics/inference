@@ -3,7 +3,7 @@
 //! Multi-object tracking, ported from the Ultralytics trackers.
 //!
 //! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`, with sparse
-//! optical flow camera motion compensation.
+//! optical flow camera motion compensation and `ReID` appearance features from an ONNX model.
 //!
 //! Feed each frame's [`Results`] to [`Tracker::update`] in order. Like `model.track()` in
 //! Ultralytics, it keeps the tracked detections, replaces their boxes with the Kalman filter
@@ -13,10 +13,10 @@
 //! use ultralytics_inference::{Tracker, TrackerConfig, YOLOModel};
 //!
 //! let mut model = YOLOModel::load("yolo26n.onnx")?;
-//! let mut tracker = Tracker::new(TrackerConfig::load("bytetrack.yaml")?);
+//! let mut tracker = Tracker::new(TrackerConfig::load("bytetrack.yaml")?, &model)?;
 //! for frame in ["frame1.jpg", "frame2.jpg"] {
 //!     let mut results = model.predict(frame)?;
-//!     tracker.update(&mut results[0]);
+//!     tracker.update(&mut results[0])?;
 //!     println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
 //! }
 //! # Ok::<(), ultralytics_inference::InferenceError>(())
@@ -37,13 +37,16 @@
     clippy::suspicious_operation_groupings
 )]
 
+mod bot_sort;
 mod byte_tracker;
 mod config;
+mod deep_oc_sort;
 mod fast_tracker;
 mod gmc;
 mod kalman_filter;
 mod matching;
 mod oc_sort;
+mod reid;
 mod track_tracker;
 
 use std::collections::VecDeque;
@@ -51,6 +54,8 @@ use std::f32::consts::PI;
 
 use ndarray::{Array2, Axis};
 
+use crate::error::Result;
+use crate::model::YOLOModel;
 use crate::results::{Boxes, Keypoints, Masks, Obb, Results};
 use crate::utils::{calculate_iou, calculate_probiou};
 pub use config::{GmcMethod, TrackerConfig, TrackerType};
@@ -93,6 +98,9 @@ struct Track {
     start_frame: u32,
     /// Matched frames since the track started (`TrackTrack`).
     tracklet_len: u32,
+    /// Unit appearance feature of the latest detection, and its moving average.
+    curr_feat: Option<Vec<f32>>,
+    smooth_feat: Option<Vec<f32>>,
     /// Recent observed `xyxy` boxes by frame, oldest first (`OC-SORT`, `TrackTrack`).
     observations: VecDeque<(u32, [f32; 4])>,
     /// Latest observed box, `-1` before any (`OC-SORT`).
@@ -116,8 +124,13 @@ struct Track {
 }
 
 impl Track {
-    /// A detection from row `idx` of its frame's results.
-    fn new(kind: TrackerType, (mut xywh, mut angle, score, cls): Row, idx: usize) -> Self {
+    /// A detection from row `idx` of its frame's results, with its appearance feature.
+    fn new(
+        kind: TrackerType,
+        (mut xywh, mut angle, score, cls): Row,
+        idx: usize,
+        feat: Option<&[f32]>,
+    ) -> Self {
         // Keep oriented boxes long side first, so equal boxes always give equal measurements.
         if let Some(a) = angle.as_mut()
             && xywh[2] < xywh[3]
@@ -126,7 +139,7 @@ impl Track {
             *a += PI / 2.0;
         }
         let (mean, cov) = kind.initiate(xywh.map(f64::from));
-        Self {
+        let mut track = Self {
             kind,
             mean,
             cov,
@@ -137,7 +150,11 @@ impl Track {
             last_observation: [-1.0; 4],
             prev_score: score,
             ..Self::default()
+        };
+        if let Some(f) = feat {
+            track.update_features(f, 1.0);
         }
+        track
     }
 
     /// Take the frame, score, class, row and angle of a matched detection.
@@ -232,12 +249,24 @@ pub struct Tracker {
     frame_id: u32,
     last_id: u64,
     gmc: Option<gmc::Gmc>,
+    reid: Option<reid::Reid>,
 }
 
 impl Tracker {
-    /// Create a tracker with the settings of `config`.
-    #[must_use]
-    pub fn new(config: TrackerConfig) -> Self {
+    /// Create a tracker for the detections of `model`, loading the `ReID` model of `config` on
+    /// the same device when it matches by appearance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `ReID` model cannot be downloaded or loaded.
+    pub fn new(config: TrackerConfig, model: &YOLOModel) -> Result<Self> {
+        let reid = (config.tracker_type.gmc_reid() && config.with_reid)
+            .then(|| reid::Reid::new(model, &config.model))
+            .transpose()?;
+        Ok(Self::with_reid(config, reid))
+    }
+
+    fn with_reid(config: TrackerConfig, reid: Option<reid::Reid>) -> Self {
         let gmc = config.tracker_type.gmc_reid() && config.gmc_method == GmcMethod::SparseOptFlow;
         Self {
             config,
@@ -246,12 +275,14 @@ impl Tracker {
             frame_id: 0,
             last_id: 0,
             gmc: gmc.then(gmc::Gmc::default),
+            reid,
         }
     }
 
     /// Forget every track and the previous frame, and restart the ids at 1.
     pub fn reset(&mut self) {
-        *self = Self::new(self.config.clone());
+        let reid = self.reid.take();
+        *self = Self::with_reid(self.config.clone(), reid);
     }
 
     /// Track the detections of the next frame.
@@ -259,7 +290,11 @@ impl Tracker {
     /// Keeps the shown tracks of `result` in track order, with their Kalman filter boxes
     /// clipped to the image and their track ids. New tracks show once confirmed. Results of
     /// classification, semantic segmentation or depth are left as they are.
-    pub fn update(&mut self, result: &mut Results) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `ReID` model fails.
+    pub fn update(&mut self, result: &mut Results) -> Result<()> {
         let kind = self.config.tracker_type;
         let boxes = result.boxes.as_ref().map(|b| (b.xywh(), b.conf(), b.cls()));
         let boxes = boxes
@@ -267,7 +302,7 @@ impl Tracker {
         if boxes.is_none()
             && (result.probs.is_some() || result.semantic_mask.is_some() || result.depth.is_some())
         {
-            return;
+            return Ok(());
         }
         // A frame without detections still ages the tracks.
         let rows: Vec<Row> = boxes.map_or_else(Vec::new, |(r, conf, cls)| {
@@ -293,14 +328,29 @@ impl Tracker {
                     && rows[i].2 < c.track_high_thresh
             })
             .collect();
-        let det = |&i: &usize| Track::new(kind, rows[i], i);
-        let dets: Vec<Track> = high.iter().chain(&low).map(det).collect();
+        // Appearance features of the rows that can match by appearance.
+        let embedded = if kind == TrackerType::TrackTrack {
+            high.len()
+        } else {
+            high.len() + low.len()
+        };
+        let order: Vec<usize> = high.iter().chain(&low).copied().collect();
+        let crops: Vec<[f32; 4]> = order[..embedded].iter().map(|&i| rows[i].0).collect();
+        let feats = match &mut self.reid {
+            Some(r) => r.embed(&result.orig_img, &crops)?,
+            None => Vec::new(),
+        };
+        let det = |(k, &i): (usize, &usize)| {
+            Track::new(kind, rows[i], i, feats.get(k).and_then(Option::as_deref))
+        };
+        let dets: Vec<Track> = order.iter().enumerate().map(det).collect();
         if kind == TrackerType::TrackTrack {
             self.step_tracktrack(dets, high.len(), warp);
         } else {
             self.step(dets, high.len(), warp);
         }
         self.write(result);
+        Ok(())
     }
 
     /// Keep the rows of the tracks shown this frame in `result`, with their boxes and ids.
@@ -380,7 +430,7 @@ mod tests {
             TrackerType::FastTrack,
             TrackerType::TrackTrack,
         ] {
-            let mut tracker = Tracker::new(kind.into());
+            let mut tracker = Tracker::with_reid(kind.into(), None);
             let mut ids = Vec::new();
             for step in 0..6u8 {
                 let dx = f32::from(step) * 4.0;
@@ -388,7 +438,7 @@ mod tests {
                     [10.0 + dx, 10.0, 60.0 + dx, 90.0, 0.9, 0.0],
                     [300.0 - dx, 200.0, 360.0 - dx, 300.0, 0.8, 2.0],
                 ]);
-                tracker.update(&mut r);
+                tracker.update(&mut r).unwrap();
                 let boxes = r.boxes.unwrap();
                 ids.push(boxes.id().unwrap().to_vec());
                 assert!((boxes.xyxy()[[0, 0]] - (10.0 + dx)).abs() < 1.0, "{kind:?}");
@@ -399,14 +449,14 @@ mod tests {
 
     #[test]
     fn test_tracker_hides_new_tracks_until_confirmed() {
-        let mut tracker = Tracker::new(TrackerType::ByteTrack.into());
+        let mut tracker = Tracker::with_reid(TrackerType::ByteTrack.into(), None);
         let mut r = frame(&[]);
-        tracker.update(&mut r);
+        tracker.update(&mut r).unwrap();
         let mut r = frame(&[[10.0, 10.0, 60.0, 90.0, 0.9, 0.0]]);
-        tracker.update(&mut r);
+        tracker.update(&mut r).unwrap();
         assert!(r.boxes.unwrap().is_empty());
         let mut r = frame(&[[11.0, 10.0, 61.0, 90.0, 0.9, 0.0]]);
-        tracker.update(&mut r);
+        tracker.update(&mut r).unwrap();
         assert_eq!(r.boxes.unwrap().id().unwrap().to_vec(), vec![1.0]);
     }
 }

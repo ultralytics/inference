@@ -124,6 +124,7 @@ impl Tracker {
                 f64::from(1.0 - iou)
             });
             let cost = fuse(&iou, c.fuse_score, all, &dets);
+            let cost = self.with_appearance(cost, &iou, all, &tracks, &dets);
             let (matches, u_t, u_d) = assign(&cost, f64::from(c.match_thresh));
             for (t, d) in matches {
                 apply(all, tracks[t], dets[d], true);

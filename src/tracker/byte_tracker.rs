@@ -6,7 +6,7 @@
 use ndarray::Array2;
 
 use super::matching::{assign, fuse, matrix};
-use super::{State, Track, Tracker, TrackerConfig, TrackerType, Warp, pair};
+use super::{State, Track, Tracker, TrackerConfig, TrackerType, Warp, deep_oc_sort, pair};
 use crate::utils::calculate_iou;
 
 impl Track {
@@ -26,6 +26,14 @@ impl Track {
 
     /// Correct a track with its matched detection, `reactivate` when the track was lost.
     pub(super) fn update(&mut self, det: &Self, frame: u32, c: &TrackerConfig, reactivate: bool) {
+        if let Some(f) = &det.curr_feat {
+            let alpha = if self.kind == TrackerType::DeepOcSort {
+                deep_oc_sort::feature_alpha(c, det.score)
+            } else {
+                0.9
+            };
+            self.update_features(f, alpha);
+        }
         if self.kind.ocsort() {
             self.record(frame, det.xyxy(), c.delta_t as usize + 2);
         }
@@ -56,7 +64,7 @@ impl Tracker {
                 *a += f64::from(c.inertia) * b;
             });
         }
-        cost
+        self.with_appearance(cost, &iou, all, tracks, dets)
     }
 
     /// One `BYTETracker.update` step for every tracker but `TrackTrack`.

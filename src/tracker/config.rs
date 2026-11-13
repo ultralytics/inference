@@ -12,14 +12,14 @@ use crate::error::{InferenceError, Result};
 pub enum TrackerType {
     /// `ByteTrack`: two association stages, high then low score detections.
     ByteTrack,
-    /// `BoT-SORT`, the Ultralytics default: `ByteTrack` with a center-width-height Kalman state
-    /// and camera motion compensation.
+    /// `BoT-SORT`, the Ultralytics default: `ByteTrack` with a center-width-height Kalman state,
+    /// camera motion compensation and optional `ReID`.
     #[default]
     BotSort,
     /// `OC-SORT`: `ByteTrack` with motion direction costs, observation-centric recovery and
     /// re-update.
     OcSort,
-    /// `Deep OC-SORT`: `OC-SORT` with optional camera motion compensation.
+    /// `Deep OC-SORT`: `OC-SORT` with optional camera motion compensation and `ReID`.
     DeepOcSort,
     /// `FastTrack`: `ByteTrack` with occlusion handling.
     FastTrack,
@@ -111,12 +111,23 @@ pub struct TrackerConfig {
     pub fuse_score: bool,
     /// Camera motion compensation (`BoT-SORT`, `Deep OC-SORT`, `TrackTrack`).
     pub gmc_method: GmcMethod,
+    /// Match by appearance too (`BoT-SORT`, `Deep OC-SORT`, `TrackTrack`).
+    pub with_reid: bool,
+    /// `ReID` ONNX model, downloaded when it is a known Ultralytics model. `auto` takes
+    /// `yolo26n-reid.onnx`, since an ONNX detector has no features to reuse.
+    pub model: String,
+    /// Lowest `IoU` for an appearance match.
+    pub proximity_thresh: f32,
+    /// Lowest appearance similarity for an appearance match.
+    pub appearance_thresh: f32,
     /// Frames over which `OC-SORT` measures the motion direction.
     pub delta_t: u32,
     /// Weight of the `OC-SORT` motion direction cost.
     pub inertia: f32,
     /// Run the `ByteTrack` low-score association in `OC-SORT`.
     pub use_byte: bool,
+    /// `Deep OC-SORT` appearance moving average weight.
+    pub alpha_fixed_emb: f32,
     /// `FastTrack`: history frames back to restore the velocity from when an occlusion starts.
     pub reset_velocity_offset_occ: usize,
     /// `FastTrack`: history frames back to restore the position from when an occlusion starts.
@@ -135,6 +146,10 @@ pub struct TrackerConfig {
     pub init_iou_suppress: f32,
     /// `TrackTrack`: matching cost for lost tracks in a second pass, 0 disables it.
     pub lost_match_thr: f32,
+    /// `TrackTrack`: weight of the height-modulated `IoU` cost.
+    pub iou_weight: f32,
+    /// `TrackTrack`: weight of the appearance cost.
+    pub reid_weight: f32,
     /// `TrackTrack`: weight of the confidence cost.
     pub conf_weight: f32,
     /// `TrackTrack`: weight of the corner angle cost.
@@ -161,9 +176,14 @@ impl Default for TrackerConfig {
             match_thresh: 0.8,
             fuse_score: true,
             gmc_method: GmcMethod::SparseOptFlow,
+            with_reid: false,
+            model: "auto".into(),
+            proximity_thresh: 0.5,
+            appearance_thresh: 0.8,
             delta_t: 3,
             inertia: 0.2,
             use_byte: false,
+            alpha_fixed_emb: 0.95,
             reset_velocity_offset_occ: 5,
             reset_pos_offset_occ: 3,
             enlarge_bbox_occ: 1.1,
@@ -173,6 +193,8 @@ impl Default for TrackerConfig {
             occ_reappear_window: 40,
             init_iou_suppress: 0.7,
             lost_match_thr: 0.0,
+            iou_weight: 0.5,
+            reid_weight: 0.5,
             conf_weight: 0.1,
             angle_weight: 0.05,
             penalty_p: 0.2,
@@ -195,6 +217,7 @@ impl From<TrackerType> for TrackerConfig {
                 track_high_thresh: 0.3,
                 new_track_thresh: 0.3,
                 gmc_method: GmcMethod::None,
+                appearance_thresh: 0.9,
                 ..base
             },
             TrackerType::TrackTrack => Self {
@@ -264,11 +287,12 @@ impl TrackerConfig {
             };
             set_keys!(config, key, value;
                 track_high_thresh, track_low_thresh, new_track_thresh, track_buffer, match_thresh,
-                fuse_score, gmc_method, delta_t, inertia, use_byte, reset_velocity_offset_occ,
+                fuse_score, gmc_method, with_reid, model, proximity_thresh, appearance_thresh,
+                delta_t, inertia, use_byte, alpha_fixed_emb, reset_velocity_offset_occ,
                 reset_pos_offset_occ, enlarge_bbox_occ, dampen_motion_occ,
                 active_occ_to_lost_thresh, occ_cover_thresh, occ_reappear_window, init_iou_suppress,
-                lost_match_thr, conf_weight, angle_weight, penalty_p, reduce_step, tai_thr,
-                min_track_len);
+                lost_match_thr, iou_weight, reid_weight, conf_weight, angle_weight, penalty_p,
+                reduce_step, tai_thr, min_track_len);
         }
         Ok(config)
     }
@@ -284,12 +308,12 @@ mod tests {
         assert_eq!("BoTSORT".parse(), Ok(TrackerType::BotSort));
         assert!("sort".parse::<TrackerType>().is_err());
         let c = TrackerConfig::from_yaml(
-            "tracker_type: deepocsort # comment\ntrack_buffer: 60\nfuse_score: False\n",
+            "tracker_type: deepocsort # comment\ntrack_buffer: 60\nwith_reid: True\nmodel: auto\n",
         )
         .unwrap();
         assert_eq!(c.tracker_type, TrackerType::DeepOcSort);
-        assert_eq!((c.track_buffer, c.fuse_score), (60, false));
-        assert!((c.track_high_thresh - 0.3).abs() < f32::EPSILON);
+        assert_eq!((c.track_buffer, c.with_reid), (60, true));
+        assert!((c.appearance_thresh - 0.9).abs() < f32::EPSILON);
         assert!(TrackerConfig::from_yaml("gmc_method: orb").is_err());
         assert!(TrackerConfig::from_yaml("tracker_type: botsort\ngmc_method: orb").is_err());
     }

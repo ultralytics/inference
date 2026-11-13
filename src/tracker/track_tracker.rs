@@ -62,6 +62,9 @@ impl Track {
             self.corner_velocity = v.map(|[x, y]| [x / DELTA_T as f32, y / DELTA_T as f32]);
         }
         self.score = det.score;
+        if let Some(f) = &det.curr_feat {
+            self.update_features(f, 0.95 + 0.05 * (1.0 - self.score));
+        }
         if reactivate || self.state == State::Tracked || self.tracklet_len + 1 >= min_track_len {
             (self.state, self.activated) = (State::Tracked, true);
         }
@@ -125,7 +128,19 @@ impl Tracker {
             let iou = calculate_iou(&a, &b);
             let h_over = a[3].min(b[3]) - a[1].max(b[1]);
             let h_union = a[3].max(b[3]) - a[1].min(b[1]);
-            let mut cost = 1.0 - (h_over / (h_union + 1e-9)).clamp(0.0, 1.0) * iou;
+            let hmiou = 1.0 - (h_over / (h_union + 1e-9)).clamp(0.0, 1.0) * iou;
+            let feats = (
+                t.smooth_feat.as_ref().or(t.curr_feat.as_ref()),
+                &d.curr_feat,
+            );
+            let mut cost = match (self.reid.is_some(), feats) {
+                (true, (Some(a), Some(b))) => {
+                    let cos =
+                        (1.0 - a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>()).clamp(0.0, 1.0);
+                    c.iou_weight * hmiou + c.reid_weight * cos
+                }
+                _ => hmiou,
+            };
             cost += c.conf_weight * (2.0f32.mul_add(t.score, -t.prev_score) - d.score).abs();
             if iou > 0.1 {
                 let dirs = corner_directions(&b, &t.history_box(self.frame_id, DELTA_T));
