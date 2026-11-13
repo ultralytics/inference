@@ -13,6 +13,7 @@ use crate::error::{InferenceError, Result};
 use crate::model::YOLOModel;
 #[allow(clippy::wildcard_imports)]
 use crate::parallel::*;
+use crate::utils::xywh_to_xyxy;
 
 /// The `ReID` model and the crop size it takes.
 pub(super) struct Reid {
@@ -102,18 +103,14 @@ impl Reid {
 
 /// Crop `[x1, y1, x2, y2]` of a center box in an image of `(height, width, _)`, grown by 2%
 /// and 10 pixels like Ultralytics `save_one_box`, or `None` when it is empty.
-fn crop([x, y, w, h]: &[f32; 4], (ih, iw, _): (usize, usize, usize)) -> Option<[usize; 4]> {
-    let (x1, y1, x2, y2) = (x - w / 2.0, y - h / 2.0, x + w / 2.0, y + h / 2.0);
+fn crop(&[x, y, w, h]: &[f32; 4], (ih, iw, _): (usize, usize, usize)) -> Option<[usize; 4]> {
+    let [x1, y1, x2, y2] = xywh_to_xyxy(x, y, w, h);
     let (cx, cy) = ((x1 + x2) / 2.0, (y1 + y2) / 2.0);
     let (w, h) = ((x2 - x1) * 1.02 + 10.0, (y2 - y1) * 1.02 + 10.0);
     // Truncate toward zero, then clip to the image.
     let clip = |v: f32, n: usize| (v.trunc() as i64).clamp(0, n as i64) as usize;
-    let b = [
-        clip(cx - w / 2.0, iw),
-        clip(cy - h / 2.0, ih),
-        clip(cx + w / 2.0, iw),
-        clip(cy + h / 2.0, ih),
-    ];
+    let [x1, y1, x2, y2] = xywh_to_xyxy(cx, cy, w, h);
+    let b = [clip(x1, iw), clip(y1, ih), clip(x2, iw), clip(y2, ih)];
     (b[2] > b[0] && b[3] > b[1]).then_some(b)
 }
 
