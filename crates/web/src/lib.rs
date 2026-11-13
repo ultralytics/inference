@@ -981,7 +981,7 @@ fn denormalize_head(
     task: Task,
     kpt_shape: Option<(usize, usize)>,
 ) {
-    if !matches!(task, Task::Detect | Task::Segment | Task::Pose | Task::Obb) {
+    if !task.has_boxes() {
         return;
     }
     if shape.len() != 3 || buf.is_empty() {

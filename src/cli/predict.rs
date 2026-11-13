@@ -112,10 +112,7 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
 
     #[cfg(feature = "track")]
     let mut tracker = tracker.map(|t| {
-        if !matches!(
-            model.task(),
-            Task::Detect | Task::Segment | Task::Pose | Task::Obb
-        ) {
+        if !model.task().has_boxes() {
             error!(
                 "Task '{}' doesn't support tracking, valid tasks are detect, segment, pose, obb",
                 model.task()
