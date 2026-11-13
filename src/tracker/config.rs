@@ -20,6 +20,8 @@ pub enum TrackerType {
     OcSort,
     /// `Deep OC-SORT`: `OC-SORT` with its own thresholds.
     DeepOcSort,
+    /// `FastTrack`: `ByteTrack` with occlusion handling.
+    FastTrack,
 }
 
 impl FromStr for TrackerType {
@@ -33,8 +35,9 @@ impl FromStr for TrackerType {
             "botsort" => Ok(Self::BotSort),
             "ocsort" => Ok(Self::OcSort),
             "deepocsort" => Ok(Self::DeepOcSort),
+            "fasttrack" => Ok(Self::FastTrack),
             _ => Err(format!(
-                "Unknown tracker '{s}', expected bytetrack, botsort, ocsort, deepocsort or a YAML file"
+                "Unknown tracker '{s}', expected bytetrack, botsort, ocsort, deepocsort, fasttrack or a YAML file"
             )),
         }
     }
@@ -43,7 +46,10 @@ impl FromStr for TrackerType {
 impl TrackerType {
     /// Whether the Kalman state is center, aspect ratio and height (otherwise width and height).
     pub(super) const fn xyah(self) -> bool {
-        matches!(self, Self::ByteTrack | Self::OcSort | Self::DeepOcSort)
+        matches!(
+            self,
+            Self::ByteTrack | Self::OcSort | Self::DeepOcSort | Self::FastTrack
+        )
     }
 
     pub(super) const fn ocsort(self) -> bool {
@@ -77,6 +83,22 @@ pub struct TrackerConfig {
     pub inertia: f32,
     /// Run the `ByteTrack` low-score association in `OC-SORT`.
     pub use_byte: bool,
+    /// `FastTrack`: history frames back to restore the velocity from when an occlusion starts.
+    pub reset_velocity_offset_occ: usize,
+    /// `FastTrack`: history frames back to restore the position from when an occlusion starts.
+    pub reset_pos_offset_occ: usize,
+    /// `FastTrack`: height scale of an occluded box.
+    pub enlarge_bbox_occ: f64,
+    /// `FastTrack`: velocity scale of an occluded box.
+    pub dampen_motion_occ: f64,
+    /// `FastTrack`: occluded frames before a track is lost.
+    pub active_occ_to_lost_thresh: u32,
+    /// `FastTrack`: covered fraction of a track that counts as occluded.
+    pub occ_cover_thresh: f32,
+    /// `FastTrack`: frames a recently occluded lost track is kept for.
+    pub occ_reappear_window: u32,
+    /// `FastTrack`: skip new tracks overlapping an active one by this `IoU` (1.0 disables).
+    pub init_iou_suppress: f32,
 }
 
 impl Default for TrackerConfig {
@@ -93,6 +115,14 @@ impl Default for TrackerConfig {
             delta_t: 3,
             inertia: 0.2,
             use_byte: false,
+            reset_velocity_offset_occ: 5,
+            reset_pos_offset_occ: 3,
+            enlarge_bbox_occ: 1.1,
+            dampen_motion_occ: 0.5,
+            active_occ_to_lost_thresh: 10,
+            occ_cover_thresh: 0.7,
+            occ_reappear_window: 40,
+            init_iou_suppress: 0.7,
         }
     }
 }
@@ -170,7 +200,10 @@ impl TrackerConfig {
             };
             set_keys!(config, key, value;
                 track_high_thresh, track_low_thresh, new_track_thresh, track_buffer, match_thresh,
-                fuse_score, delta_t, inertia, use_byte);
+                fuse_score, delta_t, inertia, use_byte, reset_velocity_offset_occ,
+                reset_pos_offset_occ, enlarge_bbox_occ, dampen_motion_occ,
+                active_occ_to_lost_thresh, occ_cover_thresh, occ_reappear_window,
+                init_iou_suppress);
         }
         Ok(config)
     }

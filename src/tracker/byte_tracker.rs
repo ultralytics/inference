@@ -1,12 +1,13 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 //! `ByteTrack`: two association stages, high then low score detections, which `BoT-SORT`,
-//! `OC-SORT` and `Deep OC-SORT` build on.
+//! `OC-SORT`, `Deep OC-SORT` and `FastTrack` build on.
 
 use ndarray::Array2;
 
 use super::matching::{assign, fuse, matrix};
-use super::{State, Track, Tracker, TrackerConfig, pair};
+use super::{State, Track, Tracker, TrackerConfig, TrackerType, pair};
+use crate::utils::calculate_iou;
 
 impl Track {
     /// Start a track with a new id.
@@ -18,11 +19,13 @@ impl Track {
         if self.kind.ocsort() {
             self.record(frame, self.xyxy(), c.delta_t as usize + 2);
             self.saved = Some((self.mean, self.cov));
+        } else if self.kind == TrackerType::FastTrack {
+            self.push_history(c);
         }
     }
 
-    /// Correct a track with its matched detection.
-    pub(super) fn update(&mut self, det: &Self, frame: u32, c: &TrackerConfig) {
+    /// Correct a track with its matched detection, `reactivate` when the track was lost.
+    pub(super) fn update(&mut self, det: &Self, frame: u32, c: &TrackerConfig, reactivate: bool) {
         if self.kind.ocsort() {
             self.record(frame, det.xyxy(), c.delta_t as usize + 2);
         }
@@ -32,6 +35,12 @@ impl Track {
         if self.kind.ocsort() {
             self.saved = Some((self.mean, self.cov));
             self.velocity = self.direction(c.delta_t);
+        } else if self.kind == TrackerType::FastTrack {
+            self.push_history(c);
+            (self.occluded, self.not_matched, self.occluded_len) = (false, 0, 0);
+            if reactivate {
+                self.recently_occluded = false;
+            }
         }
     }
 }
@@ -71,13 +80,13 @@ impl Tracker {
         let mut apply = |all: &mut [Track], t: usize, d: usize, oru: bool| {
             let (track, det) = pair(all, t, d);
             if track.state == State::Tracked {
-                track.update(det, frame, &c);
+                track.update(det, frame, &c, false);
                 activated.push(t);
             } else {
                 if oru {
                     track.reupdate(det.xyxy(), frame);
                 }
-                track.update(det, frame, &c);
+                track.update(det, frame, &c, true);
                 refind.push(t);
             }
         };
@@ -111,9 +120,13 @@ impl Tracker {
             }
             u_rest.into_iter().map(|t| rest[t]).collect()
         };
-        for t in u_rest {
-            all[t].state = State::Lost;
-            lost.push(t);
+        if kind == TrackerType::FastTrack {
+            self.occlusions(&mut all, &u_rest, &activated, &mut lost);
+        } else {
+            for t in u_rest {
+                all[t].state = State::Lost;
+                lost.push(t);
+            }
         }
 
         // Unconfirmed tracks with the high-score detections left; unmatched ones are removed.
@@ -121,21 +134,30 @@ impl Tracker {
         let (matches, u_unconfirmed, u_left) = assign(&self.dists(&all, &unconfirmed, &left), 0.7);
         for (t, d) in matches {
             let (track, det) = pair(&mut all, unconfirmed[t], left[d]);
-            track.update(det, frame, &c);
+            track.update(det, frame, &c, false);
             activated.push(unconfirmed[t]);
         }
         for t in u_unconfirmed {
             all[unconfirmed[t]].state = State::Removed;
         }
 
-        // The rest start new tracks.
+        // The rest start new tracks; FastTrack skips those on top of an active track.
+        let mut active = self.suppressing(&all, n_t, &activated, &refind);
         for d in u_left.into_iter().map(|d| left[d]) {
-            if all[d].score < c.new_track_thresh {
+            let b = all[d].xyxy();
+            let covered = |a: &Vec<[f32; 4]>| {
+                a.iter()
+                    .any(|a| calculate_iou(&b, a) >= c.init_iou_suppress)
+            };
+            if all[d].score < c.new_track_thresh || active.as_ref().is_some_and(covered) {
                 continue;
             }
             let id = self.next_id();
             all[d].activate(id, frame, &c);
             activated.push(d);
+            if let Some(a) = &mut active {
+                a.push(b);
+            }
         }
         self.merge(all, n_t, n_l, (activated, refind, lost));
     }
@@ -150,10 +172,13 @@ impl Tracker {
         n_l: usize,
         (activated, refind, lost_new): (Vec<usize>, Vec<usize>, Vec<usize>),
     ) {
-        // Lost tracks expire after `track_buffer` frames.
+        // Lost tracks expire after `track_buffer` frames, recently occluded `FastTrack` ones
+        // after `occ_reappear_window`.
         let (c, frame) = (&self.config, self.frame_id);
         for t in &mut all[n_t..n_t + n_l] {
-            if frame - t.frame_id > c.track_buffer {
+            let recent =
+                t.recently_occluded && frame - t.last_occluded_frame <= c.occ_reappear_window;
+            if !recent && frame - t.frame_id > c.track_buffer {
                 t.state = State::Removed;
             }
         }

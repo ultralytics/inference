@@ -2,7 +2,7 @@
 
 //! Multi-object tracking, ported from the Ultralytics trackers.
 //!
-//! `ByteTrack`, `BoT-SORT`, `OC-SORT` and `Deep OC-SORT`.
+//! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT` and `FastTrack`.
 //!
 //! Feed each frame's [`Results`] to [`Tracker::update`] in order. Like `model.track()` in
 //! Ultralytics, it keeps the tracked detections, replaces their boxes with the Kalman filter
@@ -38,6 +38,7 @@
 
 mod byte_tracker;
 mod config;
+mod fast_tracker;
 mod kalman_filter;
 mod matching;
 mod oc_sort;
@@ -93,6 +94,14 @@ struct Track {
     velocity: Option<[f32; 2]>,
     /// Kalman state after the latest observation (`OC-SORT`).
     saved: Option<([f64; 8], Mat8)>,
+    /// Kalman states after recent updates, oldest first (`FastTrack`).
+    history: VecDeque<([f64; 8], Mat8)>,
+    /// `FastTrack` occlusion state.
+    not_matched: u32,
+    occluded: bool,
+    occluded_len: u32,
+    last_occluded_frame: u32,
+    recently_occluded: bool,
 }
 
 impl Track {
@@ -348,6 +357,7 @@ mod tests {
             TrackerType::BotSort,
             TrackerType::OcSort,
             TrackerType::DeepOcSort,
+            TrackerType::FastTrack,
         ] {
             let mut tracker = Tracker::new(kind.into());
             let mut ids = Vec::new();
