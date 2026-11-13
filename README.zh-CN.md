@@ -53,7 +53,7 @@
 - 🏷️ **自动读取元数据**：自动读取 ONNX 模型中的类别名称、任务类型和输入尺寸。
 - ⬇️ **自动下载**：本地不存在时，自动下载支持的 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（尺寸：n/s/m/l/x）。
 - 🖼️ **多输入源**：支持图片、目录、glob 模式、视频文件、摄像头和流。
-- 🎞️ **目标跟踪**：ByteTrack、BoT-SORT、OC-SORT、Deep OC-SORT、FastTrack 和 TrackTrack，支持相机运动补偿和 ReID，结果与 Ultralytics 一致（`track` 特性）。
+- 🎞️ **目标跟踪**：ByteTrack、BoT-SORT、OC-SORT、Deep OC-SORT、FastTrack 和 TrackTrack，支持相机运动补偿和 ReID，结果与 Ultralytics 一致（`track` 特性），也可在浏览器中使用。
 - 🪶 **轻量运行时**：不需要 PyTorch、TensorFlow 或 Python 运行时。
 
 ## ✨ 模型
@@ -793,10 +793,15 @@ import { YOLO } from "@ultralytics/yolo";
 const model = await YOLO.load("/models/yolo26n.onnx");
 const results = await model.predict("bus.jpg");
 console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
+
+// 跨摄像头或视频帧跟踪目标：每帧调用一次，id 会延续
+const tracked = await model.track(video, { tracker: "bytetrack.yaml" });
+console.log(tracked.boxes.map((box) => box.id)); // [1, 2, 3, ...]
 ```
 
 通过 `{ device: "webgpu" | "cpu" }` 选择加速器（默认 `"auto"`），并读取
-`model.device` 查看实际使用的设备。`model.track(frame)` 在视频帧上运行同样的跟踪器，详见
+`model.device` 查看实际使用的设备。`model.track()` 可在 ONNX 和 LiteRT 的检测、分割、姿态和 OBB 模型上运行全部六种
+跟踪器，`model.resetTracker()` 用于开始新的视频；摄像头循环示例和全部选项详见
 [目标跟踪](web/README.zh-CN.md#目标跟踪)。
 
 后端会根据模型格式自动选择（优先使用扩展名，否则读取模型字节），因此切换后端只取决于
@@ -938,7 +943,7 @@ Apple M4 MacBook Pro（10 核 CPU，ONNX Runtime 1.28，release 构建，100 张
 - [x] 类别过滤支持。
 - [x] 自动下载所有 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（所有 n/s/m/l/x 尺寸、所有任务）。
 - [x] 使用 YOLO26-Text 和 PaddleOCR 进行场景文字识别（`--ocr`）。
-- [x] 支持所有 Ultralytics 跟踪器的目标跟踪（`track`）。
+- [x] 支持所有 Ultralytics 跟踪器的目标跟踪（`track`），原生与浏览器均可使用。
 - [x] `--task` CLI 参数：省略 `--model` 时选择并自动下载匹配的 nano 模型；任务和模型元数据冲突时退出并报错。
 - [x] 通过 WebGPU 的 WebAssembly（WASM）浏览器推理（npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo)）。
 
