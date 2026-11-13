@@ -303,10 +303,13 @@ impl Tracker {
     /// clipped to the image and their track ids. New tracks show once confirmed. Results of
     /// classification, semantic segmentation or depth are left as they are.
     ///
+    /// Returns the rows of `result` before the update that its rows now are, for data kept
+    /// outside it, or `None` when `result` is unchanged.
+    ///
     /// # Errors
     ///
     /// Returns an error if the `ReID` model fails.
-    pub fn update(&mut self, result: &mut Results) -> Result<()> {
+    pub fn update(&mut self, result: &mut Results) -> Result<Option<Vec<usize>>> {
         let kind = self.config.tracker_type;
         let boxes = result.boxes.as_ref().map(|b| (b.xywh(), b.conf(), b.cls()));
         let boxes = boxes
@@ -314,7 +317,7 @@ impl Tracker {
         if boxes.is_none()
             && (result.probs.is_some() || result.semantic_mask.is_some() || result.depth.is_some())
         {
-            return Ok(());
+            return Ok(None);
         }
         // A frame without detections still ages the tracks.
         let rows: Vec<Row> = boxes.map_or_else(Vec::new, |(r, conf, cls)| {
@@ -361,22 +364,23 @@ impl Tracker {
         } else {
             self.step(dets, high.len(), warp);
         }
-        self.write(result);
-        Ok(())
+        Ok(self.write(result))
     }
 
-    /// Keep the rows of the tracks shown this frame in `result`, with their boxes and ids.
-    fn write(&self, result: &mut Results) {
+    /// Keep the rows of the tracks shown this frame in `result`, with their boxes and ids, and
+    /// return them.
+    fn write(&self, result: &mut Results) -> Option<Vec<usize>> {
         let shown: Vec<&Track> = self
             .tracked
             .iter()
             .filter(|t| t.activated && t.frame_id == self.frame_id)
             .collect();
         if shown.is_empty() {
-            if self.tracked.iter().any(|t| !t.activated) {
-                keep_rows(result, &[]); // hide new tracks until they are confirmed
+            if self.tracked.iter().all(|t| t.activated) {
+                return None;
             }
-            return;
+            keep_rows(result, &[]); // hide new tracks until they are confirmed
+            return Some(Vec::new());
         }
         let idx: Vec<usize> = shown.iter().map(|t| t.idx).collect();
         keep_rows(result, &idx);
@@ -396,6 +400,7 @@ impl Tracker {
             let data = Array2::from_shape_vec((shown.len(), 8), rows.collect());
             *o = Obb::new(data.unwrap_or_default(), o.orig_shape);
         }
+        Some(idx)
     }
 
     /// One arena of the tracked tracks, the lost tracks and `dets`, with the first two counts.
