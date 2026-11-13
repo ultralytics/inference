@@ -529,7 +529,7 @@ fn build_inference_config(
     device: Option<crate::Device>,
 ) -> Result<InferenceConfig, String> {
     let mut config = InferenceConfig::new()
-        .with_confidence(args.conf)
+        .with_confidence(args.conf.unwrap_or(InferenceConfig::DEFAULT_CONF))
         .with_iou(args.iou)
         .with_batch(args.batch as usize)
         .with_half(args.half)
@@ -692,7 +692,7 @@ mod tests {
             model: None,
             task: None,
             source: None,
-            conf: InferenceConfig::DEFAULT_CONF,
+            conf: None,
             iou: InferenceConfig::DEFAULT_IOU,
             max_det: InferenceConfig::DEFAULT_MAX_DET,
             imgsz: None,
@@ -770,7 +770,7 @@ mod tests {
     #[test]
     fn test_build_inference_config_from_cli_args() {
         let args = PredictArgs {
-            conf: 0.42,
+            conf: Some(0.42),
             iou: 0.55,
             max_det: 77,
             imgsz: Some(512),

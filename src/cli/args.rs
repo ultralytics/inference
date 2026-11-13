@@ -86,9 +86,9 @@ pub struct PredictArgs {
     #[arg(short, long)]
     pub source: Option<String>,
 
-    /// Confidence threshold
-    #[arg(long, default_value_t = InferenceConfig::DEFAULT_CONF)]
-    pub conf: f32,
+    /// Confidence threshold [default: 0.25]
+    #[arg(long)]
+    pub conf: Option<f32>,
 
     /// `IoU` threshold for NMS
     #[arg(long, default_value_t = InferenceConfig::DEFAULT_IOU)]
@@ -230,7 +230,7 @@ mod tests {
             panic!("expected predict command");
         };
         assert_eq!(predict_args.model, Some("yolo26n.onnx".to_string()));
-        assert!((predict_args.conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON);
+        assert_eq!(predict_args.conf, None);
         assert!((predict_args.iou - InferenceConfig::DEFAULT_IOU).abs() < f32::EPSILON);
         assert!(predict_args.rect);
         assert_eq!(predict_args.max_det, 300);
@@ -261,7 +261,7 @@ mod tests {
         };
         assert_eq!(predict_args.model, Some("custom.onnx".to_string()));
         assert_eq!(predict_args.source, Some("test.jpg".to_string()));
-        assert!((predict_args.conf - 0.8).abs() < f32::EPSILON);
+        assert_eq!(predict_args.conf, Some(0.8));
         assert_eq!(predict_args.quantize, Some(Quantization::Fp16));
         assert!(!predict_args.verbose);
     }
