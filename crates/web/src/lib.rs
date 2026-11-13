@@ -46,9 +46,9 @@ use ultralytics_inference::visualizer::color::{COLORS, Color, Colormap, DepthViz
 use ultralytics_inference::visualizer::skeleton::{
     KPT_COLOR_INDICES, LIMB_COLOR_INDICES, SKELETON,
 };
-use ultralytics_inference::{InferenceConfig, Task};
+use ultralytics_inference::{InferenceConfig, Task, Tracker, TrackerConfig};
 
-use payload::JsResults;
+use payload::{InstanceMask, JsResults, instance_overlay};
 
 mod onnx_meta;
 mod payload;
@@ -288,10 +288,16 @@ fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::Dynami
 }
 
 /// Build the shared `InferenceConfig` from the JS thresholds and class filter,
-/// keeping the Rust defaults for any threshold left unset.
-fn make_config(conf: Option<f32>, iou: Option<f32>, classes: Option<Vec<u32>>) -> InferenceConfig {
+/// keeping the Rust defaults for any threshold left unset. A tracker takes detections down to
+/// 0.1 confidence by default, like Ultralytics `model.track`.
+fn make_config(
+    conf: Option<f32>,
+    iou: Option<f32>,
+    classes: Option<Vec<u32>>,
+    track: bool,
+) -> InferenceConfig {
     let mut config = InferenceConfig::new();
-    if let Some(conf) = conf {
+    if let Some(conf) = conf.or_else(|| track.then_some(0.1)) {
         config = config.with_confidence(conf);
     }
     if let Some(iou) = iou {
@@ -321,6 +327,8 @@ pub struct YoloModel {
     rect: bool,
     /// Active device label (`"webgpu"` or `"cpu"`).
     device: &'static str,
+    /// The tracker of the latest `predict` with one, and its name.
+    tracker: Option<(String, Tracker)>,
 }
 
 #[wasm_bindgen]
@@ -387,10 +395,14 @@ impl YoloModel {
     /// `conf` and `iou` are the confidence and NMS IoU thresholds (omit them for the
     /// Ultralytics defaults 0.25 / 0.5); `classes` optionally keeps only
     /// the given class ids (for semantic, other pixels become background).
+    /// `tracker` (`"botsort.yaml"`, `"bytetrack.yaml"`, ...) tracks the detections across
+    /// calls like Ultralytics `model.track(persist=True)`, starting anew when it changes.
     /// Returns a plain JS object whose shape mirrors the Ultralytics `Results` API.
     ///
     /// # Errors
-    /// Returns a JS error if the image cannot be decoded or inference fails.
+    /// Returns a JS error if the image cannot be decoded, the tracker is unknown or
+    /// inference fails.
+    #[allow(clippy::too_many_arguments)]
     pub async fn predict(
         &mut self,
         image: Vec<u8>,
@@ -399,6 +411,7 @@ impl YoloModel {
         classes: Option<Vec<u32>>,
         colormap: String,
         depth_viz: String,
+        tracker: Option<String>,
     ) -> Result<JsValue, JsError> {
         let dynimg = decode_image(ImageReader::new(Cursor::new(image)))
             .map_err(err_ctx("failed to decode image"))?;
@@ -409,6 +422,7 @@ impl YoloModel {
             classes,
             colormap.parse().unwrap_or_default(),
             depth_viz.parse().unwrap_or_default(),
+            tracker,
         )
         .await
     }
@@ -431,6 +445,7 @@ impl YoloModel {
         classes: Option<Vec<u32>>,
         colormap: String,
         depth_viz: String,
+        tracker: Option<String>,
     ) -> Result<JsValue, JsError> {
         self.run(
             rgba_to_image(rgba, width, height)?,
@@ -439,8 +454,14 @@ impl YoloModel {
             classes,
             colormap.parse().unwrap_or_default(),
             depth_viz.parse().unwrap_or_default(),
+            tracker,
         )
         .await
+    }
+
+    /// Forget the tracks, so the next frame starts a new video.
+    pub fn reset_tracker(&mut self) {
+        self.tracker = None;
     }
 }
 
@@ -522,6 +543,7 @@ impl YoloModel {
             imgsz,
             rect,
             device: device.label(),
+            tracker: None,
         })
     }
 
@@ -544,6 +566,7 @@ impl YoloModel {
     /// `preprocess` = letterbox/normalize; `inference` = `run_async` + cross-context
     /// output sync; `postprocess` = decoding, overlay construction, and serialization.
     /// Image download and decoding happen before this and are not counted here.
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         &mut self,
         dynimg: image::DynamicImage,
@@ -552,6 +575,7 @@ impl YoloModel {
         classes: Option<Vec<u32>>,
         colormap: Colormap,
         viz: DepthViz,
+        tracker: Option<String>,
     ) -> Result<JsValue, JsError> {
         let t_pre = now_ms();
 
@@ -591,7 +615,7 @@ impl YoloModel {
         drop(guard);
 
         let t_post = now_ms();
-        let config = make_config(conf, iou, classes);
+        let config = make_config(conf, iou, classes, tracker.is_some());
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         // Postprocess is timed after it returns (below), the same as the `YoloPipeline`
         // path: building the `Speed` here would only measure the setup above it.
@@ -599,7 +623,7 @@ impl YoloModel {
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
-        let mut overlay = Vec::new();
+        let mut masks = Vec::new();
         let mut results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
@@ -643,11 +667,12 @@ impl YoloModel {
                 self.metadata.kpt_shape,
                 self.metadata.is_rtdetr(),
                 &mut |mask, box_data| {
-                    payload::put_instance_mask(&mut overlay, mask, box_data, &self.metadata.colors);
+                    masks.push(InstanceMask::new(mask, box_data, &self.metadata.colors));
                 },
             )
         };
         results.colors = Arc::clone(&self.metadata.colors);
+        let overlay = track(&mut self.tracker, tracker, &mut results, &masks)?;
         results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
     }
 }
@@ -676,6 +701,8 @@ pub struct YoloPipeline {
     metadata: ModelMetadata,
     imgsz: (usize, usize),
     pending: Option<PendingFrame>,
+    /// The tracker of the latest `postprocess` with one, and its name.
+    tracker: Option<(String, Tracker)>,
 }
 
 #[wasm_bindgen]
@@ -696,6 +723,7 @@ impl YoloPipeline {
             metadata,
             imgsz,
             pending: None,
+            tracker: None,
         })
     }
 
@@ -795,12 +823,13 @@ impl YoloPipeline {
     /// segmentation: detection head + mask prototypes), with one entry of dims per
     /// output in `shapes`. `inference_ms`
     /// is the time the JS engine reported, used only for the `speed` breakdown.
+    /// `tracker` tracks the detections as in [`YoloModel::predict`].
     /// Consumes the frame stashed by the preceding
     /// [`preprocess_rgba`](Self::preprocess_rgba).
     ///
     /// # Errors
     /// Returns a JS error if called before `preprocess_rgba`, if `shapes` does not
-    /// have one entry per output, or on serialization failure.
+    /// have one entry per output, if the tracker is unknown, or on serialization failure.
     #[allow(clippy::too_many_arguments)]
     pub fn postprocess(
         &mut self,
@@ -812,6 +841,7 @@ impl YoloPipeline {
         classes: Option<Vec<u32>>,
         colormap: String,
         depth_viz: String,
+        tracker: Option<String>,
     ) -> Result<JsValue, JsError> {
         let t_post = now_ms();
         let pending = self
@@ -868,14 +898,14 @@ impl YoloPipeline {
             .map(|(b, s)| (b.as_slice(), s.clone()))
             .collect();
 
-        let config = make_config(conf, iou, classes);
+        let config = make_config(conf, iou, classes, tracker.is_some());
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
         // Postprocess time is unknown until the call returns, so pass 0 here and
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        let mut overlay = Vec::new();
+        let mut masks = Vec::new();
         let mut results = postprocess_with_head_masks(
             views,
             self.metadata.task,
@@ -890,10 +920,11 @@ impl YoloPipeline {
             self.metadata.kpt_shape,
             self.metadata.is_rtdetr(),
             &mut |mask, box_data| {
-                payload::put_instance_mask(&mut overlay, mask, box_data, &self.metadata.colors);
+                masks.push(InstanceMask::new(mask, box_data, &self.metadata.colors));
             },
         );
         results.colors = Arc::clone(&self.metadata.colors);
+        let overlay = track(&mut self.tracker, tracker, &mut results, &masks)?;
         results_to_js(
             &results,
             self.metadata.task,
@@ -903,6 +934,37 @@ impl YoloPipeline {
             t_post,
         )
     }
+
+    /// Forget the tracks, so the next frame starts a new video.
+    pub fn reset_tracker(&mut self) {
+        self.tracker = None;
+    }
+}
+
+/// Track `results` with the tracker named `tracker`, if any, then composite the instance masks
+/// of the rows it keeps. The tracker in `slot` carries over between frames like the native
+/// `YOLOModel::track` and starts anew when the name changes.
+fn track(
+    slot: &mut Option<(String, Tracker)>,
+    tracker: Option<String>,
+    results: &mut Results,
+    masks: &[InstanceMask],
+) -> Result<Vec<u8>, JsError> {
+    let Some(name) = tracker else {
+        return Ok(instance_overlay(masks));
+    };
+    if slot.as_ref().is_none_or(|(n, _)| *n != name) {
+        let config = TrackerConfig::load(&name).map_err(err_ctx("failed to load tracker"))?;
+        *slot = Some((name, Tracker::without_reid(config)));
+    }
+    let rows = match slot {
+        Some((_, t)) => t.update(results).map_err(err_ctx("tracking failed"))?,
+        None => None,
+    };
+    Ok(match rows {
+        Some(rows) => instance_overlay(rows.iter().filter_map(|&i| masks.get(i))),
+        None => instance_overlay(masks),
+    })
 }
 
 /// Scale a normalized detection head's coordinates to model-input pixels in place.

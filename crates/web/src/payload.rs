@@ -6,6 +6,7 @@
 //! wrapper sees a plain serializable object. Per-task fields are empty/`null`
 //! when unused.
 
+use ndarray::{Array2, ArrayView1, ArrayView2, s};
 use serde::Serialize;
 
 use ultralytics_inference::Task;
@@ -20,6 +21,8 @@ struct JsBox {
     y1: f32,
     x2: f32,
     y2: f32,
+    /// Track id, only when tracking.
+    id: Option<u32>,
     conf: f32,
     cls: usize,
     name: String,
@@ -34,6 +37,8 @@ struct JsObb {
     w: f32,
     h: f32,
     angle: f32,
+    /// Track id, only when tracking.
+    id: Option<u32>,
     conf: f32,
     cls: usize,
     name: String,
@@ -116,7 +121,7 @@ impl JsResults {
         let hex = |c: usize| Color::for_class(&r.colors, c).to_hex();
 
         let boxes = r.boxes.as_ref().map_or_else(Vec::new, |b| {
-            let (xyxy, conf, cls) = (b.xyxy(), b.conf(), b.cls());
+            let (xyxy, id, conf, cls) = (b.xyxy(), b.id(), b.conf(), b.cls());
             (0..b.len())
                 .map(|i| {
                     let c = cls[i] as usize;
@@ -125,6 +130,7 @@ impl JsResults {
                         y1: xyxy[[i, 1]],
                         x2: xyxy[[i, 2]],
                         y2: xyxy[[i, 3]],
+                        id: id.map(|id| id[i] as u32),
                         conf: conf[i],
                         cls: c,
                         name: name(c),
@@ -135,7 +141,7 @@ impl JsResults {
         });
 
         let obb = r.obb.as_ref().map_or_else(Vec::new, |o| {
-            let (xywhr, conf, cls) = (o.xywhr(), o.conf(), o.cls());
+            let (xywhr, id, conf, cls) = (o.xywhr(), o.id(), o.conf(), o.cls());
             (0..conf.len())
                 .map(|i| {
                     let c = cls[i] as usize;
@@ -145,6 +151,7 @@ impl JsResults {
                         w: xywhr[[i, 2]],
                         h: xywhr[[i, 3]],
                         angle: xywhr[[i, 4]],
+                        id: id.map(|id| id[i] as u32),
                         conf: conf[i],
                         cls: c,
                         name: name(c),
@@ -230,32 +237,51 @@ fn put(buf: &mut [u8], w: usize, x: usize, y: usize, c: Color, a: u8) {
     buf[i..i + 4].copy_from_slice(&[c.0, c.1, c.2, a]);
 }
 
-/// Composite one instance mask into the browser overlay in detection order, in its class color
-/// (`colors` being the model's `colors` metadata).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub(crate) fn put_instance_mask(
-    overlay: &mut Vec<u8>,
-    mask: ndarray::ArrayView2<'_, f32>,
-    box_data: ndarray::ArrayView1<'_, f32>,
-    colors: &[Color],
-) {
-    let (h, w) = mask.dim();
-    if overlay.is_empty() {
-        overlay.resize(h * w * 4, 0);
-    }
-    let color = Color::for_class(colors, box_data[5] as usize);
-    let x0 = box_data[0].max(0.0) as usize;
-    let y0 = box_data[1].max(0.0) as usize;
-    let x1 = (box_data[2].max(0.0) as usize).saturating_add(1).min(w);
-    let y1 = (box_data[3].max(0.0) as usize).saturating_add(1).min(h);
-    for y in y0..y1 {
-        let row = mask.row(y);
-        for x in x0..x1 {
-            if row[x] > 0.5 {
-                put(overlay, w, x, y, color, 128);
-            }
+/// One instance mask, kept until tracking picks the rows to draw.
+pub(crate) struct InstanceMask {
+    /// Image `(height, width)`.
+    size: (usize, usize),
+    /// Top left `(x, y)` of the box.
+    corner: (usize, usize),
+    /// Mask pixels inside the box.
+    inside: Array2<bool>,
+    color: Color,
+}
+
+impl InstanceMask {
+    /// The part of `mask` inside the box of `box_data`, in its class color (`colors` being the
+    /// model's `colors` metadata).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub(crate) fn new(
+        mask: ArrayView2<'_, f32>,
+        box_data: ArrayView1<'_, f32>,
+        colors: &[Color],
+    ) -> Self {
+        let (h, w) = mask.dim();
+        let x0 = box_data[0].max(0.0) as usize;
+        let y0 = box_data[1].max(0.0) as usize;
+        let x1 = (box_data[2].max(0.0) as usize).saturating_add(1).min(w);
+        let y1 = (box_data[3].max(0.0) as usize).saturating_add(1).min(h);
+        Self {
+            size: (h, w),
+            corner: (x0, y0),
+            inside: mask.slice(s![y0..y1, x0..x1]).mapv(|v| v > 0.5),
+            color: Color::for_class(colors, box_data[5] as usize),
         }
     }
+}
+
+/// Composite instance masks into the browser overlay in order, each over the ones before it.
+pub(crate) fn instance_overlay<'a>(masks: impl IntoIterator<Item = &'a InstanceMask>) -> Vec<u8> {
+    let mut overlay = Vec::new();
+    for m in masks {
+        let ((h, w), (x0, y0)) = (m.size, m.corner);
+        overlay.resize(h * w * 4, 0);
+        for ((y, x), _) in m.inside.indexed_iter().filter(|(_, on)| **on) {
+            put(&mut overlay, w, x0 + x, y0 + y, m.color, 128);
+        }
+    }
+    overlay
 }
 
 /// Build a translucent colored RGBA overlay (`width*height*4`) from the semantic

@@ -19,8 +19,8 @@ missing_docs = "warn"
 
 [dependencies]
 # Reuse the wasm-safe core pipeline (preprocessing, postprocessing, results,
-# metadata, task). `default-features = false` drops the native backend modules.
-ultralytics-inference = { path = "../..", default-features = false }
+# metadata, task, tracker). `default-features = false` drops the native backend modules.
+ultralytics-inference = { path = "../..", default-features = false, features = ["track"] }
 
 # Everything below is only ever compiled for the browser. Keeping these under a
 # wasm32 target table means a host build of the workspace never pulls ort with
