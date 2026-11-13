@@ -5,7 +5,7 @@
 
 use ndarray::Array2;
 
-use super::matching::{assign, fuse, matrix};
+use super::matching::{assign, fuse, iou_distance};
 use super::{State, Track, Tracker, TrackerConfig, TrackerType, Warp, deep_oc_sort, pair};
 use crate::utils::calculate_iou;
 
@@ -57,7 +57,7 @@ impl Tracker {
     /// Matching cost of `BYTETracker.get_dists` and its overrides, between arena indices.
     fn dists(&self, all: &[Track], tracks: &[usize], dets: &[usize]) -> Array2<f64> {
         let c = &self.config;
-        let iou = matrix(tracks, dets, |t, d| f64::from(1.0 - all[t].iou(&all[d])));
+        let iou = iou_distance(all, tracks, dets);
         let mut cost = fuse(&iou, c.fuse_score, all, dets);
         if c.tracker_type.ocsort() {
             cost.zip_mut_with(&self.direction_cost(all, tracks, dets), |a, b| {
@@ -126,8 +126,7 @@ impl Tracker {
         let u_rest: Vec<usize> = if kind.ocsort() && !c.use_byte {
             rest
         } else {
-            let iou = matrix(&rest, &low, |t, d| f64::from(1.0 - all[t].iou(&all[d])));
-            let (matches, u_rest, _) = assign(&iou, 0.5);
+            let (matches, u_rest, _) = assign(&iou_distance(&all, &rest, &low), 0.5);
             for (t, d) in matches {
                 apply(&mut all, rest[t], low[d], false);
             }

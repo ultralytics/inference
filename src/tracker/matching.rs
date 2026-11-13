@@ -15,6 +15,11 @@ pub(super) fn matrix(
     Array2::from_shape_fn((tracks.len(), dets.len()), |(i, j)| f(tracks[i], dets[j]))
 }
 
+/// `1 - IoU` between the tracks and detections at arena indices, `iou_distance` in Ultralytics.
+pub(super) fn iou_distance(all: &[Track], tracks: &[usize], dets: &[usize]) -> Array2<f64> {
+    matrix(tracks, dets, |t, d| f64::from(1.0 - all[t].iou(&all[d])))
+}
+
 /// `1 - IoU * score` from the `IoU` cost when `fuse_score`, so confident detections match first.
 pub(super) fn fuse(
     iou: &Array2<f64>,
