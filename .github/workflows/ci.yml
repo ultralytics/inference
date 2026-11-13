@@ -65,13 +65,13 @@ jobs:
       - name: Ensure toolchain
         run: rustup show
 
-      - name: Clippy (annotate feature)
+      - name: Clippy (annotate + track features)
         if: matrix.os != 'macos-latest'
-        run: cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
+        run: cargo clippy --all-targets --no-default-features --features annotate,track -- -D warnings
 
-      - name: Tests (annotate feature)
+      - name: Tests (annotate + track features)
         if: matrix.os != 'macos-latest'
-        run: cargo test --no-default-features --features annotate
+        run: cargo test --no-default-features --features annotate,track
 
       - name: Clippy (annotate + cuda + tensorrt)
         if: matrix.os == 'ubuntu-latest'
@@ -414,7 +414,7 @@ jobs:
         # Exclude code that host-side unit tests cannot exercise: the minifb viewer
         # window (GUI), the thin CLI entry point, and the wasm32-only web crate. The
         # CUDA kernel is reported by the GPU job instead.
-        run: cargo llvm-cov --features annotate,video,visualize --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
+        run: cargo llvm-cov --features annotate,video,visualize,track --workspace --lcov --output-path lcov.info --ignore-filename-regex '(src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
 
       - name: Upload coverage to Codecov
         continue-on-error: true
