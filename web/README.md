@@ -115,22 +115,41 @@ async function frame() {
 
 ### Tracking
 
-`track()` follows objects across video frames like Ultralytics `model.track(persist=True)`: tracks carry over between
-calls and every kept box gets an `id`. It takes the `predict()` options plus `tracker`, one of `botsort.yaml` (default),
-`bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml`, `fasttrack.yaml` and `tracktrack.yaml`, and works for ONNX and
-LiteRT detection, segmentation, pose and OBB models:
+`track()` follows objects across video frames like Ultralytics `model.track(persist=True)`. Each call takes one frame,
+in any form `predict()` accepts, and the tracker lives in the model between calls, so every kept box gets an `id` that
+carries over from frame to frame. It works for ONNX and LiteRT detection, segmentation, pose and OBB models, on a
+webcam, a video or any other frame source:
 
 ```ts
+const model = await YOLO.load("/models/yolo26n.onnx");
+video.srcObject = await navigator.mediaDevices.getUserMedia({ video: true }); // or video.src = "clip.mp4"
+await video.play();
+
 async function frame() {
-  const results = await model.track(video, { tracker: "bytetrack.yaml" });
+  const image = await createImageBitmap(video); // draw the same frame that was tracked
+  const results = await model.track(image, { tracker: "bytetrack.yaml" });
   console.log(results.boxes.map((box) => box.id));
-  await annotate(canvas, video, results); // labels read "id:1 person 87%"
+  await annotate(canvas, image, results); // labels read "id:1 person 87%"
+  image.close();
   requestAnimationFrame(frame);
 }
+frame();
 ```
 
-Call `model.resetTracker()` before a new video. The trackers use their Ultralytics default settings, so ReID appearance
-matching, which only the native crate runs, stays off as it is by default in Python.
+- `tracker` is `botsort.yaml` (default), `bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml`, `fasttrack.yaml` or
+  `tracktrack.yaml`, each with its Ultralytics default settings. Switching to another tracker starts new tracks.
+- The other options are those of `predict()`, except that `conf` defaults to `0.1` as in Ultralytics, so low-confidence
+  boxes can keep a track alive. A new track needs a box above the tracker's `new_track_thresh`: `0.25`, or `0.3` for
+  `deepocsort.yaml` and `0.7` for `tracktrack.yaml`.
+- Only boxes that belong to a track are returned, `obb` gets `id` the same way, and segmentation masks and pose
+  keypoints follow the kept boxes.
+- `model.resetTracker()` forgets every track. Call it before a new video, and between unrelated images: a single image
+  works too, but on its own it only numbers the objects `1..N`.
+- Classification, semantic segmentation and depth models have nothing to track and return what `predict()` returns.
+- `botsort.yaml` and `tracktrack.yaml` estimate camera motion with sparse optical flow, which adds about 6 to 9 ms per
+  frame in wasm. The other trackers add under 0.1 ms, so `bytetrack.yaml` is the lightest choice for a live webcam.
+- ReID appearance matching runs only in the native crate, and is off by default in Ultralytics too. Custom tracker YAML
+  files are native only as well.
 
 ## ✨ Models
 
@@ -161,8 +180,8 @@ GitHub release assets send no `Access-Control-Allow-Origin`, so a browser cannot
 
 ## 📐 Results Shape
 
-`predict()` resolves to a `Results` object whose field names match the
-Rust/Ultralytics `Results` API one-to-one:
+`predict()` and `track()` resolve to a `Results` object whose field names match the
+Rust/Ultralytics `Results` API one-to-one, with `id` set by `track()`:
 
 | Field              | Type                                                                 | Tasks                 |
 | ------------------ | -------------------------------------------------------------------- | --------------------- |
