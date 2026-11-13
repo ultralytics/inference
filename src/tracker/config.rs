@@ -254,17 +254,14 @@ impl TrackerConfig {
     /// Returns an error for an unknown tracker name, an unreadable file or a bad value.
     pub fn load(tracker: &str) -> Result<Self> {
         let path = Path::new(tracker);
-        let parsed = if path.is_file() {
-            std::fs::read_to_string(path)
-                .map_err(InferenceError::Io)
-                .and_then(|text| Self::from_yaml(&text).map_err(InferenceError::ConfigError))
-        } else {
-            tracker
-                .parse::<TrackerType>()
-                .map(Self::from)
-                .map_err(InferenceError::ConfigError)
-        };
-        parsed.map_err(|e| InferenceError::ConfigError(format!("Tracker '{tracker}': {e}")))
+        if !path.is_file() {
+            let kind = tracker.parse::<TrackerType>();
+            return kind.map(Self::from).map_err(InferenceError::ConfigError);
+        }
+        std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| Self::from_yaml(&text))
+            .map_err(|e| InferenceError::ConfigError(format!("Tracker '{tracker}': {e}")))
     }
 
     /// Parse the flat `key: value  # comment` lines of an Ultralytics tracker config.
