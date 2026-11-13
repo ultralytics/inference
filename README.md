@@ -53,7 +53,7 @@ Request an Enterprise License for commercial use at [Ultralytics Licensing](http
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
 - ⬇️ **Auto Download** - Downloads supported YOLO26, YOLO11, and YOLOv8 ONNX models (sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
-- 🎞️ **Object Tracking** - ByteTrack, BoT-SORT, OC-SORT, Deep OC-SORT, FastTrack and TrackTrack with camera motion compensation and ReID, matching Ultralytics (`track` feature)
+- 🎞️ **Object Tracking** - ByteTrack, BoT-SORT, OC-SORT, Deep OC-SORT, FastTrack and TrackTrack with camera motion compensation and ReID, matching Ultralytics (`track` feature), also in the browser
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
 ## ✨ Models
@@ -804,11 +804,16 @@ import { YOLO } from "@ultralytics/yolo";
 const model = await YOLO.load("/models/yolo26n.onnx");
 const results = await model.predict("bus.jpg");
 console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
+
+// Track objects across webcam or video frames: call once per frame, ids carry over
+const tracked = await model.track(video, { tracker: "bytetrack.yaml" });
+console.log(tracked.boxes.map((box) => box.id)); // [1, 2, 3, ...]
 ```
 
 Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the
-default), and read `model.device` to see what actually ran. `model.track(frame)` runs the same
-trackers on video frames, see [Tracking](web/README.md#tracking).
+default), and read `model.device` to see what actually ran. `model.track()` runs all six trackers on ONNX and LiteRT
+detection, segmentation, pose and OBB models, and `model.resetTracker()` starts a new video; see
+[Tracking](web/README.md#tracking) for a webcam loop and every option.
 
 The backend is picked automatically from the model format (its extension when
 available, otherwise the model bytes), so switching is just a matter of the model
@@ -951,7 +956,7 @@ On Apple M4 the fastest setting is 4 threads, one per performance core; adding t
 - [x] Class filtering support
 - [x] Auto-download all YOLO26, YOLO11, and YOLOv8 ONNX models (all sizes n/s/m/l/x, all tasks)
 - [x] Scene text OCR with YOLO26-Text and PaddleOCR (`--ocr`)
-- [x] Object tracking with all Ultralytics trackers (`track`)
+- [x] Object tracking with all Ultralytics trackers (`track`), natively and in the browser
 - [x] `--task` CLI flag: selects and auto-downloads the matching nano model when `--model` is omitted; errors on task/model metadata conflict
 - [x] WebAssembly (WASM) browser inference on WebGPU (npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo))
 
