@@ -111,21 +111,37 @@ async function frame() {
 
 ### 目标跟踪
 
-`track()` 像 Ultralytics 的 `model.track(persist=True)` 一样跨视频帧跟踪目标：轨迹在多次调用之间延续，每个保留的框都带有
-`id`。它接受 `predict()` 的选项以及 `tracker`，可选 `botsort.yaml`（默认）、`bytetrack.yaml`、`ocsort.yaml`、
-`deepocsort.yaml`、`fasttrack.yaml` 和 `tracktrack.yaml`，适用于 ONNX 和 LiteRT 的检测、分割、姿态和 OBB 模型：
+`track()` 像 Ultralytics 的 `model.track(persist=True)` 一样跨视频帧跟踪目标。每次调用处理一帧，输入形式与 `predict()`
+相同；跟踪器在多次调用之间保存在模型中，因此每个保留的框都会获得一个跨帧延续的 `id`。它适用于 ONNX 和 LiteRT
+的检测、分割、姿态和 OBB 模型，可用于摄像头、视频或任何其他帧来源：
 
 ```ts
+const model = await YOLO.load("/models/yolo26n.onnx");
+video.srcObject = await navigator.mediaDevices.getUserMedia({ video: true }); // 或 video.src = "clip.mp4"
+await video.play();
+
 async function frame() {
-  const results = await model.track(video, { tracker: "bytetrack.yaml" });
+  const image = await createImageBitmap(video); // 绘制的正是被跟踪的那一帧
+  const results = await model.track(image, { tracker: "bytetrack.yaml" });
   console.log(results.boxes.map((box) => box.id));
-  await annotate(canvas, video, results); // 标签显示为 "id:1 person 87%"
+  await annotate(canvas, image, results); // 标签显示为 "id:1 person 87%"
+  image.close();
   requestAnimationFrame(frame);
 }
+frame();
 ```
 
-处理新视频前请调用 `model.resetTracker()`。跟踪器使用 Ultralytics 的默认设置，因此只有原生 crate 才能运行的 ReID
-外观匹配保持关闭，与 Python 中的默认值一致。
+- `tracker` 可选 `botsort.yaml`（默认）、`bytetrack.yaml`、`ocsort.yaml`、`deepocsort.yaml`、`fasttrack.yaml` 或
+  `tracktrack.yaml`，均使用 Ultralytics 的默认设置。切换到其他跟踪器会开始新的轨迹。
+- 其他选项与 `predict()` 相同，但 `conf` 与 Ultralytics 一样默认为 `0.1`，使低置信度的框也能维持已有轨迹。新轨迹需要框的
+  置信度高于跟踪器的 `new_track_thresh`：`0.25`，`deepocsort.yaml` 为 `0.3`，`tracktrack.yaml` 为 `0.7`。
+- 只返回属于某条轨迹的框，`obb` 同样带有 `id`，分割掩码和姿态关键点跟随保留的框。
+- `model.resetTracker()` 会清除所有轨迹。处理新视频前，以及在互不相关的图片之间请调用它：单张图片也可以跟踪，但单独使用时
+  只会把目标编号为 `1..N`。
+- 分类、语义分割和深度模型没有可跟踪的目标，返回与 `predict()` 相同的结果。
+- `botsort.yaml` 和 `tracktrack.yaml` 用稀疏光流估计相机运动，在 wasm 中每帧增加约 6 到 9 ms。
+  其他跟踪器增加不到 0.1 ms，因此实时摄像头最轻量的选择是 `bytetrack.yaml`。
+- ReID 外观匹配只在原生 crate 中运行，在 Ultralytics 中也默认关闭。自定义跟踪器 YAML 文件同样只支持原生 crate。
 
 ## ✨ 模型
 
@@ -156,7 +172,7 @@ GitHub release 资源不会返回 `Access-Control-Allow-Origin`，因此浏览�
 
 ## 📐 结果结构
 
-`predict()` 返回的 `Results` 对象，其字段名与 Rust/Ultralytics 的 `Results` API 一一对应：
+`predict()` 和 `track()` 返回的 `Results` 对象，其字段名与 Rust/Ultralytics 的 `Results` API 一一对应，`id` 由 `track()` 设置：
 
 | 字段               | 类型                                                                 | 任务                  |
 | ------------------ | -------------------------------------------------------------------- | --------------------- |
