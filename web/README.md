@@ -113,6 +113,25 @@ async function frame() {
 }
 ```
 
+### Tracking
+
+`track()` follows objects across video frames like Ultralytics `model.track(persist=True)`: tracks carry over between
+calls and every kept box gets an `id`. It takes the `predict()` options plus `tracker`, one of `botsort.yaml` (default),
+`bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml`, `fasttrack.yaml` and `tracktrack.yaml`, and works for ONNX and
+LiteRT detection, segmentation, pose and OBB models:
+
+```ts
+async function frame() {
+  const results = await model.track(video, { tracker: "bytetrack.yaml" });
+  console.log(results.boxes.map((box) => box.id));
+  await annotate(canvas, video, results); // labels read "id:1 person 87%"
+  requestAnimationFrame(frame);
+}
+```
+
+Call `model.resetTracker()` before a new video. The trackers use their Ultralytics default settings, so ReID appearance
+matching, which only the native crate runs, stays off as it is by default in Python.
+
 ## ✨ Models
 
 <a href="https://docs.ultralytics.com/tasks" target="_blank">
@@ -149,8 +168,8 @@ Rust/Ultralytics `Results` API one-to-one:
 | ------------------ | -------------------------------------------------------------------- | --------------------- |
 | `task`             | `string`                                                             | all                   |
 | `width` / `height` | `number`                                                             | all                   |
-| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color }[]`                       | detect, segment, pose |
-| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`                    | obb                   |
+| `boxes`            | `{ x1, y1, x2, y2, id?, conf, cls, name, color }[]`                  | detect, segment, pose |
+| `obb`              | `{ x, y, w, h, angle, id?, conf, cls, name, color }[]`               | obb                   |
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                                | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, top5names, color } \| null` | classify              |
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)                        | segment, semantic     |

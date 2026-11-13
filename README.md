@@ -807,7 +807,8 @@ console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 ```
 
 Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the
-default), and read `model.device` to see what actually ran.
+default), and read `model.device` to see what actually ran. `model.track(frame)` runs the same
+trackers on video frames, see [Tracking](web/README.md#tracking).
 
 The backend is picked automatically from the model format (its extension when
 available, otherwise the model bytes), so switching is just a matter of the model
