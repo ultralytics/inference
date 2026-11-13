@@ -22,6 +22,8 @@ pub enum TrackerType {
     DeepOcSort,
     /// `FastTrack`: `ByteTrack` with occlusion handling.
     FastTrack,
+    /// `TrackTrack`: iterative association over a combined cost, with track-aware initialization.
+    TrackTrack,
 }
 
 impl FromStr for TrackerType {
@@ -36,8 +38,9 @@ impl FromStr for TrackerType {
             "ocsort" => Ok(Self::OcSort),
             "deepocsort" => Ok(Self::DeepOcSort),
             "fasttrack" => Ok(Self::FastTrack),
+            "tracktrack" => Ok(Self::TrackTrack),
             _ => Err(format!(
-                "Unknown tracker '{s}', expected bytetrack, botsort, ocsort, deepocsort, fasttrack or a YAML file"
+                "Unknown tracker '{s}', expected bytetrack, botsort, ocsort, deepocsort, fasttrack, tracktrack or a YAML file"
             )),
         }
     }
@@ -99,6 +102,20 @@ pub struct TrackerConfig {
     pub occ_reappear_window: u32,
     /// `FastTrack`: skip new tracks overlapping an active one by this `IoU` (1.0 disables).
     pub init_iou_suppress: f32,
+    /// `TrackTrack`: matching cost for lost tracks in a second pass, 0 disables it.
+    pub lost_match_thr: f32,
+    /// `TrackTrack`: weight of the confidence cost.
+    pub conf_weight: f32,
+    /// `TrackTrack`: weight of the corner angle cost.
+    pub angle_weight: f32,
+    /// `TrackTrack`: extra cost of low-score detections.
+    pub penalty_p: f32,
+    /// `TrackTrack`: threshold step of each association round.
+    pub reduce_step: f32,
+    /// `TrackTrack`: `IoU` that suppresses a new track.
+    pub tai_thr: f32,
+    /// `TrackTrack`: matched frames before a track shows.
+    pub min_track_len: u32,
 }
 
 impl Default for TrackerConfig {
@@ -123,6 +140,13 @@ impl Default for TrackerConfig {
             occ_cover_thresh: 0.7,
             occ_reappear_window: 40,
             init_iou_suppress: 0.7,
+            lost_match_thr: 0.0,
+            conf_weight: 0.1,
+            angle_weight: 0.05,
+            penalty_p: 0.2,
+            reduce_step: 0.05,
+            tai_thr: 0.55,
+            min_track_len: 3,
         }
     }
 }
@@ -138,6 +162,13 @@ impl From<TrackerType> for TrackerConfig {
             TrackerType::DeepOcSort => Self {
                 track_high_thresh: 0.3,
                 new_track_thresh: 0.3,
+                ..base
+            },
+            TrackerType::TrackTrack => Self {
+                track_high_thresh: 0.6,
+                track_low_thresh: 0.25,
+                new_track_thresh: 0.7,
+                match_thresh: 0.7,
                 ..base
             },
             _ => base,
@@ -202,8 +233,9 @@ impl TrackerConfig {
                 track_high_thresh, track_low_thresh, new_track_thresh, track_buffer, match_thresh,
                 fuse_score, delta_t, inertia, use_byte, reset_velocity_offset_occ,
                 reset_pos_offset_occ, enlarge_bbox_occ, dampen_motion_occ,
-                active_occ_to_lost_thresh, occ_cover_thresh, occ_reappear_window,
-                init_iou_suppress);
+                active_occ_to_lost_thresh, occ_cover_thresh, occ_reappear_window, init_iou_suppress,
+                lost_match_thr, conf_weight, angle_weight, penalty_p, reduce_step, tai_thr,
+                min_track_len);
         }
         Ok(config)
     }

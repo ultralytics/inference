@@ -2,7 +2,7 @@
 
 //! Multi-object tracking, ported from the Ultralytics trackers.
 //!
-//! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT` and `FastTrack`.
+//! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`.
 //!
 //! Feed each frame's [`Results`] to [`Tracker::update`] in order. Like `model.track()` in
 //! Ultralytics, it keeps the tracked detections, replaces their boxes with the Kalman filter
@@ -42,6 +42,7 @@ mod fast_tracker;
 mod kalman_filter;
 mod matching;
 mod oc_sort;
+mod track_tracker;
 
 use std::collections::VecDeque;
 use std::f32::consts::PI;
@@ -58,7 +59,7 @@ type Row = ([f32; 4], Option<f32>, f32, f32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum State {
-    /// A detection that has not started a track.
+    /// Started but not confirmed yet (`TrackTrack`).
     #[default]
     New,
     Tracked,
@@ -86,7 +87,9 @@ struct Track {
     idx: usize,
     frame_id: u32,
     start_frame: u32,
-    /// Recent observed `xyxy` boxes by frame, oldest first (`OC-SORT`).
+    /// Matched frames since the track started (`TrackTrack`).
+    tracklet_len: u32,
+    /// Recent observed `xyxy` boxes by frame, oldest first (`OC-SORT`, `TrackTrack`).
     observations: VecDeque<(u32, [f32; 4])>,
     /// Latest observed box, `-1` before any (`OC-SORT`).
     last_observation: [f32; 4],
@@ -102,6 +105,10 @@ struct Track {
     occluded_len: u32,
     last_occluded_frame: u32,
     recently_occluded: bool,
+    /// Score before the latest update (`TrackTrack`).
+    prev_score: f32,
+    /// Unit motion direction of each box corner (`TrackTrack`).
+    corner_velocity: [[f32; 2]; 4],
 }
 
 impl Track {
@@ -124,6 +131,7 @@ impl Track {
             angle,
             idx,
             last_observation: [-1.0; 4],
+            prev_score: score,
             ..Self::default()
         }
     }
@@ -263,10 +271,10 @@ impl Tracker {
         });
         self.frame_id += 1;
 
-        // High and low score rows without degenerate boxes, since an aspect ratio of a zero
-        // height is infinite.
+        // High and low score rows; `TrackTrack` keeps degenerate boxes, the others drop them
+        // since an aspect ratio of a zero height is infinite.
         let c = &self.config;
-        let valid = |b: &[f32; 4]| b[2] > 0.0 && b[3] > 0.0;
+        let valid = |b: &[f32; 4]| kind == TrackerType::TrackTrack || (b[2] > 0.0 && b[3] > 0.0);
         let high: Vec<usize> = (0..rows.len())
             .filter(|&i| valid(&rows[i].0) && rows[i].2 >= c.track_high_thresh)
             .collect();
@@ -279,7 +287,11 @@ impl Tracker {
             .collect();
         let det = |&i: &usize| Track::new(kind, rows[i], i);
         let dets: Vec<Track> = high.iter().chain(&low).map(det).collect();
-        self.step(dets, high.len());
+        if kind == TrackerType::TrackTrack {
+            self.step_tracktrack(dets, high.len());
+        } else {
+            self.step(dets, high.len());
+        }
         self.write(result);
     }
 
@@ -358,6 +370,7 @@ mod tests {
             TrackerType::OcSort,
             TrackerType::DeepOcSort,
             TrackerType::FastTrack,
+            TrackerType::TrackTrack,
         ] {
             let mut tracker = Tracker::new(kind.into());
             let mut ids = Vec::new();

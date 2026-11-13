@@ -80,15 +80,17 @@ impl Track {
         self.kf_predict();
     }
 
-    /// Kalman correction with measurement `z`.
-    pub(super) fn kf_update(&mut self, z: [f64; 4]) {
+    /// Kalman correction with measurement `z`. A `confidence` scales the measurement noise by
+    /// `max(1 - confidence, 0.05)` (NSA Kalman).
+    pub(super) fn kf_update(&mut self, z: [f64; 4], confidence: Option<f32>) {
         let std = self.kind.std(&self.mean, STD_POS, 1e-1);
+        let scale = confidence.map_or(1.0, |c| f64::from((1.0 - c).max(0.05)));
         // Innovation covariance S = H cov H^T + R, then K^T = S^-1 H cov.
         let mut s = [[0.0; 4]; 4];
         let mut kt = [[0.0; 8]; 4];
         for i in 0..4 {
             s[i].copy_from_slice(&self.cov[i][..4]);
-            s[i][i] += std[i] * std[i];
+            s[i][i] += std[i] * std[i] * scale;
             kt[i] = self.cov[i];
         }
         let h_cov = kt;

@@ -29,7 +29,7 @@ impl Track {
         if self.kind.ocsort() {
             self.record(frame, det.xyxy(), c.delta_t as usize + 2);
         }
-        self.kf_update(det.measurement());
+        self.kf_update(det.measurement(), None);
         self.take_detection(det, frame);
         (self.state, self.activated) = (State::Tracked, true);
         if self.kind.ocsort() {
@@ -59,7 +59,7 @@ impl Tracker {
         cost
     }
 
-    /// One `BYTETracker.update` step.
+    /// One `BYTETracker.update` step for every tracker but `TrackTrack`.
     #[allow(clippy::too_many_lines)]
     pub(super) fn step(&mut self, dets: Vec<Track>, n_h: usize) {
         let c = self.config.clone();

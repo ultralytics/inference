@@ -55,7 +55,7 @@ impl Track {
             let (w, h) = (b[2] - b[0], b[3] - b[1]);
             let xywh = [b[0] + w / 2.0, b[1] + h / 2.0, w, h].map(f64::from);
             self.kf_predict();
-            self.kf_update(self.kind.measure(xywh));
+            self.kf_update(self.kind.measure(xywh), None);
         }
         self.kf_predict();
     }
