@@ -13,27 +13,33 @@ impl Track {
     /// Blend a feature into the appearance moving average with weight `alpha` on the old one.
     /// A zero feature carries no appearance and is skipped.
     pub(super) fn update_features(&mut self, feat: &[f32], alpha: f32) {
-        let Some(feat) = unit(feat.iter().copied()) else {
+        let Some(feat) = unit(feat) else {
             return;
         };
         let smooth = self.smooth_feat.as_ref().map_or_else(
             || Some(feat.clone()),
             |s| {
-                unit(
-                    s.iter()
-                        .zip(&feat)
-                        .map(|(s, f)| alpha * s + (1.0 - alpha) * f),
-                )
+                let blend: Vec<f32> = s
+                    .iter()
+                    .zip(&feat)
+                    .map(|(s, f)| alpha * s + (1.0 - alpha) * f)
+                    .collect();
+                unit(&blend)
             },
         );
         (self.curr_feat, self.smooth_feat) = (Some(feat), smooth);
     }
 }
 
+/// Dot product of two features.
+pub(super) fn dot(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(a, b)| a * b).sum()
+}
+
 /// `v` scaled to unit length, or `None` for a zero vector.
-fn unit(v: impl Iterator<Item = f32> + Clone) -> Option<Vec<f32>> {
-    let norm = v.clone().map(|x| x * x).sum::<f32>().sqrt();
-    (f64::from(norm) >= 1e-12).then(|| v.map(|x| x / norm).collect())
+fn unit(v: &[f32]) -> Option<Vec<f32>> {
+    let norm = dot(v, v).sqrt();
+    (f64::from(norm) >= 1e-12).then(|| v.iter().map(|x| x / norm).collect())
 }
 
 impl Tracker {
@@ -54,10 +60,8 @@ impl Tracker {
             let (Some(a), Some(b)) = (&all[t].smooth_feat, &all[d].curr_feat) else {
                 return 1.0;
             };
-            let dot: f32 = a.iter().zip(b).map(|(a, b)| a * b).sum();
-            let norms = a.iter().map(|v| v * v).sum::<f32>().sqrt()
-                * b.iter().map(|v| v * v).sum::<f32>().sqrt();
-            f64::from((1.0 - dot / norms.max(f32::EPSILON)).max(0.0) / 2.0)
+            let norms = dot(a, a).sqrt() * dot(b, b).sqrt();
+            f64::from((1.0 - dot(a, b) / norms.max(f32::EPSILON)).max(0.0) / 2.0)
         });
         for ((cost, emb), iou) in cost.iter_mut().zip(&emb).zip(iou) {
             let far = *emb > f64::from(1.0 - c.appearance_thresh)

@@ -9,6 +9,7 @@
 
 use ndarray::{Array2, ArrayView1, s};
 
+use super::bot_sort::dot;
 use super::matching::matrix;
 use super::{State, Track, Tracker, Warp, pair};
 use crate::utils::calculate_iou;
@@ -135,9 +136,7 @@ impl Tracker {
             );
             let mut cost = match (self.reid.is_some(), feats) {
                 (true, (Some(a), Some(b))) => {
-                    let cos =
-                        (1.0 - a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>()).clamp(0.0, 1.0);
-                    c.iou_weight * hmiou + c.reid_weight * cos
+                    c.iou_weight * hmiou + c.reid_weight * (1.0 - dot(a, b)).clamp(0.0, 1.0)
                 }
                 _ => hmiou,
             };
