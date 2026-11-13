@@ -53,6 +53,7 @@
 - 🏷️ **自动读取元数据**：自动读取 ONNX 模型中的类别名称、任务类型和输入尺寸。
 - ⬇️ **自动下载**：本地不存在时，自动下载支持的 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（尺寸：n/s/m/l/x）。
 - 🖼️ **多输入源**：支持图片、目录、glob 模式、视频文件、摄像头和流。
+- 🎞️ **目标跟踪**：ByteTrack、BoT-SORT、OC-SORT、Deep OC-SORT、FastTrack 和 TrackTrack，支持相机运动补偿和 ReID，结果与 Ultralytics 一致（`track` 特性）。
 - 🪶 **轻量运行时**：不需要 PyTorch、TensorFlow 或 Python 运行时。
 
 ## ✨ 模型
@@ -296,7 +297,12 @@ ultralytics-inference version
 
 # 运行推理
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
+
+# 跟踪视频中的目标（`track` 和 `video` 特性）
+ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker bytetrack.yaml
 ```
+
+`track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`bytetrack`、`botsort`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `botsort.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。
 
 `--help` 和 `--version` 也可作为标准别名使用。
 
@@ -307,7 +313,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--model`                | `-m` | ONNX 模型文件路径；若为已知 YOLOv8/YOLO11/YOLO26 名称则自动下载                                                                                                                              | `yolo26n.onnx`                                                  |
 | `--task`                 |      | 任务类型（`detect`、`segment`、`semantic`\*、`depth`\*、`classify`、`pose`、`obb`）；省略 `--model` 时选择 nano 模型                                                                         | `detect`                                                        |
 | `--source`               | `-s` | 输入源（图片、目录、glob、视频、摄像头索引或 URL）                                                                                                                                           | 与任务相关的 Ultralytics URL 资源                               |
-| `--conf`                 |      | 置信度阈值                                                                                                                                                                                   | `0.25`                                                          |
+| `--conf`                 |      | 置信度阈值                                                                                                                                                                                   | `0.25`（`track` 为 `0.1`）                                      |
 | `--iou`                  |      | NMS IoU 阈值                                                                                                                                                                                 | `0.5`                                                           |
 | `--max-det`              |      | 最大检测数量                                                                                                                                                                                 | `300`                                                           |
 | `--imgsz`                |      | 推理图片尺寸                                                                                                                                                                                 | 模型元数据                                                      |
@@ -328,6 +334,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 | `--device`               |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、intel:cpu、intel:gpu、intel:npu、tensorrt:0、rocm:0、migraphx:0、xnnpack；每个设备需要启用对应 feature，请求的设备未编译或加载失败时会报错 | 自动（选择可用的最佳提供方；未启用任何加速 feature 时为 `cpu`） |
 | `--verbose [<BOOL>]`     |      | 显示详细输出                                                                                                                                                                                 | `true`                                                          |
 | `--classes`              |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                                                                         | 所有类别                                                        |
+| `--tracker`              |      | 仅 `track`：跟踪器名称或 YAML 文件                                                                                                                                                           | `botsort.yaml`                                                  |
 
 `[<BOOL>]` 表示该标志的值是可选的：单独传入（`--rect`）即为 `true`，也可显式使用 `--rect false` 或 `--rect=false` 关闭。
 
@@ -355,15 +362,15 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 **可自动下载的模型：**
 
-YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并覆盖标准任务变体。YOLO26 还包含用于语义分割的 `-sem`、用于深度估计的 `-depth`，以及 `--ocr` 使用的 `-text` 旋转框文字检测模型，文字由 PaddleOCR 的 `PP-OCRv6_medium_rec.onnx` 识别模型、其 PP-OCRv5 语言模型和 `PP-LCNet_x0_25_textline_ori.onnx` 方向分类模型识别（Apache-2.0）：
+YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并覆盖标准任务变体。YOLO26 还包含用于语义分割的 `-sem`、用于深度估计的 `-depth`、用于跟踪外观特征的 `-reid`，以及 `--ocr` 使用的 `-text` 旋转框文字检测模型，文字由 PaddleOCR 的 `PP-OCRv6_medium_rec.onnx` 识别模型、其 PP-OCRv5 语言模型和 `PP-LCNet_x0_25_textline_ori.onnx` 方向分类模型识别（Apache-2.0）：
 
-| 系列   | 变体                                                                                                             |
-| ------ | ---------------------------------------------------------------------------------------------------------------- |
-| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-sem`\*、`-depth`\*、`-cls`、`-pose`、`-obb`、`-text`\* |
-| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                  |
-| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                  |
+| 系列   | 变体                                                                                                                        |
+| ------ | --------------------------------------------------------------------------------------------------------------------------- |
+| YOLO26 | `yolo26{n,s,m,l,x}.onnx`、`yolo26{n,s,m,l,x}-seg.onnx`、`-sem`\*、`-depth`\*、`-cls`、`-pose`、`-obb`、`-text`\*、`-reid`\* |
+| YOLO11 | `yolo11{n,s,m,l,x}.onnx`、`yolo11{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                             |
+| YOLOv8 | `yolov8{n,s,m,l,x}.onnx`、`yolov8{n,s,m,l,x}-seg.onnx`、`-cls`、`-pose`、`-obb`                                             |
 
-\* `-sem`（语义分割）、`-depth`（深度估计）和 `-text`（场景文字）仅支持 YOLO26。
+\* `-sem`（语义分割）、`-depth`（深度估计）、`-text`（场景文字）和 `-reid`（跟踪外观特征）仅支持 YOLO26。
 
 **输入源选项：**
 
@@ -594,6 +601,20 @@ let options = AnnotateOptions {
 let annotated = annotate_image_with_options(&image, &results[0], &options);
 ```
 
+**跟踪**（`track` 特性）：
+
+```rust
+use ultralytics_inference::YOLOModel;
+
+let mut model = YOLOModel::load("yolo26n.onnx")?;
+for frame in ["frame1.jpg", "frame2.jpg"] {
+    let results = model.track(frame, "bytetrack.yaml")?; // 跟踪结果在多次调用之间保留
+    println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
+}
+```
+
+与 Ultralytics `model.track(persist=True)` 一样，跟踪器保存在模型中，直到更换跟踪器或调用 `model.reset_tracker()` 开始新视频。`model.track_image` 接受解码后的帧，例如 `SourceIterator` 读取的视频帧（参见 [track 示例](examples/track.rs)），`Tracker` 可跟踪你自己的 `Results`。
+
 可复制并修改的可运行程序，请参见 [examples](examples/README.md) 目录。
 
 ## 🗂️ 项目结构
@@ -626,7 +647,20 @@ inference/
 │   ├── cli/                # CLI 模块
 │   │   ├── mod.rs          # CLI 模块导出
 │   │   ├── args.rs         # CLI 参数解析
-│   │   └── predict.rs      # predict 命令实现
+│   │   └── predict.rs      # predict 和 track 命令实现
+│   ├── tracker/            # 目标跟踪（track 特性），结构与 ultralytics/trackers 一致
+│   │   ├── mod.rs          # Tracker 和共享的轨迹状态
+│   │   ├── byte_tracker.rs # ByteTrack，其他跟踪器在其基础上扩展
+│   │   ├── bot_sort.rs     # BoT-SORT 外观匹配
+│   │   ├── oc_sort.rs      # OC-SORT
+│   │   ├── deep_oc_sort.rs # Deep OC-SORT
+│   │   ├── fast_tracker.rs # FastTrack
+│   │   ├── track_tracker.rs # TrackTrack
+│   │   ├── config.rs       # TrackerType、TrackerConfig 和 YAML 配置
+│   │   ├── kalman_filter.rs # 卡尔曼滤波器
+│   │   ├── matching.rs     # 代价矩阵和 LAPJV 分配
+│   │   ├── gmc.rs          # 稀疏光流相机运动补偿
+│   │   └── reid.rs         # ReID 外观特征
 │   └── visualizer/         # 实时可视化（minifb）
 ├── tests/
 │   ├── integration_test.rs # 集成测试
@@ -636,6 +670,7 @@ inference/
 │   ├── config.rs           # 设置置信度、IoU、图片尺寸和设备
 │   ├── tasks.rs            # 每个任务的结果概览，另含分割、语义分割、深度的原始数组
 │   ├── annotate.rs         # 绘制边界框和标签，保存标注后的图片
+│   ├── track.rs            # 跨视频帧跟踪目标
 │   └── README.md           # 示例说明
 ├── assets/                 # 测试图片
 │   ├── boats.jpg
@@ -713,6 +748,7 @@ ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --
 | `annotate`        | 为 `--save` 提供图片标注（默认）                                                         |
 | `visualize`       | 为 `--show` 提供实时窗口显示（默认）                                                     |
 | `video`           | 视频文件解码/编码（需要 FFmpeg）                                                         |
+| `track`           | 目标跟踪：`track` 命令和 `Tracker`                                                       |
 | `cuda`            | NVIDIA CUDA 支持                                                                         |
 | `tensorrt`        | NVIDIA TensorRT 优化（包含 `cuda`）                                                      |
 | `cuda-preprocess` | GPU 预处理 + TensorRT 零拷贝输入（需要 CUDA toolkit；见 [`docs/CUDA.md`](docs/CUDA.md)） |
@@ -736,7 +772,7 @@ ultralytics-inference predict --model yolo26n_openvino_model --source bus.jpg --
 | `amd`             | 便捷组合：ROCm + MIGraphX                                                                |
 | `intel`           | 便捷组合：OpenVINO + oneDNN                                                              |
 | `mobile`          | 便捷组合：NNAPI + CoreML + QNN                                                           |
-| `all`             | 便捷组合：annotate + visualize + video                                                   |
+| `all`             | 便捷组合：annotate + visualize + video + track                                           |
 
 ## 🌐 浏览器 / WebGPU（WASM）
 
@@ -901,6 +937,7 @@ Apple M4 MacBook Pro（10 核 CPU，ONNX Runtime 1.28，release 构建，100 张
 - [x] 类别过滤支持。
 - [x] 自动下载所有 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（所有 n/s/m/l/x 尺寸、所有任务）。
 - [x] 使用 YOLO26-Text 和 PaddleOCR 进行场景文字识别（`--ocr`）。
+- [x] 支持所有 Ultralytics 跟踪器的目标跟踪（`track`）。
 - [x] `--task` CLI 参数：省略 `--model` 时选择并自动下载匹配的 nano 模型；任务和模型元数据冲突时退出并报错。
 - [x] 通过 WebGPU 的 WebAssembly（WASM）浏览器推理（npm [`@ultralytics/yolo`](https://www.npmjs.com/package/@ultralytics/yolo)）。
 
