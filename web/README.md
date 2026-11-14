@@ -32,7 +32,7 @@
 
 </div>
 
-Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser, with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm fallback) and covers [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented bounding boxes](https://docs.ultralytics.com/tasks/obb), behind a small TypeScript API with a built-in `annotate()` that draws results straight to a canvas.
+Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser, with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm fallback) and covers [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented object detection](https://docs.ultralytics.com/tasks/obb), and can [track](https://docs.ultralytics.com/modes/track) detected objects across video frames, behind a small TypeScript API with a built-in `annotate()` that draws results straight to a canvas.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -136,8 +136,8 @@ async function frame() {
 frame();
 ```
 
-- `tracker` is `tracktrack.yaml` (default), `botsort.yaml`, `bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml` or
-  `fasttrack.yaml`, each with its Ultralytics default settings. Switching to another tracker starts new tracks.
+- `tracker` is `botsort.yaml`, `bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml`, `fasttrack.yaml` or
+  `tracktrack.yaml` (default), each with its Ultralytics default settings. Switching to another tracker starts new tracks.
 - The other options are those of `predict()`, except that `conf` defaults to `0.1` as in Ultralytics, so low-confidence
   boxes can keep a track alive. A new track needs a box above the tracker's `new_track_thresh`: `0.25`, or `0.3` for
   `deepocsort.yaml` and `0.7` for `tracktrack.yaml`.
@@ -145,7 +145,7 @@ frame();
   keypoints follow the kept boxes.
 - `model.resetTracker()` forgets every track. Call it before a new video, and between unrelated images: a single image
   works too, but on its own it only numbers the objects `1..N`.
-- Classification, semantic segmentation and depth models have nothing to track and return what `predict()` returns.
+- Semantic segmentation, depth and classification models have nothing to track and return what `predict()` returns.
 - `botsort.yaml` and `tracktrack.yaml` estimate camera motion with sparse optical flow, which adds about 6 to 9 ms per
   frame in wasm. The other trackers add under 0.1 ms, so `bytetrack.yaml` is the lightest choice for a live webcam.
 - ReID appearance matching runs only in the native crate, and is off by default in Ultralytics too. Custom tracker YAML

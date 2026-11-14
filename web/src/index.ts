@@ -239,8 +239,8 @@ export interface PredictOptions {
 /** Options for {@link YOLO.track}. */
 export interface TrackOptions extends PredictOptions {
   /**
-   * Tracker: `"tracktrack.yaml"` (default, like Ultralytics), `"botsort.yaml"`, `"bytetrack.yaml"`, `"ocsort.yaml"`,
-   * `"deepocsort.yaml"` or `"fasttrack.yaml"`. Changing it starts new tracks.
+   * Tracker: `"botsort.yaml"`, `"bytetrack.yaml"`, `"ocsort.yaml"`, `"deepocsort.yaml"`, `"fasttrack.yaml"` or
+   * `"tracktrack.yaml"` (default, like Ultralytics). Changing it starts new tracks.
    */
   tracker?: string;
 }

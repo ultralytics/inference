@@ -32,7 +32,7 @@
 
 </div>
 
-直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com) YOLO 模型，无需服务器，也无需 Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、[深度估计](https://docs.ultralytics.com/tasks/depth)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和[旋转边界框](https://docs.ultralytics.com/tasks/obb)，接口是一个小巧的 TypeScript API，内置的 `annotate()` 可直接把结果绘制到 canvas 上。
+直接在浏览器中运行 [Ultralytics](https://www.ultralytics.com) YOLO 模型，无需服务器，也无需 Python。本库基于 **WebGPU**（并自动回退到 CPU/wasm），支持[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、[深度估计](https://docs.ultralytics.com/tasks/depth)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和[定向目标检测](https://docs.ultralytics.com/tasks/obb)，并可在视频帧间[跟踪](https://docs.ultralytics.com/modes/track)已检测到的目标，接口是一个小巧的 TypeScript API，内置的 `annotate()` 可直接把结果绘制到 canvas 上。
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -131,14 +131,14 @@ async function frame() {
 frame();
 ```
 
-- `tracker` 可选 `tracktrack.yaml`（默认）、`botsort.yaml`、`bytetrack.yaml`、`ocsort.yaml`、`deepocsort.yaml` 或
-  `fasttrack.yaml`，均使用 Ultralytics 的默认设置。切换到其他跟踪器会开始新的轨迹。
+- `tracker` 可选 `botsort.yaml`、`bytetrack.yaml`、`ocsort.yaml`、`deepocsort.yaml`、`fasttrack.yaml` 或
+  `tracktrack.yaml`（默认），均使用 Ultralytics 的默认设置。切换到其他跟踪器会开始新的轨迹。
 - 其他选项与 `predict()` 相同，但 `conf` 与 Ultralytics 一样默认为 `0.1`，使低置信度的框也能维持已有轨迹。新轨迹需要框的
   置信度高于跟踪器的 `new_track_thresh`：`0.25`，`deepocsort.yaml` 为 `0.3`，`tracktrack.yaml` 为 `0.7`。
 - 只返回属于某条轨迹的框，`obb` 同样带有 `id`，分割掩码和姿态关键点跟随保留的框。
 - `model.resetTracker()` 会清除所有轨迹。处理新视频前，以及在互不相关的图片之间请调用它：单张图片也可以跟踪，但单独使用时
   只会把目标编号为 `1..N`。
-- 分类、语义分割和深度模型没有可跟踪的目标，返回与 `predict()` 相同的结果。
+- 语义分割、深度和分类模型没有可跟踪的目标，返回与 `predict()` 相同的结果。
 - `botsort.yaml` 和 `tracktrack.yaml` 用稀疏光流估计相机运动，在 wasm 中每帧增加约 6 到 9 ms。
   其他跟踪器增加不到 0.1 ms，因此实时摄像头最轻量的选择是 `bytetrack.yaml`。
 - ReID 外观匹配只在原生 crate 中运行，在 Ultralytics 中也默认关闭。自定义跟踪器 YAML 文件同样只支持原生 crate。

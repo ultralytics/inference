@@ -36,7 +36,7 @@
 
 </div>
 
-[Ultralytics](https://www.ultralytics.com) 基于多年计算机视觉与 AI 基础研究，打造业界领先的顶尖（SOTA）[YOLO 模型](https://www.ultralytics.com/yolo)。我们的模型持续更新以提升性能与灵活性，具有**快速**、**准确**、**易用**的特点。它们在[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、[深度估计](https://docs.ultralytics.com/tasks/depth)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和[旋转边界框](https://docs.ultralytics.com/tasks/obb)等任务上表现出色。
+[Ultralytics](https://www.ultralytics.com) 基于多年计算机视觉与 AI 基础研究，打造业界领先的顶尖（SOTA）[YOLO 模型](https://www.ultralytics.com/yolo)。我们的模型持续更新以提升性能与灵活性，具有**快速**、**准确**、**易用**的特点。它们在[目标检测](https://docs.ultralytics.com/tasks/detect)、[实例分割](https://docs.ultralytics.com/tasks/segment)、[语义分割](https://docs.ultralytics.com/tasks/semantic)、[深度估计](https://docs.ultralytics.com/tasks/depth)、[图像分类](https://docs.ultralytics.com/tasks/classify)、[姿态估计](https://docs.ultralytics.com/tasks/pose)和[定向目标检测](https://docs.ultralytics.com/tasks/obb)任务中表现出色，并可在视频帧间[跟踪](https://docs.ultralytics.com/modes/track)已检测到的目标。
 
 本库是用 Rust 编写的高性能 YOLO 推理库，基于 [ONNX Runtime](https://onnxruntime.ai) 为上述模型提供快速、安全、高效的接口。它可运行上述全部任务，支持图像、视频文件以及摄像头或 RTSP 流，API 设计与 [Ultralytics Python 包](https://github.com/ultralytics/ultralytics)保持一致，且无需 Python 或 PyTorch 运行时。
 
@@ -53,7 +53,7 @@
 - 🏷️ **自动读取元数据**：自动读取 ONNX 模型中的类别名称、任务类型和输入尺寸。
 - ⬇️ **自动下载**：本地不存在时，自动下载支持的 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（尺寸：n/s/m/l/x）。
 - 🖼️ **多输入源**：支持图片、目录、glob 模式、视频文件、摄像头和流。
-- 🎞️ **目标跟踪**：ByteTrack、BoT-SORT、OC-SORT、Deep OC-SORT、FastTrack 和 TrackTrack，支持相机运动补偿和 ReID，结果与 Ultralytics 一致（`track` 特性），也可在浏览器中使用。
+- 🎞️ **目标跟踪**：BoT-SORT、ByteTrack、OC-SORT、Deep OC-SORT、FastTrack 和 TrackTrack，支持相机运动补偿和 ReID，结果与 Ultralytics 一致（`track` 特性），也可在浏览器中使用。
 - 🪶 **轻量运行时**：不需要 PyTorch、TensorFlow 或 Python 运行时。
 
 ## ✨ 模型
@@ -302,7 +302,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker bytetrack.yaml
 ```
 
-`track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`bytetrack`、`botsort`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `tracktrack.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。
+`track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`botsort`、`bytetrack`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `tracktrack.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。
 
 `--help` 和 `--version` 也可作为标准别名使用。
 
@@ -650,8 +650,8 @@ inference/
 │   │   └── predict.rs      # predict 和 track 命令实现
 │   ├── tracker/            # 目标跟踪（track 特性），结构与 ultralytics/trackers 一致
 │   │   ├── mod.rs          # Tracker 和共享的轨迹状态
-│   │   ├── byte_tracker.rs # ByteTrack，其他跟踪器在其基础上扩展
 │   │   ├── bot_sort.rs     # BoT-SORT 外观匹配
+│   │   ├── byte_tracker.rs # ByteTrack，其他跟踪器在其基础上扩展
 │   │   ├── oc_sort.rs      # OC-SORT
 │   │   ├── deep_oc_sort.rs # Deep OC-SORT
 │   │   ├── fast_tracker.rs # FastTrack

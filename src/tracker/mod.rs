@@ -2,7 +2,7 @@
 
 //! Multi-object tracking, ported from the Ultralytics trackers.
 //!
-//! `ByteTrack`, `BoT-SORT`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`, with sparse
+//! `BoT-SORT`, `ByteTrack`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`, with sparse
 //! optical flow camera motion compensation and `ReID` appearance features from an ONNX model.
 //!
 //! [`YOLOModel::track`] runs it like `model.track(persist=True)` in Ultralytics: it keeps the
@@ -319,7 +319,7 @@ impl Tracker {
     /// Keeps the shown tracks of `result` in track order, with their Kalman filter boxes
     /// clipped to the image and their track ids. New tracks show once confirmed. A frame with no
     /// track to show keeps its detections without ids, as in Ultralytics, and results of
-    /// classification, semantic segmentation or depth are left as they are.
+    /// semantic segmentation, depth or classification are left as they are.
     ///
     /// Returns the rows of `result` before the update that its rows now are, for data kept
     /// outside it, or `None` when `result` is unchanged.
@@ -333,7 +333,7 @@ impl Tracker {
         let boxes = boxes
             .or_else(|| (result.obb.as_ref()).map(|o| (o.xywhr().to_owned(), o.conf(), o.cls())));
         if boxes.is_none()
-            && (result.probs.is_some() || result.semantic_mask.is_some() || result.depth.is_some())
+            && (result.semantic_mask.is_some() || result.depth.is_some() || result.probs.is_some())
         {
             return Ok(None);
         }
@@ -460,8 +460,8 @@ mod tests {
     #[test]
     fn test_every_tracker_keeps_ids_across_frames() {
         for kind in [
-            TrackerType::ByteTrack,
             TrackerType::BotSort,
+            TrackerType::ByteTrack,
             TrackerType::OcSort,
             TrackerType::DeepOcSort,
             TrackerType::FastTrack,

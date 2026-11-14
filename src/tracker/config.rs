@@ -10,11 +10,11 @@ use crate::error::{InferenceError, Result};
 /// Tracking algorithm, the `tracker_type` of the Ultralytics tracker configs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TrackerType {
-    /// `ByteTrack`: two association stages, high then low score detections.
-    ByteTrack,
     /// `BoT-SORT`: `ByteTrack` with a center-width-height Kalman state, camera motion compensation
     /// and optional `ReID`.
     BotSort,
+    /// `ByteTrack`: two association stages, high then low score detections.
+    ByteTrack,
     /// `OC-SORT`: `ByteTrack` with motion direction costs, observation-centric recovery and
     /// re-update.
     OcSort,
@@ -35,14 +35,14 @@ impl FromStr for TrackerType {
     /// `bytetrack.yaml`.
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.trim_end_matches(".yaml").to_ascii_lowercase().as_str() {
-            "bytetrack" => Ok(Self::ByteTrack),
             "botsort" => Ok(Self::BotSort),
+            "bytetrack" => Ok(Self::ByteTrack),
             "ocsort" => Ok(Self::OcSort),
             "deepocsort" => Ok(Self::DeepOcSort),
             "fasttrack" => Ok(Self::FastTrack),
             "tracktrack" => Ok(Self::TrackTrack),
             _ => Err(format!(
-                "Unknown tracker '{s}', expected bytetrack, botsort, ocsort, deepocsort, fasttrack, tracktrack or a YAML file"
+                "Unknown tracker '{s}', expected botsort, bytetrack, ocsort, deepocsort, fasttrack, tracktrack or a YAML file"
             )),
         }
     }

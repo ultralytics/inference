@@ -36,7 +36,7 @@
 
 </div>
 
-[Ultralytics](https://www.ultralytics.com) creates cutting-edge, state-of-the-art (SOTA) [YOLO models](https://www.ultralytics.com/yolo) built on years of foundational research in computer vision and AI. Constantly updated for performance and flexibility, our models are **fast**, **accurate**, and **easy to use**. They excel at [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented bounding box](https://docs.ultralytics.com/tasks/obb) tasks.
+[Ultralytics](https://www.ultralytics.com) creates cutting-edge, state-of-the-art (SOTA) [YOLO models](https://www.ultralytics.com/yolo) built on years of foundational research in computer vision and AI. Constantly updated for performance and flexibility, our models are **fast**, **accurate**, and **easy to use**. They excel at [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented object detection](https://docs.ultralytics.com/tasks/obb) tasks, and can [track](https://docs.ultralytics.com/modes/track) detected objects across video frames.
 
 This is a high-performance YOLO inference library written in Rust, giving those models a fast, safe, and efficient interface on [ONNX Runtime](https://onnxruntime.ai). It runs every task above over images, video files, and webcam or RTSP streams, with an API designed to match the [Ultralytics Python package](https://github.com/ultralytics/ultralytics) and no Python or PyTorch runtime required.
 
@@ -53,7 +53,7 @@ Request an Enterprise License for commercial use at [Ultralytics Licensing](http
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
 - ⬇️ **Auto Download** - Downloads supported YOLO26, YOLO11, and YOLOv8 ONNX models (sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
-- 🎞️ **Object Tracking** - ByteTrack, BoT-SORT, OC-SORT, Deep OC-SORT, FastTrack and TrackTrack with camera motion compensation and ReID, matching Ultralytics (`track` feature), also in the browser
+- 🎞️ **Object Tracking** - BoT-SORT, ByteTrack, OC-SORT, Deep OC-SORT, FastTrack and TrackTrack with camera motion compensation and ReID, matching Ultralytics (`track` feature), also in the browser
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
 ## ✨ Models
@@ -303,7 +303,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker bytetrack.yaml
 ```
 
-`track` takes every `predict` option plus `--tracker`, a tracker name (`bytetrack`, `botsort`, `ocsort`, `deepocsort`,
+`track` takes every `predict` option plus `--tracker`, a tracker name (`botsort`, `bytetrack`, `ocsort`, `deepocsort`,
 `fasttrack`, `tracktrack`, with or without `.yaml`) or a YAML file with the keys of the
 [Ultralytics tracker configs](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers). Like
 Ultralytics it defaults to `tracktrack.yaml`, `--conf 0.1` and saving to `runs/<task>/track`. `with_reid: True` downloads
@@ -660,8 +660,8 @@ inference/
 │   │   └── predict.rs      # Predict and track command implementation
 │   ├── tracker/            # Object tracking (track feature), laid out like ultralytics/trackers
 │   │   ├── mod.rs          # Tracker and the shared track state
-│   │   ├── byte_tracker.rs # ByteTrack, which the others build on
 │   │   ├── bot_sort.rs     # BoT-SORT appearance matching
+│   │   ├── byte_tracker.rs # ByteTrack, which the others build on
 │   │   ├── oc_sort.rs      # OC-SORT
 │   │   ├── deep_oc_sort.rs # Deep OC-SORT
 │   │   ├── fast_tracker.rs # FastTrack
