@@ -530,7 +530,10 @@ impl Gmc {
         let corners = frame.corners();
         let frame = Pyramid::new(frame);
         let mut warp = IDENTITY;
-        if let Some((prev, points)) = &self.prev {
+        // A frame of another size has no motion to follow from the last one.
+        if let Some((prev, points)) = &self.prev
+            && (prev.0[0].0.w, prev.0[0].0.h) == (frame.0[0].0.w, frame.0[0].0.h)
+        {
             let moved = prev.flow(&frame, points);
             let (src, dst): (Vec<[f32; 2]>, Vec<[f32; 2]>) = points
                 .iter()
@@ -623,6 +626,10 @@ mod tests {
         assert!(
             (h[0][0] - 1.0).abs() < 0.01 && h[1][0].abs() < 0.01,
             "{h:?}"
+        );
+        assert_eq!(
+            gmc.apply(&frame(6).slice_move(ndarray::s![..120, ..200, ..])),
+            IDENTITY
         );
     }
 }
