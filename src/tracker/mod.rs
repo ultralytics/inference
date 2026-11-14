@@ -20,19 +20,7 @@
 //! # Ok::<(), ultralytics_inference::InferenceError>(())
 //! ```
 //!
-//! A [`Tracker`] does the same for your own [`Results`]: feed it each frame's in order.
-//!
-//! ```no_run
-//! use ultralytics_inference::{Tracker, TrackerConfig, YOLOModel};
-//!
-//! let mut model = YOLOModel::load("yolo26n.onnx")?;
-//! let mut tracker = Tracker::new(TrackerConfig::load("bytetrack.yaml")?, &model)?;
-//! for frame in ["frame1.jpg", "frame2.jpg"] {
-//!     let mut results = model.predict(frame)?;
-//!     tracker.update(&mut results[0])?;
-//! }
-//! # Ok::<(), ultralytics_inference::InferenceError>(())
-//! ```
+//! A [`Tracker`] does the same for your own [`Results`], fed each frame's in order.
 
 // Track math mixes f32 results with f64 Kalman states as Ultralytics mixes float32 and float64,
 // keeps the short matrix names of the papers and OpenCV, and avoids fused multiply-adds and

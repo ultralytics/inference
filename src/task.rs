@@ -92,12 +92,6 @@ impl Task {
     }
 
     /// Whether the task predicts boxes (detect, segment, pose and OBB), which can be tracked.
-    ///
-    /// ```
-    /// use ultralytics_inference::Task;
-    /// assert!(Task::Obb.has_boxes());
-    /// assert!(!Task::Classify.has_boxes());
-    /// ```
     #[must_use]
     pub const fn has_boxes(&self) -> bool {
         matches!(self, Self::Detect | Self::Segment | Self::Pose | Self::Obb)

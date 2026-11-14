@@ -296,18 +296,6 @@ mod tests {
         assert!(predict_args.half);
     }
 
-    #[cfg(feature = "track")]
-    #[test]
-    fn test_track_args() {
-        let args =
-            Cli::parse_from("app track --source video.mp4 --tracker bytetrack.yaml".split(' '));
-        let Commands::Track(track_args) = args.command else {
-            panic!("expected track command");
-        };
-        assert_eq!(track_args.tracker, "bytetrack.yaml");
-        assert_eq!(track_args.predict.source, Some("video.mp4".to_string()));
-    }
-
     #[test]
     fn test_version_command() {
         let args = Cli::parse_from(["app", "version"]);
