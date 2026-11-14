@@ -49,7 +49,7 @@ use ultralytics_inference::visualizer::skeleton::{
 };
 use ultralytics_inference::{InferenceConfig, Task, Tracker, TrackerConfig};
 
-use payload::{InstanceMask, JsResults, instance_overlay};
+use payload::{InstanceMask, JsResults};
 
 mod onnx_meta;
 mod payload;
@@ -627,7 +627,8 @@ impl YoloModel {
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
-        let mut masks = Vec::new();
+        // Masks draw as they decode, or wait for tracking to pick the rows to draw.
+        let (tracking, mut masks, mut overlay) = (tracker.is_some(), Vec::new(), Vec::new());
         let mut results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
@@ -681,12 +682,19 @@ impl YoloModel {
                 self.metadata.kpt_shape,
                 self.metadata.is_rtdetr(),
                 &mut |mask, box_data| {
-                    masks.push(InstanceMask::new(mask, box_data, &self.metadata.colors));
+                    let mask = InstanceMask::new(mask, box_data, &self.metadata.colors);
+                    if tracking {
+                        masks.push(mask.into_owned());
+                    } else {
+                        mask.draw(&mut overlay);
+                    }
                 },
             )
         };
         results.colors = Arc::clone(&self.metadata.colors);
-        let overlay = track(tracker, &mut results, loose.as_ref(), &masks)?;
+        if let Some(t) = tracker {
+            overlay = track(t, &mut results, loose.as_ref(), &masks)?;
+        }
         results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
     }
 }
@@ -930,7 +938,8 @@ impl YoloPipeline {
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        let mut masks = Vec::new();
+        // Masks draw as they decode, or wait for tracking to pick the rows to draw.
+        let (tracking, mut masks, mut overlay) = (tracker.is_some(), Vec::new(), Vec::new());
         let mut results = postprocess_with_head_masks(
             views,
             self.metadata.task,
@@ -945,11 +954,18 @@ impl YoloPipeline {
             self.metadata.kpt_shape,
             self.metadata.is_rtdetr(),
             &mut |mask, box_data| {
-                masks.push(InstanceMask::new(mask, box_data, &self.metadata.colors));
+                let mask = InstanceMask::new(mask, box_data, &self.metadata.colors);
+                if tracking {
+                    masks.push(mask.into_owned());
+                } else {
+                    mask.draw(&mut overlay);
+                }
             },
         );
         results.colors = Arc::clone(&self.metadata.colors);
-        let overlay = track(tracker, &mut results, loose.as_ref(), &masks)?;
+        if let Some(t) = tracker {
+            overlay = track(t, &mut results, loose.as_ref(), &masks)?;
+        }
         results_to_js(
             &results,
             self.metadata.task,
@@ -1009,24 +1025,24 @@ fn loose_results(
     )
 }
 
-/// Track `results` and its `loose` result with `tracker`, if any, then composite the instance
-/// masks of the rows it keeps.
+/// Track `results` and its `loose` result with `tracker`, then composite the instance masks of
+/// the rows it keeps.
 fn track(
-    tracker: Option<&mut Tracker>,
+    tracker: &mut Tracker,
     results: &mut Results,
     loose: Option<&Results>,
     masks: &[InstanceMask],
 ) -> Result<Vec<u8>, JsError> {
-    let rows = match tracker {
-        Some(t) => t
-            .update(results, loose)
-            .map_err(err_ctx("tracking failed"))?,
-        None => None,
-    };
-    Ok(match rows {
-        Some(rows) => instance_overlay(rows.iter().filter_map(|&i| masks.get(i))),
-        None => instance_overlay(masks),
-    })
+    let rows = (tracker.update(results, loose)).map_err(err_ctx("tracking failed"))?;
+    let mut overlay = Vec::new();
+    match rows {
+        Some(rows) => rows
+            .iter()
+            .filter_map(|&i| masks.get(i))
+            .for_each(|m| m.draw(&mut overlay)),
+        None => masks.iter().for_each(|m| m.draw(&mut overlay)),
+    }
+    Ok(overlay)
 }
 
 /// Scale a normalized detection head's coordinates to model-input pixels in place.
