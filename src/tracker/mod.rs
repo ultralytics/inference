@@ -317,7 +317,8 @@ impl Tracker {
     /// Track the detections of the next frame.
     ///
     /// Keeps the shown tracks of `result` in track order, with their Kalman filter boxes
-    /// clipped to the image and their track ids. New tracks show once confirmed. Results of
+    /// clipped to the image and their track ids. New tracks show once confirmed. A frame with no
+    /// track to show keeps its detections without ids, as in Ultralytics, and results of
     /// classification, semantic segmentation or depth are left as they are.
     ///
     /// Returns the rows of `result` before the update that its rows now are, for data kept
@@ -392,11 +393,13 @@ impl Tracker {
             .iter()
             .filter(|t| t.activated && t.frame_id == self.frame_id)
             .collect();
+        // Like Ultralytics, a frame with no track to show keeps its detections, unless new tracks
+        // wait to be confirmed.
         if shown.is_empty() {
             if self.tracked.iter().all(|t| t.activated) {
                 return None;
             }
-            keep_rows(result, &[]); // hide new tracks until they are confirmed
+            keep_rows(result, &[]);
             return Some(Vec::new());
         }
         let idx: Vec<usize> = shown.iter().map(|t| t.idx).collect();
