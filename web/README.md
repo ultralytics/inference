@@ -32,7 +32,7 @@
 
 </div>
 
-Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser, with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm fallback) and covers [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented bounding boxes](https://docs.ultralytics.com/tasks/obb), behind a small TypeScript API with a built-in `annotate()` that draws results straight to a canvas.
+Run [Ultralytics](https://www.ultralytics.com) YOLO models directly in the browser, with no server and no Python. It runs on **WebGPU** (with an automatic CPU/wasm fallback) and covers [object detection](https://docs.ultralytics.com/tasks/detect), [instance segmentation](https://docs.ultralytics.com/tasks/segment), [semantic segmentation](https://docs.ultralytics.com/tasks/semantic), [depth estimation](https://docs.ultralytics.com/tasks/depth), [image classification](https://docs.ultralytics.com/tasks/classify), [pose estimation](https://docs.ultralytics.com/tasks/pose), and [oriented object detection](https://docs.ultralytics.com/tasks/obb), and can [track](https://docs.ultralytics.com/modes/track) detected objects across video frames, behind a small TypeScript API with a built-in `annotate()` that draws results straight to a canvas.
 
 ```ts
 import { YOLO, annotate } from "@ultralytics/yolo";
@@ -113,6 +113,46 @@ async function frame() {
 }
 ```
 
+### Tracking
+
+`track()` follows objects across video frames like Ultralytics `model.track(persist=True)`. Each call takes one frame,
+in any form `predict()` accepts, and the tracker lives in the model between calls, so every tracked box gets an `id` that
+carries over from frame to frame. It works for ONNX and LiteRT detection, segmentation, pose and OBB models, on a
+webcam, a video or any other frame source:
+
+```ts
+const model = await YOLO.load("/models/yolo26n.onnx");
+video.srcObject = await navigator.mediaDevices.getUserMedia({ video: true }); // or video.src = "clip.mp4"
+await video.play();
+
+async function frame() {
+  const image = await createImageBitmap(video); // draw the same frame that was tracked
+  const results = await model.track(image, { tracker: "tracktrack.yaml" });
+  console.log(results.boxes.map((box) => box.id));
+  await annotate(canvas, image, results); // labels read "id:1 person 87%"
+  image.close();
+  requestAnimationFrame(frame);
+}
+frame();
+```
+
+- `tracker` is `botsort.yaml`, `bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml`, `fasttrack.yaml` or
+  `tracktrack.yaml` (default), each with its Ultralytics default settings. Switching to another tracker starts new tracks.
+- The other options are those of `predict()`, except that `conf` defaults to `0.1` as in Ultralytics, so low-confidence
+  boxes can keep a track alive. A new track needs a box above the tracker's `new_track_thresh`: `0.25`, or `0.3` for
+  `deepocsort.yaml` and `0.7` for `tracktrack.yaml`.
+- Only boxes that belong to a track are returned, except that a frame with no track to show keeps its boxes without
+  `id`, as in Ultralytics. `obb` gets `id` the same way, and segmentation masks and pose
+  keypoints follow the kept boxes.
+- `model.resetTracker()` forgets every track. Call it before a new video, and between unrelated images: a single image
+  works too, but on its own it only numbers the objects `1..N`.
+- Semantic segmentation, depth and classification models have nothing to track and return what `predict()` returns.
+- `botsort.yaml` and `tracktrack.yaml` (the default) estimate camera motion with sparse optical flow, which adds about 6
+  to 9 ms per frame in wasm. The other trackers add under 0.1 ms, so `bytetrack.yaml` is the lightest choice for a live
+  webcam.
+- ReID appearance matching runs only in the native crate, and is off by default in Ultralytics too. Custom tracker YAML
+  files are native only as well.
+
 ## ✨ Models
 
 <a href="https://docs.ultralytics.com/tasks" target="_blank">
@@ -142,15 +182,15 @@ GitHub release assets send no `Access-Control-Allow-Origin`, so a browser cannot
 
 ## 📐 Results Shape
 
-`predict()` resolves to a `Results` object whose field names match the
-Rust/Ultralytics `Results` API one-to-one:
+`predict()` and `track()` resolve to a `Results` object whose field names match the
+Rust/Ultralytics `Results` API one-to-one, with `id` set by `track()`:
 
 | Field              | Type                                                                 | Tasks                 |
 | ------------------ | -------------------------------------------------------------------- | --------------------- |
 | `task`             | `string`                                                             | all                   |
 | `width` / `height` | `number`                                                             | all                   |
-| `boxes`            | `{ x1, y1, x2, y2, conf, cls, name, color }[]`                       | detect, segment, pose |
-| `obb`              | `{ x, y, w, h, angle, conf, cls, name, color }[]`                    | obb                   |
+| `boxes`            | `{ x1, y1, x2, y2, id?, conf, cls, name, color }[]`                  | detect, segment, pose |
+| `obb`              | `{ x, y, w, h, angle, id?, conf, cls, name, color }[]`               | obb                   |
 | `keypoints`        | `{ points: [x, y, conf][], color }[]`                                | pose                  |
 | `probs`            | `{ top1, top5, top1conf, top5conf, name, top5names, color } \| null` | classify              |
 | `masks`            | `Uint8Array` (RGBA overlay, `width*height*4`)                        | segment, semantic     |

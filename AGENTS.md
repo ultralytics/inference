@@ -35,13 +35,13 @@ After opening a PR:
 cargo build
 
 # Run all tests as CI does on Linux/Windows (macOS CI uses "coreml,annotate")
-cargo test --no-default-features --features annotate
+cargo test --no-default-features --features annotate,track
 
 # Run one test by name filter (add -- --ignored --exact for the network e2e tests)
 cargo test --no-default-features --features annotate test_boxes_xyxy
 
 # Lint exactly as CI (ci.yml `test` job; macOS swaps in "coreml,annotate")
-cargo clippy --all-targets --no-default-features --features annotate -- -D warnings
+cargo clippy --all-targets --no-default-features --features annotate,track -- -D warnings
 
 # Format (checked with --check in ci.yml and format.yml)
 cargo fmt --all
@@ -65,9 +65,10 @@ cargo run -- predict
 Rust workspace with two crates plus an npm wrapper, all versioned together from the root `Cargo.toml`:
 
 - Root crate `ultralytics-inference`: YOLO inference library (`src/lib.rs`) and CLI binary (`src/main.rs`, thin wrapper over `src/cli/`). Pipeline: `source.rs` (images/dirs/globs/video/webcam) → `preprocessing.rs` (fused LUT letterbox) → `model.rs` (`YOLOModel`, the ONNX Runtime session via `ort`, configured by `inference.rs`'s `InferenceConfig`) → `postprocessing.rs` → `results.rs` (`Results`/`Boxes`/`Masks`/`Keypoints`/`Probs`/`Obb`/`SemanticMask`/`DepthMap`/`Speed`, mirroring the Ultralytics Python API). `model.rs` reads embedded ONNX metadata (`metadata.rs`) and auto-downloads known YOLOv8/YOLO11/YOLO26 models and sample images (`download.rs`).
+- `src/tracker/` (`track` feature): the Ultralytics trackers, one file each like `ultralytics/trackers` (`byte_tracker.rs` holds the shared step, `bot_sort.rs`, `oc_sort.rs`, `deep_oc_sort.rs`, `fast_tracker.rs` and `track_tracker.rs` add to it), with `config.rs`, `kalman_filter.rs`, `matching.rs`, pure-Rust sparse optical flow GMC (`gmc.rs`) and ONNX ReID (`reid.rs`); TrackTrack is the default as in Ultralytics; `YOLOModel::track` keeps a `Tracker` between calls like `model.track(persist=True)`, `Tracker::update` takes each frame's `Results` and, for TrackTrack on NMS models, its loose-NMS `Results`, and the `track` CLI command runs it. It also builds for wasm without `reid.rs`, so `crates/web` tracks ONNX and LiteRT results behind the npm `track()`.
 - `crates/web` (`ultralytics-inference-web`, `publish = false`): wasm32-only WebGPU bindings via `ort-web`. Excluded from `default-members`, so plain `cargo build`/`cargo test` from the root skip it; it only builds for `--target wasm32-unknown-unknown`.
 - `web/`: npm package `@ultralytics/yolo` — TypeScript wrapper (`web/src/index.ts`) over the wasm-pack output of `crates/web`, with an optional LiteRT.js backend for `.tflite` models.
-- GPU/accelerator features (`cuda`, `tensorrt`, `coreml`, …) gate no public API; docs.rs builds with `annotate,visualize,video` only (see `[package.metadata.docs.rs]`).
+- GPU/accelerator features (`cuda`, `tensorrt`, `coreml`, …) gate no public API; docs.rs builds with `annotate,visualize,video,track` only (see `[package.metadata.docs.rs]`).
 
 ## Conventions
 

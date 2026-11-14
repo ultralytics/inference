@@ -44,6 +44,11 @@ fn run() {
             set_verbose(args.verbose);
             run_prediction(args);
         }
+        #[cfg(feature = "track")]
+        Commands::Track(args) => {
+            set_verbose(args.predict.verbose);
+            ultralytics_inference::cli::predict::run_tracking(args);
+        }
         Commands::Version => {
             println!(
                 "{} {}",

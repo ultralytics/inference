@@ -90,6 +90,12 @@ impl Task {
     pub fn default_model(&self) -> String {
         format!("yolo26n{}.onnx", self.model_suffix())
     }
+
+    /// Whether the task predicts boxes (detect, segment, pose and OBB), which can be tracked.
+    #[must_use]
+    pub const fn has_boxes(&self) -> bool {
+        matches!(self, Self::Detect | Self::Segment | Self::Pose | Self::Obb)
+    }
 }
 
 impl fmt::Display for Task {

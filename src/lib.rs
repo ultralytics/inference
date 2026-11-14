@@ -119,6 +119,9 @@
 //! # Read Korean, Cyrillic, Arabic and other scripts with a PaddleOCR language model
 //! ultralytics-inference predict --ocr korean_PP-OCRv5_mobile_rec --source sign.jpg
 //!
+//! # Track objects in a video (`track` and `video` features)
+//! ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker tracktrack.yaml
+//!
 //! # Show help
 //! ultralytics-inference help
 //!
@@ -133,7 +136,7 @@
 //! | `--model` | `-m` | Path to ONNX model file; auto-downloaded if a known YOLO26/YOLO11/YOLOv8 name | `yolo26n.onnx` |
 //! | `--task` | | Task type (`detect`, `segment`, `semantic`\*, `depth`\*, `classify`, `pose`, `obb`); selects nano model when `--model` is omitted | `detect` |
 //! | `--source` | `-s` | Input source (image, directory, glob, video, webcam index, or URL) | Task-dependent sample assets |
-//! | `--conf` | | Confidence threshold | `0.25` |
+//! | `--conf` | | Confidence threshold | `0.25` (`0.1` for `track`) |
 //! | `--iou` | | `IoU` threshold for NMS | `0.5` |
 //! | `--max-det` | | Maximum number of detections | `300` |
 //! | `--imgsz` | | Inference image size | Model metadata |
@@ -154,6 +157,7 @@
 //! | `--device` | | Device (cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, migraphx:0, xnnpack) | auto (best available provider; `cpu` when no accelerator feature is enabled) |
 //! | `--verbose [<BOOL>]` | | Show verbose output | `true` |
 //! | `--classes` | | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"` | all classes |
+//! | `--tracker` | | `track` only: tracker name or YAML file | `tracktrack.yaml` |
 //!
 //! `[<BOOL>]` marks a flag whose value is optional: passing it bare (`--rect`) sets
 //! it to `true`, and an explicit `--rect false` or `--rect=false` turns it off.
@@ -367,6 +371,7 @@
 //! | `annotate` | Image annotation for `--save` (default) |
 //! | `visualize` | Real-time window display for `--show` (default) |
 //! | `video` | Video file decoding/encoding (requires `FFmpeg`) |
+//! | `track` | Object tracking: the `track` command and `Tracker` |
 //! | `cuda` | NVIDIA CUDA acceleration |
 //! | `tensorrt` | NVIDIA `TensorRT` optimization (includes `cuda`) |
 //! | `cuda-preprocess` | GPU preprocessing with zero-copy `TensorRT` input |
@@ -390,7 +395,7 @@
 //! | `amd` | Convenience: `rocm` + `migraphx` |
 //! | `intel` | Convenience: `openvino` + `onednn` |
 //! | `mobile` | Convenience: `nnapi` + `coreml` + `qnn` |
-//! | `all` | Convenience: `annotate` + `visualize` + `video` |
+//! | `all` | Convenience: `annotate` + `visualize` + `video` + `track` |
 //!
 //! ## License
 //!
@@ -463,6 +468,8 @@ mod cuda_inference;
 pub mod preprocessing;
 pub mod results;
 pub mod task;
+#[cfg(feature = "track")]
+pub mod tracker;
 pub mod utils;
 
 pub use device::Device;
@@ -476,6 +483,8 @@ pub use results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, Semant
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::{Source, SourceIterator, SourceMeta};
 pub use task::Task;
+#[cfg(feature = "track")]
+pub use tracker::{GmcMethod, Tracker, TrackerConfig, TrackerType};
 
 /// Library version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

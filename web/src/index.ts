@@ -16,6 +16,10 @@
  * for (const box of results.boxes) {
  *   console.log(box.name, box.conf, box.x1, box.y1, box.x2, box.y2);
  * }
+ *
+ * // Tracks carry over between calls, like `model.track(persist=True)` in Ultralytics.
+ * const tracked = await model.track(videoElement, { tracker: "tracktrack.yaml" });
+ * console.log(tracked.boxes.map((box) => box.id));
  * ```
  */
 
@@ -45,6 +49,8 @@ export interface Box {
   y1: number;
   x2: number;
   y2: number;
+  /** Track id, set by {@link YOLO.track}. */
+  id?: number;
   conf: number;
   cls: number;
   name: string;
@@ -58,6 +64,8 @@ export interface Obb {
   w: number;
   h: number;
   angle: number;
+  /** Track id, set by {@link YOLO.track}. */
+  id?: number;
   conf: number;
   cls: number;
   name: string;
@@ -228,13 +236,22 @@ export interface PredictOptions {
   depthViz?: "metric" | "disparity";
 }
 
+/** Options for {@link YOLO.track}. */
+export interface TrackOptions extends PredictOptions {
+  /**
+   * Tracker: `"botsort.yaml"`, `"bytetrack.yaml"`, `"ocsort.yaml"`, `"deepocsort.yaml"`, `"fasttrack.yaml"` or
+   * `"tracktrack.yaml"` (default, like Ultralytics). Changing it starts new tracks.
+   */
+  tracker?: string;
+}
+
 /** Options for {@link annotate}. */
 export interface AnnotateOptions {
   /** Box/line width in pixels. Defaults to a value scaled to the image size. */
   lineWidth?: number;
   /** Font CSS string. Defaults to a size scaled to the image. */
   font?: string;
-  /** Draw `class_name confidence%` labels. Default `true`. */
+  /** Draw `id:track_id class_name confidence%` labels. Default `true`. */
   labels?: boolean;
   /** Draw pose keypoints and skeleton. Default `true`. */
   keypoints?: boolean;
@@ -543,6 +560,7 @@ interface PredictParams {
   classes: Uint32Array | undefined;
   colormap: string;
   depthViz: string;
+  tracker: string | undefined;
 }
 
 /** Backend behind {@link YOLO}: returns the wasm `Results` payload either way. */
@@ -552,6 +570,7 @@ interface Engine {
   readonly names: Record<number, string>;
   predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown>;
   predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown>;
+  resetTracker(): void;
   free(): void;
 }
 
@@ -568,10 +587,13 @@ class OrtEngine implements Engine {
     return this.model.names as Record<number, string>;
   }
   predictDrawable(data: Uint8Array, width: number, height: number, p: PredictParams): Promise<unknown> {
-    return this.model.predict_rgba(data, width, height, p.conf, p.iou, p.classes, p.colormap, p.depthViz);
+    return this.model.predict_rgba(data, width, height, p.conf, p.iou, p.classes, p.colormap, p.depthViz, p.tracker);
   }
   predictEncoded(bytes: Uint8Array, p: PredictParams): Promise<unknown> {
-    return this.model.predict(bytes, p.conf, p.iou, p.classes, p.colormap, p.depthViz);
+    return this.model.predict(bytes, p.conf, p.iou, p.classes, p.colormap, p.depthViz, p.tracker);
+  }
+  resetTracker(): void {
+    this.model.reset_tracker();
   }
   free(): void {
     this.model.free();
@@ -619,7 +641,12 @@ class LiteRtEngine implements Engine {
       p.classes,
       p.colormap,
       p.depthViz,
+      p.tracker,
     );
+  }
+
+  resetTracker(): void {
+    this.pipeline.reset_tracker();
   }
 
   free(): void {
@@ -705,6 +732,29 @@ export class YOLO {
    * @param options Confidence/IoU thresholds, class filter, and depth colorizing.
    */
   async predict(image: ImageInput, options?: PredictOptions): Promise<Results> {
+    return this.run(image, options);
+  }
+
+  /**
+   * Run inference on the next frame of a video and track its objects, like Ultralytics
+   * `model.track(persist=True)`: tracks carry over between calls and every tracked box gets an
+   * `id` (a frame with no track to show keeps its boxes without one, as in Ultralytics). Confidence defaults to `0.1` here, as in Ultralytics. Call {@link resetTracker}
+   * before a new video.
+   *
+   * @param image The frame to run on, as in {@link predict}.
+   * @param options The {@link predict} options and the tracker.
+   */
+  async track(image: ImageInput, options?: TrackOptions): Promise<Results> {
+    return this.run(image, options, options?.tracker ?? "tracktrack.yaml");
+  }
+
+  /** Forget the tracks of {@link track}, so the next frame starts a new video. */
+  resetTracker(): void {
+    this.queue = this.queue.then(() => this.engine.resetTracker());
+  }
+
+  /** Run one prediction in turn, tracked by `tracker` when given. */
+  private async run(image: ImageInput, options: PredictOptions | undefined, tracker?: string): Promise<Results> {
     const p: PredictParams = {
       // Unset thresholds fall back to the Rust `InferenceConfig` defaults.
       conf: options?.conf,
@@ -714,6 +764,7 @@ export class YOLO {
       // defaults, so the default lives in exactly one place.
       colormap: options?.colormap ?? "",
       depthViz: options?.depthViz ?? "",
+      tracker,
     };
     let predict: () => Promise<unknown>;
     if (isDrawable(image)) {
@@ -847,6 +898,7 @@ export async function annotate(
     }
   };
 
+  const caption = (d: Box | Obb) => `${d.id === undefined ? "" : `id:${d.id} `}${d.name} ${(d.conf * 100).toFixed(0)}%`;
   const label = (text: string, x: number, y: number, color: string) => {
     if (!showLabels) return;
     const pad = Math.round(fontSize * 0.2);
@@ -864,7 +916,7 @@ export async function annotate(
   for (const b of results.boxes) {
     ctx.strokeStyle = b.color;
     ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
-    label(`${b.name} ${(b.conf * 100).toFixed(0)}%`, b.x1, b.y1, b.color);
+    label(caption(b), b.x1, b.y1, b.color);
   }
 
   // Oriented boxes (obb): draw the rotated rectangle.
@@ -887,7 +939,7 @@ export async function annotate(
     for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i][0], corners[i][1]);
     ctx.closePath();
     ctx.stroke();
-    label(`${o.name} ${(o.conf * 100).toFixed(0)}%`, corners[0][0], corners[0][1], color);
+    label(caption(o), corners[0][0], corners[0][1], color);
   }
 
   // Pose keypoints + skeleton, colored with the engine's pose palette (per-limb

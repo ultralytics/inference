@@ -7,7 +7,7 @@
 ```toml
 # Cargo.toml
 [dependencies]
-ultralytics-inference = { version = "0.0.59", features = ["openvino-native"] }
+ultralytics-inference = { version = "0.0.60", features = ["openvino-native"] }
 ```
 
 ```bash

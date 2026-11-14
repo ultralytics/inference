@@ -19,7 +19,7 @@ const MODEL_FAMILIES: &[&str] = &["yolo26", "yolo11", "yolov8"];
 const MODEL_SIZES: &[&str] = &["n", "s", "m", "l", "x"];
 const MODEL_VARIANTS: &[&str] = &["", "-seg", "-pose", "-obb", "-cls"];
 /// Variants only available for the yolo26 family.
-const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth", "-text"];
+const YOLO26_ONLY_VARIANTS: &[&str] = &["-sem", "-depth", "-text", "-reid"];
 /// Scripts of the `PaddleOCR` PP-OCRv5 language recognizers, `{script}_PP-OCRv5_mobile_rec.onnx`.
 const OCR_LANGUAGES: &[&str] = &[
     "arabic",
@@ -37,7 +37,7 @@ const OCR_LANGUAGES: &[&str] = &[
 
 /// Every auto-downloadable model filename, as the cross product of family, size, and variant.
 ///
-/// `-sem`, `-depth` and `-text` are only emitted for the `yolo26` family, followed by the
+/// `-sem`, `-depth`, `-text` and `-reid` are only emitted for the `yolo26` family, followed by the
 /// `PaddleOCR` models that read text and its language recognizers.
 fn downloadable_models() -> Vec<String> {
     MODEL_FAMILIES
@@ -81,6 +81,7 @@ fn supported_models_help() -> String {
         "-pose",
         "-obb",
         "-text (yolo26 only, OBB text detectors for --ocr)",
+        "-reid (yolo26 only, appearance features for tracking)",
     ];
     let sizes_display = MODEL_SIZES.join(", ");
     let variants_joined = variants_display.join(", ");

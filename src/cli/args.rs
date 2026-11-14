@@ -13,7 +13,7 @@ use clap::{Args, Parser, Subcommand};
     --task <TASK>          Task type: detect, segment, semantic, depth, classify, pose, obb [default: detect]
                            Selects the matching nano model when --model is omitted
     --source, -s <SOURCE>  Input source (image, directory, glob, video, webcam, or URL)
-    --conf <CONF>          Confidence threshold [default: 0.25]
+    --conf <CONF>          Confidence threshold [default: 0.25, 0.1 for track]
     --iou <IOU>            IoU threshold for NMS [default: 0.5]
     --max-det <MAX_DET>    Maximum number of detections [default: 300]
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
@@ -36,6 +36,9 @@ use clap::{Args, Parser, Subcommand};
     --verbose [<BOOL>]     Show verbose output [default: true]
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
+Track Options (with the track feature, plus the predict options):
+    --tracker <TRACKER>    botsort, bytetrack, ocsort, deepocsort, fasttrack, tracktrack or a YAML file [default: tracktrack.yaml]
+
 Examples:
     ultralytics-inference predict
     ultralytics-inference predict --task segment
@@ -53,7 +56,8 @@ Examples:
     ultralytics-inference predict --source assets/ --save --quantize 16
     ultralytics-inference predict --source image.jpg --device cuda:0
     ultralytics-inference predict --source image.jpg --classes 0
-    ultralytics-inference predict --source image.jpg --line-width 4 --show-conf false"#)]
+    ultralytics-inference predict --source image.jpg --line-width 4 --show-conf false
+    ultralytics-inference track --source video.mp4 --tracker tracktrack.yaml"#)]
 pub struct Cli {
     #[command(subcommand)]
     /// Subcommand to execute.
@@ -65,6 +69,9 @@ pub struct Cli {
 pub enum Commands {
     /// Run inference on an image, video, or stream
     Predict(PredictArgs),
+    /// Track objects across the frames of a video or stream
+    #[cfg(feature = "track")]
+    Track(TrackArgs),
     /// Print version information
     Version,
 }
@@ -182,6 +189,22 @@ pub struct PredictArgs {
     /// shell argument parsing issues (e.g. use --classes 0,1 not --classes 0, 1).
     #[arg(long, allow_hyphen_values = true)]
     pub classes: Option<String>,
+}
+
+/// Arguments for the track command, whose confidence threshold defaults to
+/// [`InferenceConfig::DEFAULT_TRACK_CONF`] like Ultralytics `model.track()`.
+#[cfg(feature = "track")]
+#[derive(Args, Debug)]
+#[command(mut_arg("conf", |a| a.default_value("0.1")))]
+pub struct TrackArgs {
+    /// Prediction arguments.
+    #[command(flatten)]
+    pub predict: PredictArgs,
+
+    /// Tracker: botsort, bytetrack, ocsort, deepocsort, fasttrack, tracktrack, or a YAML file
+    /// with the keys of the Ultralytics tracker configs
+    #[arg(long, default_value = "tracktrack.yaml")]
+    pub tracker: String,
 }
 
 /// Parse class IDs from various formats: `"1,2,3"`, `"[1,2,3]"`, `"(1,2,3)"`

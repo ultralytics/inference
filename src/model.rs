@@ -195,6 +195,16 @@ pub struct YOLOModel {
     /// standard CPU preprocess path runs.
     #[cfg(feature = "cuda-preprocess")]
     cuda_preprocessor: Option<crate::cuda_inference::CudaPreprocessor>,
+    /// The tracker of [`Self::track`], with the tracker name or YAML it was loaded from.
+    #[cfg(feature = "track")]
+    tracker: Option<(String, crate::tracker::Tracker)>,
+    /// The confidence [`Self::track`] uses in place of the configured one: the Ultralytics track
+    /// default for a model from [`Self::load`], which has no config to keep.
+    #[cfg(feature = "track")]
+    track_conf: Option<f32>,
+    /// While a tracker asks for it, the NMS `IoU` of a second postprocess of each image, whose
+    /// result follows the image's own one ([`crate::tracker::Tracker::loose_iou`]).
+    pub(crate) loose_iou: Option<f32>,
 }
 
 #[allow(
@@ -226,7 +236,13 @@ impl YOLOModel {
     /// # Ok::<(), ultralytics_inference::InferenceError>(())
     /// ```
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Self::load_with_config(path, InferenceConfig::default())
+        let model = Self::load_with_config(path, InferenceConfig::default())?;
+        #[cfg(feature = "track")]
+        let model = Self {
+            track_conf: Some(InferenceConfig::DEFAULT_TRACK_CONF),
+            ..model
+        };
+        Ok(model)
     }
 
     /// Load a YOLO model with custom configuration.
@@ -724,6 +740,11 @@ impl YOLOModel {
             output_names,
             config,
             warmed_up: false,
+            #[cfg(feature = "track")]
+            tracker: None,
+            #[cfg(feature = "track")]
+            track_conf: None,
+            loose_iou: None,
             fp16_input,
             execution_provider: provider_name.to_string(),
             is_dynamic,
@@ -807,6 +828,11 @@ impl YOLOModel {
             },
             metadata,
             warmed_up: false,
+            #[cfg(feature = "track")]
+            tracker: None,
+            #[cfg(feature = "track")]
+            track_conf: None,
+            loose_iou: None,
             fp16_input: false,
             execution_provider: "OpenVINO".to_owned(),
             is_dynamic: false,
@@ -1100,6 +1126,7 @@ impl YOLOModel {
         paths: &[String],
         speed: &Speed,
         inference_shape: (u32, u32),
+        loose_iou: Option<f32>,
     ) -> Vec<Vec<Results>> {
         let start_postprocess = Instant::now();
         // Each image decodes independently, so a batch fans out across cores.
@@ -1108,22 +1135,29 @@ impl YOLOModel {
             .zip(preprocessed)
             .enumerate()
             .map(|(i, (orig_img, pre))| {
-                let mut results = postprocess_with_head(
-                    Self::slice_batch_output(outputs, i),
-                    metadata.task,
-                    pre,
-                    config,
-                    Arc::clone(&metadata.names),
-                    orig_img,
-                    paths.get(i).cloned().unwrap_or_default(),
-                    speed.clone(),
-                    inference_shape,
-                    metadata.end2end,
-                    metadata.kpt_shape,
-                    metadata.is_rtdetr(),
-                );
-                results.colors = Arc::clone(&metadata.colors);
-                vec![results]
+                let post = |config: &InferenceConfig, orig_img| {
+                    let mut results = postprocess_with_head(
+                        Self::slice_batch_output(outputs, i),
+                        metadata.task,
+                        pre,
+                        config,
+                        Arc::clone(&metadata.names),
+                        orig_img,
+                        paths.get(i).cloned().unwrap_or_default(),
+                        speed.clone(),
+                        inference_shape,
+                        metadata.end2end,
+                        metadata.kpt_shape,
+                        metadata.is_rtdetr(),
+                    );
+                    results.colors = Arc::clone(&metadata.colors);
+                    results
+                };
+                let loose = loose_iou
+                    .map(|iou| post(&config.clone().with_iou(iou), Array3::zeros((0, 0, 3))));
+                std::iter::once(post(config, orig_img))
+                    .chain(loose)
+                    .collect()
             })
             .collect();
         Self::apply_postprocess_time(batch_results, start_postprocess)
@@ -1184,6 +1218,7 @@ impl YOLOModel {
         paths: &[String],
         speed: &Speed,
         inference_shape: (u32, u32),
+        loose_iou: Option<f32>,
     ) -> Result<Vec<Vec<Results>>> {
         let output = |name: &String| {
             outputs
@@ -1237,6 +1272,7 @@ impl YOLOModel {
             paths,
             speed,
             inference_shape,
+            loose_iou,
         ))
     }
 
@@ -1521,6 +1557,79 @@ impl YOLOModel {
         })?;
 
         self.predict_image(&img, path.to_string_lossy().to_string())
+    }
+
+    /// Run inference on an image file and track its objects across calls, like Ultralytics
+    /// `model.track(source, tracker=..., persist=True)`.
+    ///
+    /// `tracker` is a tracker name (`tracktrack`, `botsort.yaml`, ...) or a YAML file with the keys
+    /// of the Ultralytics tracker configs. Tracks carry over between calls until `tracker`
+    /// changes or [`Self::reset_tracker`] is called, as before a new video. A model from
+    /// [`Self::load`] tracks at [`InferenceConfig::DEFAULT_TRACK_CONF`] like Ultralytics, since
+    /// trackers need the low-score detections, and one from [`Self::load_with_config`] at its
+    /// configured confidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image can't be loaded, inference fails, or the tracker or its
+    /// `ReID` model can't be loaded.
+    #[cfg(feature = "track")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn track<P: AsRef<Path>>(&mut self, path: P, tracker: &str) -> Result<Vec<Results>> {
+        self.tracked(tracker, |model| model.predict(path))
+    }
+
+    /// [`Self::track`] on a `DynamicImage`, such as a video frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if inference fails, or the tracker or its `ReID` model can't be loaded.
+    #[cfg(feature = "track")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn track_image(
+        &mut self,
+        image: &DynamicImage,
+        path: String,
+        tracker: &str,
+    ) -> Result<Vec<Results>> {
+        self.tracked(tracker, |model| model.predict_image(image, path))
+    }
+
+    /// Forget the tracks of [`Self::track`], to start a new video.
+    #[cfg(feature = "track")]
+    pub fn reset_tracker(&mut self) {
+        self.tracker = None;
+    }
+
+    /// Run `predict` with the confidence trackers need and track its results with `tracker`.
+    #[cfg(feature = "track")]
+    fn tracked(
+        &mut self,
+        tracker: &str,
+        predict: impl FnOnce(&mut Self) -> Result<Vec<Results>>,
+    ) -> Result<Vec<Results>> {
+        use crate::tracker::{Tracker, TrackerConfig};
+        if self
+            .tracker
+            .as_ref()
+            .is_none_or(|(name, _)| name != tracker)
+        {
+            let new = Tracker::new(TrackerConfig::load(tracker)?, self)?;
+            self.tracker = Some((tracker.to_owned(), new));
+        }
+        let conf = self.config.confidence_threshold;
+        if let Some(track_conf) = self.track_conf {
+            self.config.confidence_threshold = track_conf;
+        }
+        self.loose_iou = (self.tracker.as_ref()).and_then(|(_, t)| t.loose_iou(&self.metadata));
+        let results = predict(self);
+        (self.config.confidence_threshold, self.loose_iou) = (conf, None);
+        let mut results = results?;
+        let loose = results.drain(1..).next();
+        if let (Some((_, t)), Some(result)) = (&mut self.tracker, results.first_mut()) {
+            t.update(result, loose.as_ref())?;
+        }
+        Ok(results)
     }
 
     /// Run inference on a `DynamicImage`.
@@ -1903,6 +2012,7 @@ impl YOLOModel {
                 paths,
                 &speed,
                 inference_shape,
+                self.loose_iou,
             ));
         };
         Self::postprocess_outputs(
@@ -1916,6 +2026,7 @@ impl YOLOModel {
             paths,
             &speed,
             inference_shape,
+            self.loose_iou,
         )
     }
 
@@ -2122,6 +2233,7 @@ impl YOLOModel {
                 paths,
                 &speed,
                 inference_shape,
+                self.loose_iou,
             ));
         }
 
@@ -2165,6 +2277,7 @@ impl YOLOModel {
             paths,
             &speed,
             inference_shape,
+            self.loose_iou,
         )
     }
 
