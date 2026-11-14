@@ -237,19 +237,22 @@ impl Gray {
         });
         // Local maxima above the quality floor, away from the border.
         let floor = eig.iter().copied().fold(0.0, f32::max) * QUALITY;
-        let eig = &eig;
-        let mut found: Vec<(f32, usize)> = (1..h - 1)
+        let rows: Vec<Vec<(f32, usize)>> = (1..h - 1)
             .into_par_iter()
-            .flat_map_iter(|y| {
-                (1..w - 1).filter_map(move |x| {
-                    let v = eig[y * w + x];
-                    let peak = || {
-                        (y - 1..=y + 1).all(|j| eig[j * w + x - 1..][..3].iter().all(|&n| n <= v))
-                    };
-                    (v > floor && peak()).then_some((v, y * w + x))
-                })
+            .map(|y| {
+                (1..w - 1)
+                    .filter_map(|x| {
+                        let v = eig[y * w + x];
+                        let peak = || {
+                            (y - 1..=y + 1)
+                                .all(|j| eig[j * w + x - 1..][..3].iter().all(|&n| n <= v))
+                        };
+                        (v > floor && peak()).then_some((v, y * w + x))
+                    })
+                    .collect()
             })
             .collect();
+        let mut found = rows.concat();
         // Strongest first, and of equals the later pixel, like OpenCV's sort.
         found.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)));
         found
