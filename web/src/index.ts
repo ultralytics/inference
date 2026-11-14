@@ -737,8 +737,8 @@ export class YOLO {
 
   /**
    * Run inference on the next frame of a video and track its objects, like Ultralytics
-   * `model.track(persist=True)`: tracks carry over between calls and every kept box gets an
-   * `id`. Confidence defaults to `0.1` here, as in Ultralytics. Call {@link resetTracker}
+   * `model.track(persist=True)`: tracks carry over between calls and every tracked box gets an
+   * `id` (a frame with no track to show keeps its boxes without one, as in Ultralytics). Confidence defaults to `0.1` here, as in Ultralytics. Call {@link resetTracker}
    * before a new video.
    *
    * @param image The frame to run on, as in {@link predict}.

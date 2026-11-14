@@ -116,7 +116,7 @@ async function frame() {
 ### Tracking
 
 `track()` follows objects across video frames like Ultralytics `model.track(persist=True)`. Each call takes one frame,
-in any form `predict()` accepts, and the tracker lives in the model between calls, so every kept box gets an `id` that
+in any form `predict()` accepts, and the tracker lives in the model between calls, so every tracked box gets an `id` that
 carries over from frame to frame. It works for ONNX and LiteRT detection, segmentation, pose and OBB models, on a
 webcam, a video or any other frame source:
 
@@ -141,7 +141,8 @@ frame();
 - The other options are those of `predict()`, except that `conf` defaults to `0.1` as in Ultralytics, so low-confidence
   boxes can keep a track alive. A new track needs a box above the tracker's `new_track_thresh`: `0.25`, or `0.3` for
   `deepocsort.yaml` and `0.7` for `tracktrack.yaml`.
-- Only boxes that belong to a track are returned, `obb` gets `id` the same way, and segmentation masks and pose
+- Only boxes that belong to a track are returned, except that a frame with no track to show keeps its boxes without
+  `id`, as in Ultralytics. `obb` gets `id` the same way, and segmentation masks and pose
   keypoints follow the kept boxes.
 - `model.resetTracker()` forgets every track. Call it before a new video, and between unrelated images: a single image
   works too, but on its own it only numbers the objects `1..N`.

@@ -304,10 +304,11 @@ ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker by
 ```
 
 `track` takes every `predict` option plus `--tracker`, a tracker name (`botsort`, `bytetrack`, `ocsort`, `deepocsort`,
-`fasttrack`, `tracktrack`, with or without `.yaml`) or a YAML file with the keys of the
-[Ultralytics tracker configs](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers). Like
-Ultralytics it defaults to `tracktrack.yaml`, `--conf 0.1` and saving to `runs/<task>/track`. `with_reid: True` downloads
-`yolo26n-reid.onnx` for `model: auto`. Of the `gmc_method` values, `sparseOptFlow` and `none` are supported.
+`fasttrack`, `tracktrack`, with or without `.yaml`) or a YAML file with the keys of the [Ultralytics tracker
+configs](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers). Like Ultralytics it defaults to
+`tracktrack.yaml`, `--conf 0.1` and saving to `runs/<task>/track`. `with_reid: True` downloads `yolo26n-reid.onnx` for
+`model: auto`. Of the `gmc_method` values, `sparseOptFlow` and `none` are supported. `tracktrack` skips the loose NMS
+pass Ultralytics adds to recover boxes of NMS models like YOLO11, which NMS-free YOLO26 models don't need.
 
 `--help` and `--version` are also supported as standard flag aliases.
 
@@ -339,7 +340,7 @@ Ultralytics it defaults to `tracktrack.yaml`, `--conf 0.1` and saving to `runs/<
 | `--device`               |       | Device string, e.g. cpu, cuda:0, coreml, directml:0, intel:cpu, intel:gpu, intel:npu, tensorrt:0, rocm:0, migraphx:0, xnnpack; each needs its feature, and a requested device that is not built or fails to load is an error | auto (best available provider; `cpu` when no accelerator feature is enabled) |
 | `--verbose [<BOOL>]`     |       | Show verbose output                                                                                                                                                                                                          | `true`                                                                       |
 | `--classes`              |       | Filter by class IDs, e.g. `0` or `"0,1,2"` or `"[0, 1, 2]"`                                                                                                                                                                  | all classes                                                                  |
-| `--tracker`              |       | `track` only: tracker name or YAML file                                                                                                                                                                                      | `botsort.yaml`                                                               |
+| `--tracker`              |       | `track` only: tracker name or YAML file                                                                                                                                                                                      | `tracktrack.yaml`                                                            |
 
 `[<BOOL>]` marks a flag whose value is optional: passing it bare (`--rect`) sets it to `true`, and an explicit `--rect false` or `--rect=false` turns it off.
 

@@ -302,7 +302,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker bytetrack.yaml
 ```
 
-`track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`botsort`、`bytetrack`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `tracktrack.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。
+`track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`botsort`、`bytetrack`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `tracktrack.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。`tracktrack` 不运行 Ultralytics 为 YOLO11 等 NMS 模型找回框的宽松 NMS 步骤，无 NMS 的 YOLO26 模型不需要它。
 
 `--help` 和 `--version` 也可作为标准别名使用。
 
@@ -334,7 +334,7 @@ ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker by
 | `--device`               |      | 设备字符串，例如 cpu、cuda:0、coreml、directml:0、intel:cpu、intel:gpu、intel:npu、tensorrt:0、rocm:0、migraphx:0、xnnpack；每个设备需要启用对应 feature，请求的设备未编译或加载失败时会报错 | 自动（选择可用的最佳提供方；未启用任何加速 feature 时为 `cpu`） |
 | `--verbose [<BOOL>]`     |      | 显示详细输出                                                                                                                                                                                 | `true`                                                          |
 | `--classes`              |      | 按类别 ID 过滤，例如 `0`、`"0,1,2"` 或 `"[0, 1, 2]"`                                                                                                                                         | 所有类别                                                        |
-| `--tracker`              |      | 仅 `track`：跟踪器名称或 YAML 文件                                                                                                                                                           | `botsort.yaml`                                                  |
+| `--tracker`              |      | 仅 `track`：跟踪器名称或 YAML 文件                                                                                                                                                           | `tracktrack.yaml`                                               |
 
 `[<BOOL>]` 表示该标志的值是可选的：单独传入（`--rect`）即为 `true`，也可显式使用 `--rect false` 或 `--rect=false` 关闭。
 
