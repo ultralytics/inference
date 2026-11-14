@@ -246,7 +246,8 @@ macro_rules! set_keys {
 impl TrackerConfig {
     /// Load a tracker by name (`tracktrack`, `botsort.yaml`, ...) or from a YAML file with the keys
     /// of the Ultralytics tracker configs. Keys a file leaves out keep the values of its
-    /// `tracker_type`.
+    /// `tracker_type`, except that `deepocsort` falls back to `appearance_thresh: 0.75` and
+    /// `gmc_method: sparseOptFlow` like the Ultralytics code.
     ///
     /// # Errors
     ///
@@ -275,6 +276,9 @@ impl TrackerConfig {
             .find(|(k, _)| *k == "tracker_type")
             .ok_or("missing tracker_type")?;
         let mut config = Self::from(kind.1.parse::<TrackerType>()?);
+        if config.tracker_type == TrackerType::DeepOcSort {
+            (config.appearance_thresh, config.gmc_method) = (0.75, GmcMethod::SparseOptFlow);
+        }
         for (key, value) in pairs {
             let value = match value {
                 "True" => "true",
@@ -309,7 +313,7 @@ mod tests {
         .unwrap();
         assert_eq!(c.tracker_type, TrackerType::DeepOcSort);
         assert_eq!((c.track_buffer, c.with_reid), (60, true));
-        assert!((c.appearance_thresh - 0.9).abs() < f32::EPSILON);
+        assert!((c.appearance_thresh - 0.75).abs() < f32::EPSILON);
         assert!(TrackerConfig::from_yaml("gmc_method: orb").is_err());
         assert!(TrackerConfig::from_yaml("tracker_type: botsort\ngmc_method: orb").is_err());
     }
