@@ -239,8 +239,8 @@ export interface PredictOptions {
 /** Options for {@link YOLO.track}. */
 export interface TrackOptions extends PredictOptions {
   /**
-   * Tracker: `"botsort.yaml"` (default, like Ultralytics), `"bytetrack.yaml"`, `"ocsort.yaml"`,
-   * `"deepocsort.yaml"`, `"fasttrack.yaml"` or `"tracktrack.yaml"`. Changing it starts new tracks.
+   * Tracker: `"tracktrack.yaml"` (default, like Ultralytics), `"botsort.yaml"`, `"bytetrack.yaml"`, `"ocsort.yaml"`,
+   * `"deepocsort.yaml"` or `"fasttrack.yaml"`. Changing it starts new tracks.
    */
   tracker?: string;
 }
@@ -745,7 +745,7 @@ export class YOLO {
    * @param options The {@link predict} options and the tracker.
    */
   async track(image: ImageInput, options?: TrackOptions): Promise<Results> {
-    return this.run(image, options, options?.tracker ?? "botsort.yaml");
+    return this.run(image, options, options?.tracker ?? "tracktrack.yaml");
   }
 
   /** Forget the tracks of {@link track}, so the next frame starts a new video. */

@@ -306,7 +306,7 @@ ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker by
 `track` takes every `predict` option plus `--tracker`, a tracker name (`bytetrack`, `botsort`, `ocsort`, `deepocsort`,
 `fasttrack`, `tracktrack`, with or without `.yaml`) or a YAML file with the keys of the
 [Ultralytics tracker configs](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers). Like
-Ultralytics it defaults to `botsort.yaml`, `--conf 0.1` and saving to `runs/<task>/track`. `with_reid: True` downloads
+Ultralytics it defaults to `tracktrack.yaml`, `--conf 0.1` and saving to `runs/<task>/track`. `with_reid: True` downloads
 `yolo26n-reid.onnx` for `model: auto`. Of the `gmc_method` values, `sparseOptFlow` and `none` are supported.
 
 `--help` and `--version` are also supported as standard flag aliases.

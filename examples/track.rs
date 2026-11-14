@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "https://github.com/ultralytics/assets/releases/download/v0.0.0/solutions_ci_demo.mp4"
             .into()
     });
-    let tracker = args.next().unwrap_or_else(|| "botsort.yaml".to_string());
+    let tracker = args.next().unwrap_or_else(|| "tracktrack.yaml".to_string());
     let mut model = YOLOModel::load("yolo26n.onnx")?;
 
     // Tracks carry over from frame to frame, like `persist=True` in Ultralytics.

@@ -37,7 +37,7 @@ use clap::{Args, Parser, Subcommand};
     --classes <CLASSES>    Filter by class IDs (e.g., "0", "0,1,2", "[0, 1]")
 
 Track Options (with the track feature, plus the predict options):
-    --tracker <TRACKER>    bytetrack, botsort, ocsort, deepocsort, fasttrack, tracktrack or a YAML file [default: botsort.yaml]
+    --tracker <TRACKER>    bytetrack, botsort, ocsort, deepocsort, fasttrack, tracktrack or a YAML file [default: tracktrack.yaml]
 
 Examples:
     ultralytics-inference predict
@@ -201,7 +201,7 @@ pub struct TrackArgs {
 
     /// Tracker: bytetrack, botsort, ocsort, deepocsort, fasttrack, tracktrack, or a YAML file
     /// with the keys of the Ultralytics tracker configs
-    #[arg(long, default_value = "botsort.yaml")]
+    #[arg(long, default_value = "tracktrack.yaml")]
     pub tracker: String,
 }
 

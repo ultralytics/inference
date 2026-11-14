@@ -136,8 +136,8 @@ async function frame() {
 frame();
 ```
 
-- `tracker` is `botsort.yaml` (default), `bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml`, `fasttrack.yaml` or
-  `tracktrack.yaml`, each with its Ultralytics default settings. Switching to another tracker starts new tracks.
+- `tracker` is `tracktrack.yaml` (default), `botsort.yaml`, `bytetrack.yaml`, `ocsort.yaml`, `deepocsort.yaml` or
+  `fasttrack.yaml`, each with its Ultralytics default settings. Switching to another tracker starts new tracks.
 - The other options are those of `predict()`, except that `conf` defaults to `0.1` as in Ultralytics, so low-confidence
   boxes can keep a track alive. A new track needs a box above the tracker's `new_track_thresh`: `0.25`, or `0.3` for
   `deepocsort.yaml` and `0.7` for `tracktrack.yaml`.

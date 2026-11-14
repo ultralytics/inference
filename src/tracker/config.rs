@@ -12,9 +12,8 @@ use crate::error::{InferenceError, Result};
 pub enum TrackerType {
     /// `ByteTrack`: two association stages, high then low score detections.
     ByteTrack,
-    /// `BoT-SORT`, the Ultralytics default: `ByteTrack` with a center-width-height Kalman state,
-    /// camera motion compensation and optional `ReID`.
-    #[default]
+    /// `BoT-SORT`: `ByteTrack` with a center-width-height Kalman state, camera motion compensation
+    /// and optional `ReID`.
     BotSort,
     /// `OC-SORT`: `ByteTrack` with motion direction costs, observation-centric recovery and
     /// re-update.
@@ -23,7 +22,9 @@ pub enum TrackerType {
     DeepOcSort,
     /// `FastTrack`: `ByteTrack` with occlusion handling.
     FastTrack,
-    /// `TrackTrack`: iterative association over a combined cost, with track-aware initialization.
+    /// `TrackTrack`, the Ultralytics default: iterative association over a combined cost, with
+    /// track-aware initialization.
+    #[default]
     TrackTrack,
 }
 
@@ -165,10 +166,18 @@ pub struct TrackerConfig {
 }
 
 impl Default for TrackerConfig {
-    /// The `botsort.yaml` values, and the other trackers' values for the other keys.
+    /// The values of `tracktrack.yaml`, the Ultralytics default tracker.
     fn default() -> Self {
-        Self {
-            tracker_type: TrackerType::BotSort,
+        TrackerType::default().into()
+    }
+}
+
+impl From<TrackerType> for TrackerConfig {
+    /// The values of the Ultralytics config of `tracker_type`. Keys it leaves out take the values
+    /// of the configs that have them.
+    fn from(tracker_type: TrackerType) -> Self {
+        let base = Self {
+            tracker_type,
             track_high_thresh: 0.25,
             track_low_thresh: 0.1,
             new_track_thresh: 0.25,
@@ -201,16 +210,6 @@ impl Default for TrackerConfig {
             reduce_step: 0.05,
             tai_thr: 0.55,
             min_track_len: 3,
-        }
-    }
-}
-
-impl From<TrackerType> for TrackerConfig {
-    /// The values of the Ultralytics config of `tracker_type`.
-    fn from(tracker_type: TrackerType) -> Self {
-        let base = Self {
-            tracker_type,
-            ..Self::default()
         };
         match tracker_type {
             TrackerType::DeepOcSort => Self {

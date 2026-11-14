@@ -131,8 +131,8 @@ async function frame() {
 frame();
 ```
 
-- `tracker` 可选 `botsort.yaml`（默认）、`bytetrack.yaml`、`ocsort.yaml`、`deepocsort.yaml`、`fasttrack.yaml` 或
-  `tracktrack.yaml`，均使用 Ultralytics 的默认设置。切换到其他跟踪器会开始新的轨迹。
+- `tracker` 可选 `tracktrack.yaml`（默认）、`botsort.yaml`、`bytetrack.yaml`、`ocsort.yaml`、`deepocsort.yaml` 或
+  `fasttrack.yaml`，均使用 Ultralytics 的默认设置。切换到其他跟踪器会开始新的轨迹。
 - 其他选项与 `predict()` 相同，但 `conf` 与 Ultralytics 一样默认为 `0.1`，使低置信度的框也能维持已有轨迹。新轨迹需要框的
   置信度高于跟踪器的 `new_track_thresh`：`0.25`，`deepocsort.yaml` 为 `0.3`，`tracktrack.yaml` 为 `0.7`。
 - 只返回属于某条轨迹的框，`obb` 同样带有 `id`，分割掩码和姿态关键点跟随保留的框。
