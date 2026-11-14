@@ -80,14 +80,10 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
     }
 
     // Load model first so we can determine appropriate default source based on task
-    let mut config = build_inference_config(args, device).unwrap_or_else(|e| {
+    let config = build_inference_config(args, device).unwrap_or_else(|e| {
         error!("{e}");
         process::exit(1);
     });
-    // Trackers need the low-confidence detections too, like Ultralytics `model.track()`.
-    if tracker.is_some() && args.conf.is_none() {
-        config = config.with_confidence(InferenceConfig::DEFAULT_TRACK_CONF);
-    }
 
     let mut model = match YOLOModel::load_with_config(model_path, config) {
         Ok(m) => m,
@@ -611,7 +607,7 @@ fn build_inference_config(
     device: Option<crate::Device>,
 ) -> Result<InferenceConfig, String> {
     let mut config = InferenceConfig::new()
-        .with_confidence(args.conf.unwrap_or(InferenceConfig::DEFAULT_CONF))
+        .with_confidence(args.conf)
         .with_iou(args.iou)
         .with_batch(args.batch as usize)
         .with_half(args.half)
@@ -774,7 +770,7 @@ mod tests {
             model: None,
             task: None,
             source: None,
-            conf: None,
+            conf: InferenceConfig::DEFAULT_CONF,
             iou: InferenceConfig::DEFAULT_IOU,
             max_det: InferenceConfig::DEFAULT_MAX_DET,
             imgsz: None,
@@ -852,7 +848,7 @@ mod tests {
     #[test]
     fn test_build_inference_config_from_cli_args() {
         let args = PredictArgs {
-            conf: Some(0.42),
+            conf: 0.42,
             iou: 0.55,
             max_det: 77,
             imgsz: Some(512),
