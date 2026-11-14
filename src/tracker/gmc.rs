@@ -522,6 +522,10 @@ impl Gmc {
     /// The motion from the previous frame to `img` (RGB, HWC), identity on the first frame or
     /// without enough tracked corners.
     pub(super) fn apply(&mut self, img: &Array3<u8>) -> Warp {
+        // A frame under two pixels across has no half-size image to follow.
+        if img.dim().0 < 2 || img.dim().1 < 2 {
+            return IDENTITY;
+        }
         let frame = Gray::half_from_rgb(img);
         let corners = frame.corners();
         let frame = Pyramid::new(frame);
@@ -613,6 +617,7 @@ mod tests {
     fn test_gmc_follows_a_camera_pan() {
         let mut gmc = Gmc::default();
         assert_eq!(gmc.apply(&frame(0)), IDENTITY);
+        assert_eq!(Gmc::default().apply(&Array3::zeros((1, 9, 3))), IDENTITY);
         let h = gmc.apply(&frame(6));
         assert!((h[0][2] - 6.0).abs() < 0.5 && h[1][2].abs() < 0.5, "{h:?}");
         assert!(
