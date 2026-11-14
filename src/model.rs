@@ -198,6 +198,10 @@ pub struct YOLOModel {
     /// The tracker of [`Self::track`], with the tracker name or YAML it was loaded from.
     #[cfg(feature = "track")]
     tracker: Option<(String, crate::tracker::Tracker)>,
+    /// The confidence [`Self::track`] uses in place of the configured one: the Ultralytics track
+    /// default for a model from [`Self::load`], which has no config to keep.
+    #[cfg(feature = "track")]
+    track_conf: Option<f32>,
     /// While a tracker asks for it, the NMS `IoU` of a second postprocess of each image, whose
     /// result follows the image's own one ([`crate::tracker::Tracker::loose_iou`]).
     pub(crate) loose_iou: Option<f32>,
@@ -232,7 +236,13 @@ impl YOLOModel {
     /// # Ok::<(), ultralytics_inference::InferenceError>(())
     /// ```
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Self::load_with_config(path, InferenceConfig::default())
+        let model = Self::load_with_config(path, InferenceConfig::default())?;
+        #[cfg(feature = "track")]
+        let model = Self {
+            track_conf: Some(InferenceConfig::DEFAULT_TRACK_CONF),
+            ..model
+        };
+        Ok(model)
     }
 
     /// Load a YOLO model with custom configuration.
@@ -732,6 +742,8 @@ impl YOLOModel {
             warmed_up: false,
             #[cfg(feature = "track")]
             tracker: None,
+            #[cfg(feature = "track")]
+            track_conf: None,
             loose_iou: None,
             fp16_input,
             execution_provider: provider_name.to_string(),
@@ -818,6 +830,8 @@ impl YOLOModel {
             warmed_up: false,
             #[cfg(feature = "track")]
             tracker: None,
+            #[cfg(feature = "track")]
+            track_conf: None,
             loose_iou: None,
             fp16_input: false,
             execution_provider: "OpenVINO".to_owned(),
@@ -1550,9 +1564,10 @@ impl YOLOModel {
     ///
     /// `tracker` is a tracker name (`tracktrack`, `botsort.yaml`, ...) or a YAML file with the keys
     /// of the Ultralytics tracker configs. Tracks carry over between calls until `tracker`
-    /// changes or [`Self::reset_tracker`] is called, as before a new video. Like Ultralytics, a
-    /// confidence threshold left at its default drops to
-    /// [`InferenceConfig::DEFAULT_TRACK_CONF`], since trackers need the low-score detections.
+    /// changes or [`Self::reset_tracker`] is called, as before a new video. A model from
+    /// [`Self::load`] tracks at [`InferenceConfig::DEFAULT_TRACK_CONF`] like Ultralytics, since
+    /// trackers need the low-score detections, and one from [`Self::load_with_config`] at its
+    /// configured confidence.
     ///
     /// # Errors
     ///
@@ -1603,8 +1618,8 @@ impl YOLOModel {
             self.tracker = Some((tracker.to_owned(), new));
         }
         let conf = self.config.confidence_threshold;
-        if (conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON {
-            self.config.confidence_threshold = InferenceConfig::DEFAULT_TRACK_CONF;
+        if let Some(track_conf) = self.track_conf {
+            self.config.confidence_threshold = track_conf;
         }
         self.loose_iou = (self.tracker.as_ref()).and_then(|(_, t)| t.loose_iou(&self.metadata));
         let results = predict(self);
