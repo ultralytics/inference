@@ -111,7 +111,7 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
     }
 
     #[cfg(feature = "track")]
-    let mut tracker = tracker.map(|name| SourceTracker::load(&model, name));
+    let mut tracker = tracker.map(|name| SourceTracker::load(&mut model, name));
     #[cfg(not(feature = "track"))]
     let _ = tracker;
 
@@ -326,12 +326,12 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
                     .into_iter()
                     .zip(metas.iter().zip(paths.iter().zip(images.iter())))
                 {
+                    #[cfg(feature = "track")]
+                    let results = match &mut tracker {
+                        Some(t) => t.update(image_path, results),
+                        None => results,
+                    };
                     for result in results {
-                        #[cfg(feature = "track")]
-                        let result = match &mut tracker {
-                            Some(t) => t.update(image_path, result),
-                            None => result,
-                        };
                         let texts = reader.as_mut().map(|r| {
                             r.read(img, &result).unwrap_or_else(|e| {
                                 error!("OCR failed: {e}");
@@ -541,9 +541,9 @@ struct SourceTracker {
 #[cfg(feature = "track")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl SourceTracker {
-    /// Load the tracker `name` for `model`, exiting when the task has no boxes or the tracker
-    /// cannot be loaded.
-    fn load(model: &YOLOModel, name: &str) -> Self {
+    /// Load the tracker `name` for `model` and have `model` add the loose result it needs,
+    /// exiting when the task has no boxes or the tracker cannot be loaded.
+    fn load(model: &mut YOLOModel, name: &str) -> Self {
         if !model.task().has_boxes() {
             error!(
                 "Task '{}' doesn't support tracking, valid tasks are detect, segment, pose, obb",
@@ -557,22 +557,26 @@ impl SourceTracker {
                 error!("{e}");
                 process::exit(1);
             });
+        model.loose_iou = tracker.loose_iou(model.metadata());
         Self {
             tracker,
             source: None,
         }
     }
 
-    /// Track `result`, a frame of `source`.
-    fn update(&mut self, source: &str, mut result: Results) -> Results {
+    /// Track the results of a frame of `source`, followed by its loose result when there is one.
+    fn update(&mut self, source: &str, mut results: Vec<Results>) -> Vec<Results> {
         if self.source.as_deref() != Some(source) {
             self.tracker.reset();
             self.source = Some(source.to_owned());
         }
-        if let Err(e) = self.tracker.update(&mut result) {
+        let loose = results.drain(1..).next();
+        if let Some(result) = results.first_mut()
+            && let Err(e) = self.tracker.update(result, loose.as_ref())
+        {
             error!("Tracking failed: {e}");
         }
-        result
+        results
     }
 }
 

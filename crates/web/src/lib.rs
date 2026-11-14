@@ -35,7 +35,8 @@ use wasm_bindgen::prelude::*;
 
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{
-    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head_masks,
+    filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head,
+    postprocess_with_head_masks,
 };
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
@@ -616,6 +617,9 @@ impl YoloModel {
 
         let t_post = now_ms();
         let config = make_config(conf, iou, classes, tracker.is_some());
+        let tracker = load_tracker(&mut self.tracker, tracker)?;
+        let loose_iou = tracker.as_ref().and_then(|t| t.loose_iou(&self.metadata));
+        let mut loose = None;
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         // Postprocess is timed after it returns (below), the same as the `YoloPipeline`
         // path: building the `Speed` here would only measure the setup above it.
@@ -653,6 +657,16 @@ impl YoloModel {
                         })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
+            loose = loose_iou.map(|iou| {
+                loose_results(
+                    views.clone(),
+                    &self.metadata,
+                    &pre,
+                    &config,
+                    iou,
+                    inference_shape,
+                )
+            });
             postprocess_with_head_masks(
                 views,
                 self.metadata.task,
@@ -672,7 +686,7 @@ impl YoloModel {
             )
         };
         results.colors = Arc::clone(&self.metadata.colors);
-        let overlay = track(&mut self.tracker, tracker, &mut results, &masks)?;
+        let overlay = track(tracker, &mut results, loose.as_ref(), &masks)?;
         results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
     }
 }
@@ -899,8 +913,19 @@ impl YoloPipeline {
             .collect();
 
         let config = make_config(conf, iou, classes, tracker.is_some());
+        let tracker = load_tracker(&mut self.tracker, tracker)?;
         let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
+        let loose = (tracker.as_ref().and_then(|t| t.loose_iou(&self.metadata))).map(|iou| {
+            loose_results(
+                views.clone(),
+                &self.metadata,
+                &pending.pre,
+                &config,
+                iou,
+                inference_shape,
+            )
+        });
         // Postprocess time is unknown until the call returns, so pass 0 here and
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
@@ -924,7 +949,7 @@ impl YoloPipeline {
             },
         );
         results.colors = Arc::clone(&self.metadata.colors);
-        let overlay = track(&mut self.tracker, tracker, &mut results, &masks)?;
+        let overlay = track(tracker, &mut results, loose.as_ref(), &masks)?;
         results_to_js(
             &results,
             self.metadata.task,
@@ -941,24 +966,61 @@ impl YoloPipeline {
     }
 }
 
-/// Track `results` with the tracker named `tracker`, if any, then composite the instance masks
-/// of the rows it keeps. The tracker in `slot` carries over between frames like the native
-/// `YOLOModel::track` and starts anew when the name changes.
-fn track(
+/// The tracker named `tracker`, if any, kept in `slot` so it carries over between frames like
+/// the native `YOLOModel::track`, and loaded anew when the name changes.
+fn load_tracker(
     slot: &mut Option<(String, Tracker)>,
     tracker: Option<String>,
-    results: &mut Results,
-    masks: &[InstanceMask],
-) -> Result<Vec<u8>, JsError> {
+) -> Result<Option<&mut Tracker>, JsError> {
     let Some(name) = tracker else {
-        return Ok(instance_overlay(masks));
+        return Ok(None);
     };
     if slot.as_ref().is_none_or(|(n, _)| *n != name) {
         let config = TrackerConfig::load(&name).map_err(err_ctx("failed to load tracker"))?;
         *slot = Some((name, Tracker::without_reid(config)));
     }
-    let rows = match slot {
-        Some((_, t)) => t.update(results).map_err(err_ctx("tracking failed"))?,
+    Ok(slot.as_mut().map(|(_, t)| t))
+}
+
+/// The detections of `views` after an NMS at `iou`, which `TrackTrack` recovers boxes from.
+fn loose_results(
+    views: Vec<(&[f32], Vec<usize>)>,
+    m: &ModelMetadata,
+    pre: &PreprocessResult,
+    config: &InferenceConfig,
+    iou: f32,
+    inference_shape: (u32, u32),
+) -> Results {
+    let config = config.clone().with_iou(iou);
+    let (names, img) = (Arc::clone(&m.names), Array3::zeros((0, 0, 3)));
+    postprocess_with_head(
+        views,
+        m.task,
+        pre,
+        &config,
+        names,
+        img,
+        String::new(),
+        Speed::default(),
+        inference_shape,
+        m.end2end,
+        m.kpt_shape,
+        m.is_rtdetr(),
+    )
+}
+
+/// Track `results` and its `loose` result with `tracker`, if any, then composite the instance
+/// masks of the rows it keeps.
+fn track(
+    tracker: Option<&mut Tracker>,
+    results: &mut Results,
+    loose: Option<&Results>,
+    masks: &[InstanceMask],
+) -> Result<Vec<u8>, JsError> {
+    let rows = match tracker {
+        Some(t) => t
+            .update(results, loose)
+            .map_err(err_ctx("tracking failed"))?,
         None => None,
     };
     Ok(match rows {

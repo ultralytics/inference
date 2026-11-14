@@ -198,6 +198,9 @@ pub struct YOLOModel {
     /// The tracker of [`Self::track`], with the tracker name or YAML it was loaded from.
     #[cfg(feature = "track")]
     tracker: Option<(String, crate::tracker::Tracker)>,
+    /// While a tracker asks for it, the NMS `IoU` of a second postprocess of each image, whose
+    /// result follows the image's own one ([`crate::tracker::Tracker::loose_iou`]).
+    pub(crate) loose_iou: Option<f32>,
 }
 
 #[allow(
@@ -729,6 +732,7 @@ impl YOLOModel {
             warmed_up: false,
             #[cfg(feature = "track")]
             tracker: None,
+            loose_iou: None,
             fp16_input,
             execution_provider: provider_name.to_string(),
             is_dynamic,
@@ -814,6 +818,7 @@ impl YOLOModel {
             warmed_up: false,
             #[cfg(feature = "track")]
             tracker: None,
+            loose_iou: None,
             fp16_input: false,
             execution_provider: "OpenVINO".to_owned(),
             is_dynamic: false,
@@ -1107,6 +1112,7 @@ impl YOLOModel {
         paths: &[String],
         speed: &Speed,
         inference_shape: (u32, u32),
+        loose_iou: Option<f32>,
     ) -> Vec<Vec<Results>> {
         let start_postprocess = Instant::now();
         // Each image decodes independently, so a batch fans out across cores.
@@ -1115,22 +1121,29 @@ impl YOLOModel {
             .zip(preprocessed)
             .enumerate()
             .map(|(i, (orig_img, pre))| {
-                let mut results = postprocess_with_head(
-                    Self::slice_batch_output(outputs, i),
-                    metadata.task,
-                    pre,
-                    config,
-                    Arc::clone(&metadata.names),
-                    orig_img,
-                    paths.get(i).cloned().unwrap_or_default(),
-                    speed.clone(),
-                    inference_shape,
-                    metadata.end2end,
-                    metadata.kpt_shape,
-                    metadata.is_rtdetr(),
-                );
-                results.colors = Arc::clone(&metadata.colors);
-                vec![results]
+                let post = |config: &InferenceConfig, orig_img| {
+                    let mut results = postprocess_with_head(
+                        Self::slice_batch_output(outputs, i),
+                        metadata.task,
+                        pre,
+                        config,
+                        Arc::clone(&metadata.names),
+                        orig_img,
+                        paths.get(i).cloned().unwrap_or_default(),
+                        speed.clone(),
+                        inference_shape,
+                        metadata.end2end,
+                        metadata.kpt_shape,
+                        metadata.is_rtdetr(),
+                    );
+                    results.colors = Arc::clone(&metadata.colors);
+                    results
+                };
+                let loose = loose_iou
+                    .map(|iou| post(&config.clone().with_iou(iou), Array3::zeros((0, 0, 3))));
+                std::iter::once(post(config, orig_img))
+                    .chain(loose)
+                    .collect()
             })
             .collect();
         Self::apply_postprocess_time(batch_results, start_postprocess)
@@ -1191,6 +1204,7 @@ impl YOLOModel {
         paths: &[String],
         speed: &Speed,
         inference_shape: (u32, u32),
+        loose_iou: Option<f32>,
     ) -> Result<Vec<Vec<Results>>> {
         let output = |name: &String| {
             outputs
@@ -1244,6 +1258,7 @@ impl YOLOModel {
             paths,
             speed,
             inference_shape,
+            loose_iou,
         ))
     }
 
@@ -1591,13 +1606,13 @@ impl YOLOModel {
         if (conf - InferenceConfig::DEFAULT_CONF).abs() < f32::EPSILON {
             self.config.confidence_threshold = InferenceConfig::DEFAULT_TRACK_CONF;
         }
+        self.loose_iou = (self.tracker.as_ref()).and_then(|(_, t)| t.loose_iou(&self.metadata));
         let results = predict(self);
-        self.config.confidence_threshold = conf;
+        (self.config.confidence_threshold, self.loose_iou) = (conf, None);
         let mut results = results?;
-        if let Some((_, t)) = &mut self.tracker {
-            for result in &mut results {
-                t.update(result)?;
-            }
+        let loose = results.drain(1..).next();
+        if let (Some((_, t)), Some(result)) = (&mut self.tracker, results.first_mut()) {
+            t.update(result, loose.as_ref())?;
         }
         Ok(results)
     }
@@ -1982,6 +1997,7 @@ impl YOLOModel {
                 paths,
                 &speed,
                 inference_shape,
+                self.loose_iou,
             ));
         };
         Self::postprocess_outputs(
@@ -1995,6 +2011,7 @@ impl YOLOModel {
             paths,
             &speed,
             inference_shape,
+            self.loose_iou,
         )
     }
 
@@ -2201,6 +2218,7 @@ impl YOLOModel {
                 paths,
                 &speed,
                 inference_shape,
+                self.loose_iou,
             ));
         }
 
@@ -2244,6 +2262,7 @@ impl YOLOModel {
             paths,
             &speed,
             inference_shape,
+            self.loose_iou,
         )
     }
 

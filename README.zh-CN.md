@@ -302,7 +302,7 @@ ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker tracktrack.yaml
 ```
 
-`track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`botsort`、`bytetrack`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `tracktrack.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。`tracktrack` 不运行 Ultralytics 为 YOLO11 等 NMS 模型找回框的宽松 NMS 步骤，无 NMS 的 YOLO26 模型不需要它。
+`track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`botsort`、`bytetrack`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `tracktrack.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。
 
 `--help` 和 `--version` 也可作为标准别名使用。
 

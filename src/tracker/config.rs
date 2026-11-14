@@ -157,6 +157,8 @@ pub struct TrackerConfig {
     pub angle_weight: f32,
     /// `TrackTrack`: extra cost of low-score detections.
     pub penalty_p: f32,
+    /// `TrackTrack`: extra cost of the detections recovered from a looser NMS.
+    pub penalty_q: f32,
     /// `TrackTrack`: threshold step of each association round.
     pub reduce_step: f32,
     /// `TrackTrack`: `IoU` that suppresses a new track.
@@ -207,6 +209,7 @@ impl From<TrackerType> for TrackerConfig {
             conf_weight: 0.1,
             angle_weight: 0.05,
             penalty_p: 0.2,
+            penalty_q: 0.4,
             reduce_step: 0.05,
             tai_thr: 0.55,
             min_track_len: 3,
@@ -292,7 +295,7 @@ impl TrackerConfig {
                 reset_pos_offset_occ, enlarge_bbox_occ, dampen_motion_occ,
                 active_occ_to_lost_thresh, occ_cover_thresh, occ_reappear_window, init_iou_suppress,
                 lost_match_thr, iou_weight, reid_weight, conf_weight, angle_weight, penalty_p,
-                reduce_step, tai_thr, min_track_len);
+                penalty_q, reduce_step, tai_thr, min_track_len);
         }
         Ok(config)
     }

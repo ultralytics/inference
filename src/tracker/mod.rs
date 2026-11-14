@@ -56,9 +56,11 @@ use std::f32::consts::PI;
 use ndarray::{Array2, Array3, Axis};
 
 use crate::error::Result;
+use crate::metadata::ModelMetadata;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::model::YOLOModel;
 use crate::results::{Boxes, Keypoints, Masks, Obb, Results};
+use crate::task::Task;
 use crate::utils::{calculate_iou, calculate_probiou};
 pub use config::{GmcMethod, TrackerConfig, TrackerType};
 
@@ -227,6 +229,43 @@ const fn pair(all: &mut [Track], t: usize, d: usize) -> (&mut Track, &Track) {
     (&mut tracks[t], &dets[0])
 }
 
+/// The rows of `result`, or `None` when it has no boxes.
+fn detections(result: &Results) -> Option<Vec<Row>> {
+    let (r, conf, cls) = match (&result.boxes, &result.obb) {
+        (Some(b), _) => (b.xywh(), b.conf(), b.cls()),
+        (None, Some(o)) => (o.xywhr().to_owned(), o.conf(), o.cls()),
+        (None, None) => return None,
+    };
+    let angle = |i: usize| (r.ncols() > 4).then(|| r[[i, 4]]);
+    let row = |i: usize| ([0, 1, 2, 3].map(|k| r[[i, k]]), angle(i), conf[i], cls[i]);
+    Some((0..conf.len()).map(row).collect())
+}
+
+/// The rows of `loose`, a looser NMS of the same frame, scoring above `thresh` that no box of
+/// `result` overlaps by an `IoU` of 0.97: the `dets_del` that `TrackTrack` recovers in
+/// Ultralytics. Oriented boxes compare by their axis-aligned bounds.
+fn recovered(result: &Results, loose: &Results, thresh: f32) -> Vec<Row> {
+    let xyxy = |r: &Results| {
+        let b = match (&r.boxes, &r.obb) {
+            (Some(b), _) => b.xyxy().to_owned(),
+            (None, Some(o)) => o.xyxy(),
+            (None, None) => return Vec::new(),
+        };
+        b.rows()
+            .into_iter()
+            .map(|r| [r[0], r[1], r[2], r[3]])
+            .collect::<Vec<_>>()
+    };
+    let (kept, all) = (xyxy(result), xyxy(loose));
+    let rows = detections(loose).unwrap_or_default();
+    (rows.into_iter().zip(all))
+        .filter(|((_, _, score, _), b)| {
+            *score > thresh && kept.iter().all(|k| calculate_iou(b, k) < 0.97)
+        })
+        .map(|(row, _)| row)
+        .collect()
+}
+
 /// Keep rows `idx` of every per-detection field of `result`.
 fn keep_rows(result: &mut Results, idx: &[usize]) {
     let rows = |a: &Array2<f32>| a.select(Axis(0), idx);
@@ -302,6 +341,15 @@ impl Tracker {
         *self = Self::with_reid(self.config.clone(), reid);
     }
 
+    /// The NMS `IoU` of the looser pass to pass [`Tracker::update`] for a model with `metadata`:
+    /// `TrackTrack` recovers boxes from it on NMS detection and OBB models, like Ultralytics.
+    #[must_use]
+    pub fn loose_iou(&self, metadata: &ModelMetadata) -> Option<f32> {
+        let nms = matches!(metadata.task, Task::Detect | Task::Obb) && !metadata.end2end;
+        (self.config.tracker_type == TrackerType::TrackTrack && nms && !metadata.is_rtdetr())
+            .then_some(0.95)
+    }
+
     /// Track the detections of the next frame.
     ///
     /// Keeps the shown tracks of `result` in track order, with their Kalman filter boxes
@@ -309,29 +357,31 @@ impl Tracker {
     /// track to show keeps its detections without ids, as in Ultralytics, and results of
     /// semantic segmentation, depth or classification are left as they are.
     ///
+    /// `loose` is the same frame postprocessed with the NMS `IoU` of [`Tracker::loose_iou`], from
+    /// which `TrackTrack` also matches the boxes the NMS dropped, as Ultralytics does for NMS
+    /// models. Pass `None` when [`Tracker::loose_iou`] is `None`.
+    ///
     /// Returns the rows of `result` before the update that its rows now are, for data kept
     /// outside it, or `None` when `result` is unchanged.
     ///
     /// # Errors
     ///
     /// Returns an error if the `ReID` model fails.
-    pub fn update(&mut self, result: &mut Results) -> Result<Option<Vec<usize>>> {
+    pub fn update(
+        &mut self,
+        result: &mut Results,
+        loose: Option<&Results>,
+    ) -> Result<Option<Vec<usize>>> {
         let kind = self.config.tracker_type;
-        let boxes = result.boxes.as_ref().map(|b| (b.xywh(), b.conf(), b.cls()));
-        let boxes = boxes
-            .or_else(|| (result.obb.as_ref()).map(|o| (o.xywhr().to_owned(), o.conf(), o.cls())));
-        if boxes.is_none()
+        let rows = detections(result);
+        if rows.is_none()
             && (result.semantic_mask.is_some() || result.depth.is_some() || result.probs.is_some())
         {
             return Ok(None);
         }
         // A frame without detections still ages the tracks.
-        let rows: Vec<Row> = boxes.map_or_else(Vec::new, |(r, conf, cls)| {
-            let angle = |i: usize| (r.ncols() > 4).then(|| r[[i, 4]]);
-            (0..conf.len())
-                .map(|i| ([0, 1, 2, 3].map(|k| r[[i, k]]), angle(i), conf[i], cls[i]))
-                .collect()
-        });
+        let mut rows = rows.unwrap_or_default();
+        let n = rows.len();
         self.frame_id += 1;
         let warp = self.gmc.as_mut().map(|g| g.apply(&result.orig_img));
 
@@ -355,18 +405,32 @@ impl Tracker {
         } else {
             high.len() + low.len()
         };
-        let order: Vec<usize> = high.iter().chain(&low).copied().collect();
+        if let Some(l) = loose.filter(|_| kind == TrackerType::TrackTrack && n > 0) {
+            rows.extend(recovered(result, l, c.track_high_thresh));
+        }
+        let order: Vec<usize> = high
+            .iter()
+            .chain(&low)
+            .copied()
+            .chain(n..rows.len())
+            .collect();
         let crops: Vec<[f32; 4]> = order[..embedded].iter().map(|&i| rows[i].0).collect();
         let feats = match &mut self.reid {
             Some(embed) => embed(&result.orig_img, &crops)?,
             None => Vec::new(),
         };
+        // A recovered box has no row of its own and takes the last one, like index -1 does.
         let det = |(k, &i): (usize, &usize)| {
-            Track::new(kind, rows[i], i, feats.get(k).and_then(Option::as_deref))
+            Track::new(
+                kind,
+                rows[i],
+                i.min(n.saturating_sub(1)),
+                feats.get(k).and_then(Option::as_deref),
+            )
         };
         let dets: Vec<Track> = order.iter().enumerate().map(det).collect();
         if kind == TrackerType::TrackTrack {
-            self.step_tracktrack(dets, high.len(), warp);
+            self.step_tracktrack(dets, (high.len(), low.len()), warp);
         } else {
             self.step(dets, high.len(), warp);
         }
@@ -463,7 +527,7 @@ mod tests {
                     [10.0 + dx, 10.0, 60.0 + dx, 90.0, 0.9, 0.0],
                     [300.0 - dx, 200.0, 360.0 - dx, 300.0, 0.8, 2.0],
                 ]);
-                tracker.update(&mut r).unwrap();
+                tracker.update(&mut r, None).unwrap();
                 let boxes = r.boxes.unwrap();
                 ids.push(boxes.id().unwrap().to_vec());
                 assert!((boxes.xyxy()[[0, 0]] - (10.0 + dx)).abs() < 1.0, "{kind:?}");
@@ -476,12 +540,12 @@ mod tests {
     fn test_tracker_hides_new_tracks_until_confirmed() {
         let mut tracker = Tracker::without_reid(TrackerType::ByteTrack.into());
         let mut r = frame(&[]);
-        tracker.update(&mut r).unwrap();
+        tracker.update(&mut r, None).unwrap();
         let mut r = frame(&[[10.0, 10.0, 60.0, 90.0, 0.9, 0.0]]);
-        tracker.update(&mut r).unwrap();
+        tracker.update(&mut r, None).unwrap();
         assert!(r.boxes.unwrap().is_empty());
         let mut r = frame(&[[11.0, 10.0, 61.0, 90.0, 0.9, 0.0]]);
-        tracker.update(&mut r).unwrap();
+        tracker.update(&mut r, None).unwrap();
         assert_eq!(r.boxes.unwrap().id().unwrap().to_vec(), vec![1.0]);
     }
 }

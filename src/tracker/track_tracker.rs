@@ -3,9 +3,6 @@
 //! `TrackTrack`: one association of all tracks with all detections over a combined cost of
 //! height-modulated `IoU`, appearance, confidence and corner motion, matched iteratively with a
 //! falling threshold, and new tracks only where no track already is.
-//!
-//! The loose NMS pass Ultralytics adds for NMS models (`dets_del`) is not run, which changes
-//! nothing for NMS-free models like `YOLO26`.
 
 use ndarray::{Array2, ArrayView1, s};
 
@@ -185,7 +182,12 @@ impl Tracker {
 
     /// One `TRACKTRACK.update` step.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn step_tracktrack(&mut self, dets: Vec<Track>, n_h: usize, warp: Option<Warp>) {
+    pub(super) fn step_tracktrack(
+        &mut self,
+        dets: Vec<Track>,
+        (n_h, n_low): (usize, usize),
+        warp: Option<Warp>,
+    ) {
         let c = self.config.clone();
         let (frame, step) = (self.frame_id, f64::from(c.reduce_step));
         let (mut all, n_t, n_l) = self.arena(dets);
@@ -204,10 +206,15 @@ impl Tracker {
         }
         let (mut activated, mut refind, mut lost) = (Vec::new(), Vec::new(), Vec::new());
 
-        // All tracks with all detections, low-score ones costing more.
+        // All tracks with all detections, low-score and recovered ones costing more.
         let mut cost = self.tt_cost(&all, &pool, &dets);
-        cost.slice_mut(s![.., n_h..])
-            .mapv_inplace(|v| (v + f64::from(c.penalty_p)).clamp(0.0, 1.0));
+        for (cols, penalty) in [
+            (n_h..n_h + n_low, c.penalty_p),
+            (n_h + n_low..dets.len(), c.penalty_q),
+        ] {
+            cost.slice_mut(s![.., cols])
+                .mapv_inplace(|v| (v + f64::from(penalty)).clamp(0.0, 1.0));
+        }
         let (matches, u_pool, u_dets) = iterative_assign(cost, f64::from(c.match_thresh), step);
         for (t, d) in matches {
             let (track, det) = pair(&mut all, pool[t], dets[d]);

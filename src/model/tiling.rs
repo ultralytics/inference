@@ -287,15 +287,17 @@ impl YOLOModel {
         }
 
         let batch = self.config.batch.unwrap_or(1).max(1);
-        let mut tiles: Vec<Results> = Vec::with_capacity(windows.len());
+        let (mut tiles, mut loose) = (Vec::with_capacity(windows.len()), Vec::new());
         for chunk in windows.chunks(batch) {
             let crops: Vec<_> = chunk
                 .iter()
                 .map(|&[x1, y1, x2, y2]| image.crop_imm(x1, y1, x2 - x1, y2 - y1))
                 .collect();
             let refs: Vec<_> = crops.iter().collect();
-            let results = self.predict_internal(&refs, &vec![path.clone(); crops.len()])?;
-            tiles.extend(results.into_iter().flatten());
+            for mut results in self.predict_internal(&refs, &vec![path.clone(); crops.len()])? {
+                loose.extend(results.drain(1..));
+                tiles.extend(results);
+            }
         }
 
         let mut out = tiles[0].clone();
@@ -310,7 +312,15 @@ impl YOLOModel {
         };
 
         merge_tiles(&mut out, self.metadata.task, &tiles, &windows, &self.config);
-        Ok(vec![out])
+        // The loose tile results, which hold no image, merge at their own NMS `IoU`.
+        let loose = self.loose_iou.filter(|_| !loose.is_empty()).map(|iou| {
+            let mut merged = loose[0].clone();
+            merged.orig_shape = (h, w);
+            let config = self.config.clone().with_iou(iou);
+            merge_tiles(&mut merged, self.metadata.task, &loose, &windows, &config);
+            merged
+        });
+        Ok(std::iter::once(out).chain(loose).collect())
     }
 }
 
