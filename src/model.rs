@@ -1533,7 +1533,7 @@ impl YOLOModel {
     /// Run inference on an image file and track its objects across calls, like Ultralytics
     /// `model.track(source, tracker=..., persist=True)`.
     ///
-    /// `tracker` is a tracker name (`botsort`, `bytetrack.yaml`, ...) or a YAML file with the keys
+    /// `tracker` is a tracker name (`tracktrack`, `botsort.yaml`, ...) or a YAML file with the keys
     /// of the Ultralytics tracker configs. Tracks carry over between calls until `tracker`
     /// changes or [`Self::reset_tracker`] is called, as before a new video. Like Ultralytics, a
     /// confidence threshold left at its default drops to

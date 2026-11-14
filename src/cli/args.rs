@@ -57,7 +57,7 @@ Examples:
     ultralytics-inference predict --source image.jpg --device cuda:0
     ultralytics-inference predict --source image.jpg --classes 0
     ultralytics-inference predict --source image.jpg --line-width 4 --show-conf false
-    ultralytics-inference track --source video.mp4 --tracker bytetrack.yaml"#)]
+    ultralytics-inference track --source video.mp4 --tracker tracktrack.yaml"#)]
 pub struct Cli {
     #[command(subcommand)]
     /// Subcommand to execute.

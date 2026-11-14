@@ -40,9 +40,9 @@ cargo run --example config
 # Annotate and save to runs/predict/annotated_*.jpg
 cargo run --example annotate --features annotate
 
-# Track objects in the sample video, or your own video with a tracker name or YAML file
+# Track objects in the sample video with the default tracktrack.yaml, or your own video with a tracker name or YAML file
 cargo run --example track --features track,video
-cargo run --example track --features track,video -- path/to/video.mp4 bytetrack.yaml
+cargo run --example track --features track,video -- path/to/video.mp4 tracktrack.yaml
 ```
 
 The `tasks` example defaults to detection and works with the other tasks when you pass their model. The matching sample image is downloaded automatically. The segment, semantic, and depth branches also print the raw output array, which `ndarray` truncates with `...`:

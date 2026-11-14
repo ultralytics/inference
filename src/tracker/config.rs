@@ -31,8 +31,8 @@ pub enum TrackerType {
 impl FromStr for TrackerType {
     type Err = String;
 
-    /// Parse a tracker name like `bytetrack`, also accepting the Ultralytics config names like
-    /// `bytetrack.yaml`.
+    /// Parse a tracker name like `tracktrack`, also accepting the Ultralytics config names like
+    /// `tracktrack.yaml`.
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.trim_end_matches(".yaml").to_ascii_lowercase().as_str() {
             "botsort" => Ok(Self::BotSort),
@@ -244,7 +244,7 @@ macro_rules! set_keys {
 }
 
 impl TrackerConfig {
-    /// Load a tracker by name (`botsort`, `bytetrack.yaml`, ...) or from a YAML file with the keys
+    /// Load a tracker by name (`tracktrack`, `botsort.yaml`, ...) or from a YAML file with the keys
     /// of the Ultralytics tracker configs. Keys a file leaves out keep the values of its
     /// `tracker_type`.
     ///

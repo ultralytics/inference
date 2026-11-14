@@ -18,7 +18,7 @@
  * }
  *
  * // Tracks carry over between calls, like `model.track(persist=True)` in Ultralytics.
- * const tracked = await model.track(videoElement, { tracker: "bytetrack.yaml" });
+ * const tracked = await model.track(videoElement, { tracker: "tracktrack.yaml" });
  * console.log(tracked.boxes.map((box) => box.id));
  * ```
  */

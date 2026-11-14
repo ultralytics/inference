@@ -7,7 +7,7 @@
 //!
 //! ```bash
 //! cargo run --example track --features track,video
-//! cargo run --example track --features track,video -- path/to/video.mp4 bytetrack.yaml
+//! cargo run --example track --features track,video -- path/to/video.mp4 tracktrack.yaml
 //! ```
 
 use ultralytics_inference::{Source, SourceIterator, YOLOModel};

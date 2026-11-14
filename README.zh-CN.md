@@ -53,7 +53,7 @@
 - 🏷️ **自动读取元数据**：自动读取 ONNX 模型中的类别名称、任务类型和输入尺寸。
 - ⬇️ **自动下载**：本地不存在时，自动下载支持的 YOLO26、YOLO11 和 YOLOv8 ONNX 模型（尺寸：n/s/m/l/x）。
 - 🖼️ **多输入源**：支持图片、目录、glob 模式、视频文件、摄像头和流。
-- 🎞️ **目标跟踪**：BoT-SORT、ByteTrack、OC-SORT、Deep OC-SORT、FastTrack 和 TrackTrack，支持相机运动补偿和 ReID，结果与 Ultralytics 一致（`track` 特性），也可在浏览器中使用。
+- 🎞️ **目标跟踪**：BoT-SORT、ByteTrack、OC-SORT、Deep OC-SORT、FastTrack 和 TrackTrack（默认），支持相机运动补偿和 ReID，结果与 Ultralytics 一致（`track` 特性），也可在浏览器中使用。
 - 🪶 **轻量运行时**：不需要 PyTorch、TensorFlow 或 Python 运行时。
 
 ## ✨ 模型
@@ -299,7 +299,7 @@ ultralytics-inference version
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 # 跟踪视频中的目标（`track` 和 `video` 特性）
-ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker bytetrack.yaml
+ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker tracktrack.yaml
 ```
 
 `track` 接受所有 `predict` 选项以及 `--tracker`，即跟踪器名称（`botsort`、`bytetrack`、`ocsort`、`deepocsort`、`fasttrack`、`tracktrack`，可带或不带 `.yaml`）或包含 [Ultralytics 跟踪器配置](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/trackers) 键的 YAML 文件。与 Ultralytics 一样，默认使用 `tracktrack.yaml`、`--conf 0.1`，并保存到 `runs/<task>/track`。`model: auto` 时 `with_reid: True` 会下载 `yolo26n-reid.onnx`。`gmc_method` 支持 `sparseOptFlow` 和 `none`。`tracktrack` 不运行 Ultralytics 为 YOLO11 等 NMS 模型找回框的宽松 NMS 步骤，无 NMS 的 YOLO26 模型不需要它。
@@ -608,7 +608,7 @@ use ultralytics_inference::YOLOModel;
 
 let mut model = YOLOModel::load("yolo26n.onnx")?;
 for frame in ["frame1.jpg", "frame2.jpg"] {
-    let results = model.track(frame, "bytetrack.yaml")?; // 跟踪结果在多次调用之间保留
+    let results = model.track(frame, "tracktrack.yaml")?; // 跟踪结果在多次调用之间保留
     println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
 }
 ```
@@ -795,13 +795,13 @@ const results = await model.predict("bus.jpg");
 console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 
 // 跨摄像头或视频帧跟踪目标：每帧调用一次，id 会延续
-const tracked = await model.track(video, { tracker: "bytetrack.yaml" });
+const tracked = await model.track(video, { tracker: "tracktrack.yaml" });
 console.log(tracked.boxes.map((box) => box.id)); // [1, 2, 3, ...]
 ```
 
 通过 `{ device: "webgpu" | "cpu" }` 选择加速器（默认 `"auto"`），并读取
 `model.device` 查看实际使用的设备。`model.track()` 可在 ONNX 和 LiteRT 的检测、分割、姿态和 OBB 模型上运行全部六种
-跟踪器，`model.resetTracker()` 用于开始新的视频；摄像头循环示例和全部选项详见
+跟踪器（默认 `tracktrack.yaml`），`model.resetTracker()` 用于开始新的视频；摄像头循环示例和全部选项详见
 [目标跟踪](web/README.zh-CN.md#目标跟踪)。
 
 后端会根据模型格式自动选择（优先使用扩展名，否则读取模型字节），因此切换后端只取决于

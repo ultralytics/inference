@@ -2,7 +2,7 @@
 
 //! Multi-object tracking, ported from the Ultralytics trackers.
 //!
-//! `BoT-SORT`, `ByteTrack`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack`, with sparse
+//! `BoT-SORT`, `ByteTrack`, `OC-SORT`, `Deep OC-SORT`, `FastTrack` and `TrackTrack` (the default), with sparse
 //! optical flow camera motion compensation and `ReID` appearance features from an ONNX model.
 //!
 //! [`YOLOModel::track`] runs it like `model.track(persist=True)` in Ultralytics: it keeps the
@@ -14,7 +14,7 @@
 //!
 //! let mut model = YOLOModel::load("yolo26n.onnx")?;
 //! for frame in ["frame1.jpg", "frame2.jpg"] {
-//!     let results = model.track(frame, "bytetrack.yaml")?;
+//!     let results = model.track(frame, "tracktrack.yaml")?;
 //!     println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
 //! }
 //! # Ok::<(), ultralytics_inference::InferenceError>(())

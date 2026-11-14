@@ -395,7 +395,7 @@ impl YoloModel {
     /// `conf` and `iou` are the confidence and NMS IoU thresholds (omit them for the
     /// Ultralytics defaults 0.25 / 0.5); `classes` optionally keeps only
     /// the given class ids (for semantic, other pixels become background).
-    /// `tracker` (`"botsort.yaml"`, `"bytetrack.yaml"`, ...) tracks the detections across
+    /// `tracker` (`"tracktrack.yaml"`, `"botsort.yaml"`, ...) tracks the detections across
     /// calls like Ultralytics `model.track(persist=True)`, starting anew when it changes.
     /// Returns a plain JS object whose shape mirrors the Ultralytics `Results` API.
     ///

@@ -122,7 +122,7 @@ await video.play();
 
 async function frame() {
   const image = await createImageBitmap(video); // 绘制的正是被跟踪的那一帧
-  const results = await model.track(image, { tracker: "bytetrack.yaml" });
+  const results = await model.track(image, { tracker: "tracktrack.yaml" });
   console.log(results.boxes.map((box) => box.id));
   await annotate(canvas, image, results); // 标签显示为 "id:1 person 87%"
   image.close();
@@ -139,7 +139,7 @@ frame();
 - `model.resetTracker()` 会清除所有轨迹。处理新视频前，以及在互不相关的图片之间请调用它：单张图片也可以跟踪，但单独使用时
   只会把目标编号为 `1..N`。
 - 语义分割、深度和分类模型没有可跟踪的目标，返回与 `predict()` 相同的结果。
-- `botsort.yaml` 和 `tracktrack.yaml` 用稀疏光流估计相机运动，在 wasm 中每帧增加约 6 到 9 ms。
+- `botsort.yaml` 和 `tracktrack.yaml`（默认）用稀疏光流估计相机运动，在 wasm 中每帧增加约 6 到 9 ms。
   其他跟踪器增加不到 0.1 ms，因此实时摄像头最轻量的选择是 `bytetrack.yaml`。
 - ReID 外观匹配只在原生 crate 中运行，在 Ultralytics 中也默认关闭。自定义跟踪器 YAML 文件同样只支持原生 crate。
 

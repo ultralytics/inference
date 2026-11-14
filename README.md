@@ -53,7 +53,7 @@ Request an Enterprise License for commercial use at [Ultralytics Licensing](http
 - 🏷️ **Auto Metadata** - Automatically reads class names, task type, and input size from ONNX models
 - ⬇️ **Auto Download** - Downloads supported YOLO26, YOLO11, and YOLOv8 ONNX models (sizes: n/s/m/l/x) when not found locally
 - 🖼️ **Multiple Sources** - Images, directories, glob patterns, video files, webcams, and streams
-- 🎞️ **Object Tracking** - BoT-SORT, ByteTrack, OC-SORT, Deep OC-SORT, FastTrack and TrackTrack with camera motion compensation and ReID, matching Ultralytics (`track` feature), also in the browser
+- 🎞️ **Object Tracking** - BoT-SORT, ByteTrack, OC-SORT, Deep OC-SORT, FastTrack and TrackTrack (the default) with camera motion compensation and ReID, matching Ultralytics (`track` feature), also in the browser
 - 🪶 **Lean Runtime** - No PyTorch, TensorFlow, or Python runtime required
 
 ## ✨ Models
@@ -300,7 +300,7 @@ ultralytics-inference version
 ultralytics-inference predict --model yolo26n.onnx --source image.jpg
 
 # Track objects in a video (`track` and `video` features)
-ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker bytetrack.yaml
+ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker tracktrack.yaml
 ```
 
 `track` takes every `predict` option plus `--tracker`, a tracker name (`botsort`, `bytetrack`, `ocsort`, `deepocsort`,
@@ -617,7 +617,7 @@ use ultralytics_inference::YOLOModel;
 
 let mut model = YOLOModel::load("yolo26n.onnx")?;
 for frame in ["frame1.jpg", "frame2.jpg"] {
-    let results = model.track(frame, "bytetrack.yaml")?; // tracks carry over between calls
+    let results = model.track(frame, "tracktrack.yaml")?; // tracks carry over between calls
     println!("{:?}", results[0].boxes.as_ref().and_then(|b| b.id()));
 }
 ```
@@ -807,14 +807,14 @@ const results = await model.predict("bus.jpg");
 console.log(results.boxes); // [{ x1, y1, x2, y2, conf, cls, name, color }, ...]
 
 // Track objects across webcam or video frames: call once per frame, ids carry over
-const tracked = await model.track(video, { tracker: "bytetrack.yaml" });
+const tracked = await model.track(video, { tracker: "tracktrack.yaml" });
 console.log(tracked.boxes.map((box) => box.id)); // [1, 2, 3, ...]
 ```
 
-Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the
-default), and read `model.device` to see what actually ran. `model.track()` runs all six trackers on ONNX and LiteRT
-detection, segmentation, pose and OBB models, and `model.resetTracker()` starts a new video; see
-[Tracking](web/README.md#tracking) for a webcam loop and every option.
+Pass `{ device: "webgpu" | "cpu" }` to pick the accelerator (`"auto"` is the default), and read `model.device` to see
+what actually ran. `model.track()` runs all six trackers (`tracktrack.yaml` by default) on ONNX and LiteRT detection,
+segmentation, pose and OBB models, and `model.resetTracker()` starts a new video; see [Tracking](web/README.md#tracking)
+for a webcam loop and every option.
 
 The backend is picked automatically from the model format (its extension when
 available, otherwise the model bytes), so switching is just a matter of the model

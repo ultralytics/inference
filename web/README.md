@@ -127,7 +127,7 @@ await video.play();
 
 async function frame() {
   const image = await createImageBitmap(video); // draw the same frame that was tracked
-  const results = await model.track(image, { tracker: "bytetrack.yaml" });
+  const results = await model.track(image, { tracker: "tracktrack.yaml" });
   console.log(results.boxes.map((box) => box.id));
   await annotate(canvas, image, results); // labels read "id:1 person 87%"
   image.close();
@@ -147,8 +147,9 @@ frame();
 - `model.resetTracker()` forgets every track. Call it before a new video, and between unrelated images: a single image
   works too, but on its own it only numbers the objects `1..N`.
 - Semantic segmentation, depth and classification models have nothing to track and return what `predict()` returns.
-- `botsort.yaml` and `tracktrack.yaml` estimate camera motion with sparse optical flow, which adds about 6 to 9 ms per
-  frame in wasm. The other trackers add under 0.1 ms, so `bytetrack.yaml` is the lightest choice for a live webcam.
+- `botsort.yaml` and `tracktrack.yaml` (the default) estimate camera motion with sparse optical flow, which adds about 6
+  to 9 ms per frame in wasm. The other trackers add under 0.1 ms, so `bytetrack.yaml` is the lightest choice for a live
+  webcam.
 - ReID appearance matching runs only in the native crate, and is off by default in Ultralytics too. Custom tracker YAML
   files are native only as well.
 
