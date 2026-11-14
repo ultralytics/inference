@@ -18,7 +18,7 @@ fn predict_args(model: &str, task: Option<Task>, save_json: bool) -> PredictArgs
         model: Some(model.to_string()),
         task,
         source: Some(BUS.to_string()),
-        conf: Some(0.25),
+        conf: 0.25,
         iou: 0.45,
         max_det: 300,
         imgsz: Some(640),
