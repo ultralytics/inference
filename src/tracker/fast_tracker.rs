@@ -56,12 +56,13 @@ impl Tracker {
                 (t.occluded_len, t.last_occluded_frame) = (1, frame);
                 let n = t.history.len();
                 if n > 0 {
+                    // Python's `hist[-k]`, where `hist[-0]` is the oldest entry.
                     if n >= c.reset_velocity_offset_occ {
-                        let prev = t.history[n - c.reset_velocity_offset_occ].0;
+                        let prev = t.history[(n - c.reset_velocity_offset_occ) % n].0;
                         t.mean[4..].copy_from_slice(&prev[4..]);
                     }
                     if n >= c.reset_pos_offset_occ {
-                        let (prev, cov) = t.history[n - c.reset_pos_offset_occ];
+                        let (prev, cov) = t.history[(n - c.reset_pos_offset_occ) % n];
                         t.mean[..4].copy_from_slice(&prev[..4]);
                         t.cov = cov;
                     }
