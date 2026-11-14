@@ -22,6 +22,7 @@ struct JsBox {
     x2: f32,
     y2: f32,
     /// Track id, only when tracking.
+    #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<u32>,
     conf: f32,
     cls: usize,
@@ -38,6 +39,7 @@ struct JsObb {
     h: f32,
     angle: f32,
     /// Track id, only when tracking.
+    #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<u32>,
     conf: f32,
     cls: usize,
