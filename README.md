@@ -254,7 +254,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -274,7 +274,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -399,7 +399,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.60"
+ultralytics-inference = "0.0.61"
 ```
 
 ```toml
@@ -470,10 +470,15 @@ if let Some(ref boxes) = result.boxes {
     let cls = boxes.cls();        // Class IDs
 }
 
-// Segmentation mask outlines, like Ultralytics masks.xy
+// Segmentation masks, kept inside their boxes like Ultralytics
 if let Some(ref masks) = result.masks {
-    let xy = masks.xy();          // One (points, 2) array per mask, in pixels
+    let xy = masks.xy();          // Outlines like Ultralytics masks.xy, one (points, 2) array per mask, in pixels
     let xyn = masks.xyn();        // Normalized [0-1]
+    let (n, h, w) = masks.shape(); // Mask count and size, without building the full stack
+    for ((x, y), mask) in masks.crops() {
+        // Each mask's pixels inside its box, whose top-left corner is (x, y)
+    }
+    let data = masks.data();      // Full [N, H, W] stack, built on first use
 }
 ```
 
@@ -732,7 +737,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.60", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.61", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 

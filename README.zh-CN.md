@@ -253,7 +253,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -273,7 +273,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -394,7 +394,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.60"
+ultralytics-inference = "0.0.61"
 ```
 
 ```toml
@@ -465,10 +465,15 @@ if let Some(ref boxes) = result.boxes {
     let cls = boxes.cls();        // 类别 ID
 }
 
-// 分割掩码轮廓，与 Ultralytics masks.xy 一致
+// 分割掩码，与 Ultralytics 一样保存在各自的框内
 if let Some(ref masks) = result.masks {
-    let xy = masks.xy();          // 每个掩码一个 (点数, 2) 数组，单位为像素
+    let xy = masks.xy();          // 轮廓，与 Ultralytics masks.xy 一致，每个掩码一个 (点数, 2) 数组，单位为像素
     let xyn = masks.xyn();        // 归一化 [0-1]
+    let (n, h, w) = masks.shape(); // 掩码数量和尺寸，无需构建完整的掩码堆叠
+    for ((x, y), mask) in masks.crops() {
+        // 每个掩码在其框内的像素，框的左上角为 (x, y)
+    }
+    let data = masks.data();      // 完整的 [N, H, W] 掩码堆叠，首次调用时构建
 }
 ```
 
@@ -722,7 +727,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.60", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.61", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 
