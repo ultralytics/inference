@@ -35,9 +35,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for result in &results {
         if let Some(masks) = &result.masks {
             println!("segment: {} instance masks", masks.len());
-            // masks.data is Array3<f32> of shape [N, H, W], 1.0 inside each object.
-            println!("  raw data shape {:?}", masks.data.shape());
-            println!("{:?}", masks.data);
+            // masks.data() is Array3<f32> of shape [N, H, W], 1.0 inside each object.
+            println!("  raw data shape {:?}", masks.shape());
+            println!("{:?}", masks.data());
         } else if let Some(keypoints) = &result.keypoints {
             println!("pose: {} sets of keypoints", keypoints.len());
         } else if let Some(obb) = &result.obb {

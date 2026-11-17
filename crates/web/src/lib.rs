@@ -36,7 +36,6 @@ use wasm_bindgen::prelude::*;
 use ultralytics_inference::metadata::ModelMetadata;
 use ultralytics_inference::postprocessing::{
     filter_semantic_classes, postprocess_semantic_mask, postprocess_with_head,
-    postprocess_with_head_masks,
 };
 use ultralytics_inference::preprocessing::{
     PreprocessResult, calculate_rect_size, preprocess_for_task,
@@ -49,7 +48,7 @@ use ultralytics_inference::visualizer::skeleton::{
 };
 use ultralytics_inference::{InferenceConfig, Task, Tracker, TrackerConfig};
 
-use payload::{InstanceMask, JsResults};
+use payload::JsResults;
 
 mod onnx_meta;
 mod payload;
@@ -290,14 +289,14 @@ fn rgba_to_image(rgba: Vec<u8>, width: u32, height: u32) -> Result<image::Dynami
 
 /// Build the shared `InferenceConfig` from the JS thresholds and class filter,
 /// keeping the Rust defaults for any threshold left unset, with the tracking confidence
-/// default when tracking.
+/// default when tracking, and instance masks at the image size for the browser overlay.
 fn make_config(
     conf: Option<f32>,
     iou: Option<f32>,
     classes: Option<Vec<u32>>,
     track: bool,
 ) -> InferenceConfig {
-    let mut config = InferenceConfig::new();
+    let mut config = InferenceConfig::new().with_retina_masks(true);
     if let Some(conf) = conf.or_else(|| track.then_some(InferenceConfig::DEFAULT_TRACK_CONF)) {
         config = config.with_confidence(conf);
     }
@@ -627,8 +626,6 @@ impl YoloModel {
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
-        // Masks draw as they decode, or wait for tracking to pick the rows to draw.
-        let (tracking, mut masks, mut overlay) = (tracker.is_some(), Vec::new(), Vec::new());
         let mut results = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
@@ -668,7 +665,7 @@ impl YoloModel {
                     inference_shape,
                 )
             });
-            postprocess_with_head_masks(
+            postprocess_with_head(
                 views,
                 self.metadata.task,
                 &pre,
@@ -681,21 +678,14 @@ impl YoloModel {
                 self.metadata.end2end,
                 self.metadata.kpt_shape,
                 self.metadata.is_rtdetr(),
-                &mut |mask, box_data| {
-                    let mask = InstanceMask::new(mask, box_data, &self.metadata.colors);
-                    if tracking {
-                        masks.push(mask.into_owned());
-                    } else {
-                        mask.draw(&mut overlay);
-                    }
-                },
             )
         };
         results.colors = Arc::clone(&self.metadata.colors);
         if let Some(t) = tracker {
-            overlay = track(t, &mut results, loose.as_ref(), &masks)?;
+            t.update(&mut results, loose.as_ref())
+                .map_err(err_ctx("tracking failed"))?;
         }
-        results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
+        results_to_js(&results, self.metadata.task, colormap, viz, t_post)
     }
 }
 
@@ -938,9 +928,7 @@ impl YoloPipeline {
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
 
-        // Masks draw as they decode, or wait for tracking to pick the rows to draw.
-        let (tracking, mut masks, mut overlay) = (tracker.is_some(), Vec::new(), Vec::new());
-        let mut results = postprocess_with_head_masks(
+        let mut results = postprocess_with_head(
             views,
             self.metadata.task,
             &pending.pre,
@@ -953,25 +941,17 @@ impl YoloPipeline {
             self.metadata.end2end,
             self.metadata.kpt_shape,
             self.metadata.is_rtdetr(),
-            &mut |mask, box_data| {
-                let mask = InstanceMask::new(mask, box_data, &self.metadata.colors);
-                if tracking {
-                    masks.push(mask.into_owned());
-                } else {
-                    mask.draw(&mut overlay);
-                }
-            },
         );
         results.colors = Arc::clone(&self.metadata.colors);
         if let Some(t) = tracker {
-            overlay = track(t, &mut results, loose.as_ref(), &masks)?;
+            t.update(&mut results, loose.as_ref())
+                .map_err(err_ctx("tracking failed"))?;
         }
         results_to_js(
             &results,
             self.metadata.task,
             colormap.parse().unwrap_or_default(),
             depth_viz.parse().unwrap_or_default(),
-            overlay,
             t_post,
         )
     }
@@ -1023,26 +1003,6 @@ fn loose_results(
         m.kpt_shape,
         m.is_rtdetr(),
     )
-}
-
-/// Track `results` and its `loose` result with `tracker`, then composite the instance masks of
-/// the rows it keeps.
-fn track(
-    tracker: &mut Tracker,
-    results: &mut Results,
-    loose: Option<&Results>,
-    masks: &[InstanceMask],
-) -> Result<Vec<u8>, JsError> {
-    let rows = (tracker.update(results, loose)).map_err(err_ctx("tracking failed"))?;
-    let mut overlay = Vec::new();
-    match rows {
-        Some(rows) => rows
-            .iter()
-            .filter_map(|&i| masks.get(i))
-            .for_each(|m| m.draw(&mut overlay)),
-        None => masks.iter().for_each(|m| m.draw(&mut overlay)),
-    }
-    Ok(overlay)
 }
 
 /// Scale a normalized detection head's coordinates to model-input pixels in place.
@@ -1143,11 +1103,10 @@ fn results_to_js(
     task: Task,
     colormap: Colormap,
     viz: DepthViz,
-    overlay: Vec<u8>,
     t_post: f64,
 ) -> Result<JsValue, JsError> {
     let value = to_js(
-        &JsResults::from_results(results, task, colormap, viz, overlay),
+        &JsResults::from_results(results, task, colormap, viz),
         "results",
     )?;
     let speed = js_sys::Reflect::get(&value, &JsValue::from_str("speed"))

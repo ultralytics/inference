@@ -6,7 +6,7 @@
 //! API for easy migration and consistent usage patterns.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, s};
 
@@ -843,15 +843,20 @@ impl Boxes {
 
 /// Per-instance segmentation masks produced by the `segment` task.
 ///
-/// Holds the binary mask tensor, with mask outlines on the original image in [`xy`](Self::xy)
-/// and [`xyn`](Self::xyn).
+/// Each mask is kept inside its box like Ultralytics box-local masks, so memory and time follow
+/// the box areas rather than N * H * W; [`data`](Self::data) pastes them into the dense stack
+/// on first use. Mask outlines on the original image are in [`xy`](Self::xy) and
+/// [`xyn`](Self::xyn).
 #[derive(Debug, Clone)]
 pub struct Masks {
-    /// Binary masks with shape (N, H, W), 1.0 inside each object, at the model input size like
-    /// Ultralytics, or at the original image size with `retina_masks` or tiling.
-    pub data: Array3<f32>,
     /// Original image shape (height, width).
     pub orig_shape: (u32, u32),
+    /// The (height, width) the masks span: the model input size like Ultralytics, or the
+    /// original image size with `retina_masks` or tiling.
+    frame: (usize, usize),
+    /// Each mask's top-left `(x, y)` in the frame and its pixels from there.
+    crops: Vec<((usize, usize), Array2<f32>)>,
+    data: OnceLock<Array3<f32>>,
 }
 
 impl Masks {
@@ -866,8 +871,63 @@ impl Masks {
     ///
     /// * A new `Masks` instance.
     #[must_use]
-    pub const fn new(data: Array3<f32>, orig_shape: (u32, u32)) -> Self {
-        Self { data, orig_shape }
+    pub fn new(data: Array3<f32>, orig_shape: (u32, u32)) -> Self {
+        let (_, h, w) = data.dim();
+        let crops = data.outer_iter().map(|m| ((0, 0), m.to_owned())).collect();
+        Self {
+            data: OnceLock::from(data),
+            ..Self::from_crops(crops, (h, w), orig_shape)
+        }
+    }
+
+    /// Masks spanning a `frame` of (height, width), each given as its top-left `(x, y)` there
+    /// and its pixels from that corner.
+    pub(crate) const fn from_crops(
+        crops: Vec<((usize, usize), Array2<f32>)>,
+        frame: (usize, usize),
+        orig_shape: (u32, u32),
+    ) -> Self {
+        Self {
+            orig_shape,
+            frame,
+            crops,
+            data: OnceLock::new(),
+        }
+    }
+
+    /// Binary masks with shape (N, H, W), 1.0 inside each object, at the model input size like
+    /// Ultralytics, or at the original image size with `retina_masks` or tiling. Built from the
+    /// box-local masks on the first call; [`crops`](Self::crops) reads them without it.
+    #[must_use]
+    pub fn data(&self) -> &Array3<f32> {
+        self.data.get_or_init(|| {
+            let (h, w) = self.frame;
+            let mut data = Array3::zeros((self.len(), h, w));
+            for (mut d, ((x, y), m)) in data.outer_iter_mut().zip(self.crops()) {
+                d.slice_mut(s![y..y + m.nrows(), x..x + m.ncols()])
+                    .assign(&m);
+            }
+            data
+        })
+    }
+
+    /// Each mask as the top-left `(x, y)` of its box in the [`data`](Self::data) frame and its
+    /// pixels inside the box, which hold all of its set pixels.
+    pub fn crops(&self) -> impl ExactSizeIterator<Item = ((usize, usize), ArrayView2<'_, f32>)> {
+        self.crops.iter().map(|(xy, m)| (*xy, m.view()))
+    }
+
+    /// The (N, H, W) shape of [`data`](Self::data), without building it.
+    #[must_use]
+    pub const fn shape(&self) -> (usize, usize, usize) {
+        (self.crops.len(), self.frame.0, self.frame.1)
+    }
+
+    /// The masks at `idx`, in that order.
+    #[cfg(feature = "track")]
+    pub(crate) fn select(&self, idx: &[usize]) -> Self {
+        let crops = idx.iter().map(|&i| self.crops[i].clone()).collect();
+        Self::from_crops(crops, self.frame, self.orig_shape)
     }
 
     /// Get the number of masks.
@@ -876,18 +936,18 @@ impl Masks {
     ///
     /// * The count of masks.
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.data.shape()[0]
+    pub const fn len(&self) -> usize {
+        self.crops.len()
     }
 
     /// Check if there are no masks.
     ///
     /// # Returns
     ///
-    /// * `true` if the masks array is empty.
+    /// * `true` if there are no masks.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.crops.is_empty()
     }
 
     /// The outline of each mask in image pixels, `(points, 2)` per mask, like Ultralytics
@@ -896,20 +956,24 @@ impl Masks {
     /// points and scaled from the mask size to the image like `scale_coords`. A mask without
     /// pixels has no points.
     #[must_use]
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap
+    )]
     pub fn xy(&self) -> Vec<Array2<f32>> {
-        let (_, mh, mw) = self.data.dim();
+        let (mh, mw) = self.frame;
         let (oh, ow) = self.orig_shape;
         let [left, top, nw, nh] = crate::postprocessing::content_crop(mh, mw, oh, ow);
         // Python's f64 gains, which NumPy rounds to f32 for f32 points.
         let gain = [nw as f64 / f64::from(ow), nh as f64 / f64::from(oh)].map(|g| g as f32);
         let (pad, size) = ([left as f32, top as f32], [ow as f32, oh as f32]);
-        self.data
-            .outer_iter()
-            .map(|mask| {
+        self.crops()
+            .map(|((x, y), mask)| {
                 let points = merge_segments(external_contours(&mask));
+                let corner = [x as i32, y as i32];
                 Array2::from_shape_fn((points.len(), 2), |(i, k)| {
-                    ((points[i][k] as f32 - pad[k]) / gain[k]).clamp(0.0, size[k])
+                    (((points[i][k] + corner[k]) as f32 - pad[k]) / gain[k]).clamp(0.0, size[k])
                 })
             })
             .collect()

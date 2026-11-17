@@ -59,7 +59,7 @@ use crate::error::Result;
 use crate::metadata::ModelMetadata;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::model::YOLOModel;
-use crate::results::{Boxes, Keypoints, Masks, Obb, Results};
+use crate::results::{Boxes, Keypoints, Obb, Results};
 use crate::task::Task;
 use crate::utils::{calculate_iou, calculate_probiou};
 pub use config::{GmcMethod, TrackerConfig, TrackerType};
@@ -276,7 +276,7 @@ fn keep_rows(result: &mut Results, idx: &[usize]) {
         *o = Obb::new(rows(&o.data), o.orig_shape);
     }
     if let Some(m) = &mut result.masks {
-        *m = Masks::new(m.data.select(Axis(0), idx), m.orig_shape);
+        *m = m.select(idx);
     }
     if let Some(k) = &mut result.keypoints {
         *k = Keypoints::new(k.data.select(Axis(0), idx), k.orig_shape);

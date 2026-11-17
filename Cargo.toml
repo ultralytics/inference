@@ -148,8 +148,7 @@ dirs = "^7.0"
 glob = "^0.3.3"
 rayon = "^1.12"
 clap = { version = "^4.6.1", features = ["derive"] }
-# rayon-backed parallelism for ndarray and fast_image_resize, native only.
-ndarray = { version = "^0.17", features = ["rayon"] }
+# rayon-backed parallelism for fast_image_resize, native only.
 fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
 # Native OpenVINO IR (.xml) runtime, loaded from the installed libraries at run time (openvino-native feature).
 openvino = { version = "0.11.1", default-features = false, features = ["runtime-linking"], optional = true }

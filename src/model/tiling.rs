@@ -11,7 +11,7 @@
 )]
 
 use image::{DynamicImage, GenericImageView};
-use ndarray::{Array, Array2, Array3, Axis, RemoveAxis, aview1, s};
+use ndarray::{Array, Array2, Axis, RemoveAxis, aview1, s};
 
 use super::YOLOModel;
 use crate::error::Result;
@@ -163,7 +163,8 @@ fn merge_detections(
             d.column_mut(k).mapv_inplace(|v| v + win[k % 2] as f32);
         }
         if let Some(m) = &t.masks {
-            masks.extend(m.data.outer_iter());
+            let [wx, wy, ..] = win.map(|v| v as usize);
+            masks.extend(m.crops().map(|((x, y), m)| ((x + wx, y + wy), m)));
         }
         wins.extend(std::iter::repeat_n(*win, d.nrows()));
         parts.push(d);
@@ -177,15 +178,11 @@ fn merge_detections(
         out.boxes = Some(Boxes::new(merged, shape));
     }
     out.keypoints = stack(&kpts).map(|k| Keypoints::new(k.select(Axis(0), &keep), shape));
-    // Each kept mask goes at its window origin in a source-sized stack.
+    // Each kept mask moves by its window origin into the source frame.
     out.masks = tiles.iter().any(|t| t.masks.is_some()).then(|| {
-        let mut data = Array3::zeros((keep.len(), shape.0 as usize, shape.1 as usize));
-        for (o, &k) in keep.iter().enumerate() {
-            let (m, [x, y, ..]) = (&masks[k], wins[k].map(|v| v as usize));
-            data.slice_mut(s![o, y..y + m.nrows(), x..x + m.ncols()])
-                .assign(m);
-        }
-        Masks::new(data, shape)
+        let crops = keep.iter().map(|&k| (masks[k].0, masks[k].1.to_owned()));
+        let frame = (shape.0 as usize, shape.1 as usize);
+        Masks::from_crops(crops.collect(), frame, shape)
     });
 }
 
@@ -327,7 +324,7 @@ impl YOLOModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{arr1, arr2, arr3};
+    use ndarray::{Array3, arr1, arr2, arr3};
 
     #[test]
     fn test_tile_windows_match_the_documented_counts() {
@@ -420,7 +417,7 @@ mod tests {
             boxes(merge(Task::Detect, 1)),
             [60.0, 10.0, 100.0, 90.0, 0.9, 0.0]
         );
-        let masks = merge(Task::Segment, 2).masks.unwrap().data;
+        let masks = merge(Task::Segment, 2).masks.unwrap().data().clone();
         assert_eq!(
             (masks.shape(), masks[[0, 0, 49]], masks.sum()),
             (&[1, 100, 150][..], 0.0, 1e4)

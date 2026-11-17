@@ -6,7 +6,6 @@
 //! wrapper sees a plain serializable object. Per-task fields are empty/`null`
 //! when unused.
 
-use ndarray::{ArrayView1, ArrayView2, CowArray, Ix2, s};
 use serde::Serialize;
 
 use ultralytics_inference::Task;
@@ -111,13 +110,7 @@ impl JsResults {
     /// Convert core [`Results`] into the serializable JS payload, labeling it with
     /// the model's declared `task` (the caller already holds it, so there is no
     /// need to guess it back from which result fields are populated).
-    pub(crate) fn from_results(
-        r: &Results,
-        task: Task,
-        colormap: Colormap,
-        viz: DepthViz,
-        overlay: Vec<u8>,
-    ) -> Self {
+    pub(crate) fn from_results(r: &Results, task: Task, colormap: Colormap, viz: DepthViz) -> Self {
         // Class id -> display name and class color, shared by every detection type.
         let name = |c: usize| r.names.get(&c).cloned().unwrap_or_default();
         let hex = |c: usize| Color::for_class(&r.colors, c).to_hex();
@@ -207,10 +200,10 @@ impl JsResults {
             obb,
             keypoints,
             probs,
-            masks: if overlay.is_empty() {
-                build_semantic_overlay(r)
+            masks: if r.masks.is_some() {
+                build_instance_overlay(r)
             } else {
-                overlay
+                build_semantic_overlay(r)
             },
             semantic_mask: r.semantic_mask.as_ref().map_or_else(Vec::new, |sem| {
                 let mut bytes = Vec::with_capacity(sem.data.len() * 2);
@@ -239,59 +232,26 @@ fn put(buf: &mut [u8], w: usize, x: usize, y: usize, c: Color, a: u8) {
     buf[i..i + 4].copy_from_slice(&[c.0, c.1, c.2, a]);
 }
 
-/// The part of one instance mask inside its box, borrowed while drawing it straight away and
-/// copied only to wait for tracking to pick the rows to draw.
-pub(crate) struct InstanceMask<'a> {
-    /// Image `(height, width)`.
-    size: (usize, usize),
-    /// Top left `(x, y)` of the box.
-    corner: (usize, usize),
-    inside: CowArray<'a, f32, Ix2>,
-    color: Color,
-}
-
-impl<'a> InstanceMask<'a> {
-    /// The part of `mask` inside the box of `box_data`, in its class color (`colors` being the
-    /// model's `colors` metadata).
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    pub(crate) fn new(
-        mask: ArrayView2<'a, f32>,
-        box_data: ArrayView1<'_, f32>,
-        colors: &[Color],
-    ) -> Self {
-        let (h, w) = mask.dim();
-        let x1 = (box_data[2].max(0.0) as usize).saturating_add(1).min(w);
-        let y1 = (box_data[3].max(0.0) as usize).saturating_add(1).min(h);
-        let x0 = (box_data[0].max(0.0) as usize).min(x1);
-        let y0 = (box_data[1].max(0.0) as usize).min(y1);
-        Self {
-            size: (h, w),
-            corner: (x0, y0),
-            inside: mask.slice_move(s![y0..y1, x0..x1]).into(),
-            color: Color::for_class(colors, box_data[5] as usize),
-        }
+/// Composite the instance masks into a translucent colored `RGBA` overlay (`width*height*4`)
+/// in their class colors, each over the masks before it; empty without masks.
+fn build_instance_overlay(r: &Results) -> Vec<u8> {
+    let (Some(boxes), Some(masks)) = (&r.boxes, &r.masks) else {
+        return Vec::new();
+    };
+    if masks.is_empty() {
+        return Vec::new();
     }
-
-    /// The mask with its own copy of the pixels, to draw after tracking.
-    pub(crate) fn into_owned(self) -> InstanceMask<'static> {
-        InstanceMask {
-            inside: self.inside.into_owned().into(),
-            ..self
-        }
-    }
-
-    /// Composite the mask into the browser overlay, over the masks drawn before it.
-    pub(crate) fn draw(&self, overlay: &mut Vec<u8>) {
-        let ((h, w), (x0, y0)) = (self.size, self.corner);
-        if overlay.is_empty() {
-            overlay.resize(h * w * 4, 0);
-        }
-        for ((y, x), &v) in self.inside.indexed_iter() {
+    let (_, h, w) = masks.shape();
+    let mut overlay = vec![0; h * w * 4];
+    for (((x0, y0), mask), &c) in masks.crops().zip(&boxes.cls()) {
+        let color = Color::for_class(&r.colors, c as usize);
+        for ((y, x), &v) in mask.indexed_iter() {
             if v > 0.5 {
-                put(overlay, w, x0 + x, y0 + y, self.color, 128);
+                put(&mut overlay, w, x0 + x, y0 + y, color, 128);
             }
         }
     }
+    overlay
 }
 
 /// Build a translucent colored RGBA overlay (`width*height*4`) from the semantic

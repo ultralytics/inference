@@ -851,33 +851,27 @@ fn draw_masks(img: &mut image::RgbImage, result: &Results) {
     let (Some(boxes), Some(masks)) = (result.boxes.as_ref(), result.masks.as_ref()) else {
         return;
     };
-    let count = boxes.len().min(masks.data.dim().0);
+    let count = boxes.len().min(masks.len());
     if count == 0 {
         return;
     }
     let (width, height) = img.dimensions();
-    let (xyxy, cls) = (boxes.xyxy(), boxes.cls());
+    let cls = boxes.cls();
     let w = width as usize;
+    let (_, mh, mw) = masks.shape();
 
     // Per pixel, the brightest class color of the masks covering it and how many cover it.
     let mut cover = vec![[0u8; 4]; w * height as usize];
-    for i in 0..count {
+    for (i, ((x, y), crop)) in masks.crops().enumerate().take(count) {
         let color = Color::for_class(&result.colors, cls[i] as usize);
 
-        // Original-size masks only fill their box; input-size ones are scaled to the image
+        // Original-size masks are drawn as they are; input-size ones are scaled to the image
         // first like the Ultralytics annotator, which can spill past the box.
-        let plane = masks.data.index_axis(ndarray::Axis(0), i);
         let scaled;
-        let (region, [x, y]) = if plane.dim() == (height as usize, w) {
-            let side = |v: f32, n: u32| v.max(0.0).min(n as f32).ceil() as usize;
-            let (x1, y1) = (side(xyxy[[i, 0]], width), side(xyxy[[i, 1]], height));
-            let (x2, y2) = (side(xyxy[[i, 2]], width), side(xyxy[[i, 3]], height));
-            (
-                plane.slice_move(ndarray::s![y1..y2.max(y1), x1..x2.max(x1)]),
-                [x1, y1],
-            )
+        let (region, [x, y]) = if (mh, mw) == (height as usize, w) {
+            (crop, [x, y])
         } else {
-            scaled = crate::postprocessing::scale_mask(&plane, (height, width));
+            scaled = crate::postprocessing::scale_mask((x, y), &crop, (mh, mw), (height, width));
             (scaled.0.view(), scaled.1)
         };
 
