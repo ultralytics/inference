@@ -192,16 +192,3 @@ of the two.
 
 The first TensorRT run builds an engine and takes tens of seconds; engines are cached under
 `.trt_cache/` next to the model and reused afterwards.
-
-### Segmentation masks
-
-yolo26n-seg at 640×640 over coco128, ms per image, mean and sample standard deviation across 5 runs. Masks are
-built, outlined (`masks.xy()`) and drawn on the CPU, so the execution provider only changes the detections they
-come from. Since 0.0.61 each mask is kept inside its box, so all three cost the box areas rather than the full frame.
-
-| Configuration            | postprocess ms 0.0.60 | postprocess ms 0.0.61 | outlines ms 0.0.60 | outlines ms 0.0.61 | annotate ms 0.0.60 | annotate ms 0.0.61 |
-| ------------------------ | --------------------- | --------------------- | ------------------ | ------------------ | ------------------ | ------------------ |
-| CUDA FP32                | 1.30 +- 0.18          | 0.86 +- 0.07          | 1.88 +- 0.00       | 0.24 +- 0.01       | 2.52 +- 0.14       | 2.16 +- 0.09       |
-| CUDA FP32, conf 0.05     | 1.78 +- 0.08          | 0.97 +- 0.05          | 5.29 +- 0.03       | 0.40 +- 0.00       | 4.41 +- 0.12       | 3.08 +- 0.14       |
-| TensorRT FP32            | 1.30 +- 0.15          | 0.90 +- 0.14          | 1.89 +- 0.01       | 0.23 +- 0.00       | 2.52 +- 0.17       | 2.12 +- 0.11       |
-| TensorRT FP32, conf 0.05 | 1.65 +- 0.16          | 1.02 +- 0.14          | 5.29 +- 0.01       | 0.39 +- 0.00       | 4.31 +- 0.19       | 3.04 +- 0.10       |
