@@ -383,7 +383,9 @@ impl Tracker {
         let mut rows = rows.unwrap_or_default();
         let n = rows.len();
         self.frame_id += 1;
-        let warp = self.gmc.as_mut().map(|g| g.apply(&result.orig_img));
+        // The camera motion only moves tracks, so it is measured only when there are some.
+        let follow = !self.tracked.is_empty() || !self.lost.is_empty();
+        let warp = self.gmc.as_mut().map(|g| g.apply(&result.orig_img, follow));
 
         // High and low score rows; `TrackTrack` keeps degenerate boxes, the others drop them
         // since an aspect ratio of a zero height is infinite.
