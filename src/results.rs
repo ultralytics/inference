@@ -871,13 +871,11 @@ impl Masks {
     ///
     /// * A new `Masks` instance.
     #[must_use]
+    #[allow(clippy::needless_pass_by_value)] // the planes are kept, `data` is built again on use
     pub fn new(data: Array3<f32>, orig_shape: (u32, u32)) -> Self {
         let (_, h, w) = data.dim();
         let crops = data.outer_iter().map(|m| ((0, 0), m.to_owned())).collect();
-        Self {
-            data: OnceLock::from(data),
-            ..Self::from_crops(crops, (h, w), orig_shape)
-        }
+        Self::from_crops(crops, (h, w), orig_shape)
     }
 
     /// Masks spanning a `frame` of (height, width), each given as its top-left `(x, y)` there
