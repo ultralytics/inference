@@ -203,34 +203,40 @@ impl Gray {
         // smoothing taps and fused multiply-adds like the `OpenCV` SIMD filters (exact in f64).
         let scale = 1.0f32 / (4.0 * 3.0 * 255.0);
         let fma = |a: f32, b: f32, c: f32| (f64::from(a) * f64::from(b) + f64::from(c)) as f32;
-        let mut cov = vec![[0.0f32; 3]; w * h];
+        // Their products, summed over 3 columns then 3 rows with reflected borders in f64 like
+        // `boxFilter`.
+        let mut cov = vec![[0.0f64; 3]; w * h];
         cov.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
             let [a, b, c] = [-1, 0, 1].map(|dy| self.row(-1, y as isize + dy, w + 2));
-            for (x, o) in out.iter_mut().enumerate() {
-                let p = |r: &[u8], dx: usize| f32::from(r[x + dx]);
-                let smooth = |r| fma(p(r, 2), scale, fma(p(r, 1), 2.0 * scale, p(r, 0) * scale));
-                let gx = fma(
-                    scale,
-                    (p(a, 2) - p(a, 0)) + (p(c, 2) - p(c, 0)),
-                    2.0 * scale * (p(b, 2) - p(b, 0)),
-                );
-                let gy = smooth(c) - smooth(a);
-                *o = [gx * gx, gx * gy, gy * gy];
+            let mut products: Vec<[f32; 3]> = (0..w)
+                .map(|x| {
+                    let p = |r: &[u8], dx: usize| f32::from(r[x + dx]);
+                    let smooth =
+                        |r| fma(p(r, 2), scale, fma(p(r, 1), 2.0 * scale, p(r, 0) * scale));
+                    let gx = fma(
+                        scale,
+                        (p(a, 2) - p(a, 0)) + (p(c, 2) - p(c, 0)),
+                        2.0 * scale * (p(b, 2) - p(b, 0)),
+                    );
+                    let gy = smooth(c) - smooth(a);
+                    [gx * gx, gx * gy, gy * gy]
+                })
+                .collect();
+            products.insert(0, products[1]);
+            products.push(products[w - 1]);
+            for (o, p) in out.iter_mut().zip(products.windows(3)) {
+                *o = std::array::from_fn(|k| {
+                    f64::from(p[0][k]) + f64::from(p[1][k]) + f64::from(p[2][k])
+                });
             }
         });
-        // 3x3 sums with reflected borders (exact in f64 like `boxFilter`) and the smaller
-        // eigenvalue.
+        // The smaller eigenvalue of each summed structure tensor.
         let mut eig = vec![0.0f32; w * h];
         eig.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
             let rows = [-1, 0, 1].map(|dy| &cov[reflect(y as isize + dy, h) * w..][..w]);
             for (x, o) in out.iter_mut().enumerate() {
-                let cols = [-1, 0, 1].map(|dx| reflect(x as isize + dx, w));
-                let mut s = [0.0f64; 3];
-                for r in rows {
-                    for &i in &cols {
-                        (0..3).for_each(|k| s[k] += f64::from(r[i][k]));
-                    }
-                }
+                let s: [f64; 3] =
+                    std::array::from_fn(|k| rows[0][x][k] + rows[1][x][k] + rows[2][x][k]);
                 let (a, b, c) = (s[0] as f32 * 0.5, s[1] as f32, s[2] as f32 * 0.5);
                 *o = (a + c) - (b * b + (a - c) * (a - c)).sqrt();
             }
@@ -520,8 +526,9 @@ pub(super) struct Gmc {
 
 impl Gmc {
     /// The motion from the previous frame to `img` (RGB, HWC), identity on the first frame or
-    /// without enough tracked corners.
-    pub(super) fn apply(&mut self, img: &Array3<u8>) -> Warp {
+    /// without enough tracked corners. Only `follow` measures it; otherwise `img` is just kept
+    /// for the next frame.
+    pub(super) fn apply(&mut self, img: &Array3<u8>, follow: bool) -> Warp {
         // A frame under two pixels across has no half-size image to follow.
         if img.dim().0 < 2 || img.dim().1 < 2 {
             return IDENTITY;
@@ -531,7 +538,7 @@ impl Gmc {
         let frame = Pyramid::new(frame);
         let mut warp = IDENTITY;
         // A frame of another size has no motion to follow from the last one.
-        if let Some((prev, points)) = &self.prev
+        if let Some((prev, points)) = self.prev.as_ref().filter(|_| follow)
             && (prev.0[0].0.w, prev.0[0].0.h) == (frame.0[0].0.w, frame.0[0].0.h)
         {
             let moved = prev.flow(&frame, points);
@@ -619,16 +626,19 @@ mod tests {
     #[test]
     fn test_gmc_follows_a_camera_pan() {
         let mut gmc = Gmc::default();
-        assert_eq!(gmc.apply(&frame(0)), IDENTITY);
-        assert_eq!(Gmc::default().apply(&Array3::zeros((1, 9, 3))), IDENTITY);
-        let h = gmc.apply(&frame(6));
+        assert_eq!(gmc.apply(&frame(0), true), IDENTITY);
+        assert_eq!(
+            Gmc::default().apply(&Array3::zeros((1, 9, 3)), true),
+            IDENTITY
+        );
+        let h = gmc.apply(&frame(6), true);
         assert!((h[0][2] - 6.0).abs() < 0.5 && h[1][2].abs() < 0.5, "{h:?}");
         assert!(
             (h[0][0] - 1.0).abs() < 0.01 && h[1][0].abs() < 0.01,
             "{h:?}"
         );
         assert_eq!(
-            gmc.apply(&frame(6).slice_move(ndarray::s![..120, ..200, ..])),
+            gmc.apply(&frame(6).slice_move(ndarray::s![..120, ..200, ..]), true),
             IDENTITY
         );
     }
