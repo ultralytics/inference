@@ -841,6 +841,9 @@ impl Boxes {
     }
 }
 
+/// One box-local mask: its top-left `(x, y)` in the mask frame and its pixels from there.
+type Crop = ((usize, usize), Array2<f32>);
+
 /// Per-instance segmentation masks produced by the `segment` task.
 ///
 /// Each mask is kept inside its box like Ultralytics box-local masks, so memory and time follow
@@ -854,8 +857,9 @@ pub struct Masks {
     /// The (height, width) the masks span: the model input size like Ultralytics, or the
     /// original image size with `retina_masks` or tiling.
     frame: (usize, usize),
-    /// Each mask's top-left `(x, y)` in the frame and its pixels from there.
-    crops: Vec<((usize, usize), Array2<f32>)>,
+    /// Each mask's top-left `(x, y)` in the frame and its pixels from there, or `None` for
+    /// masks given dense to [`new`](Self::new), which are their whole planes in `data`.
+    crops: Option<Vec<Crop>>,
     data: OnceLock<Array3<f32>>,
 }
 
@@ -871,24 +875,27 @@ impl Masks {
     ///
     /// * A new `Masks` instance.
     #[must_use]
-    #[allow(clippy::needless_pass_by_value)] // the planes are kept, `data` is built again on use
     pub fn new(data: Array3<f32>, orig_shape: (u32, u32)) -> Self {
         let (_, h, w) = data.dim();
-        let crops = data.outer_iter().map(|m| ((0, 0), m.to_owned())).collect();
-        Self::from_crops(crops, (h, w), orig_shape)
+        Self {
+            orig_shape,
+            frame: (h, w),
+            crops: None,
+            data: OnceLock::from(data),
+        }
     }
 
     /// Masks spanning a `frame` of (height, width), each given as its top-left `(x, y)` there
     /// and its pixels from that corner.
     pub(crate) const fn from_crops(
-        crops: Vec<((usize, usize), Array2<f32>)>,
+        crops: Vec<Crop>,
         frame: (usize, usize),
         orig_shape: (u32, u32),
     ) -> Self {
         Self {
             orig_shape,
             frame,
-            crops,
+            crops: Some(crops),
             data: OnceLock::new(),
         }
     }
@@ -901,31 +908,39 @@ impl Masks {
         self.data.get_or_init(|| {
             let (h, w) = self.frame;
             let mut data = Array3::zeros((self.len(), h, w));
-            for (mut d, ((x, y), m)) in data.outer_iter_mut().zip(self.crops()) {
-                d.slice_mut(s![y..y + m.nrows(), x..x + m.ncols()])
-                    .assign(&m);
+            for (mut d, ((x, y), m)) in data.outer_iter_mut().zip(self.crops.iter().flatten()) {
+                d.slice_mut(s![*y..y + m.nrows(), *x..x + m.ncols()])
+                    .assign(m);
             }
             data
         })
     }
 
     /// Each mask as the top-left `(x, y)` of its box in the [`data`](Self::data) frame and its
-    /// pixels inside the box, which hold all of its set pixels.
-    pub fn crops(&self) -> impl ExactSizeIterator<Item = ((usize, usize), ArrayView2<'_, f32>)> {
-        self.crops.iter().map(|(xy, m)| (*xy, m.view()))
+    /// pixels inside the box, which hold all of its set pixels; masks given dense to
+    /// [`new`](Self::new) are their whole planes.
+    pub fn crops(&self) -> impl Iterator<Item = ((usize, usize), ArrayView2<'_, f32>)> {
+        let local = self.crops.iter().flatten().map(|(xy, m)| (*xy, m.view()));
+        let dense = self.crops.is_none().then(|| self.data().outer_iter());
+        local.chain(dense.into_iter().flatten().map(|m| ((0, 0), m)))
     }
 
     /// The (N, H, W) shape of [`data`](Self::data), without building it.
     #[must_use]
-    pub const fn shape(&self) -> (usize, usize, usize) {
-        (self.crops.len(), self.frame.0, self.frame.1)
+    pub fn shape(&self) -> (usize, usize, usize) {
+        (self.len(), self.frame.0, self.frame.1)
     }
 
     /// The masks at `idx`, in that order.
     #[cfg(feature = "track")]
     pub(crate) fn select(&self, idx: &[usize]) -> Self {
-        let crops = idx.iter().map(|&i| self.crops[i].clone()).collect();
-        Self::from_crops(crops, self.frame, self.orig_shape)
+        self.crops.as_ref().map_or_else(
+            || Self::new(self.data().select(Axis(0), idx), self.orig_shape),
+            |crops| {
+                let crops = idx.iter().map(|&i| crops[i].clone()).collect();
+                Self::from_crops(crops, self.frame, self.orig_shape)
+            },
+        )
     }
 
     /// Get the number of masks.
@@ -934,8 +949,10 @@ impl Masks {
     ///
     /// * The count of masks.
     #[must_use]
-    pub const fn len(&self) -> usize {
-        self.crops.len()
+    pub fn len(&self) -> usize {
+        self.crops
+            .as_ref()
+            .map_or_else(|| self.data().dim().0, Vec::len)
     }
 
     /// Check if there are no masks.
@@ -944,8 +961,8 @@ impl Masks {
     ///
     /// * `true` if there are no masks.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.crops.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// The outline of each mask in image pixels, `(points, 2)` per mask, like Ultralytics
