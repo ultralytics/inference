@@ -253,7 +253,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -273,7 +273,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -319,6 +319,7 @@ ultralytics-inference track --model yolo26n.onnx --source video.mp4 --tracker tr
 | `--imgsz`                |      | 推理图片尺寸                                                                                                                                                                                 | 模型元数据                                                      |
 | `--rect [<BOOL>]`        |      | 启用矩形推理（最小填充）                                                                                                                                                                     | `true`                                                          |
 | `--tile [<TILE>]`        |      | 切片推理的窗口尺寸，窗口互相重叠；不带值的 `--tile` 使用 `--imgsz`                                                                                                                           | 关闭                                                            |
+| `--tile-overlap`         |      | 每个切片窗口与相邻窗口重叠的比例                                                                                                                                                             | `0.2`                                                           |
 | `--retina-masks`         |      | 以原图尺寸生成分割掩码，而不是推理尺寸                                                                                                                                                       | `false`                                                         |
 | `--ocr [<RECOGNIZER>]`   |      | 使用 PaddleOCR 识别每个框、旋转框或掩码中的文字；不带值时使用 PP-OCRv6，也可指定 PP-OCRv5 语言模型；省略 `--model` 时使用 `yolo26n-text.onnx`                                                | 关闭                                                            |
 | `--batch`                |      | 推理 batch size                                                                                                                                                                              | `1`                                                             |
@@ -394,7 +395,7 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 ```toml
 # crates.io 稳定版本
 [dependencies]
-ultralytics-inference = "0.0.60"
+ultralytics-inference = "0.0.61"
 ```
 
 ```toml
@@ -534,7 +535,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **切片推理：**
 
-大图中的小目标可以切分为互相重叠的窗口分别推理，再合并回一个结果，与 Python 的 `tile` 参数一致。像 `conf` 或 `imgsz` 一样在配置中设置 `tile` 后，每次 `predict` 调用都会切片推理。窗口重叠 20%，框会映射回原图，并按类别去除重复结果。使用动态 batch 导出的模型时，`with_batch`（CLI 为 `--batch`）可在一次推理中运行多个窗口。检测、实例分割、语义分割、深度、分类、姿态和旋转框模型均受支持：
+大图中的小目标可以切分为互相重叠的窗口分别推理，再合并回一个结果，与 Python 的 `tile` 参数一致。像 `conf` 或 `imgsz` 一样在配置中设置 `tile` 后，每次 `predict` 调用都会切片推理。窗口默认重叠 20%（`with_tile_overlap`，CLI 为 `--tile-overlap`），框会映射回原图，并按类别去除重复结果。使用动态 batch 导出的模型时，`with_batch`（CLI 为 `--batch`）可在一次推理中运行多个窗口。检测、实例分割、语义分割、深度、分类、姿态和旋转框模型均受支持：
 
 ```rust
 use ultralytics_inference::{InferenceConfig, YOLOModel};
@@ -722,7 +723,7 @@ cargo build --release --features "cuda,tensorrt"
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.60", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.61", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 
