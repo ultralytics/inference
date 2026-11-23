@@ -254,7 +254,7 @@ ultralytics-inference predict
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
@@ -274,7 +274,7 @@ ultralytics-inference predict --task segment
 ```text
 WARNING ⚠️ 'model' argument is missing. Using default '--model=yolo26n-seg.onnx'.
 WARNING ⚠️ 'source' argument is missing. Using default images: https://ultralytics.com/images/bus.jpg, https://ultralytics.com/images/zidane.jpg
-Ultralytics Inference 0.0.60 🚀 Rust ONNX FP32 CPU
+Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
@@ -324,6 +324,7 @@ configs](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/tr
 | `--imgsz`                |       | Inference image size                                                                                                                                                                                                         | model metadata                                                               |
 | `--rect [<BOOL>]`        |       | Enable rectangular inference (minimal padding)                                                                                                                                                                               | `true`                                                                       |
 | `--tile [<TILE>]`        |       | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz`                                                                                                                                                     | off                                                                          |
+| `--tile-overlap`         |       | Fraction of each tile shared with its neighbor                                                                                                                                                                               | `0.2`                                                                        |
 | `--retina-masks`         |       | Build segmentation masks at the original image size instead of the inference size                                                                                                                                            | `false`                                                                      |
 | `--ocr [<RECOGNIZER>]`   |       | Read the text in each box, oriented box or mask with PaddleOCR; bare `--ocr` uses PP-OCRv6, or name a PP-OCRv5 language model; without `--model` this runs `yolo26n-text.onnx`                                               | off                                                                          |
 | `--batch`                |       | Batch size for inference                                                                                                                                                                                                     | `1`                                                                          |
@@ -399,7 +400,7 @@ Add to your `Cargo.toml` (choose one):
 ```toml
 # Stable release from crates.io
 [dependencies]
-ultralytics-inference = "0.0.60"
+ultralytics-inference = "0.0.61"
 ```
 
 ```toml
@@ -542,7 +543,7 @@ directly, linearly between its min and max.
 
 **Tiled Inference:**
 
-Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. Set `tile` in the config like `conf` or `imgsz` and every `predict` call is tiled. Windows overlap by 20%, boxes are mapped back to the source image, and duplicates are removed per class. With a dynamic batch export, `with_batch` (CLI `--batch`) runs several windows in one inference call. Detection, segmentation, semantic segmentation, depth, classification, pose and OBB models are all supported:
+Large images with small objects can be split into overlapping windows and merged back into one result, the same as the Python `tile` argument. Set `tile` in the config like `conf` or `imgsz` and every `predict` call is tiled. Windows overlap by 20% by default (`with_tile_overlap`, CLI `--tile-overlap`), boxes are mapped back to the source image, and duplicates are removed per class. With a dynamic batch export, `with_batch` (CLI `--batch`) runs several windows in one inference call. Detection, segmentation, semantic segmentation, depth, classification, pose and OBB models are all supported:
 
 ```rust
 use ultralytics_inference::{InferenceConfig, YOLOModel};
@@ -732,7 +733,7 @@ Each accelerator feature links a prebuilt ONNX Runtime containing that provider.
 
 ```toml
 [dependencies]
-ultralytics-inference = { version = "0.0.60", features = ["coreml", "xnnpack"] }
+ultralytics-inference = { version = "0.0.61", features = ["coreml", "xnnpack"] }
 ort = { version = "=2.0.0-rc.15", features = ["lax-feature-matching"] }
 ```
 

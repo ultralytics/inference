@@ -19,6 +19,7 @@ use clap::{Args, Parser, Subcommand};
     --imgsz <IMGSZ>        Inference image size [default: model metadata]
     --rect [<BOOL>]        Enable rectangular inference (minimal padding) [default: true]
     --tile [<TILE>]        Tile size for overlapping-window inference (bare uses --imgsz)
+    --tile-overlap <FRAC>  Fraction of each tile shared with its neighbor [default: 0.2]
     --retina-masks         Build segmentation masks at the original image size [default: false]
     --ocr [<RECOGNIZER>]   Read the text in each detection with PaddleOCR [default model: yolo26n-text]
                            Bare uses PP-OCRv6, or name a language model like korean_PP-OCRv5_mobile_rec
@@ -116,6 +117,10 @@ pub struct PredictArgs {
     /// Tile size for overlapping-window inference on large images (bare `--tile` uses `--imgsz`)
     #[arg(long, num_args = 0..=1, default_missing_value = "0")]
     pub tile: Option<u32>,
+
+    /// Fraction of each tile shared with its neighbor
+    #[arg(long, default_value_t = InferenceConfig::DEFAULT_TILE_OVERLAP)]
+    pub tile_overlap: f32,
 
     /// Build segmentation masks at the original image size
     #[arg(long, default_value_t = false)]

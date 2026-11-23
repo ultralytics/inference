@@ -628,6 +628,7 @@ fn build_inference_config(
     if let Some(tile) = args.tile {
         config = config.with_tile(tile);
     }
+    config = config.with_tile_overlap(args.tile_overlap);
 
     if let Some(d) = device {
         config = config.with_device(d);
@@ -776,6 +777,7 @@ mod tests {
             imgsz: None,
             rect: InferenceConfig::DEFAULT_RECT,
             tile: None,
+            tile_overlap: InferenceConfig::DEFAULT_TILE_OVERLAP,
             retina_masks: false,
             ocr: None,
             batch: 1,
@@ -854,6 +856,7 @@ mod tests {
             imgsz: Some(512),
             rect: false,
             tile: Some(320),
+            tile_overlap: 0.3,
             retina_masks: true,
             ocr: None,
             batch: 4,
@@ -875,6 +878,7 @@ mod tests {
         assert_eq!(config.device, Some(crate::Device::IntelCpu));
         assert!(config.save_frames);
         assert_eq!(config.tile, Some(320));
+        assert!((config.tile_overlap - 0.3).abs() < f32::EPSILON);
         assert!(config.retina_masks);
         assert!(!config.rect);
         assert_eq!(config.classes, Some(vec![0, 2, 5]));

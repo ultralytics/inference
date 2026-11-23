@@ -150,6 +150,9 @@ pub struct InferenceConfig {
     /// Tile size in pixels for overlapping-window inference on large images, like the Ultralytics `tile`
     /// argument. `Some(0)` tiles at the inference size. Defaults to `None` (no tiling).
     pub tile: Option<u32>,
+    /// Fraction of each tile shared with its neighbor, like the Ultralytics `tile_overlap` argument,
+    /// in `[0, 1)`. Defaults to `0.2`.
+    pub tile_overlap: f32,
     /// Whether to build segmentation masks at the original image size like the Ultralytics
     /// `retina_masks` argument, instead of the model input size. Defaults to `false`. Tiling and
     /// streamed masks always use the original size.
@@ -190,6 +193,7 @@ impl Default for InferenceConfig {
             save_frames: Self::DEFAULT_SAVE_FRAMES,
             rect: Self::DEFAULT_RECT,
             tile: None,
+            tile_overlap: Self::DEFAULT_TILE_OVERLAP,
             retina_masks: false,
             classes: None,
             cuda_preprocess: Self::DEFAULT_CUDA_PREPROCESS,
@@ -219,6 +223,8 @@ impl InferenceConfig {
     pub const DEFAULT_SAVE_FRAMES: bool = false;
     /// Default for rectangular (minimal padding) inference.
     pub const DEFAULT_RECT: bool = true;
+    /// Default fraction of each tile shared with its neighbor.
+    pub const DEFAULT_TILE_OVERLAP: f32 = 0.2;
     /// Default input image size for standard YOLO models (height, width).
     pub const DEFAULT_IMGSZ: (usize, usize) = (640, 640);
     /// Default input image size for OBB models (height, width).
@@ -468,6 +474,17 @@ impl InferenceConfig {
     #[must_use]
     pub const fn with_tile(mut self, tile: u32) -> Self {
         self.tile = Some(tile);
+        self
+    }
+
+    /// Set the fraction of each tile shared with its neighbor, like Ultralytics `tile_overlap`.
+    ///
+    /// # Returns
+    ///
+    /// * The modified `InferenceConfig`.
+    #[must_use]
+    pub const fn with_tile_overlap(mut self, tile_overlap: f32) -> Self {
+        self.tile_overlap = tile_overlap;
         self
     }
 
