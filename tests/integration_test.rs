@@ -24,6 +24,7 @@ fn predict_args(model: &str, task: Option<Task>, save_json: bool) -> PredictArgs
         imgsz: Some(640),
         rect: false,
         tile: None,
+        tile_overlap: InferenceConfig::DEFAULT_TILE_OVERLAP,
         retina_masks: false,
         ocr: None,
         batch: 1,

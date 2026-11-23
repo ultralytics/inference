@@ -23,12 +23,12 @@ use crate::utils::{nms_per_class, nms_rotated_per_class};
 /// A tile window as `[x1, y1, x2, y2]` in source pixels.
 type Window = [u32; 4];
 
-/// Windows of `th` x `tw` covering an `h` x `w` image with 20% overlap and the last window aligned
-/// to the edge.
-fn tile_windows(h: u32, w: u32, (th, tw): (u32, u32)) -> Vec<Window> {
+/// Windows of `th` x `tw` covering an `h` x `w` image, sharing the `overlap` fraction with each
+/// neighbor and the last window aligned to the edge.
+fn tile_windows(h: u32, w: u32, (th, tw): (u32, u32), overlap: f32) -> Vec<Window> {
     let starts = |len: u32, size: u32| -> Vec<u32> {
         let last = len.saturating_sub(size);
-        let step = ((8 * size + 5) / 10).max(1); // round(size * 0.8)
+        let step = (size as f32 * (1.0 - overlap)).round_ties_even().max(1.0) as u32;
         (0..last).step_by(step as usize).chain([last]).collect()
     };
     let xs = starts(w, tw);
@@ -280,7 +280,7 @@ impl YOLOModel {
             tile => (tile, tile),
         };
         let (w, h) = image.dimensions();
-        let windows = tile_windows(h, w, size);
+        let windows = tile_windows(h, w, size, self.config.tile_overlap);
         if windows == [[0, 0, w, h]] {
             let mut results = self.predict_internal(&[image], &[path])?;
             return Ok(results.pop().unwrap_or_default());
@@ -332,23 +332,25 @@ mod tests {
     #[test]
     fn test_tile_windows_match_the_documented_counts() {
         // Ultralytics tiling guide counts: 1920x1080 at 640 and 3840x2160 at 1280 both run 8.
-        assert_eq!(tile_windows(1080, 1920, (640, 640)).len(), 8);
-        assert_eq!(tile_windows(2160, 3840, (1280, 1280)).len(), 8);
+        assert_eq!(tile_windows(1080, 1920, (640, 640), 0.2).len(), 8);
+        assert_eq!(tile_windows(2160, 3840, (1280, 1280), 0.2).len(), 8);
         // The last window is aligned to the edge and the others step by round(0.8 * size).
-        let w = tile_windows(1080, 1920, (640, 640));
+        let w = tile_windows(1080, 1920, (640, 640), 0.2);
         assert_eq!(w[0], [0, 0, 640, 640]);
         assert_eq!(w[1], [512, 0, 1152, 640]);
         assert_eq!(w[3], [1280, 0, 1920, 640]);
         assert_eq!(w[7], [1280, 440, 1920, 1080]);
         // A non-square inference size steps each axis by its own side, as Ultralytics does.
-        let w = tile_windows(1080, 1920, (384, 640));
+        let w = tile_windows(1080, 1920, (384, 640), 0.2);
         assert_eq!(
             (w.len(), w[1], w[4]),
             (16, [512, 0, 1152, 384], [0, 307, 640, 691])
         );
         // An image no larger than the window gets one window.
-        assert_eq!(tile_windows(300, 500, (640, 640)), [[0, 0, 500, 300]]);
-        assert_eq!(tile_windows(640, 640, (640, 640)), [[0, 0, 640, 640]]);
+        assert_eq!(tile_windows(300, 500, (640, 640), 0.2), [[0, 0, 500, 300]]);
+        assert_eq!(tile_windows(640, 640, (640, 640), 0.2), [[0, 0, 640, 640]]);
+        // A larger overlap steps by round(size * (1 - overlap)), so 0.5 halves the step.
+        assert_eq!(tile_windows(1080, 1920, (640, 640), 0.5).len(), 15);
     }
 
     fn blank(h: u32, w: u32) -> Results {

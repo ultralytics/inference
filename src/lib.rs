@@ -142,6 +142,7 @@
 //! | `--imgsz` | | Inference image size | Model metadata |
 //! | `--rect [<BOOL>]` | | Enable rectangular inference (minimal padding) | `true` |
 //! | `--tile [<TILE>]` | | Tile size for overlapping-window inference; bare `--tile` uses `--imgsz` | off |
+//! | `--tile-overlap` | | Fraction of each tile shared with its neighbor | `0.2` |
 //! | `--retina-masks` | | Build segmentation masks at the original image size instead of the inference size | `false` |
 //! | `--ocr [<RECOGNIZER>]` | | Read the text in each box, oriented box or mask with `PaddleOCR`; bare `--ocr` uses PP-OCRv6, or name a PP-OCRv5 language model like `korean_PP-OCRv5_mobile_rec`; without `--model` this runs `yolo26n-text.onnx` | off |
 //! | `--batch` | | Batch size for inference | `1` |
