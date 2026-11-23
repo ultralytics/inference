@@ -150,8 +150,8 @@ pub struct InferenceConfig {
     /// Tile size in pixels for overlapping-window inference on large images, like the Ultralytics `tile`
     /// argument. `Some(0)` tiles at the inference size. Defaults to `None` (no tiling).
     pub tile: Option<u32>,
-    /// Fraction of each tile shared with its neighbor, like the Ultralytics `tile_overlap` argument.
-    /// Defaults to `0.2`.
+    /// Fraction of each tile shared with its neighbor, like the Ultralytics `tile_overlap` argument,
+    /// in `[0, 1)`. Defaults to `0.2`.
     pub tile_overlap: f32,
     /// Whether to build segmentation masks at the original image size like the Ultralytics
     /// `retina_masks` argument, instead of the model input size. Defaults to `false`. Tiling and

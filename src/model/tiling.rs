@@ -14,7 +14,7 @@ use image::{DynamicImage, GenericImageView};
 use ndarray::{Array, Array2, Array3, Axis, RemoveAxis, aview1, s};
 
 use super::YOLOModel;
-use crate::error::Result;
+use crate::error::{InferenceError, Result};
 use crate::inference::InferenceConfig;
 use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
@@ -268,19 +268,25 @@ impl YOLOModel {
     ///
     /// # Errors
     ///
-    /// Returns an error if inference fails.
+    /// Returns an error if `tile_overlap` is outside `[0, 1)` or inference fails.
     pub(super) fn predict_tiled(
         &mut self,
         image: &DynamicImage,
         path: String,
     ) -> Result<Vec<Results>> {
+        let overlap = self.config.tile_overlap;
+        if !(0.0..1.0).contains(&overlap) {
+            return Err(InferenceError::ConfigError(format!(
+                "tile_overlap must be in [0, 1), got {overlap}"
+            )));
+        }
         let (th, tw) = self.imgsz();
         let size = match self.config.tile.unwrap_or_default() {
             0 => (th as u32, tw as u32),
             tile => (tile, tile),
         };
         let (w, h) = image.dimensions();
-        let windows = tile_windows(h, w, size, self.config.tile_overlap);
+        let windows = tile_windows(h, w, size, overlap);
         if windows == [[0, 0, w, h]] {
             let mut results = self.predict_internal(&[image], &[path])?;
             return Ok(results.pop().unwrap_or_default());
