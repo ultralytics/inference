@@ -397,19 +397,18 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
                             }
                         }
 
+                        // Annotate once for both the saved file and the window.
                         #[cfg(feature = "annotate")]
-                        if save {
-                            let annotated = texts.as_ref().map_or_else(
+                        let wanted = save;
+                        #[cfg(feature = "visualize")]
+                        let wanted = wanted || show;
+                        #[cfg(feature = "annotate")]
+                        let annotated = wanted.then(|| {
+                            texts.as_ref().map_or_else(
                                 || annotate_image_with_options(img, &result, &draw),
                                 |t| annotate_texts(img, t, &draw),
-                            );
-
-                            if let Some(saver) = &mut result_saver
-                                && let Err(e) = saver.save_owned(is_video, meta, annotated)
-                            {
-                                error!("Failed to save result: {e}");
-                            }
-                        }
+                            )
+                        });
 
                         #[cfg(feature = "visualize")]
                         if show {
@@ -438,21 +437,26 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
                                 }
                             }
 
-                            if let Some(ref mut v) = viewer {
-                                let annotated = texts.as_ref().map_or_else(
-                                    || annotate_image_with_options(img, &result, &draw),
-                                    |t| annotate_texts(img, t, &draw),
-                                );
-
+                            if let Some(ref mut v) = viewer
+                                && let Some(annotated) = &annotated
+                            {
                                 // Images stay up briefly. Q, Esc or closing the window ends
                                 // the run, like the `q` key in Ultralytics.
-                                let open = v.update(&annotated).unwrap_or(true)
+                                let open = v.update(annotated).unwrap_or(true)
                                     && (is_video
                                         || v.wait(Duration::from_millis(200)).unwrap_or(true));
                                 if !open {
                                     STOP.store(true, Ordering::Relaxed);
                                 }
                             }
+                        }
+
+                        #[cfg(feature = "annotate")]
+                        if let Some(saver) = &mut result_saver
+                            && let Some(annotated) = annotated
+                            && let Err(e) = saver.save_owned(is_video, meta, annotated)
+                        {
+                            error!("Failed to save result: {e}");
                         }
 
                         total_preprocess += result.speed.preprocess.unwrap_or(0.0);
