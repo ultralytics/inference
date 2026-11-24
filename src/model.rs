@@ -1252,7 +1252,7 @@ impl YOLOModel {
                 let (shape, data) = output.try_extract_tensor::<f16>().map_err(|e| {
                     InferenceError::InferenceError(format!("Failed to extract output: {e}"))
                 })?;
-                let converted: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
+                let converted = half::slice::HalfFloatSliceExt::to_f32_vec(data);
                 Ok((std::borrow::Cow::Owned(converted), shape_to_usize(shape)))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -1874,16 +1874,7 @@ impl YOLOModel {
         let n_images_f = images.len() as f64;
         let start_preprocess = Instant::now();
 
-        // One letterbox target for the whole batch, chosen the way the CPU path chooses it so
-        // both feed the model identical pixels: `rect` applies only when every image shares a
-        // shape, since a mixed batch cannot share one padded target.
-        let imgsz = self.imgsz();
-        let (w, h) = images[0].dimensions();
-        let target = if self.rect_enabled() && images.iter().all(|i| i.dimensions() == (w, h)) {
-            calculate_rect_size(w, h, imgsz, self.metadata.stride)
-        } else {
-            imgsz
-        };
+        let target = self.batch_target(images);
         if self.graph_io.is_none() {
             self.prepare_cuda_input(&[images.len() as i64, 3, target.0 as i64, target.1 as i64])?;
         }
@@ -2047,6 +2038,24 @@ impl YOLOModel {
         Ok(all_results)
     }
 
+    /// One letterbox target for a whole batch, shared by the CPU and CUDA paths so both feed
+    /// the model identical pixels: `rect` applies only when every image shares a shape, since
+    /// a mixed batch cannot share one padded target.
+    fn batch_target(&self, images: &[&DynamicImage]) -> (usize, usize) {
+        let imgsz = self.imgsz();
+        let (w, h) = images[0].dimensions();
+        if !self.rect_enabled() {
+            imgsz
+        } else if images.iter().all(|i| i.dimensions() == (w, h)) {
+            calculate_rect_size(w, h, imgsz, self.metadata.stride)
+        } else {
+            warn!(
+                "Batch contains images of different sizes. Rectangular inference disabled for this batch (falling back to square padding)."
+            );
+            imgsz
+        }
+    }
+
     /// Run inference on a batch of `DynamicImage`s.
     ///
     /// # Arguments
@@ -2124,55 +2133,16 @@ impl YOLOModel {
             return self.predict_cuda_pre(images, paths);
         }
 
-        // Get target size from config or metadata
-        let target_size = self.imgsz();
-
-        // Preprocess all images
         let start_preprocess = Instant::now();
-
-        // Rect inference additionally needs a homogeneous batch: mixed sizes can't share
-        // one padded shape, so they fall back to square below.
-        let use_rect = self.rect_enabled();
-        let uniform_shape = if images.len() > 1 {
-            let first_dims = images[0].dimensions();
-            images.iter().all(|img| img.dimensions() == first_dims)
-        } else {
-            true
-        };
-        let actual_rect = use_rect && uniform_shape;
-
-        // Warn if rect was actually in play but disabled due to mixed batch. `use_rect` is
-        // already false on a fixed-shape input, where rect never applied to begin with.
-        if use_rect && !uniform_shape {
-            warn!(
-                "Batch contains images of different sizes. Rectangular inference disabled for this batch (falling back to square padding)."
-            );
-        }
+        let target = self.batch_target(images);
 
         // Each image letterboxes independently, so the batch fans out across cores
         // instead of paying the per-image resize serially.
-        let (stride, task, fp16_input) =
-            (self.metadata.stride, self.metadata.task, self.fp16_input);
-        let scale_fill = self.metadata.scale_fill();
+        let (task, scale_fill) = (self.metadata.task, self.metadata.scale_fill());
+        let quantize = self.fp16_input.then_some(Quantization::Fp16);
         let preprocessed_results: Vec<_> = images
             .par_iter()
-            .map(|image| {
-                // Determine target size for this image
-                let current_target_size = if actual_rect {
-                    let (w, h) = image.dimensions();
-                    calculate_rect_size(w, h, target_size, stride)
-                } else {
-                    target_size
-                };
-
-                preprocess_for_task(
-                    image,
-                    current_target_size,
-                    task,
-                    scale_fill,
-                    fp16_input.then_some(Quantization::Fp16),
-                )
-            })
+            .map(|image| preprocess_for_task(image, target, task, scale_fill, quantize))
             .collect();
         #[allow(clippy::cast_precision_loss)]
         let preprocess_time =

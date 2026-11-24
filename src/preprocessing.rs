@@ -456,15 +456,13 @@ pub(crate) fn fused_zerocopy_preprocess(
 
 /// Convert f32 tensor to f16 tensor.
 fn tensor_f32_to_f16(tensor: &Array4<f32>) -> Array4<half::f16> {
-    use half::slice::HalfFloatSliceExt;
-    // `mapv` converts one element at a time; `half`'s slice conversion is vectorized where
-    // the target supports it. Falls back to `mapv` if the tensor is not contiguous.
-    let Some(src) = tensor.as_slice() else {
-        return tensor.mapv(half::f16::from_f32);
-    };
-    let mut out = vec![half::f16::ZERO; src.len()];
-    out.convert_from_f32_slice(src);
-    Array4::from_shape_vec(tensor.raw_dim(), out).expect("shape matches the source tensor")
+    use half::vec::HalfFloatVecExt;
+    // `half`'s slice conversion is vectorized where the target supports it.
+    let src = tensor
+        .as_slice()
+        .expect("the letterbox tensor is contiguous");
+    Array4::from_shape_vec(tensor.raw_dim(), Vec::from_f32_slice(src))
+        .expect("shape matches the source tensor")
 }
 
 /// Calculate target size for rectangular inference mode.
@@ -746,17 +744,11 @@ fn center_crop_image(
         (((src_w as f32 * scale_y) as u32).max(target_w), target_h)
     };
 
-    // Resize first. Borrow the source samples when the image is already RGB8 (the common
-    // case): `to_rgb8` would clone the full frame just to hand it straight to the resizer.
-    let owned_rgb;
-    let src_bytes: &[u8] = match image {
-        DynamicImage::ImageRgb8(rgb) => rgb.as_raw(),
-        other => {
-            owned_rgb = other.to_rgb8();
-            owned_rgb.as_raw()
-        }
-    };
-    let Ok(src_image) = ImageRef::new(src_w, src_h, src_bytes, PixelType::U8x3) else {
+    // Resize first, borrowing the samples of an RGB8 image like `build_preprocess_result`.
+    let rgb = image
+        .as_rgb8()
+        .map_or_else(|| Cow::Owned(image.to_rgb8()), Cow::Borrowed);
+    let Ok(src_image) = ImageRef::new(src_w, src_h, rgb.as_raw(), PixelType::U8x3) else {
         return blank();
     };
 
