@@ -581,13 +581,13 @@ fn extract_detect_boxes(
     let mut keep = Vec::with_capacity(max_det);
     let iou_v = f32x8::splat(iou_thresh);
     for i in 0..n {
+        if keep.len() >= max_det {
+            break;
+        }
         if suppressed[i] {
             continue;
         }
         keep.push(i);
-        if keep.len() >= max_det {
-            break;
-        }
 
         let ax1 = f32x8::splat(x1[i]);
         let ay1 = f32x8::splat(y1[i]);
