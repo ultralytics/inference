@@ -258,9 +258,9 @@ Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 36.4ms
-image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
-Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 384, 640)
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x640 4 persons, 1 bus, 36.4ms
+image 2/2 /home/ultralytics/inference/zidane.jpg: 640x640 2 persons, 1 tie, 28.6ms
+Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 640, 640)
 Results saved to runs/detect/predict
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
@@ -278,9 +278,9 @@ Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 48.2ms
-image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 38.1ms
-Speed: 1.6ms preprocess, 44.3ms inference, 1.2ms postprocess per image at shape (1, 3, 384, 640)
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x640 3 persons, 1 bus, 48.2ms
+image 2/2 /home/ultralytics/inference/zidane.jpg: 640x640 2 persons, 1 tie, 38.1ms
+Speed: 1.6ms preprocess, 44.3ms inference, 1.2ms postprocess per image at shape (1, 3, 640, 640)
 Results saved to runs/segment/predict
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
@@ -380,14 +380,15 @@ YOLOv8, YOLO11, and YOLO26 ONNX models in sizes **n / s / m / l / x** are suppor
 
 **Source Options:**
 
-| Source Type | Example Input                   | Description                       |
-| ----------- | ------------------------------- | --------------------------------- |
-| Image       | `image.jpg`                     | Single image file                 |
-| Directory   | `images/`                       | Directory of images               |
-| Glob        | `images/*.jpg`                  | Glob pattern for images           |
-| Video       | `video.mp4`                     | Video file                        |
-| Webcam      | `0`,`1`                         | Webcam index (0 = default webcam) |
-| URL         | `https://example.com/image.jpg` | Remote image URL                  |
+| Source Type | Example Input                   | Description                                       |
+| ----------- | ------------------------------- | ------------------------------------------------- |
+| Image       | `image.jpg`                     | Single image file                                 |
+| Directory   | `images/`                       | Directory of images                               |
+| Glob        | `images/*.jpg`                  | Glob pattern for images                           |
+| Video       | `video.mp4`                     | Video file                                        |
+| Webcam      | `0`,`1`                         | Webcam index (0 = default webcam)                 |
+| URL         | `https://example.com/image.jpg` | Remote image URL                                  |
+| Stream      | `rtsp://example.com/stream`     | RTSP, RTMP or HTTP video stream (`video` feature) |
 
 Supported image formats: `.bmp`, `.dng`, `.gif`, `.jp2`, `.jpeg`, `.jpg`, `.mpo`, `.png`, `.tif`, `.tiff` and `.webp`.
 
@@ -636,6 +637,7 @@ inference/
 │   ├── lib.rs              # Library entry point and public exports
 │   ├── main.rs             # CLI application
 │   ├── model.rs            # YOLOModel - ONNX session and inference
+│   ├── model/tiling.rs     # Tiled inference (tile, tile_overlap)
 │   ├── ocr.rs              # Scene text OCR (YOLO26-Text + PaddleOCR)
 │   ├── openvino.rs         # Native OpenVINO IR runtime (openvino-native feature)
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask, DepthMap

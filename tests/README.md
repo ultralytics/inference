@@ -21,7 +21,7 @@ cargo test
 To generate code coverage locally (Linux recommended), use the same feature set as CI:
 
 ```bash
-cargo llvm-cov --features annotate,video,visualize --workspace --html \
+cargo llvm-cov --features annotate,video,visualize,track --workspace --html \
   --ignore-filename-regex '(src/visualizer/viewer\.rs|src/main\.rs|crates/web/)'
 ```
 

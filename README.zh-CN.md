@@ -257,9 +257,9 @@ Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 36.4ms
-image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 28.6ms
-Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 384, 640)
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x640 4 persons, 1 bus, 36.4ms
+image 2/2 /home/ultralytics/inference/zidane.jpg: 640x640 2 persons, 1 tie, 28.6ms
+Speed: 1.5ms preprocess, 32.5ms inference, 0.5ms postprocess per image at shape (1, 3, 640, 640)
 Results saved to runs/detect/predict
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
@@ -277,9 +277,9 @@ Ultralytics Inference 0.0.61 🚀 Rust ONNX FP32 CPU
 Using ONNX Runtime CPUExecutionProvider
 YOLO26n-seg summary: 80 classes, imgsz=(640, 640)
 
-image 1/2 /home/ultralytics/inference/bus.jpg: 640x480 4 persons, 1 bus, 48.2ms
-image 2/2 /home/ultralytics/inference/zidane.jpg: 384x640 2 persons, 1 tie, 38.1ms
-Speed: 1.6ms preprocess, 44.3ms inference, 1.2ms postprocess per image at shape (1, 3, 384, 640)
+image 1/2 /home/ultralytics/inference/bus.jpg: 640x640 3 persons, 1 bus, 48.2ms
+image 2/2 /home/ultralytics/inference/zidane.jpg: 640x640 2 persons, 1 tie, 38.1ms
+Speed: 1.6ms preprocess, 44.3ms inference, 1.2ms postprocess per image at shape (1, 3, 640, 640)
 Results saved to runs/segment/predict
 💡 Learn more at https://docs.ultralytics.com/modes/predict
 ```
@@ -375,14 +375,15 @@ YOLOv8、YOLO11 和 YOLO26 ONNX 模型支持 **n / s / m / l / x** 尺寸，并�
 
 **输入源选项：**
 
-| 输入源类型 | 示例输入                        | 说明                   |
-| ---------- | ------------------------------- | ---------------------- |
-| 图片       | `image.jpg`                     | 单张图片文件           |
-| 目录       | `images/`                       | 图片目录               |
-| Glob       | `images/*.jpg`                  | 图片 glob 模式         |
-| 视频       | `video.mp4`                     | 视频文件               |
-| 摄像头     | `0`,`1`                         | 摄像头索引（0 为默认） |
-| URL        | `https://example.com/image.jpg` | 远程图片 URL           |
+| 输入源类型 | 示例输入                        | 说明                                      |
+| ---------- | ------------------------------- | ----------------------------------------- |
+| 图片       | `image.jpg`                     | 单张图片文件                              |
+| 目录       | `images/`                       | 图片目录                                  |
+| Glob       | `images/*.jpg`                  | 图片 glob 模式                            |
+| 视频       | `video.mp4`                     | 视频文件                                  |
+| 摄像头     | `0`,`1`                         | 摄像头索引（0 为默认）                    |
+| URL        | `https://example.com/image.jpg` | 远程图片 URL                              |
+| 流         | `rtsp://example.com/stream`     | RTSP、RTMP 或 HTTP 视频流（`video` 特性） |
 
 支持的图片格式：`.bmp`、`.dng`、`.gif`、`.jp2`、`.jpeg`、`.jpg`、`.mpo`、`.png`、`.tif`、`.tiff` 和 `.webp`。
 
@@ -626,6 +627,7 @@ inference/
 │   ├── lib.rs              # 库入口和公开导出
 │   ├── main.rs             # CLI 应用
 │   ├── model.rs            # YOLOModel - ONNX session 和推理
+│   ├── model/tiling.rs     # 切片推理（tile、tile_overlap）
 │   ├── ocr.rs              # 场景文字识别（YOLO26-Text + PaddleOCR）
 │   ├── openvino.rs         # 原生 OpenVINO IR 运行时（openvino-native feature）
 │   ├── results.rs          # Results, Boxes, Masks, Keypoints, Probs, Obb, SemanticMask, DepthMap
