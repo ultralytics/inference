@@ -87,14 +87,14 @@ impl Viewer {
             self.buffer.resize(num_pixels, 0);
         }
 
-        // Convert image to BGRA format expected by minifb (u32 per pixel: 0x00RRGGBB)
-        let rgb = image.to_rgb8();
-        for (i, pixel) in rgb.pixels().enumerate() {
-            let r = u32::from(pixel[0]);
-            let g = u32::from(pixel[1]);
-            let b = u32::from(pixel[2]);
-            // Pack as 0x00RRGGBB
-            self.buffer[i] = (r << 16) | (g << 8) | b;
+        // Pack each pixel as the 0x00RRGGBB minifb expects, borrowing the samples of an
+        // RGB8 image (annotated frames are) instead of copying them.
+        let rgb = image.as_rgb8().map_or_else(
+            || std::borrow::Cow::Owned(image.to_rgb8()),
+            std::borrow::Cow::Borrowed,
+        );
+        for (px, &[r, g, b]) in self.buffer.iter_mut().zip(rgb.as_raw().as_chunks::<3>().0) {
+            *px = (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
         }
 
         // Update dimensions if changed
