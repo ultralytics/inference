@@ -426,10 +426,12 @@ pub(crate) fn fused_zerocopy_preprocess(
                 }
             } else {
                 let p1 = src_raw.as_ptr().add(row1_off);
+                // With `fy == 0` the second row contributes `(h1 * 0) >> 16 = 0`, so skip it.
+                let src_rows = 1 + usize::from(fy != 0);
                 for (chunk, lut) in x_lut.chunks(CHUNK).enumerate() {
                     let mut h = [[[0i16; CHUNK]; 3]; 2];
                     for (i, &(x0_off, x1_off, fx_inv, fx)) in lut.iter().enumerate() {
-                        for (planes, p) in h.iter_mut().zip([p0, p1]) {
+                        for (planes, p) in h.iter_mut().zip([p0, p1]).take(src_rows) {
                             for (c, plane) in planes.iter_mut().enumerate() {
                                 plane[i] = ((i32::from(*p.add(x0_off + c)) * fx_inv
                                     + i32::from(*p.add(x1_off + c)) * fx)
