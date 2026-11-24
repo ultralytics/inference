@@ -185,6 +185,7 @@ fn test_depth_results_has_map() {
 }
 
 #[test]
+#[cfg(feature = "annotate")]
 #[ignore = "downloads a YOLO depth model and sample image; annotates the depth map"]
 fn test_depth_annotation_blends_over_image() {
     use ultralytics_inference::YOLOModel;
