@@ -1073,14 +1073,9 @@ impl YOLOModel {
             });
         }
 
-        let batch = ndarray::concatenate(ndarray::Axis(0), arrays).map_err(|e| {
-            InferenceError::InferenceError(format!("Failed to concatenate {label} tensors: {e}"))
-        })?;
-        batch.into_dimensionality::<ndarray::Ix4>().map_err(|e| {
-            InferenceError::InferenceError(format!(
-                "Failed to convert concatenated tensor to 4D: {e}"
-            ))
-        })
+        Err(InferenceError::InferenceError(format!(
+            "Failed to build {label} batch: the images have different tensor shapes"
+        )))
     }
 
     /// Run one forward pass over the per-image input tensors `tensor` picks, joined along
@@ -1922,7 +1917,7 @@ impl YOLOModel {
                     .expect("an image is either RGB8 or converted to it");
                 let (w, h) = rgb.dimensions();
                 // `cuda_input` owns this batch tensor until inference completes.
-                unsafe { pre.preprocess(rgb.as_raw(), (h, w), false, target, input_ptr, slot) }
+                unsafe { pre.preprocess(rgb.as_raw(), (h, w), target, input_ptr, slot) }
             })
             .collect::<Result<Vec<_>>>()?;
         let frames: Vec<(Vec<u8>, u32, u32)> = images
@@ -1977,13 +1972,15 @@ impl YOLOModel {
         let preprocessed: Vec<_> = frames
             .iter()
             .zip(&geoms)
-            .map(|((_, h, w), geom)| crate::preprocessing::PreprocessResult {
-                tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
-                tensor_f16: None,
-                orig_shape: (*h, *w),
-                scale: geom.scale,
-                padding: (geom.pad_y as f32, geom.pad_x as f32),
-            })
+            .map(
+                |((_, h, w), (geom, scale))| crate::preprocessing::PreprocessResult {
+                    tensor: ndarray::Array4::<f32>::zeros((0, 0, 0, 0)),
+                    tensor_f16: None,
+                    orig_shape: (*h, *w),
+                    scale: *scale,
+                    padding: (geom.pad_top as f32, geom.pad_left as f32),
+                },
+            )
             .collect();
         // Reuse each frame's RGB buffer as the annotator's HWC array; no copy.
         let image_arrays = frames

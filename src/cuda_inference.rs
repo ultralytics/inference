@@ -3,9 +3,9 @@
 //! Internal GPU preprocess for the `cuda-preprocess` feature.
 //!
 //! Implements a fused CUDA kernel that performs bilinear letterbox-resize +
-//! `/255` normalize + (optional) BGR↔RGB swap + HWC→CHW packing in a single
-//! launch, writing directly into the device-side input buffer that ONNX
-//! Runtime's TRT/CUDA EP reads in place.
+//! `/255` normalize + HWC→CHW packing in a single launch, writing directly
+//! into the device-side input buffer that ONNX Runtime's TRT/CUDA EP reads
+//! in place.
 //!
 //! The whole module is `pub(crate)` - public API consumers reach this path
 //! through [`crate::YOLOModel`] + [`crate::InferenceConfig`]'s
@@ -30,12 +30,11 @@ use cudarc::driver::{
 use cudarc::nvrtc::compile_ptx_with_opts;
 
 use crate::error::{InferenceError, Result};
+use crate::preprocessing::LetterboxGeometry;
 
 /// CUDA preprocess kernel source (NVRTC-compiled once per `CudaPreprocessor`).
 ///
-/// Reads BGR/RGB HWC u8 input, writes RGB CHW f32 in `[0,1]` with letterbox padding.
-/// `bgr_in=1` for OpenCV-style BGR inputs, `bgr_in=0` for RGB inputs (e.g. from the
-/// `image` crate's `to_rgb8`).
+/// Reads RGB HWC u8 input, writes RGB CHW f32 in `[0,1]` with letterbox padding.
 const KERNEL_SRC: &str = r#"
 extern "C" __global__ void preprocess(
     const unsigned char* __restrict__ src,
@@ -44,8 +43,7 @@ extern "C" __global__ void preprocess(
     int dst_h, int dst_w,
     float scale_x, float scale_y,
     int valid_w, int valid_h,
-    int pad_x, int pad_y,
-    int bgr_in)
+    int pad_x, int pad_y)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -86,14 +84,10 @@ extern "C" __global__ void preprocess(
         float w10 = (1.f - dx) *        dy ;
         float w11 =        dx  *        dy ;
 
-        int ir = bgr_in ? 2 : 0;
-        int ig = 1;
-        int ib = bgr_in ? 0 : 2;
-
         float inv255 = 1.0f / 255.0f;
-        r = (w00 * p00[ir] + w01 * p01[ir] + w10 * p10[ir] + w11 * p11[ir]) * inv255;
-        g = (w00 * p00[ig] + w01 * p01[ig] + w10 * p10[ig] + w11 * p11[ig]) * inv255;
-        b = (w00 * p00[ib] + w01 * p01[ib] + w10 * p10[ib] + w11 * p11[ib]) * inv255;
+        r = (w00 * p00[0] + w01 * p01[0] + w10 * p10[0] + w11 * p11[0]) * inv255;
+        g = (w00 * p00[1] + w01 * p01[1] + w10 * p10[1] + w11 * p11[1]) * inv255;
+        b = (w00 * p00[2] + w01 * p01[2] + w10 * p10[2] + w11 * p11[2]) * inv255;
     }
 
     int hw = dst_h * dst_w;
@@ -103,17 +97,6 @@ extern "C" __global__ void preprocess(
     dst[2 * hw + idx] = b;
 }
 "#;
-
-/// Geometry produced by [`CudaPreprocessor::preprocess`].
-///
-/// `scale` is the uniform letterbox scale factor; `pad_x`/`pad_y` are the
-/// pixel offsets applied along each axis. These values are needed by
-/// post-processing to map model-space coordinates back to source pixels.
-pub(crate) struct PreGeom {
-    pub scale: (f32, f32),
-    pub pad_x: i32,
-    pub pad_y: i32,
-}
 
 /// Phase-1 of the fast-path init: a cudarc context + stream created before
 /// the ORT session is built, so the raw stream pointer can be handed to the
@@ -301,11 +284,10 @@ impl CudaPreprocessor {
         &mut self,
         frame_hwc: &[u8],
         src: (u32, u32),
-        bgr_in: bool,
         dst: (usize, usize),
         input_ptr: u64,
         slot: usize,
-    ) -> Result<PreGeom> {
+    ) -> Result<(LetterboxGeometry, (f32, f32))> {
         let (src_h, src_w) = src;
         let (dst_h, dst_w) = dst;
         let needed = (src_h as usize) * (src_w as usize) * 3;
@@ -346,19 +328,13 @@ impl CudaPreprocessor {
         // Geometry from the shared CPU helper, so the kernel and the CPU path can never
         // disagree on scale/rounding/padding. `scale` is the `(y, x)` gain post-processing
         // back-projects with.
-        let (geom, scale) = crate::preprocessing::LetterboxGeometry::compute(
-            src_w,
-            src_h,
-            (dst_h, dst_w),
-            self.stretch,
-        );
+        let (geom, scale) = LetterboxGeometry::compute(src_w, src_h, (dst_h, dst_w), self.stretch);
         let (resized_w, resized_h) = (geom.new_w as i32, geom.new_h as i32);
         let (pad_x, pad_y) = (geom.pad_left as i32, geom.pad_top as i32);
         // Resampling ratios are src-per-dst on each axis, matching the CPU letterbox
         // (`get_or_compute_x_lut(src_w, new_w)` / `scale_y = src_h / new_h`).
         let scale_x = src_w as f32 / geom.new_w as f32;
         let scale_y = src_h as f32 / geom.new_h as f32;
-        let bgr_in_i = i32::from(bgr_in);
 
         let block_dim = (16u32, 16u32, 1u32);
         let grid_dim = (
@@ -394,16 +370,11 @@ impl CudaPreprocessor {
                 .arg(&resized_h)
                 .arg(&pad_x)
                 .arg(&pad_y)
-                .arg(&bgr_in_i)
                 .launch(launch_cfg)
                 .map_err(|e| InferenceError::InferenceError(format!("kernel launch: {e:?}")))?;
         }
 
-        Ok(PreGeom {
-            scale,
-            pad_x,
-            pad_y,
-        })
+        Ok((geom, scale))
     }
 }
 
@@ -481,17 +452,16 @@ mod tests {
         let (src_h, src_w) = (480u32, 640u32);
         let frame = solid(src_h as usize, src_w as usize, 200, 100, 50);
 
-        let geom = unsafe { pre.preprocess(&frame, (src_h, src_w), false, (640, 640), ptr, 0) }
+        let (geom, scale) = unsafe { pre.preprocess(&frame, (src_h, src_w), (640, 640), ptr, 0) }
             .expect("preprocess");
 
         // 640/640 = 1.0 is the binding axis; the 480-tall image is centered.
         assert!(
-            (geom.scale.0 - 1.0).abs() < EPS && (geom.scale.1 - 1.0).abs() < EPS,
-            "scale = {:?}",
-            geom.scale
+            (scale.0 - 1.0).abs() < EPS && (scale.1 - 1.0).abs() < EPS,
+            "scale = {scale:?}"
         );
-        assert_eq!(geom.pad_x, 0);
-        assert_eq!(geom.pad_y, 80);
+        assert_eq!(geom.pad_left, 0);
+        assert_eq!(geom.pad_top, 80);
 
         let host = readback(&pre, &input);
         assert!(
@@ -506,14 +476,14 @@ mod tests {
 
         // 640x640 into 384x640: scale 0.6 fills the width, pads the height to 0.
         let frame = solid(640, 640, 10, 20, 30);
-        let geom = unsafe { pre.preprocess(&frame, (640, 640), false, (384, 640), ptr, 0) }
-            .expect("preprocess");
+        let (geom, _) =
+            unsafe { pre.preprocess(&frame, (640, 640), (384, 640), ptr, 0) }.expect("preprocess");
 
-        assert_eq!(geom.pad_y, 0);
+        assert_eq!(geom.pad_top, 0);
         assert!(
-            geom.pad_x > 0,
+            geom.pad_left > 0,
             "expected horizontal padding, got {}",
-            geom.pad_x
+            geom.pad_left
         );
     }
 
@@ -524,14 +494,13 @@ mod tests {
         let (mut pre, input, ptr) = preprocessor_with(640, 640, true);
         let frame = solid(480, 640, 200, 100, 50);
 
-        let geom = unsafe { pre.preprocess(&frame, (480, 640), false, (640, 640), ptr, 0) }
-            .expect("preprocess");
+        let (geom, scale) =
+            unsafe { pre.preprocess(&frame, (480, 640), (640, 640), ptr, 0) }.expect("preprocess");
 
-        assert_eq!((geom.pad_x, geom.pad_y), (0, 0));
+        assert_eq!((geom.pad_left, geom.pad_top), (0, 0));
         assert!(
-            (geom.scale.0 - 640.0 / 480.0).abs() < EPS && (geom.scale.1 - 1.0).abs() < EPS,
-            "scale = {:?}",
-            geom.scale
+            (scale.0 - 640.0 / 480.0).abs() < EPS && (scale.1 - 1.0).abs() < EPS,
+            "scale = {scale:?}"
         );
 
         // No padding means no pixel keeps the letterbox fill value.
@@ -548,12 +517,12 @@ mod tests {
         let (mut pre, input, ptr) = preprocessor(dst, dst);
         let frame = solid(src_h as usize, src_w as usize, 255, 255, 255);
 
-        let geom = unsafe { pre.preprocess(&frame, (src_h, src_w), false, (dst, dst), ptr, 0) }
+        let (geom, _) = unsafe { pre.preprocess(&frame, (src_h, src_w), (dst, dst), ptr, 0) }
             .expect("preprocess");
         assert!(
-            geom.pad_x > 0,
+            geom.pad_left > 0,
             "expected horizontal padding, got {}",
-            geom.pad_x
+            geom.pad_left
         );
 
         // The top-left pixel is outside the resized image, so it is background.
@@ -574,7 +543,7 @@ mod tests {
         let (mut pre, input, ptr) = preprocessor(dst, dst);
         // Square input, no letterbox: every pixel is R=255, G=0, B=0.
         let frame = solid(dst, dst, 255, 0, 0);
-        unsafe { pre.preprocess(&frame, (dst as u32, dst as u32), false, (dst, dst), ptr, 0) }
+        unsafe { pre.preprocess(&frame, (dst as u32, dst as u32), (dst, dst), ptr, 0) }
             .expect("preprocess");
 
         let host = readback(&pre, &input);
@@ -590,59 +559,10 @@ mod tests {
     }
 
     #[test]
-    fn preprocess_bgr_swap() {
-        let dst = 64usize;
-        let frame = solid(dst, dst, 255, 0, 0); // byte order [255, 0, 0]
-        let hw = dst * dst;
-        let idx = (dst / 2) * dst + dst / 2;
-
-        let (mut rgb, rgb_input, rgb_ptr) = preprocessor(dst, dst);
-        unsafe {
-            rgb.preprocess(
-                &frame,
-                (dst as u32, dst as u32),
-                false,
-                (dst, dst),
-                rgb_ptr,
-                0,
-            )
-        }
-        .expect("rgb preprocess");
-        let rgb_host = readback(&rgb, &rgb_input);
-
-        let (mut bgr, bgr_input, bgr_ptr) = preprocessor(dst, dst);
-        unsafe {
-            bgr.preprocess(
-                &frame,
-                (dst as u32, dst as u32),
-                true,
-                (dst, dst),
-                bgr_ptr,
-                0,
-            )
-        }
-        .expect("bgr preprocess");
-        let bgr_host = readback(&bgr, &bgr_input);
-
-        // RGB reads byte[0]=255 into R; BGR reads the same byte into B.
-        assert!(
-            (rgb_host[idx] - 1.0).abs() < EPS,
-            "rgb R = {}",
-            rgb_host[idx]
-        );
-        assert!(bgr_host[idx].abs() < EPS, "bgr R = {}", bgr_host[idx]);
-        assert!(
-            (bgr_host[2 * hw + idx] - 1.0).abs() < EPS,
-            "bgr B = {}",
-            bgr_host[2 * hw + idx]
-        );
-    }
-
-    #[test]
     fn preprocess_rejects_wrong_len() {
         let (mut pre, _input, ptr) = preprocessor(64, 64);
         let bad = vec![0u8; 10]; // != 64 * 64 * 3
-        let result = unsafe { pre.preprocess(&bad, (64, 64), false, (64, 64), ptr, 0) };
+        let result = unsafe { pre.preprocess(&bad, (64, 64), (64, 64), ptr, 0) };
         assert!(
             matches!(result, Err(InferenceError::InferenceError(_))),
             "wrong-length frame must be rejected"
@@ -654,10 +574,9 @@ mod tests {
         let (mut pre, _input, ptr) = preprocessor(128, 128);
         // First a small frame, then a larger one to force `frame_dev` to grow.
         let small = solid(32, 32, 1, 2, 3);
-        unsafe { pre.preprocess(&small, (32, 32), false, (128, 128), ptr, 0) }
-            .expect("small frame");
+        unsafe { pre.preprocess(&small, (32, 32), (128, 128), ptr, 0) }.expect("small frame");
         let large = solid(256, 256, 4, 5, 6);
-        unsafe { pre.preprocess(&large, (256, 256), false, (128, 128), ptr, 0) }
+        unsafe { pre.preprocess(&large, (256, 256), (128, 128), ptr, 0) }
             .expect("large frame after buffer growth");
     }
 
@@ -696,7 +615,7 @@ mod tests {
             }
 
             // All images share a rect target and occupy separate slots of one batch tensor.
-            unsafe { pre.preprocess(&frame, (src_h as u32, src_w as u32), false, dst, ptr, slot) }
+            unsafe { pre.preprocess(&frame, (src_h as u32, src_w as u32), dst, ptr, slot) }
                 .expect("gpu preprocess");
 
             let img = image::DynamicImage::ImageRgb8(
