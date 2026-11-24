@@ -57,7 +57,6 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
     let (model_path, model_is_default) = resolve_model_path(args);
     let source_path = &args.source;
     let save = args.save;
-    let save_frames = args.save_frames;
     let save_json = args.save_json;
     #[cfg(feature = "annotate")]
     let draw = AnnotateOptions {
@@ -245,9 +244,9 @@ fn run(args: &PredictArgs, tracker: Option<&str>) {
     let mut result_saver = save_dir
         .as_ref()
         .filter(|_| save)
-        .map(|d| crate::io::SaveResults::new(d.clone(), save_frames));
+        .map(|d| crate::io::SaveResults::new(d.clone(), args.save_frames));
     #[cfg(not(feature = "annotate"))]
-    let mut result_saver: Option<crate::io::SaveResults> = None;
+    let result_saver: Option<crate::io::SaveResults> = None;
 
     // A webcam keeps capturing while inference runs, so like Ultralytics it keeps only the
     // latest frame for inference instead of blocking until the capture buffer overflows or
