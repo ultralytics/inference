@@ -22,7 +22,7 @@ use wide::f32x8;
 use crate::parallel::*;
 use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions};
-use ndarray::{Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip, s};
+use ndarray::{Array, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip, s};
 
 use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, resize, scale_coords};
@@ -881,8 +881,8 @@ fn apply_mask_proto(
     let (x0, x1) = window(x_start, box_w, sx, nw);
     let (y0, y1) = window(y_start, box_h, sy, nh);
     let (ww, wh) = (x1 - x0, y1 - y0);
-    let up;
-    let content = if f > 1 {
+    let (up, window): (_, Vec<f32>);
+    let content: &[f32] = if f > 1 {
         // That window of the prototypes upsampled by `f`, from the same coefficients as the
         // whole grid.
         let fw = f as f64;
@@ -893,15 +893,16 @@ fn apply_mask_proto(
             wh as f64 / fw,
         ];
         up = bilinear(logits, (mw, mh), (ww, wh), crop)?;
-        bytemuck::cast_slice::<u8, f32>(up.buffer()).to_vec()
+        bytemuck::cast_slice(up.buffer())
     } else {
-        (top + y0..top + y1)
+        window = (top + y0..top + y1)
             .flat_map(|y| {
                 logits[y * mw + left + x0..y * mw + left + x1]
                     .iter()
                     .copied()
             })
-            .collect()
+            .collect();
+        &window
     };
     let crop = [
         (x_start as f64).mul_add(sx, -(x0 as f64)),
@@ -909,16 +910,16 @@ fn apply_mask_proto(
         box_w as f64 * sx,
         box_h as f64 * sy,
     ];
-    let out = bilinear(&content, (ww, wh), (box_w, box_h), crop)?;
+    let out = bilinear(content, (ww, wh), (box_w, box_h), crop)?;
     put_logits(mask_out, (x_start, y_start), &out)
 }
 
-/// The `boxes` rows at `keep`, without copying when all are kept.
-fn select_rows(boxes: Array2<f32>, keep: &[usize]) -> Array2<f32> {
-    if keep.len() == boxes.nrows() {
-        boxes
+/// The `rows` at `keep` along the first axis, without copying when all are kept.
+fn select_rows<D: ndarray::RemoveAxis>(rows: Array<f32, D>, keep: &[usize]) -> Array<f32, D> {
+    if keep.len() == rows.len_of(ndarray::Axis(0)) {
+        rows
     } else {
-        boxes.select(ndarray::Axis(0), keep)
+        rows.select(ndarray::Axis(0), keep)
     }
 }
 
@@ -967,8 +968,10 @@ fn build_instance_masks(
     };
     let apply =
         |mask_out: ArrayViewMut2<f32>, mask_flat: ArrayView1<f32>, box_data: ArrayView1<f32>| {
-            let logits = mask_flat.to_vec();
-            apply_mask_proto(mask_out, &logits, &box_data, (mw, mh), (w, h), geometry)
+            let logits = mask_flat
+                .as_slice()
+                .expect("dot output rows are contiguous");
+            apply_mask_proto(mask_out, logits, &box_data, (mw, mh), (w, h), geometry)
         };
     if let Some(on_mask) = on_mask {
         let mut mask = Array2::<f32>::zeros((h as usize, w as usize));
@@ -1004,11 +1007,7 @@ fn build_instance_masks(
     zip.for_each(|mask, coeffs, bbox, filled| *filled = apply(mask, coeffs, bbox).is_some());
 
     let keep: Vec<usize> = (0..n).filter(|&i| filled[i]).collect();
-    let masks_data = if keep.len() == n {
-        masks_data
-    } else {
-        masks_data.select(ndarray::Axis(0), &keep)
-    };
+    let masks_data = select_rows(masks_data, &keep);
     Some((keep, Some(masks_data)))
 }
 
