@@ -28,7 +28,7 @@ use crate::inference::InferenceConfig;
 use crate::preprocessing::{PreprocessResult, clip_coords, resize, scale_coords};
 use crate::results::{Boxes, DepthMap, Keypoints, Masks, Obb, Probs, Results, SemanticMask, Speed};
 use crate::task::Task;
-use crate::utils::{nms_per_class, nms_rotated_per_class, xywh_to_xyxy};
+use crate::utils::{nms_rotated_per_class, xywh_to_xyxy};
 
 type MaskSink<'a> = dyn for<'b> FnMut(ArrayView2<'b, f32>, ArrayView1<'b, f32>) + 'a;
 
@@ -256,9 +256,10 @@ fn postprocess_detect(
     }
 
     // Zero-copy extraction with stride-based indexing
-    let boxes_data = extract_detect_boxes(
+    let (boxes_data, _) = extract_detect_boxes(
         output,
         num_classes,
+        4 + num_classes,
         num_predictions,
         is_transposed,
         preprocess,
@@ -387,51 +388,6 @@ fn best_class_score(scores: &ArrayView1<f32>) -> (usize, f32) {
         .unwrap_or((0, f32::NEG_INFINITY))
 }
 
-/// Decode a `[preds, features]` head, run per-class NMS and return the kept detections as
-/// `[x1, y1, x2, y2, score, class]` rows, plus the head row each came from so the caller can
-/// read its extra columns (mask coefficients, keypoints).
-///
-/// A row is a candidate when its best of the `num_classes` class scores is above the
-/// confidence threshold and passes the class filter; its box is scaled back to the original
-/// image. NMS runs on the unclipped boxes, as for detect, and the kept boxes are clipped.
-fn decode_nms(
-    output_2d: &Array2<f32>,
-    num_classes: usize,
-    preprocess: &PreprocessResult,
-    config: &InferenceConfig,
-) -> (Array2<f32>, Vec<usize>) {
-    let mut rows = Vec::new();
-    let mut candidates = Vec::new();
-    for i in 0..output_2d.nrows() {
-        let (best_class, best_score) =
-            best_class_score(&output_2d.slice(s![i, 4..4 + num_classes]));
-        if best_score <= config.confidence_threshold || !config.keep_class(best_class) {
-            continue;
-        }
-        let bbox = scale_coords(
-            &xywh_to_xyxy(
-                output_2d[[i, 0]],
-                output_2d[[i, 1]],
-                output_2d[[i, 2]],
-                output_2d[[i, 3]],
-            ),
-            preprocess.scale,
-            preprocess.padding,
-        );
-        candidates.push((bbox, best_score, best_class));
-        rows.push(i);
-    }
-
-    let keep = nms_per_class(&candidates, config.iou_threshold, config.max_det);
-    let mut boxes = Array2::zeros((keep.len(), 6));
-    for (out_idx, &k) in keep.iter().enumerate() {
-        let (bbox, score, class) = &candidates[k];
-        let bbox = clip_coords(bbox, preprocess.orig_shape);
-        write_box_row(&mut boxes, out_idx, &bbox, *score, *class);
-    }
-    (boxes, keep.iter().map(|&k| rows[k]).collect())
-}
-
 /// Write one `[x1, y1, x2, y2, score, class]` detection row into a `(_, 6)` boxes array.
 #[allow(clippy::cast_precision_loss)]
 fn write_box_row(boxes: &mut Array2<f32>, row: usize, bbox: &[f32; 4], score: f32, class: usize) {
@@ -443,11 +399,11 @@ fn write_box_row(boxes: &mut Array2<f32>, row: usize, bbox: &[f32; 4], score: f3
     boxes[[row, 5]] = class as f32;
 }
 
-/// Reshape a flat model output into a `[preds, features]` 2D array.
+/// View a flat model output as a `[preds, features]` 2D array without copying it.
 ///
 /// When `is_transposed` the data is already laid out `[preds, features]`;
-/// otherwise it is `[features, preds]` and gets transposed. Returns an empty
-/// array on shape mismatch, matching the per-task fallbacks.
+/// otherwise it is `[features, preds]` and is viewed transposed. Returns an empty
+/// view on shape mismatch, matching the per-task fallbacks.
 ///
 /// The length check is exact on purpose. `ArrayView2::from_shape` accepts a buffer *longer*
 /// than the shape needs and silently views a prefix, so a feature count that disagrees with
@@ -458,28 +414,19 @@ fn output_to_2d(
     num_preds: usize,
     features: usize,
     is_transposed: bool,
-) -> Array2<f32> {
+) -> ArrayView2<'_, f32> {
+    let empty = ArrayView2::from_shape((0, 0), &[]).expect("empty shape");
     if num_preds
         .checked_mul(features)
         .is_none_or(|len| len != data.len())
     {
-        return Array2::zeros((0, 0));
+        return empty;
     }
 
-    let shape = if is_transposed {
-        (num_preds, features)
-    } else {
-        (features, num_preds)
-    };
-    let Ok(view) = ArrayView2::from_shape(shape, data) else {
-        return Array2::zeros((0, 0));
-    };
-    // The transpose is materialized on purpose: callers walk a prediction at a time, and a
-    // strided view would read a column per access.
     if is_transposed {
-        view.to_owned()
+        ArrayView2::from_shape((num_preds, features), data).unwrap_or(empty)
     } else {
-        view.t().to_owned()
+        ArrayView2::from_shape((features, num_preds), data).map_or(empty, ArrayView2::reversed_axes)
     }
 }
 
@@ -488,9 +435,15 @@ struct Candidate {
     bbox: [f32; 4],
     score: f32,
     class: usize,
+    row: usize,
 }
 
 /// Optimized detection extraction with SIMD acceleration.
+///
+/// Each prediction holds `row_stride` features: `[cx, cy, w, h]`, `num_classes` class scores,
+/// then any extra columns (mask coefficients, keypoints) that are left to the caller. Returns
+/// the kept detections as `[x1, y1, x2, y2, score, class]` rows plus the prediction index each
+/// came from, so the caller can read its extra columns.
 ///
 /// Key optimizations:
 /// - SIMD-accelerated candidate extraction (f32x8)
@@ -499,12 +452,12 @@ struct Candidate {
 fn extract_detect_boxes(
     output: &[f32],
     num_classes: usize,
+    row_stride: usize,
     num_predictions: usize,
     is_transposed: bool,
     preprocess: &PreprocessResult,
     config: &InferenceConfig,
-) -> Array2<f32> {
-    let feat_count = 4 + num_classes;
+) -> (Array2<f32>, Vec<usize>) {
     let orig_shape = preprocess.orig_shape;
     let conf_thresh = config.confidence_threshold;
     let max_det = config.max_det;
@@ -513,18 +466,29 @@ fn extract_detect_boxes(
 
     let mut candidates: Vec<Candidate> = Vec::with_capacity(256);
     // Keep a row that cleared the threshold when its class passes the filter, reading its
-    // `[cx, cy, w, h]` from `output[base + k * step]` and scaling it to the original image.
-    let mut push_candidate = |base: usize, step: usize, score: f32, class: usize| {
+    // `[cx, cy, w, h]` from the raw layout and scaling it to the original image.
+    let mut push_candidate = |row: usize, score: f32, class: usize| {
         if !config.keep_class(class) {
             return;
         }
-        let at = |k: usize| output[base + k * step];
+        let at = |k: usize| {
+            if is_transposed {
+                output[row * row_stride + k]
+            } else {
+                output[k * num_predictions + row]
+            }
+        };
         let bbox = scale_coords(
             &xywh_to_xyxy(at(0), at(1), at(2), at(3)),
             preprocess.scale,
             preprocess.padding,
         );
-        candidates.push(Candidate { bbox, score, class });
+        candidates.push(Candidate {
+            bbox,
+            score,
+            class,
+            row,
+        });
     };
 
     // Candidate Extraction
@@ -546,13 +510,13 @@ fn extract_detect_boxes(
 
         for (idx, &score) in max_scores.iter().enumerate() {
             if score > conf_thresh {
-                push_candidate(idx, num_predictions, score, max_classes[idx]);
+                push_candidate(idx, score, max_classes[idx]);
             }
         }
     } else {
         // Layout [pred, feat] - Process 8 classes at once
         for (idx, row) in output
-            .chunks_exact(feat_count)
+            .chunks_exact(row_stride)
             .take(num_predictions)
             .enumerate()
         {
@@ -566,7 +530,7 @@ fn extract_detect_boxes(
                     }
                 }
             };
-            let (blocks, rest) = row[4..].as_chunks::<8>();
+            let (blocks, rest) = row[4..4 + num_classes].as_chunks::<8>();
             for (b, block) in blocks.iter().enumerate() {
                 if f32x8::new(*block).simd_gt(conf_v).any() {
                     scan(b * 8, block);
@@ -574,24 +538,28 @@ fn extract_detect_boxes(
             }
             scan(num_classes - rest.len(), rest);
             if best_score > conf_thresh {
-                push_candidate(idx * feat_count, 1, best_score, best_class);
+                push_candidate(idx, best_score, best_class);
             }
         }
     }
 
     if candidates.is_empty() {
-        return Array2::zeros((0, 6));
+        return (Array2::zeros((0, 6)), Vec::new());
     }
 
-    // Top-K Selection & Sort. `total_cmp` keeps a NaN score from panicking, and both of these
-    // need the total order it provides: `select_nth_unstable_by` has unspecified behavior with
-    // an inconsistent comparator.
-    let nms_limit = (max_det * 10).min(candidates.len());
+    // Top-K Selection & Sort, by descending score with ties in prediction order (what a stable
+    // sort gives). `total_cmp` keeps a NaN score from panicking, and both of these need the
+    // total order it provides: `select_nth_unstable_by` has unspecified behavior with an
+    // inconsistent comparator.
+    let by_score =
+        |a: &Candidate, b: &Candidate| b.score.total_cmp(&a.score).then(a.row.cmp(&b.row));
+    // Like the Python `max_nms`, NMS sees at most the 30000 highest scoring candidates.
+    let nms_limit = candidates.len().min(30_000);
     if candidates.len() > nms_limit {
-        candidates.select_nth_unstable_by(nms_limit, |a, b| b.score.total_cmp(&a.score));
+        candidates.select_nth_unstable_by(nms_limit, by_score);
         candidates.truncate(nms_limit);
     }
-    candidates.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
+    candidates.sort_unstable_by(by_score);
 
     // Population of SoA for NMS (small copy, very fast)
     let n = candidates.len();
@@ -613,13 +581,13 @@ fn extract_detect_boxes(
     let mut keep = Vec::with_capacity(max_det);
     let iou_v = f32x8::splat(iou_thresh);
     for i in 0..n {
+        if keep.len() >= max_det {
+            break;
+        }
         if suppressed[i] {
             continue;
         }
         keep.push(i);
-        if keep.len() >= max_det {
-            break;
-        }
 
         let ax1 = f32x8::splat(x1[i]);
         let ay1 = f32x8::splat(y1[i]);
@@ -691,7 +659,10 @@ fn extract_detect_boxes(
         );
     }
 
-    result
+    (
+        result,
+        keep.iter().map(|&idx| candidates[idx].row).collect(),
+    )
 }
 
 /// Bilinear resize of a `w×h` f32 grid to `out_w×out_h`, reading its `[x, y, width, height]`
@@ -1061,7 +1032,7 @@ fn postprocess_segment(
         return results;
     }
 
-    // Convert to 2D [preds, features]. `output_to_2d` yields an empty array when the feature
+    // View as 2D [preds, features]. `output_to_2d` yields an empty view when the feature
     // count disagrees with the buffer, which the decoder cannot index.
     let output_2d = output_to_2d(output0, num_preds, expected_features, is_transposed);
 
@@ -1069,7 +1040,15 @@ fn postprocess_segment(
         return results;
     }
 
-    let (boxes_data, kept_rows) = decode_nms(&output_2d, nc, preprocess, config);
+    let (boxes_data, kept_rows) = extract_detect_boxes(
+        output0,
+        nc,
+        expected_features,
+        num_preds,
+        is_transposed,
+        preprocess,
+        config,
+    );
     if kept_rows.is_empty() {
         return results;
     }
@@ -1212,7 +1191,7 @@ fn postprocess_pose(
         return results;
     }
 
-    // Convert to 2D [preds, features]
+    // View as 2D [preds, features]
     let output_2d = output_to_2d(output, num_preds, expected_features, is_transposed);
 
     if output_2d.is_empty() {
@@ -1220,7 +1199,15 @@ fn postprocess_pose(
     }
 
     // Keypoints are decoded for kept rows only.
-    let (boxes_data, kept_rows) = decode_nms(&output_2d, num_classes, preprocess, config);
+    let (boxes_data, kept_rows) = extract_detect_boxes(
+        output,
+        num_classes,
+        expected_features,
+        num_preds,
+        is_transposed,
+        preprocess,
+        config,
+    );
     let num_kept = kept_rows.len();
     let mut flat_kpts: Vec<f32> = Vec::with_capacity(num_kept * kpt_features);
     let kpt_start = 4 + num_classes;
@@ -1332,7 +1319,7 @@ fn postprocess_obb(
         return results;
     }
 
-    // Convert to 2D [preds, features]
+    // View as 2D [preds, features]
     let output_2d = output_to_2d(output, num_preds, actual_features, is_transposed);
 
     if output_2d.is_empty() {
@@ -2870,9 +2857,10 @@ mod tests {
         let a = output_to_2d(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3, true);
         assert_eq!(a.shape(), [2, 3]);
         assert!((a[[0, 0]] - 1.0).abs() < 1e-6);
-        // [features, preds] gets transposed to [preds, features].
+        // [features, preds] is viewed transposed as [preds, features].
         let b = output_to_2d(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3, false);
         assert_eq!(b.shape(), [2, 3]);
+        assert!((b[[0, 1]] - 3.0).abs() < 1e-6);
         // Buffer too short -> empty array.
         let c = output_to_2d(&[1.0, 2.0, 3.0], 2, 3, true);
         assert!(c.is_empty());
