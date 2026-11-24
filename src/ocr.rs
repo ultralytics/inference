@@ -200,9 +200,11 @@ impl TextRecognizer {
             texts[i].confidence = confidence;
         }
         let polygons: Vec<&[[f32; 2]]> = texts.iter().map(|t| t.polygon.as_slice()).collect();
-        Ok(reading_order(&polygons)
+        let order = reading_order(&polygons);
+        // The order is a permutation, so each text moves out once.
+        Ok(order
             .into_iter()
-            .map(|i| texts[i].clone())
+            .map(|i| std::mem::take(&mut texts[i]))
             .collect())
     }
 }

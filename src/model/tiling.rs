@@ -78,16 +78,17 @@ fn merge_rows(
     config: &InferenceConfig,
 ) -> Vec<usize> {
     let border = [0.0, 0.0, shape.1 as f32, shape.0 as f32];
-    let ext = if rotated {
-        Obb::new(data.clone(), shape).xyxy()
-    } else {
-        data.slice(s![.., ..4]).to_owned()
+    let rows = |e: ndarray::ArrayView2<f32>| -> Vec<[f32; 4]> {
+        e.rows()
+            .into_iter()
+            .map(|e| [e[0], e[1], e[2], e[3]])
+            .collect()
     };
-    let ext: Vec<[f32; 4]> = ext
-        .rows()
-        .into_iter()
-        .map(|e| [e[0], e[1], e[2], e[3]])
-        .collect();
+    let ext = if rotated {
+        rows(Obb::new(data.clone(), shape).xyxy().view())
+    } else {
+        rows(data.slice(s![.., ..4]))
+    };
     let win_f = |w: &Window| w.map(|v| v as f32);
     // Whether edge `k` of extent `e` lies more than 2 pixels inside edge `k` of window `r`.
     let inside = |e: &[f32; 4], r: [f32; 4], k: usize| {
@@ -306,16 +307,18 @@ impl YOLOModel {
             }
         }
 
-        let mut out = tiles[0].clone();
-        out.orig_img = crate::preprocessing::image_to_array(image);
-        out.orig_shape = (h, w);
-        out.path = path;
+        // A fresh result rather than a clone of the first tile, whose image and masks the
+        // merge would overwrite.
         let total = |f: fn(&Speed) -> Option<f64>| tiles.iter().map(|t| f(&t.speed)).sum();
-        out.speed = Speed {
+        let speed = Speed {
             preprocess: total(|s| s.preprocess),
             inference: total(|s| s.inference),
             postprocess: total(|s| s.postprocess),
         };
+        let image_array = crate::preprocessing::image_to_array(image);
+        let names = std::sync::Arc::clone(&tiles[0].names);
+        let mut out = Results::new(image_array, path, names, speed, tiles[0].inference_shape);
+        out.colors = std::sync::Arc::clone(&tiles[0].colors);
 
         merge_tiles(&mut out, self.metadata.task, &tiles, &windows, &self.config);
         // The loose tile results, which hold no image, merge at their own NMS `IoU`.

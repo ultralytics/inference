@@ -1395,9 +1395,9 @@ fn scale_xywh(cx: f32, cy: f32, w: f32, h: f32, preprocess: &PreprocessResult) -
 // them back to original-image space. No NMS, no class-score matrix.
 
 /// Walk an end-to-end output and, for each row above the confidence threshold that
-/// passes the class filter, scale/clip its box and invoke `on_kept(base, [x1,y1,x2,y2],
-/// conf, cls)`. Skip NaN scores and scores at or below the threshold, stopping after `cap` kept
-/// detections.
+/// passes the class filter, scale/clip its box into the returned `(n, 6)` box rows and invoke
+/// `on_kept(base, conf, cls)`. Skip NaN scores and scores at or below the threshold, stopping
+/// after `cap` kept detections.
 /// Shared by the detect, segment, pose and OBB paths.
 ///
 /// `normalized_to` names the inference `(height, width)` for heads whose first four columns
@@ -1412,9 +1412,9 @@ fn decode_end2end(
     config: &InferenceConfig,
     cap: usize,
     normalized_to: Option<(u32, u32)>,
-    mut on_kept: impl FnMut(usize, [f32; 4], f32, usize),
-) {
-    let mut kept = 0;
+    mut on_kept: impl FnMut(usize, f32, usize),
+) -> Array2<f32> {
+    let mut flat: Vec<f32> = Vec::with_capacity(cap * 6);
     for i in 0..num_preds {
         let base = i * feats;
         let conf = output[base + 4];
@@ -1439,13 +1439,14 @@ fn decode_end2end(
                 output[base + 3],
             ],
         };
-        let bbox = scale_and_clip_box(&corners, preprocess);
-        on_kept(base, bbox, conf, cls);
-        kept += 1;
-        if kept >= cap {
+        let [x1, y1, x2, y2] = scale_and_clip_box(&corners, preprocess);
+        flat.extend_from_slice(&[x1, y1, x2, y2, conf, cls as f32]);
+        on_kept(base, conf, cls);
+        if flat.len() >= cap * 6 {
             break;
         }
     }
+    Array2::from_shape_vec((flat.len() / 6, 6), flat).expect("flat length matches (n, 6)")
 }
 
 /// Post-process YOLO26 end-to-end detection output `[1, max_det, 6]`.
@@ -1469,8 +1470,7 @@ fn postprocess_detect_end2end(
 
     let user_cap = config.max_det.min(max_det);
 
-    let mut flat: Vec<f32> = Vec::with_capacity(user_cap * 6);
-    decode_end2end(
+    let boxes_data = decode_end2end(
         output,
         max_det,
         feats,
@@ -1478,14 +1478,9 @@ fn postprocess_detect_end2end(
         config,
         user_cap,
         normalized_to,
-        |_base, bbox, conf, cls| {
-            flat.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
-        },
+        |_, _, _| {},
     );
-
-    let n = flat.len() / 6;
-    if n > 0 {
-        let boxes_data = Array2::from_shape_vec((n, 6), flat).expect("flat length matches (n, 6)");
+    if boxes_data.nrows() > 0 {
         results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     }
     results
@@ -1529,11 +1524,10 @@ fn postprocess_segment_end2end(
 
     let user_cap = config.max_det.min(max_det);
 
-    let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_coeffs: Vec<f32> = Vec::with_capacity(user_cap * num_masks);
     let mut flat_input: Vec<f32> = Vec::with_capacity(user_cap * 4);
 
-    decode_end2end(
+    let boxes_data = decode_end2end(
         output0,
         max_det,
         feats,
@@ -1541,21 +1535,18 @@ fn postprocess_segment_end2end(
         config,
         user_cap,
         None,
-        |base, bbox, conf, cls| {
-            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+        |base, _, _| {
             flat_input.extend_from_slice(&output0[base..base + 4]);
             let coeff_start = base + 6;
             flat_coeffs.extend_from_slice(&output0[coeff_start..coeff_start + num_masks]);
         },
     );
 
-    let num_kept = flat_boxes.len() / 6;
+    let num_kept = boxes_data.nrows();
     if num_kept == 0 {
         return results;
     }
 
-    let boxes_data =
-        Array2::from_shape_vec((num_kept, 6), flat_boxes).expect("flat length matches (n, 6)");
     let mask_coeffs = Array2::from_shape_vec((num_kept, num_masks), flat_coeffs)
         .expect("flat length matches (n, num_masks)");
     let input_boxes =
@@ -1610,10 +1601,9 @@ fn postprocess_pose_end2end(
 
     let user_cap = config.max_det.min(max_det);
 
-    let mut flat_boxes: Vec<f32> = Vec::with_capacity(user_cap * 6);
     let mut flat_kpts: Vec<f32> = Vec::with_capacity(user_cap * nk * kpt_dim);
 
-    decode_end2end(
+    let boxes_data = decode_end2end(
         output,
         max_det,
         feats,
@@ -1621,8 +1611,7 @@ fn postprocess_pose_end2end(
         config,
         user_cap,
         None,
-        |base, bbox, conf, cls| {
-            flat_boxes.extend_from_slice(&[bbox[0], bbox[1], bbox[2], bbox[3], conf, cls as f32]);
+        |base, _, _| {
             push_keypoints(
                 &ArrayView1::from(&output[base + 6..]),
                 nk,
@@ -1633,14 +1622,12 @@ fn postprocess_pose_end2end(
         },
     );
 
-    let n = flat_boxes.len() / 6;
+    let n = boxes_data.nrows();
     // Always emit a keypoints tensor (even empty) to match the non-end2end pose path.
     let kdata = Array3::from_shape_vec((n, nk, kpt_dim), flat_kpts)
         .expect("flat length matches (n, nk, kpt_dim)");
     results.keypoints = Some(Keypoints::new(kdata, preprocess.orig_shape));
     if n > 0 {
-        let boxes_data =
-            Array2::from_shape_vec((n, 6), flat_boxes).expect("flat length matches (n, 6)");
         results.boxes = Some(Boxes::new(boxes_data, preprocess.orig_shape));
     }
     results
@@ -1665,7 +1652,7 @@ fn postprocess_obb_end2end(
             let user_cap = config.max_det.min(max_det);
             flat.reserve(user_cap * 7);
 
-            // The shared decoder's xyxy box is unused here: OBB keeps `xywhr`, so the raw
+            // The shared decoder's xyxy boxes are unused here: OBB keeps `xywhr`, so the raw
             // row is rescaled below and the rotation angle is read from column 6.
             decode_end2end(
                 output,
@@ -1675,7 +1662,7 @@ fn postprocess_obb_end2end(
                 config,
                 user_cap,
                 None,
-                |base, _bbox, conf, cls| {
+                |base, conf, cls| {
                     let [cx, cy, w, h] = scale_xywh(
                         output[base],
                         output[base + 1],
