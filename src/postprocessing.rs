@@ -553,7 +553,8 @@ fn extract_detect_boxes(
     // inconsistent comparator.
     let by_score =
         |a: &Candidate, b: &Candidate| b.score.total_cmp(&a.score).then(a.row.cmp(&b.row));
-    let nms_limit = (max_det * 10).min(candidates.len());
+    // Like the Python `max_nms`, NMS sees at most the 30000 highest scoring candidates.
+    let nms_limit = candidates.len().min(30_000);
     if candidates.len() > nms_limit {
         candidates.select_nth_unstable_by(nms_limit, by_score);
         candidates.truncate(nms_limit);
