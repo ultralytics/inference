@@ -306,14 +306,12 @@ fn build_semantic_overlay(r: &Results) -> Vec<u8> {
             return Vec::new();
         }
         let mut buf = vec![0u8; w * h * 4];
-        for y in 0..h {
-            for x in 0..w {
-                // Filtered-out classes carry the IGNORE sentinel; leave transparent.
-                let cls = sem.data[[y, x]];
-                if cls != SemanticMask::IGNORE {
-                    let color = Color::for_class(&r.colors, cls as usize);
-                    put(&mut buf, w, x, y, color, 128);
-                }
+        // Row-major like `buf`; filtered-out classes carry the IGNORE sentinel and stay
+        // transparent.
+        for (px, &cls) in buf.as_chunks_mut::<4>().0.iter_mut().zip(&sem.data) {
+            if cls != SemanticMask::IGNORE {
+                let c = Color::for_class(&r.colors, cls as usize);
+                *px = [c.0, c.1, c.2, 128];
             }
         }
         return buf;

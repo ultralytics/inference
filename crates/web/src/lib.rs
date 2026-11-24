@@ -618,18 +618,13 @@ impl YoloModel {
         let t_post = now_ms();
         let config = make_config(conf, iou, classes, tracker.is_some());
         let tracker = load_tracker(&mut self.tracker, tracker)?;
-        let loose_iou = tracker.as_ref().and_then(|t| t.loose_iou(&self.metadata));
-        let mut loose = None;
-        let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         // Postprocess is timed after it returns (below), the same as the `YoloPipeline`
         // path: building the `Speed` here would only measure the setup above it.
-        let speed = || Speed::new(pre_ms, t_post - t_inf, 0.0);
+        let speed = Speed::new(pre_ms, t_post - t_inf, 0.0);
 
         // Baked-argmax semantic models output a single `[B, H, W] uint8` class map
         // (ArgMax + Cast folded into the graph).
-        // Masks draw as they decode, or wait for tracking to pick the rows to draw.
-        let (tracking, mut masks, mut overlay) = (tracker.is_some(), Vec::new(), Vec::new());
-        let mut results = if semantic_baked {
+        let (results, overlay) = if semantic_baked {
             let name = &self.output_names[0];
             let (shape, data) = outputs[name.as_str()]
                 .try_extract_tensor::<u8>()
@@ -638,13 +633,19 @@ impl YoloModel {
             let results = postprocess_semantic_mask(
                 data,
                 &shape,
-                names,
+                Arc::clone(&self.metadata.names),
                 orig_img,
                 String::new(),
-                speed(),
+                speed,
                 inference_shape,
             );
-            filter_semantic_classes(results, &config)
+            let mut results = filter_semantic_classes(results, &config);
+            results.colors = Arc::clone(&self.metadata.colors);
+            let overlay = match tracker {
+                Some(t) => track(t, &mut results, None, &[])?,
+                None => Vec::new(),
+            };
+            (results, overlay)
         } else {
             // Borrow each output's data directly (no copy) and feed it to the shared
             // f32 postprocessor while `outputs` is still alive.
@@ -658,43 +659,9 @@ impl YoloModel {
                         })?;
                 views.push((data, shape.iter().map(|&d| d as usize).collect()));
             }
-            loose = loose_iou.map(|iou| {
-                loose_results(
-                    views.clone(),
-                    &self.metadata,
-                    &pre,
-                    &config,
-                    iou,
-                    inference_shape,
-                )
-            });
-            postprocess_with_head_masks(
-                views,
-                self.metadata.task,
-                &pre,
-                &config,
-                names,
-                orig_img,
-                String::new(),
-                speed(),
-                inference_shape,
-                self.metadata.end2end,
-                self.metadata.kpt_shape,
-                self.metadata.is_rtdetr(),
-                &mut |mask, box_data| {
-                    let mask = InstanceMask::new(mask, box_data, &self.metadata.colors);
-                    if tracking {
-                        masks.push(mask.into_owned());
-                    } else {
-                        mask.draw(&mut overlay);
-                    }
-                },
-            )
+            let frame = (&pre, orig_img, speed, inference_shape);
+            decode_views(&self.metadata, tracker, views, &config, frame)?
         };
-        results.colors = Arc::clone(&self.metadata.colors);
-        if let Some(t) = tracker {
-            overlay = track(t, &mut results, loose.as_ref(), &masks)?;
-        }
         results_to_js(&results, self.metadata.task, colormap, viz, overlay, t_post)
     }
 }
@@ -922,50 +889,12 @@ impl YoloPipeline {
 
         let config = make_config(conf, iou, classes, tracker.is_some());
         let tracker = load_tracker(&mut self.tracker, tracker)?;
-        let names: Arc<HashMap<usize, String>> = Arc::clone(&self.metadata.names);
         let inference_shape = (self.imgsz.0 as u32, self.imgsz.1 as u32);
-        let loose = (tracker.as_ref().and_then(|t| t.loose_iou(&self.metadata))).map(|iou| {
-            loose_results(
-                views.clone(),
-                &self.metadata,
-                &pending.pre,
-                &config,
-                iou,
-                inference_shape,
-            )
-        });
         // Postprocess time is unknown until the call returns, so pass 0 here and
         // stamp the real duration onto the result afterwards (as the native path does).
         let speed = Speed::new(pending.pre_ms, inference_ms, 0.0);
-
-        // Masks draw as they decode, or wait for tracking to pick the rows to draw.
-        let (tracking, mut masks, mut overlay) = (tracker.is_some(), Vec::new(), Vec::new());
-        let mut results = postprocess_with_head_masks(
-            views,
-            self.metadata.task,
-            &pending.pre,
-            &config,
-            names,
-            pending.orig_img,
-            String::new(),
-            speed,
-            inference_shape,
-            self.metadata.end2end,
-            self.metadata.kpt_shape,
-            self.metadata.is_rtdetr(),
-            &mut |mask, box_data| {
-                let mask = InstanceMask::new(mask, box_data, &self.metadata.colors);
-                if tracking {
-                    masks.push(mask.into_owned());
-                } else {
-                    mask.draw(&mut overlay);
-                }
-            },
-        );
-        results.colors = Arc::clone(&self.metadata.colors);
-        if let Some(t) = tracker {
-            overlay = track(t, &mut results, loose.as_ref(), &masks)?;
-        }
+        let frame = (&pending.pre, pending.orig_img, speed, inference_shape);
+        let (results, overlay) = decode_views(&self.metadata, tracker, views, &config, frame)?;
         results_to_js(
             &results,
             self.metadata.task,
@@ -996,6 +925,49 @@ fn load_tracker(
         *slot = Some((name, Tracker::without_reid(config)));
     }
     Ok(slot.as_mut().map(|(_, t)| t))
+}
+
+/// Decode the f32 head `views` of one frame (its letterbox geometry, image, speed and
+/// inference shape) with the shared postprocessor and track the result. Instance masks draw
+/// into the returned overlay as they decode, or wait for tracking to pick the rows to draw.
+/// Shared by [`YoloModel::run`] and [`YoloPipeline::postprocess`].
+fn decode_views(
+    m: &ModelMetadata,
+    tracker: Option<&mut Tracker>,
+    views: Vec<(&[f32], Vec<usize>)>,
+    config: &InferenceConfig,
+    (pre, orig_img, speed, inference_shape): (&PreprocessResult, Array3<u8>, Speed, (u32, u32)),
+) -> Result<(Results, Vec<u8>), JsError> {
+    let loose = (tracker.as_ref().and_then(|t| t.loose_iou(m)))
+        .map(|iou| loose_results(views.clone(), m, pre, config, iou, inference_shape));
+    let (tracking, mut masks, mut overlay) = (tracker.is_some(), Vec::new(), Vec::new());
+    let mut results = postprocess_with_head_masks(
+        views,
+        m.task,
+        pre,
+        config,
+        Arc::clone(&m.names),
+        orig_img,
+        String::new(),
+        speed,
+        inference_shape,
+        m.end2end,
+        m.kpt_shape,
+        m.is_rtdetr(),
+        &mut |mask, box_data| {
+            let mask = InstanceMask::new(mask, box_data, &m.colors);
+            if tracking {
+                masks.push(mask.into_owned());
+            } else {
+                mask.draw(&mut overlay);
+            }
+        },
+    );
+    results.colors = Arc::clone(&m.colors);
+    if let Some(t) = tracker {
+        overlay = track(t, &mut results, loose.as_ref(), &masks)?;
+    }
+    Ok((results, overlay))
 }
 
 /// The detections of `views` after an NMS at `iou`, which `TrackTrack` recovers boxes from.
