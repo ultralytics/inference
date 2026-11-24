@@ -72,8 +72,8 @@ library's SONAME is `libonnxruntime.so.1`, which is what the loader asks for at 
 Nothing about ONNX Runtime is compiled here. It is the same prebuilt binary the Python
 `onnxruntime-gpu` package ships; only this crate is built from source, as any Rust crate is. The
 difference from Python is packaging, not building: `pip install onnxruntime-gpu` is a supported
-one-step install, while `ort` has no aarch64 GPU distribution to download, so the libraries have to
-be extracted and pointed at by hand.
+one-step install, while `ort` has no download for these builds, so the libraries have to be
+extracted and pointed at by hand.
 
 Build against it:
 

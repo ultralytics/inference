@@ -309,7 +309,8 @@
 //! See the [CUDA / `TensorRT` acceleration guide](crate::cuda_guide) for setup,
 //! requirements, and the zero-copy GPU preprocess fast path.
 //!
-//! On aarch64 no GPU build is published; see the [DGX Spark guide](crate::dgx_guide).
+//! On aarch64 Linux only the CUDA 13, `TensorRT` and NVRTX builds are published; see the
+//! [DGX Spark guide](crate::dgx_guide).
 //!
 //! Enable hardware acceleration with Cargo features:
 //!
