@@ -201,7 +201,7 @@ impl OvSession {
             )
             .map_err(load_err)?;
         }
-        let mut compiled = core.compile_model(&model, device).map_err(load_err)?;
+        let compiled = core.compile_model(&model, device).map_err(load_err)?;
         let mut request = compiled.create_infer_request().map_err(load_err)?;
         let input = Tensor::new(ElementType::F32, &Shape::new(&dims).map_err(load_err)?)
             .map_err(load_err)?;
