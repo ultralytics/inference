@@ -152,7 +152,7 @@ clap = { version = "^4.6.1", features = ["derive"] }
 ndarray = { version = "^0.17", features = ["rayon"] }
 fast_image_resize = { version = "^6.0", features = ["image", "rayon"] }
 # Native OpenVINO IR (.xml) runtime, loaded from the installed libraries at run time (openvino-native feature).
-openvino = { version = "0.11.1", default-features = false, features = ["runtime-linking"], optional = true }
+openvino = { version = "0.11.2", default-features = false, features = ["runtime-linking"], optional = true }
 
 [features]
 default = ["annotate", "visualize"]
